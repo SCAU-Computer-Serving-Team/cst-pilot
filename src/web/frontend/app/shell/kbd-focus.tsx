@@ -1,7 +1,15 @@
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type KeyboardEvent as ReactKeyboardEvent,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { apiJson } from "../data/api";
 import { subscribeGlobalEvents } from "../data/event-stream";
-import { type PointerPosition, pointerMoved } from "./keyboard-navigation";
+import { type PointerPosition, pointerMoved, resolveDialogActionKey } from "./keyboard-navigation";
 
 export type KeyboardFocusStyle = "brackets" | "rail";
 
@@ -221,4 +229,132 @@ export function KbdFocusOverlay({
 			}}
 		/>
 	);
+}
+
+export interface DialogActionItem {
+	id: string;
+	tone: KeyboardFocusTone;
+}
+
+/** 模态弹窗按钮栏的横向方向键切换、边界夹紧与 180ms 滑移指示器协调 Hook。 */
+export function useDialogActionNav(
+	actions: readonly DialogActionItem[],
+	options: {
+		initialId?: string;
+		requireButtonFocus?: boolean;
+		disabled?: boolean;
+	} = {},
+) {
+	const { initialId, requireButtonFocus = false, disabled = false } = options;
+	const kbdStyle = useKeyboardFocusStyle();
+	const containerRef = useRef<HTMLDivElement>(null);
+	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const [kbdActive, setKbdActive] = useState(!requireButtonFocus);
+	const [activeId, setActiveId] = useState<string | null>(
+		requireButtonFocus ? null : (initialId ?? actions[0]?.id ?? null),
+	);
+	const clearKbd = useCallback(() => setKbdActive(false), []);
+	usePointerMutex(kbdActive && !disabled, clearKbd);
+
+	const registerButton = useCallback(
+		(id: string, externalRef?: RefObject<HTMLButtonElement | null>) => (node: HTMLButtonElement | null) => {
+			if (node) itemRefs.current.set(id, node);
+			else itemRefs.current.delete(id);
+			if (externalRef) externalRef.current = node;
+		},
+		[],
+	);
+
+	const onButtonFocus = useCallback((id: string) => {
+		setActiveId(id);
+	}, []);
+
+	const onButtonPointerDown = useCallback(() => {
+		setKbdActive(false);
+	}, []);
+
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		const onFocusOut = (event: FocusEvent) => {
+			const next = event.relatedTarget;
+			if (next instanceof Node && container.contains(next)) return;
+			setActiveId(null);
+		};
+		container.addEventListener("focusout", onFocusOut);
+		return () => container.removeEventListener("focusout", onFocusOut);
+	}, []);
+
+	const onDialogKeyDown = useCallback(
+		(event: ReactKeyboardEvent<HTMLElement>) => {
+			if (disabled) return;
+			const target = event.target;
+			const isTextField = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+			const isTab =
+				event.key === "Tab" &&
+				!event.ctrlKey &&
+				!event.altKey &&
+				!event.metaKey &&
+				!event.nativeEvent.isComposing &&
+				event.keyCode !== 229;
+			if (isTab) {
+				setKbdActive(true);
+				return;
+			}
+			if (isTextField) return;
+			const activeEl = document.activeElement;
+			const focusedIdx = actions.findIndex((item) => itemRefs.current.get(item.id) === activeEl);
+			if (requireButtonFocus && focusedIdx < 0) return;
+			const currentIdx =
+				focusedIdx >= 0
+					? focusedIdx
+					: Math.max(
+							0,
+							actions.findIndex((item) => item.id === activeId),
+						);
+			const nextIdx = resolveDialogActionKey(
+				{
+					key: event.key,
+					defaultPrevented: event.defaultPrevented,
+					isComposing: event.nativeEvent.isComposing,
+					keyCode: event.keyCode,
+					ctrlKey: event.ctrlKey,
+					metaKey: event.metaKey,
+					altKey: event.altKey,
+					shiftKey: event.shiftKey,
+				},
+				currentIdx,
+				actions.length,
+				(index) => {
+					const button = itemRefs.current.get(actions[index]?.id ?? "");
+					return !button || (button instanceof HTMLButtonElement && button.disabled);
+				},
+			);
+			if (nextIdx === null) return;
+			event.preventDefault();
+			const nextItem = actions[nextIdx];
+			if (!nextItem) return;
+			setKbdActive(true);
+			setActiveId(nextItem.id);
+			itemRefs.current.get(nextItem.id)?.focus({ preventScroll: true });
+		},
+		[actions, activeId, disabled, requireButtonFocus],
+	);
+
+	const resolvedTargetId =
+		!disabled && kbdActive && activeId && actions.some((item) => item.id === activeId) ? activeId : null;
+	const activeTone: KeyboardFocusTone = actions.find((item) => item.id === resolvedTargetId)?.tone ?? "neutral";
+
+	return {
+		containerRef,
+		itemRefs,
+		kbdStyle,
+		kbdActive: resolvedTargetId !== null,
+		targetId: resolvedTargetId,
+		activeTone,
+		registerButton,
+		onButtonFocus,
+		onButtonPointerDown,
+		onDialogKeyDown,
+	};
 }

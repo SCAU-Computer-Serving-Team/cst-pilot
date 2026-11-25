@@ -1,9 +1,10 @@
 use std::rc::Rc;
 
-use cst_client::ExitCheckReport;
+use cst_client::{ExitCheckReport, KeyboardFocusStyleDto};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
-use gpui_kit::component::Icon;
+use gpui_kit::component::{ElementExt as _, Icon};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement,
     Styled, TestSupportExt, Window, div, px,
@@ -11,6 +12,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -37,6 +39,8 @@ pub fn render_exit_confirm_dialog(
     report: &ExitCheckReport,
     exiting_in_progress: bool,
     scrim_progress: f32,
+    kbd_style: KeyboardFocusStyleDto,
+    nav: DialogActionNav,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -45,10 +49,30 @@ pub fn render_exit_confirm_dialog(
     confirm_focus: &FocusHandle,
     on_cancel: impl Fn(&mut Window, &mut App) + 'static,
     on_confirm_exit: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
     let on_cancel = Rc::new(on_cancel);
     let on_confirm_exit = Rc::new(on_confirm_exit);
     let summary_text = summarize_exit_message(report);
+    let focuses = [cancel_focus.clone(), confirm_focus.clone()];
+    let kbd_active = nav.is_keyboard_active(cx);
+    nav.clear_tracker(cx);
+    let tracker_cancel = nav.tracker(cx);
+    let tracker_confirm = nav.tracker(cx);
+    let nav_move = nav.clone();
+    let nav_key = nav.clone();
+    let nav_click_cancel = nav.clone();
+    let nav_click_confirm = nav.clone();
+    let kbd_overlay = nav.render_overlay(
+        kbd_style,
+        &focuses,
+        [KbdTone::Neutral, KbdTone::Danger],
+        false,
+        palette,
+        window,
+        cx,
+    );
 
     let scrim = render_frosted_surface(
         "exit-dialog-scrim",
@@ -67,7 +91,8 @@ pub fn render_exit_confirm_dialog(
     .flex()
     .items_center()
     .justify_center()
-    .occlude();
+    .occlude()
+    .on_mouse_move(move |ev, window, cx| nav_move.handle_mouse_move(ev, window, cx));
 
     let card = render_frosted_surface(
         "exit-dialog-card-pfook",
@@ -139,13 +164,15 @@ pub fn render_exit_confirm_dialog(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
                     .on_click(move |_, window, cx| {
+                        nav_click_cancel.clear_keyboard(window, cx);
                         if !exiting_in_progress {
                             cb(window, cx);
                         }
                     })
                     .child(cjk_inline_label("取消"))
+                    .on_prepaint(move |bounds, _, _| tracker_cancel.set(0, bounds))
             })
             .child({
                 let cb = Rc::clone(&on_confirm_exit);
@@ -171,8 +198,11 @@ pub fn render_exit_confirm_dialog(
                     .items_center()
                     .justify_center()
                     .opacity(if exiting_in_progress { 0.65 } else { 1.0 })
-                    .hover(|s| s.bg(palette.status_danger_hover))
+                    .when(!kbd_active, |el| {
+                        el.hover(|s| s.bg(palette.status_danger_hover))
+                    })
                     .on_click(move |_, window, cx| {
+                        nav_click_confirm.clear_keyboard(window, cx);
                         if !exiting_in_progress {
                             cb(window, cx);
                         }
@@ -182,12 +212,31 @@ pub fn render_exit_confirm_dialog(
                     } else {
                         "退出"
                     }))
-            }),
+                    .on_prepaint(move |bounds, _, _| tracker_confirm.set(1, bounds))
+            })
+            .child(kbd_overlay),
     );
 
+    let key_cancel = Rc::clone(&on_cancel);
+    let key_confirm = Rc::clone(&on_confirm_exit);
     scrim.child(
         div()
             .tab_stop(false)
+            .on_key_down(move |ev, window, cx| {
+                let on_l = |w: &mut Window, cx: &mut App| {
+                    if !exiting_in_progress {
+                        key_cancel(w, cx);
+                    }
+                };
+                let on_r = |w: &mut Window, cx: &mut App| {
+                    if !exiting_in_progress {
+                        key_confirm(w, cx);
+                    }
+                };
+                if nav_key.handle_key_down(ev, &focuses, false, &on_l, &on_r, window, cx) {
+                    cx.stop_propagation();
+                }
+            })
             .child(motion::animate_modal_enter(
                 "exit-dialog-anim",
                 card,

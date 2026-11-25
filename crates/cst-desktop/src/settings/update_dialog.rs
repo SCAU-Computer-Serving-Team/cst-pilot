@@ -1,7 +1,11 @@
-use cst_client::{UpdatePhaseDto, UpdateStateDto};
+use std::rc::Rc;
+
+use cst_client::{KeyboardFocusStyleDto, UpdatePhaseDto, UpdateStateDto};
+use gpui::{KeyDownEvent, MouseMoveEvent};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px, relative,
@@ -9,6 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -59,12 +64,16 @@ pub fn render_update_dialog(
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    kbd_style: KeyboardFocusStyleDto,
+    nav: DialogActionNav,
     trap_focus: &FocusHandle,
     dismiss_focus: &FocusHandle,
     on_dismiss_later: impl Fn(&mut Window, &mut App) + 'static,
     on_start_prepare: impl Fn(&mut Window, &mut App) + 'static,
     on_cancel_prepare: impl Fn(&mut Window, &mut App) + 'static,
     on_launch_restart: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
     let phase = update_state
         .map(|u| u.status.phase)
@@ -287,6 +296,46 @@ pub fn render_update_dialog(
         );
     }
 
+    let on_dismiss_later: crate::theme::kbd_focus::DialogActionCallback = Rc::new(on_dismiss_later);
+    let on_start_prepare: crate::theme::kbd_focus::DialogActionCallback = Rc::new(on_start_prepare);
+    let on_cancel_prepare: crate::theme::kbd_focus::DialogActionCallback =
+        Rc::new(on_cancel_prepare);
+    let on_launch_restart: crate::theme::kbd_focus::DialogActionCallback =
+        Rc::new(on_launch_restart);
+
+    let secondary_focus = nav.fallback_focus(1, cx);
+    let focuses = [dismiss_focus.clone(), secondary_focus.clone()];
+    nav.clear_tracker(cx);
+    let kbd_active = nav.is_keyboard_active(cx);
+    let tracker_left = nav.tracker(cx);
+    let tracker_right = nav.tracker(cx);
+    let (tones, on_right): ([KbdTone; 2], crate::theme::kbd_focus::DialogActionCallback) =
+        if is_preparing {
+            (
+                [KbdTone::Neutral, KbdTone::Neutral],
+                Rc::clone(&on_cancel_prepare),
+            )
+        } else if is_ready {
+            (
+                [KbdTone::Neutral, KbdTone::Accent],
+                Rc::clone(&on_launch_restart),
+            )
+        } else {
+            (
+                [KbdTone::Neutral, KbdTone::Accent],
+                Rc::clone(&on_start_prepare),
+            )
+        };
+    let kbd_overlay = nav.render_overlay(kbd_style, &focuses, tones, false, palette, window, cx);
+    let nav_move = nav.clone();
+    let nav_key = nav.clone();
+    let nav_click_left = nav.clone();
+    let nav_click_right = nav.clone();
+    let click_left = Rc::clone(&on_dismiss_later);
+    let click_right = Rc::clone(&on_right);
+    let key_left = Rc::clone(&on_dismiss_later);
+    let key_right = Rc::clone(&on_right);
+
     let footer = if is_preparing {
         div()
             .relative()
@@ -309,14 +358,19 @@ pub fn render_update_dialog(
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, w, cx| on_dismiss_later(w, cx))
-                    .child(cjk_inline_label("稍后")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_left.clear_keyboard(w, cx);
+                        click_left(w, cx);
+                    })
+                    .child(cjk_inline_label("稍后"))
+                    .on_prepaint(move |bounds, _, _| tracker_left.set(0, bounds)),
             )
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-cancel-prepare-btn")
                     .test_support()
+                    .track_focus(&secondary_focus)
                     .tab_index(0)
                     .a11y_button("update-dialog-cancel-prepare-btn", "取消下载更新")
                     .h(height::CONTROL)
@@ -328,10 +382,15 @@ pub fn render_update_dialog(
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, w, cx| on_cancel_prepare(w, cx))
-                    .child(cjk_inline_label("取消")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_right.clear_keyboard(w, cx);
+                        click_right(w, cx);
+                    })
+                    .child(cjk_inline_label("取消"))
+                    .on_prepaint(move |bounds, _, _| tracker_right.set(1, bounds)),
             )
+            .child(kbd_overlay)
     } else if is_ready {
         div()
             .relative()
@@ -354,14 +413,19 @@ pub fn render_update_dialog(
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, w, cx| on_dismiss_later(w, cx))
-                    .child(cjk_inline_label("稍后")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_left.clear_keyboard(w, cx);
+                        click_left(w, cx);
+                    })
+                    .child(cjk_inline_label("稍后"))
+                    .on_prepaint(move |bounds, _, _| tracker_left.set(0, bounds)),
             )
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-launch-btn")
                     .test_support()
+                    .track_focus(&secondary_focus)
                     .tab_index(0)
                     .a11y_button("update-dialog-launch-btn", "立即重启更新")
                     .h(height::CONTROL)
@@ -371,10 +435,15 @@ pub fn render_update_dialog(
                     .text_color(palette.text_on_accent)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.accent_hover))
-                    .on_click(move |_, w, cx| on_launch_restart(w, cx))
-                    .child(cjk_inline_label("立即重启更新")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.accent_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_right.clear_keyboard(w, cx);
+                        click_right(w, cx);
+                    })
+                    .child(cjk_inline_label("立即重启更新"))
+                    .on_prepaint(move |bounds, _, _| tracker_right.set(1, bounds)),
             )
+            .child(kbd_overlay)
     } else {
         div()
             .relative()
@@ -397,14 +466,19 @@ pub fn render_update_dialog(
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, w, cx| on_dismiss_later(w, cx))
-                    .child(cjk_inline_label("稍后")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_left.clear_keyboard(w, cx);
+                        click_left(w, cx);
+                    })
+                    .child(cjk_inline_label("稍后"))
+                    .on_prepaint(move |bounds, _, _| tracker_left.set(0, bounds)),
             )
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-confirm-restart-btn")
                     .test_support()
+                    .track_focus(&secondary_focus)
                     .tab_index(0)
                     .a11y_button("update-dialog-confirm-restart-btn", "更新并重启")
                     .h(height::CONTROL)
@@ -414,10 +488,15 @@ pub fn render_update_dialog(
                     .text_color(palette.text_on_accent)
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.accent_hover))
-                    .on_click(move |_, w, cx| on_start_prepare(w, cx))
-                    .child(cjk_inline_label("更新并重启")),
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.accent_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_right.clear_keyboard(w, cx);
+                        click_right(w, cx);
+                    })
+                    .child(cjk_inline_label("更新并重启"))
+                    .on_prepaint(move |bounds, _, _| tracker_right.set(1, bounds)),
             )
+            .child(kbd_overlay)
     };
 
     render_frosted_surface(
@@ -438,9 +517,25 @@ pub fn render_update_dialog(
     .items_center()
     .justify_center()
     .occlude()
+    .on_mouse_move(move |ev: &MouseMoveEvent, w, cx| {
+        nav_move.handle_mouse_move(ev, w, cx);
+    })
     .child(
         div()
             .tab_stop(false)
+            .on_key_down(move |ev: &KeyDownEvent, w, cx| {
+                if nav_key.handle_key_down(
+                    ev,
+                    &focuses,
+                    false,
+                    key_left.as_ref(),
+                    key_right.as_ref(),
+                    w,
+                    cx,
+                ) {
+                    cx.stop_propagation();
+                }
+            })
             .focus_trap("update-dialog-focus-trap", trap_focus)
             .child(motion::animate_modal_enter(
                 "update-dialog-card-anim",

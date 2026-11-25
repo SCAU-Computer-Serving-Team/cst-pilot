@@ -17,10 +17,11 @@ use cst_client::{
     WorkspaceView,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::base::motion::{Transition, TransitionState, transition};
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
@@ -4148,6 +4149,8 @@ impl Render for AppShell {
             root = root.child(cp_modal.clone());
         }
 
+        let kbd_style = self.snapshot.desktop_settings.keyboard_focus_style;
+
         // Rename Session Modal (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
         let rename_scrim_p = motion::surface_presence(
             "rename-session-scrim-p",
@@ -4156,8 +4159,56 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let rename_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "rename-session",
+            self.rename_modal.is_some(),
+            1,
+            window,
+            cx,
+        );
         if let Some(ref rm) = self.rename_modal {
             let ent_cancel = entity.clone();
+            let ent_confirm = entity.clone();
+            let on_cancel_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_cancel.update(cx, |this, cx| {
+                        this.close_sidebar_rename(w, cx);
+                    });
+                });
+            let on_confirm_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_confirm.update(cx, |this, cx| {
+                        this.submit_sidebar_rename(w, cx);
+                    });
+                });
+            let cancel_focus = rename_nav.fallback_focus(0, cx);
+            let confirm_focus = rename_nav.fallback_focus(1, cx);
+            let focuses = [cancel_focus.clone(), confirm_focus.clone()];
+            rename_nav.clear_tracker(cx);
+            let kbd_active = rename_nav.is_keyboard_active(cx);
+            let tracker_cancel = rename_nav.tracker(cx);
+            let tracker_confirm = rename_nav.tracker(cx);
+            let kbd_overlay = rename_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [
+                    crate::theme::kbd_focus::KbdTone::Neutral,
+                    crate::theme::kbd_focus::KbdTone::Accent,
+                ],
+                true,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = rename_nav.clone();
+            let nav_key = rename_nav.clone();
+            let nav_click_cancel = rename_nav.clone();
+            let nav_click_confirm = rename_nav.clone();
+            let key_cancel = Rc::clone(&on_cancel_rc);
+            let key_confirm = Rc::clone(&on_confirm_rc);
+            let click_cancel = Rc::clone(&on_cancel_rc);
+            let click_confirm = Rc::clone(&on_confirm_rc);
+
             root = root.child(
                 render_frosted_surface(
                     "rename-session-scrim",
@@ -4176,6 +4227,7 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
+                .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
                 .child(motion::animate_modal_enter(
                     "rename-session-modal-anim",
                     render_frosted_surface(
@@ -4192,17 +4244,31 @@ impl Render for AppShell {
                             crate::sessions::consume_composing_escape(&modal.input, window, cx);
                         }
                     }))
-                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "enter"
-                            && !event.is_held
-                            && this.rename_modal.as_ref().is_some_and(|modal| {
-                                modal.input.read(cx).focus_handle(cx).is_focused(window)
-                            })
-                        {
-                            this.submit_sidebar_rename(window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .on_key_down(cx.listener(
+                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                            if event.keystroke.key == "enter"
+                                && !event.is_held
+                                && this.rename_modal.as_ref().is_some_and(|modal| {
+                                    modal.input.read(cx).focus_handle(cx).is_focused(window)
+                                })
+                            {
+                                this.submit_sidebar_rename(window, cx);
+                                cx.stop_propagation();
+                                return;
+                            }
+                            if nav_key.handle_key_down(
+                                event,
+                                &focuses,
+                                true,
+                                key_cancel.as_ref(),
+                                key_confirm.as_ref(),
+                                window,
+                                cx,
+                            ) {
+                                cx.stop_propagation();
+                            }
+                        },
+                    ))
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .p(px(20.0))
                     .rounded(radius::ROW)
@@ -4288,6 +4354,7 @@ impl Render for AppShell {
                                     .id("rename-session-cancel-btn")
                                     .test_support()
                                     .a11y_button("rename-session-cancel-btn", "取消")
+                                    .track_focus(&cancel_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::MD)
@@ -4297,19 +4364,24 @@ impl Render for AppShell {
                                     .bg(palette.bg_elevated)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_cancel.update(cx, |this, cx| {
-                                            this.close_sidebar_rename(w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.bg_item_hover))
                                     })
-                                    .child(cjk_inline_label("取消")),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_cancel.clear_keyboard(w, cx);
+                                        click_cancel(w, cx);
+                                    })
+                                    .child(cjk_inline_label("取消"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_cancel.set(0, bounds);
+                                    }),
                             )
                             .child(
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("rename-session-confirm-btn")
                                     .test_support()
                                     .a11y_button("rename-session-confirm-btn", "保存")
+                                    .track_focus(&confirm_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
@@ -4318,12 +4390,19 @@ impl Render for AppShell {
                                     .text_color(palette.text_on_accent)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.accent_hover))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit_sidebar_rename(window, cx)
-                                    }))
-                                    .child(cjk_inline_label("保存")),
-                            ),
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.accent_hover))
+                                    })
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_confirm.clear_keyboard(w, cx);
+                                        click_confirm(w, cx);
+                                    })
+                                    .child(cjk_inline_label("保存"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_confirm.set(1, bounds);
+                                    }),
+                            )
+                            .child(kbd_overlay),
                     )
                     .tab_stop(false)
                     .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
@@ -4340,12 +4419,21 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let missing_key_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "missing-key",
+            self.missing_key_modal.is_some(),
+            0,
+            window,
+            cx,
+        );
         if let Some(ref mk_state) = self.missing_key_modal {
             let ent_cancel = entity.clone();
             let ent_cfg = entity.clone();
             root = root.child(render_missing_key_dialog(
                 mk_state,
                 missing_key_p,
+                kbd_style,
+                missing_key_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -4370,6 +4458,8 @@ impl Render for AppShell {
                         cx.notify();
                     });
                 },
+                window,
+                cx,
             ));
         }
 
@@ -4379,6 +4469,16 @@ impl Render for AppShell {
             "update-dialog-scrim-p",
             update_dialog_open,
             motion::MODAL_OPEN,
+            window,
+            cx,
+        );
+        let update_interactive = update_dialog_open
+            && !self.update_dialog.handoff_locked
+            && !self.update_dialog.launch_pending;
+        let update_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "update-dialog",
+            update_interactive,
+            0,
             window,
             cx,
         );
@@ -4395,6 +4495,8 @@ impl Render for AppShell {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+                kbd_style,
+                update_nav,
                 &self.update_trap_focus,
                 &self.update_dismiss_focus,
                 move |w, cx| {
@@ -4411,6 +4513,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_lnch.update(cx, |this, cx| this.trigger_update_launch_handoff(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 
@@ -4422,9 +4526,55 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let web_switch_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "web-switch-confirm",
+            self.web_switch_confirm.is_some(),
+            0,
+            window,
+            cx,
+        );
         if self.web_switch_confirm.is_some() {
             let ent_cancel = entity.clone();
             let ent_proceed = entity.clone();
+            let on_cancel_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_cancel.update(cx, |this, cx| {
+                        let _ = this.dismiss_topmost_surface(w, cx);
+                    });
+                });
+            let on_proceed_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_proceed.update(cx, |this, cx| {
+                        this.trigger_open_web(true, w, cx);
+                    });
+                });
+            let confirm_focus = web_switch_nav.fallback_focus(1, cx);
+            let focuses = [self.web_switch_cancel_focus.clone(), confirm_focus.clone()];
+            web_switch_nav.clear_tracker(cx);
+            let kbd_active = web_switch_nav.is_keyboard_active(cx);
+            let tracker_cancel = web_switch_nav.tracker(cx);
+            let tracker_confirm = web_switch_nav.tracker(cx);
+            let kbd_overlay = web_switch_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [
+                    crate::theme::kbd_focus::KbdTone::Neutral,
+                    crate::theme::kbd_focus::KbdTone::Accent,
+                ],
+                false,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = web_switch_nav.clone();
+            let nav_key = web_switch_nav.clone();
+            let nav_click_cancel = web_switch_nav.clone();
+            let nav_click_proceed = web_switch_nav.clone();
+            let key_cancel = Rc::clone(&on_cancel_rc);
+            let key_proceed = Rc::clone(&on_proceed_rc);
+            let click_cancel = Rc::clone(&on_cancel_rc);
+            let click_proceed = Rc::clone(&on_proceed_rc);
+
             root = root.child(
                 render_frosted_surface(
                     "web-switch-confirm-scrim",
@@ -4443,6 +4593,7 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
+                .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
                 .child(motion::animate_modal_enter(
                     "web-switch-confirm-anim",
                     render_frosted_surface(
@@ -4454,6 +4605,19 @@ impl Render for AppShell {
                     )
                     .test_support()
                     .a11y_dialog("web-switch-confirm-card", "切换到网页端确认")
+                    .on_key_down(move |ev, w, cx| {
+                        if nav_key.handle_key_down(
+                            ev,
+                            &focuses,
+                            false,
+                            key_cancel.as_ref(),
+                            key_proceed.as_ref(),
+                            w,
+                            cx,
+                        ) {
+                            cx.stop_propagation();
+                        }
+                    })
                     .focus_trap("web-switch-confirm-trap", &self.web_switch_trap_focus)
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .rounded(radius::ROW)
@@ -4502,19 +4666,24 @@ impl Render for AppShell {
                                     .text_color(palette.text_primary)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_cancel.update(cx, |this, cx| {
-                                            let _ = this.dismiss_topmost_surface(w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.bg_item_hover))
                                     })
-                                    .child(cjk_inline_label("取消")),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_cancel.clear_keyboard(w, cx);
+                                        click_cancel(w, cx);
+                                    })
+                                    .child(cjk_inline_label("取消"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_cancel.set(0, bounds);
+                                    }),
                             )
                             .child(
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("web-switch-confirm-btn")
                                     .test_support()
                                     .a11y_button("web-switch-confirm-btn", "继续切换")
+                                    .track_focus(&confirm_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
@@ -4523,14 +4692,19 @@ impl Render for AppShell {
                                     .text_color(palette.text_on_accent)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.accent_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_proceed.update(cx, |this, cx| {
-                                            this.trigger_open_web(true, w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.accent_hover))
                                     })
-                                    .child(cjk_inline_label("继续切换")),
-                            ),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_proceed.clear_keyboard(w, cx);
+                                        click_proceed(w, cx);
+                                    })
+                                    .child(cjk_inline_label("继续切换"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_confirm.set(1, bounds);
+                                    }),
+                            )
+                            .child(kbd_overlay),
                     ),
                     palette.craft_stack_shadows(),
                 )),
@@ -4545,11 +4719,20 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let web_lock_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "web-active-lock",
+            web_locked,
+            1,
+            window,
+            cx,
+        );
         if web_locked {
             let ent_open = entity.clone();
             let ent_back = entity.clone();
             root = root.child(render_web_active_lock_overlay(
                 web_lock_p,
+                kbd_style,
+                web_lock_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -4564,6 +4747,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_back.update(cx, |this, cx| this.trigger_close_web(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 
@@ -4575,6 +4760,13 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let exit_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "exit-dialog",
+            self.exit_dialog.is_some(),
+            0,
+            window,
+            cx,
+        );
         if let Some(ref dialog) = self.exit_dialog {
             let ent_cancel = entity.clone();
             let ent_confirm = entity.clone();
@@ -4582,6 +4774,8 @@ impl Render for AppShell {
                 &dialog.report,
                 dialog.exiting,
                 exit_dialog_p,
+                kbd_style,
+                exit_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -4596,6 +4790,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_confirm.update(cx, |this, cx| this.execute_final_shutdown(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 

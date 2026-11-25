@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAnimatedDialogClose, useStandbyDialogClose } from "./app-dialogs";
 import { useDialogFocusTrap } from "./dialog-focus";
+import { type DialogActionItem, KbdFocusOverlay, useDialogActionNav } from "./kbd-focus";
 import { Notification } from "./notification";
 import {
 	type DeletionResult,
@@ -11,6 +12,11 @@ import {
 	deletionReason,
 	deletionTitle,
 } from "./session-deletion";
+
+const DELETE_DIALOG_ACTIONS: readonly DialogActionItem[] = [
+	{ id: "cancel", tone: "neutral" },
+	{ id: "confirm", tone: "danger" },
+];
 
 export function useSessionManagement(
 	sessions: readonly DeletionTarget[],
@@ -161,6 +167,7 @@ export function SessionDeleteDialog({
 	const dialog = useRef<HTMLDialogElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
+	const actionNav = useDialogActionNav(DELETE_DIALOG_ACTIONS, { initialId: "cancel", disabled: closing });
 	useDialogFocusTrap(dialog, cancel);
 	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
@@ -189,6 +196,7 @@ export function SessionDeleteDialog({
 			className="tier-3-dialog exit-dialog session-delete-dialog"
 			aria-labelledby="session-delete-title"
 			aria-describedby="session-delete-warning"
+			onKeyDown={actionNav.onDialogKeyDown}
 			onCancel={(event) => {
 				event.preventDefault();
 				if (!closing) requestClose(onCancel);
@@ -201,24 +209,42 @@ export function SessionDeleteDialog({
 			<p id="session-delete-warning" className="exit-description">
 				删除后无法恢复。
 			</p>
-			<div className="exit-actions">
+			<div
+				ref={actionNav.containerRef}
+				className="exit-actions kbd-focus-scope kbd-dialog-actions"
+				data-kbd-active={actionNav.kbdActive ? "true" : "false"}
+			>
 				<button
 					type="button"
-					ref={cancel}
+					ref={actionNav.registerButton("cancel", cancel)}
 					className="tier-1-btn-outline"
 					disabled={closing}
+					onPointerDown={actionNav.onButtonPointerDown}
+					onFocus={() => actionNav.onButtonFocus("cancel")}
 					onClick={() => requestClose(onCancel)}
 				>
 					取消
 				</button>
 				<button
 					type="button"
+					ref={actionNav.registerButton("confirm")}
 					className="tier-1-btn-danger solid-danger exit-confirm"
 					disabled={closing}
+					onPointerDown={actionNav.onButtonPointerDown}
+					onFocus={() => actionNav.onButtonFocus("confirm")}
 					onClick={() => requestClose(onConfirm)}
 				>
 					删除
 				</button>
+				<KbdFocusOverlay
+					containerRef={actionNav.containerRef}
+					itemRefs={actionNav.itemRefs}
+					targetId={actionNav.targetId}
+					style={actionNav.kbdStyle}
+					tone={actionNav.activeTone}
+					railPlacement="bottom"
+					bracketOutset={3}
+				/>
 			</div>
 		</dialog>,
 		document.body,
