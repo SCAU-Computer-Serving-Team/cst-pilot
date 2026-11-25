@@ -56,6 +56,7 @@ export function ProcessSegment({
 	waiting,
 	results,
 	format,
+	forceOpen = false,
 }: {
 	parts: TurnPart[];
 	live: boolean;
@@ -63,12 +64,20 @@ export function ProcessSegment({
 	waiting: boolean;
 	results: Map<string, Map<string, Message>>;
 	format?: TranscriptFormat;
+	forceOpen?: boolean;
 }) {
-	const [open, setOpen] = useState(format === "png" || live),
+	const [open, setOpen] = useState(format === "png" || live || forceOpen),
 		[touched, setTouched] = useState(false),
-		[opened, setOpened] = useState(!!format || live);
-	// 运行时立即挂载；首次展开后保留节点和工具内部状态。
-	if (live && !opened) setOpened(true);
+		[opened, setOpened] = useState(!!format || live || forceOpen);
+	// 运行时或搜索命中定位时立即挂载；首次展开后保留节点和工具内部状态。
+	if ((live || forceOpen) && !opened) setOpened(true);
+	useEffect(() => {
+		if (forceOpen) {
+			setTouched(true);
+			setOpened(true);
+			setOpen(true);
+		}
+	}, [forceOpen]);
 	useEffect(() => {
 		if (!touched) setOpen(format === "png" || live);
 	}, [format, live, touched]);

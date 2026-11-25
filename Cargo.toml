@@ -12,6 +12,7 @@ members = [
     "crates/pi-session",
     "crates/pi-runtime",
     "crates/cst-os",
+    "crates/cst-search",
     "crates/cst-updater",
     "crates/cst-kit",
     "crates/cst-server",
@@ -25,6 +26,7 @@ default-members = [
     "crates/pi-session",
     "crates/pi-runtime",
     "crates/cst-os",
+    "crates/cst-search",
     "crates/cst-updater",
     "crates/cst-kit",
     "crates/cst-server",
@@ -45,6 +47,7 @@ bytes = "1"
 chromiumoxide = { version = "=0.9.1", default-features = false, features = ["bytes"] }
 futures-core = "0.3"
 futures-util = "0.3"
+ib-matcher = { version = "=0.4.5", default-features = false, features = ["std", "unicode", "perf-literal", "pinyin"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff"] }
 rquickjs = { version = "0.14" }
 unicode-segmentation = "1.13"
@@ -55,6 +58,7 @@ schemars = { version = "=1.2.3", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+strsim = "=0.11.1"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = "0.7"

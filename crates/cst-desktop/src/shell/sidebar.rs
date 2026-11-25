@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use cst_client::SessionSummary;
+use cst_client::{ContentSearchMatchDto, SessionSummary, TitleSearchMatchDto};
+use cst_search::{MatchSpan, match_query};
+use gpui::{HighlightStyle, StyledText};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
@@ -13,6 +15,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::shell::search_state::SidebarSearchState;
 use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
@@ -42,6 +45,7 @@ impl ShellRoute {
 pub type SidebarActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type SidebarSessionFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type SidebarSessionMenuFn = Rc<dyn Fn(String, Point<Pixels>, &mut Window, &mut App)>;
+pub type SidebarSearchContentFn = Rc<dyn Fn(ContentSearchMatchDto, &mut Window, &mut App)>;
 
 pub struct SidebarCallbacks {
     pub on_collapse: SidebarActionFn,
@@ -50,6 +54,9 @@ pub struct SidebarCallbacks {
     pub on_open_all_sessions: SidebarActionFn,
     pub on_open_dashboard: SidebarActionFn,
     pub on_select_session: SidebarSessionFn,
+    pub on_select_search_content: SidebarSearchContentFn,
+    pub on_expand_search_titles: SidebarActionFn,
+    pub on_expand_search_contents: SidebarActionFn,
     pub on_open_session_menu: SidebarSessionMenuFn,
     pub on_toggle_select_all: SidebarActionFn,
     pub on_batch_delete: SidebarActionFn,
@@ -82,7 +89,8 @@ pub fn filter_recent_sidebar_sessions(
     sorted
 }
 
-/// Full-height `248px` sidebar (`cst-pilot-desktop.pen` 「01 · 工作台」 master `L081M1` / `h5AY3`).
+/// Full-height `248px` sidebar (`cst-pilot-desktop.pen` 「01 · 工作台」 master `L081M1` / `h5AY3`
+/// & 「02 · 会话管理」 `TZgxW` search state).
 #[allow(clippy::too_many_arguments)]
 pub fn render_sidebar(
     route: ShellRoute,
@@ -92,6 +100,7 @@ pub fn render_sidebar(
     cx: &mut App,
     search_input: &Entity<InputState>,
     search_query: &str,
+    search_state: &SidebarSearchState,
     batch_mode: bool,
     selected_ids: &BTreeSet<String>,
     account_label: SharedString,
@@ -103,7 +112,7 @@ pub fn render_sidebar(
     palette: &DesktopPalette,
     cb: SidebarCallbacks,
 ) -> impl IntoElement {
-    let recent = filter_recent_sidebar_sessions(sessions, search_query);
+    let recent = filter_recent_sidebar_sessions(sessions, "");
     let has_search_query = !search_query.trim().is_empty();
     let row_height = px(36.0);
 
@@ -372,7 +381,16 @@ pub fn render_sidebar(
         .px(space::MD)
         .rounded(radius::CONTROL)
         .border_1()
-        .border_color(palette.border_hairline)
+        .border_color(if has_search_query {
+            palette.border_strong
+        } else {
+            palette.border_hairline
+        })
+        .bg(if has_search_query {
+            palette.bg_workspace
+        } else {
+            gpui_kit::transparent_black()
+        })
         .flex_shrink_0()
         .flex()
         .items_center()
@@ -419,6 +437,27 @@ pub fn render_sidebar(
             ),
         )
         .children(search_trailing);
+
+    let search_results_body = if has_search_query {
+        let on_clear_empty = Rc::clone(&cb.on_clear_search);
+        let on_sel_title = Rc::clone(&cb.on_select_session);
+        let on_sel_content = Rc::clone(&cb.on_select_search_content);
+        let on_expand_titles = Rc::clone(&cb.on_expand_search_titles);
+        let on_expand_contents = Rc::clone(&cb.on_expand_search_contents);
+        Some(render_sidebar_search_body(
+            route,
+            active_session_id,
+            search_state,
+            palette,
+            on_clear_empty,
+            on_sel_title,
+            on_sel_content,
+            on_expand_titles,
+            on_expand_contents,
+        ))
+    } else {
+        None
+    };
 
     let has_checked_items = !selected_ids.is_empty();
     let account_btn_label = SharedString::from(format!("账号菜单：{account_label}"));
@@ -608,9 +647,9 @@ pub fn render_sidebar(
                                 }),
                         ),
                 )
-                // 2. Navigation & recent sessions body `pQpX5` (`gap: 16px`)
-                .child(
-                    div()
+                // 2. Navigation & recent sessions body `pQpX5` (`gap: 16px`), or search results (`TZgxW`)
+                .child({
+                    let mut body = div()
                         .flex_1()
                         .min_h_0()
                         .w_full()
@@ -618,105 +657,113 @@ pub fn render_sidebar(
                         .flex_col()
                         .gap(space::LG)
                         // 2a. Search box `oq4G4` (`36px`)
-                        .child(search_box)
-                        // 2b. Primary navigation `WKJAy` (`gap: 6px`, Dashboard -> All Sessions)
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .flex()
-                                .flex_col()
-                                .gap(space::TIGHT)
-                                .child(sidebar_nav_item(
-                                    "sidebar-dashboard-btn",
-                                    IconName::LayoutDashboard,
-                                    "仪表盘",
-                                    false,
-                                    palette,
-                                    move |w, cx| (on_dash)(w, cx),
-                                ))
-                                .child(sidebar_nav_item(
-                                    "sidebar-all-sessions-btn",
-                                    IconName::RotateCcwClock,
-                                    "全部会话",
-                                    !batch_mode && matches!(route, ShellRoute::AllSessions),
-                                    palette,
-                                    move |w, cx| (on_all)(w, cx),
-                                )),
-                        )
-                        // 2c. Recent sessions group `CzUNm` (`28px` header + `8px` gap + scrollable list)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_h_0()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(space::SM)
-                                .child(
-                                    div()
-                                        .h(height::COMPACT)
-                                        .px(space::MD)
-                                        .flex_shrink_0()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            apply_scale(div(), scale::BODY_MEDIUM)
-                                                .text_color(palette.text_muted)
-                                                .child(cjk_inline_label("最近")),
-                                        )
-                                        .when_some(batch_mode.then_some(()), |hdr, ()| {
-                                            hdr.child(
-                                                div()
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(space::SM)
-                                                    .child(
-                                                        apply_scale(div(), scale::BODY)
-                                                            .id("sidebar-batch-select-all-btn")
-                                                            .test_support()
-                                                            .a11y_button(
-                                                                "sidebar-batch-select-all-btn",
-                                                                "全选会话",
-                                                            )
-                                                            .text_color(palette.text_secondary)
-                                                            .hover(|s| {
-                                                                s.text_color(palette.text_primary)
-                                                            })
-                                                            .on_click(move |_, w, cx| {
-                                                                (on_sel_all)(w, cx)
-                                                            })
-                                                            .child(cjk_inline_label("全选")),
-                                                    )
-                                                    .when_some(
-                                                        has_checked_items.then_some(()),
-                                                        |d, ()| {
-                                                            d.child(
-                                                                apply_scale(div(), scale::BODY)
-                                                                    .id("sidebar-batch-delete-btn")
-                                                                    .test_support()
-                                                                    .a11y_button(
-                                                                        "sidebar-batch-delete-btn",
-                                                                        "批量删除所选会话",
-                                                                    )
-                                                                    .text_color(
-                                                                        palette.status_danger,
-                                                                    )
-                                                                    .on_click(move |_, w, cx| {
-                                                                        (on_del)(w, cx)
-                                                                    })
-                                                                    .child(cjk_inline_label(
-                                                                        "删除",
-                                                                    )),
-                                                            )
-                                                        },
-                                                    ),
+                        .child(search_box);
+                    if let Some(search_body) = search_results_body {
+                        body = body.child(search_body);
+                    } else {
+                        body = body
+                            // 2b. Primary navigation `WKJAy` (`gap: 6px`, Dashboard -> All Sessions)
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::TIGHT)
+                                    .child(sidebar_nav_item(
+                                        "sidebar-dashboard-btn",
+                                        IconName::LayoutDashboard,
+                                        "仪表盘",
+                                        false,
+                                        palette,
+                                        move |w, cx| (on_dash)(w, cx),
+                                    ))
+                                    .child(sidebar_nav_item(
+                                        "sidebar-all-sessions-btn",
+                                        IconName::RotateCcwClock,
+                                        "全部会话",
+                                        !batch_mode && matches!(route, ShellRoute::AllSessions),
+                                        palette,
+                                        move |w, cx| (on_all)(w, cx),
+                                    )),
+                            )
+                            // 2c. Recent sessions group `CzUNm` (`28px` header + `8px` gap + scrollable list)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h_0()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::SM)
+                                    .child(
+                                        div()
+                                            .h(height::COMPACT)
+                                            .px(space::MD)
+                                            .flex_shrink_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .child(
+                                                apply_scale(div(), scale::BODY_MEDIUM)
+                                                    .text_color(palette.text_muted)
+                                                    .child(cjk_inline_label("最近")),
                                             )
-                                        }),
-                                )
-                                .child(recent_list),
-                        ),
-                ),
+                                            .when_some(batch_mode.then_some(()), |hdr, ()| {
+                                                hdr.child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(space::SM)
+                                                        .child(
+                                                            apply_scale(div(), scale::BODY)
+                                                                .id("sidebar-batch-select-all-btn")
+                                                                .test_support()
+                                                                .a11y_button(
+                                                                    "sidebar-batch-select-all-btn",
+                                                                    "全选会话",
+                                                                )
+                                                                .text_color(palette.text_secondary)
+                                                                .hover(|s| {
+                                                                    s.text_color(
+                                                                        palette.text_primary,
+                                                                    )
+                                                                })
+                                                                .on_click(move |_, w, cx| {
+                                                                    (on_sel_all)(w, cx)
+                                                                })
+                                                                .child(cjk_inline_label("全选")),
+                                                        )
+                                                        .when_some(
+                                                            has_checked_items.then_some(()),
+                                                            |d, ()| {
+                                                                d.child(
+                                                                    apply_scale(div(), scale::BODY)
+                                                                        .id("sidebar-batch-delete-btn")
+                                                                        .test_support()
+                                                                        .a11y_button(
+                                                                            "sidebar-batch-delete-btn",
+                                                                            "批量删除所选会话",
+                                                                        )
+                                                                        .text_color(
+                                                                            palette.status_danger,
+                                                                        )
+                                                                        .on_click(move |_, w, cx| {
+                                                                            (on_del)(w, cx)
+                                                                        })
+                                                                        .child(cjk_inline_label(
+                                                                            "删除",
+                                                                        )),
+                                                                )
+                                                            },
+                                                        ),
+                                                )
+                                            }),
+                                    )
+                                    .child(recent_list),
+                            );
+                    }
+                    body
+                }),
         )
         // 3. Bottom account + settings menu trigger bar `fMdf9`
         .child(
@@ -1222,6 +1269,448 @@ fn sidebar_nav_item(
             .text_color(palette.text_secondary),
     )
     .child(cjk_inline_label(label))
+}
+
+fn render_highlighted_text(
+    text: &str,
+    spans: &[MatchSpan],
+    palette: &DesktopPalette,
+) -> gpui::AnyElement {
+    let mut highlights = Vec::new();
+    for s in spans {
+        if s.start < s.end
+            && s.end <= text.len()
+            && text.is_char_boundary(s.start)
+            && text.is_char_boundary(s.end)
+        {
+            highlights.push((
+                s.start..s.end,
+                HighlightStyle {
+                    color: Some(palette.accent_ink),
+                    font_weight: Some(FontWeight::MEDIUM),
+                    ..Default::default()
+                },
+            ));
+        }
+    }
+    if highlights.is_empty() {
+        cjk_inline_label(SharedString::from(text.to_owned())).into_any_element()
+    } else {
+        StyledText::new(SharedString::from(text.to_owned()))
+            .with_highlights(highlights)
+            .into_any_element()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_sidebar_search_body(
+    route: ShellRoute,
+    active_session_id: Option<&str>,
+    search_state: &SidebarSearchState,
+    palette: &DesktopPalette,
+    on_clear: SidebarActionFn,
+    on_select_title: SidebarSessionFn,
+    on_select_content: SidebarSearchContentFn,
+    on_expand_titles: SidebarActionFn,
+    on_expand_contents: SidebarActionFn,
+) -> gpui::AnyElement {
+    if search_state.is_empty_result() {
+        if search_state.loading_first_page {
+            return div()
+                .id("sidebar-search-loading")
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_muted)
+                        .child("正在搜索…"),
+                )
+                .into_any_element();
+        }
+        return div()
+            .id("sidebar-search-empty")
+            .test_support()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .px(space::MD)
+            .pb(px(72.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(space::LG)
+            .child(
+                div()
+                    .w(px(36.0))
+                    .h(px(36.0))
+                    .rounded(radius::ROW)
+                    .bg(palette.bg_elevated)
+                    .border_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Icon::new(IconName::Search)
+                            .size(px(16.0))
+                            .text_color(palette.text_secondary),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(space::XS)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("无匹配结果")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .text_color(palette.text_muted)
+                            .child(cjk_inline_label("清空后恢复导航与列表")),
+                    ),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id("sidebar-search-empty-clear-btn")
+                    .test_support()
+                    .a11y_button("sidebar-search-empty-clear-btn", "清空搜索")
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(space::SM)
+                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .on_click(move |_, w, cx| (on_clear)(w, cx))
+                    .child(
+                        Icon::new(IconName::Close)
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(cjk_inline_label("清空搜索")),
+            )
+            .into_any_element();
+    }
+
+    let mut scroll = div()
+        .id("sidebar-search-results-scroll")
+        .test_support()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .overflow_y_scroll()
+        .flex()
+        .flex_col()
+        .gap(space::MD);
+
+    let has_titles = !search_state.title_matches.is_empty();
+    let has_contents = !search_state.content_matches.is_empty();
+
+    if has_titles {
+        let mut group = div().w_full().flex().flex_col().gap(space::MICRO);
+        group = group.child(
+            div()
+                .h(height::COMPACT)
+                .px(space::MD)
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                        .text_color(palette.text_muted)
+                        .child(cjk_inline_label("标题")),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_muted)
+                        .child(SharedString::from(search_state.title_total.to_string())),
+                ),
+        );
+
+        for item in &search_state.title_matches {
+            group = group.child(render_title_search_row(
+                route,
+                active_session_id,
+                item,
+                &search_state.query,
+                palette,
+                Rc::clone(&on_select_title),
+            ));
+        }
+
+        if search_state.title_has_more {
+            let cb_expand = Rc::clone(&on_expand_titles);
+            group = group.child(render_search_expand_btn(
+                "sidebar-search-expand-titles-btn",
+                "展开更多标题结果",
+                palette,
+                cb_expand,
+            ));
+        }
+        scroll = scroll.child(group);
+    }
+
+    if has_titles && has_contents {
+        scroll = scroll.child(
+            div()
+                .w_full()
+                .h(px(1.0))
+                .bg(palette.border_subtle)
+                .flex_shrink_0(),
+        );
+    }
+
+    if has_contents {
+        let mut group = div().w_full().flex().flex_col().gap(space::MICRO);
+        group = group.child(
+            div()
+                .h(height::COMPACT)
+                .px(space::MD)
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                        .text_color(palette.text_muted)
+                        .child(cjk_inline_label("正文")),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_muted)
+                        .child(SharedString::from(search_state.content_total.to_string())),
+                ),
+        );
+
+        for item in &search_state.content_matches {
+            group = group.child(render_content_search_row(
+                route,
+                active_session_id,
+                item,
+                palette,
+                Rc::clone(&on_select_content),
+            ));
+        }
+
+        if search_state.content_has_more {
+            let cb_expand = Rc::clone(&on_expand_contents);
+            group = group.child(render_search_expand_btn(
+                "sidebar-search-expand-contents-btn",
+                "展开更多正文结果",
+                palette,
+                cb_expand,
+            ));
+        }
+        scroll = scroll.child(group);
+    }
+
+    scroll.into_any_element()
+}
+
+fn format_search_short_date(updated_at: Option<&str>) -> Option<SharedString> {
+    let raw = updated_at?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+        let local = dt.with_timezone(&chrono::Local);
+        let today = chrono::Local::now().date_naive();
+        let text = if local.date_naive() == today {
+            local.format("%H:%M").to_string()
+        } else {
+            local.format("%m/%d").to_string()
+        };
+        return Some(SharedString::from(text));
+    }
+    if raw.len() >= 10 {
+        return Some(SharedString::from(format!(
+            "{}/{}",
+            &raw[5..7],
+            &raw[8..10]
+        )));
+    }
+    None
+}
+
+fn render_title_search_row(
+    route: ShellRoute,
+    active_session_id: Option<&str>,
+    item: &TitleSearchMatchDto,
+    query: &str,
+    palette: &DesktopPalette,
+    on_select: SidebarSessionFn,
+) -> gpui::AnyElement {
+    let is_active =
+        matches!(route, ShellRoute::Session) && active_session_id == Some(item.session_id.as_str());
+    let spans = match_query(&item.title, query)
+        .map(|m| m.spans)
+        .unwrap_or_default();
+    let row_id = SharedString::from(format!("sidebar-search-title-{}", item.session_id));
+    let sid = item.session_id.clone();
+    let date_label = format_search_short_date(item.updated_at.as_deref());
+
+    apply_scale(
+        div(),
+        if is_active {
+            scale::UI_MEDIUM
+        } else {
+            scale::UI
+        },
+    )
+    .id(row_id.clone())
+    .test_support()
+    .a11y_listitem(row_id, SharedString::from(item.title.clone()), is_active)
+    .w_full()
+    .h(px(36.0))
+    .px(space::MD)
+    .rounded(radius::CONTROL)
+    .bg(if is_active {
+        palette.bg_item_active
+    } else {
+        gpui_kit::transparent_black()
+    })
+    .text_color(palette.text_primary)
+    .flex()
+    .items_center()
+    .justify_between()
+    .gap(space::SM)
+    .hover(move |s| {
+        s.bg(if is_active {
+            palette.bg_item_active
+        } else {
+            palette.bg_item_hover
+        })
+    })
+    .on_click(move |_, w, cx| (on_select)(sid.clone(), w, cx))
+    .child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .child(render_highlighted_text(&item.title, &spans, palette)),
+    )
+    .when_some(date_label, |el, label| {
+        el.child(
+            apply_scale(div(), scale::CAPTION)
+                .flex_shrink_0()
+                .text_color(palette.text_muted)
+                .child(label),
+        )
+    })
+    .into_any_element()
+}
+
+fn render_content_search_row(
+    route: ShellRoute,
+    active_session_id: Option<&str>,
+    item: &ContentSearchMatchDto,
+    palette: &DesktopPalette,
+    on_select: SidebarSearchContentFn,
+) -> gpui::AnyElement {
+    let is_active =
+        matches!(route, ShellRoute::Session) && active_session_id == Some(item.session_id.as_str());
+    let row_id = SharedString::from(format!("sidebar-search-content-{}", item.session_id));
+    let hit_item = item.clone();
+    let count_label = SharedString::from(format!("{} 处", item.hit_count));
+
+    div()
+        .id(row_id.clone())
+        .test_support()
+        .a11y_listitem(row_id, SharedString::from(item.title.clone()), is_active)
+        .w_full()
+        .px(space::MD)
+        .py(space::SM)
+        .rounded(radius::CONTROL)
+        .bg(if is_active {
+            palette.bg_item_active
+        } else {
+            gpui_kit::transparent_black()
+        })
+        .flex()
+        .flex_col()
+        .gap(space::MICRO)
+        .hover(move |s| {
+            s.bg(if is_active {
+                palette.bg_item_active
+            } else {
+                palette.bg_item_hover
+            })
+        })
+        .on_click(move |_, w, cx| (on_select)(hit_item.clone(), w, cx))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::SM)
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label(SharedString::from(item.title.clone()))),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .flex_shrink_0()
+                        .text_color(palette.text_muted)
+                        .child(count_label),
+                ),
+        )
+        .child(
+            apply_scale(div(), scale::CAPTION)
+                .w_full()
+                .min_w_0()
+                .truncate()
+                .text_color(palette.text_secondary)
+                .child(render_highlighted_text(
+                    &item.best_hit.snippet,
+                    &item.best_hit.spans,
+                    palette,
+                )),
+        )
+        .into_any_element()
+}
+
+fn render_search_expand_btn(
+    id: &'static str,
+    aria_label: &'static str,
+    palette: &DesktopPalette,
+    on_click: SidebarActionFn,
+) -> gpui::AnyElement {
+    apply_scale(div(), scale::UI)
+        .id(id)
+        .test_support()
+        .a11y_button(id, aria_label)
+        .w_full()
+        .h(height::CONTROL)
+        .px(space::MD)
+        .rounded(radius::CONTROL)
+        .text_color(palette.text_secondary)
+        .flex()
+        .items_center()
+        .gap(space::SM)
+        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+        .on_click(move |_, w, cx| (on_click)(w, cx))
+        .child(cjk_inline_label("展开"))
+        .child(Icon::new(IconName::ChevronDown).size(px(14.0)))
+        .into_any_element()
 }
 
 trait DivCondExt: Sized {

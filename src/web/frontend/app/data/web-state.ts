@@ -58,6 +58,109 @@ const sessionDetails = new SessionDetailCache((id) =>
 	apiJson<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
 );
 
+export type SearchContentKind = "user" | "assistant" | "tool" | "summary";
+
+export type SearchMatchSpan = { start: number; end: number };
+
+export type TitleSearchMatch = {
+	sessionId: string;
+	title: string;
+	updatedAt?: string;
+	score: number;
+};
+
+export type ContentSearchBestHit = {
+	entryId: string;
+	kind: SearchContentKind;
+	snippet: string;
+	onActiveBranch: boolean;
+	branchLeafId?: string;
+	spans: SearchMatchSpan[];
+};
+
+export type ContentSearchMatch = {
+	sessionId: string;
+	title: string;
+	updatedAt?: string;
+	hitCount: number;
+	score: number;
+	bestHit: ContentSearchBestHit;
+};
+
+export type SessionSearchResponse = {
+	query: string;
+	snapshotToken: string;
+	titleMatches: TitleSearchMatch[];
+	titleTotal: number;
+	titleHasMore: boolean;
+	contentMatches: ContentSearchMatch[];
+	contentTotal: number;
+	contentHasMore: boolean;
+};
+
+export function getCachedSessionDetails(): ReadonlyMap<string, SessionDetail> {
+	return sessionDetails.snapshotDetails();
+}
+
+export function invalidateCachedSessionDetail(id: string): void {
+	sessionDetails.remove(id);
+}
+
+function utf8ByteSpansToUtf16(text: string, spans: readonly SearchMatchSpan[]): SearchMatchSpan[] {
+	if (!spans.length) return [];
+	const byteToUtf16 = new Map<number, number>();
+	let bytePos = 0;
+	byteToUtf16.set(0, 0);
+	for (let i = 0; i < text.length; ) {
+		const cp = text.codePointAt(i)!;
+		const utf16Len = cp > 0xffff ? 2 : 1;
+		const utf8Len = cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+		i += utf16Len;
+		bytePos += utf8Len;
+		byteToUtf16.set(bytePos, i);
+	}
+	const out: SearchMatchSpan[] = [];
+	for (const s of spans) {
+		const start = byteToUtf16.get(s.start);
+		const end = byteToUtf16.get(s.end);
+		if (start !== undefined && end !== undefined && start < end) out.push({ start, end });
+	}
+	return out;
+}
+
+export async function searchSessionsApi(
+	params: {
+		query: string;
+		activeSessionId?: string;
+		titleOffset?: number;
+		titleLimit?: number;
+		contentOffset?: number;
+		contentLimit?: number;
+		snapshotToken?: string;
+	},
+	signal?: AbortSignal,
+): Promise<SessionSearchResponse> {
+	const search = new URLSearchParams();
+	search.set("q", params.query);
+	if (params.activeSessionId) search.set("activeSessionId", params.activeSessionId);
+	if (params.titleOffset !== undefined) search.set("titleOffset", String(params.titleOffset));
+	if (params.titleLimit !== undefined) search.set("titleLimit", String(params.titleLimit));
+	if (params.contentOffset !== undefined) search.set("contentOffset", String(params.contentOffset));
+	if (params.contentLimit !== undefined) search.set("contentLimit", String(params.contentLimit));
+	if (params.snapshotToken) search.set("snapshotToken", params.snapshotToken);
+	const raw = await apiJson<SessionSearchResponse>(`/api/sessions/search?${search.toString()}`, { signal });
+	return {
+		...raw,
+		contentMatches: raw.contentMatches.map((item) => ({
+			...item,
+			bestHit: {
+				...item.bestHit,
+				spans: utf8ByteSpansToUtf16(item.bestHit.snippet, item.bestHit.spans ?? []),
+			},
+		})),
+	};
+}
+
 let knownSessions: readonly SessionRow[] = [];
 
 /** 订阅全局事件流：通过聚合流或单流回退分发；enabled 为 false 时不占连接。 */
@@ -95,9 +198,11 @@ export function useSessions() {
 			if (nextStage !== "preview" && nextStage !== "app_active") {
 				resumeEventStreamFromStandby();
 				sessionDetails.reconcile(state.sessions);
-				if (!preloaded.current) {
-					preloaded.current = true;
-					void sessionDetails.preload(recentSessionIds(rows));
+				const topTen = recentSessionIds(rows);
+				const missingTopTen = preloaded.current ? topTen.filter((id) => !sessionDetails.has(id)) : topTen;
+				preloaded.current = true;
+				if (missingTopTen.length > 0) {
+					void sessionDetails.preload(missingTopTen);
 				}
 			}
 			setStage(nextStage);

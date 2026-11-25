@@ -16,6 +16,7 @@
 | `crates/pi-session` | 库 | 后台服务（经 `cst-server`） | JSONL v3 会话树、压缩、静态扩展接口、恢复日志 |
 | `crates/pi-runtime` | 库 + `pi` CLI | 后台服务（库）/ 上游 CLI 验证 | 设置与模型管理、资源加载、SDK、`codemode`/`mcp` 可选编译开关 |
 | `crates/cst-os` | 库 | 后台服务、更新器、软件端共用 | 根目录解析、`.state/server.json` 发现记录、`ProcessIdentity`、安全路径与内核锁、JSON 辅助 |
+| `crates/cst-search` | 库 | 后台服务与软件端共用 | 拼音（全拼／简拼／多音字）加受限模糊匹配引擎、片段裁剪、跨端搜索接口 DTO |
 | `crates/cst-updater` | 库 + `cst-updater.exe` | 独立更新器进程 / 离线验签库 | Ed25519 验签与归档验树、升级布局白名单、事务替换与中断恢复、`cst-updater.exe` |
 | `crates/cst-kit` | 库 | 后台服务（经 `cst-server`） | 17 个诊断工具、BitLocker、Runbook、CSTOA 认证、双端遥测、联网升级检查与拉起编排 |
 | `crates/cst-server` | 库 + `cst-server.exe` | 公用后台服务进程 | 服务发现、通道控制、HTTP/SSE 路由、会话池、收件箱、会话导出 |

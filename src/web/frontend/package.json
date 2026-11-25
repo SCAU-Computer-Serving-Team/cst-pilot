@@ -24,6 +24,7 @@
     "@react-router/node": "7.18.4",
     "isbot": "5.2.2",
     "lucide-react": "0.468.0",
+    "pinyin-match": "1.2.10",
     "qrcode.react": "4.2.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",

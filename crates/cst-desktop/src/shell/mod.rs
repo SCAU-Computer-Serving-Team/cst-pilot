@@ -2,6 +2,7 @@ pub mod exit_dialog;
 pub(crate) mod input_nav;
 mod menus;
 pub mod overlays;
+pub mod search_state;
 pub mod sidebar;
 pub mod topbar;
 pub mod window_bounds;
@@ -11,8 +12,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cst_client::{
-    ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
-    ExitCheckReport, RecentExportSummary, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
+    ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, ContentSearchMatchDto,
+    DesktopSettingsPatchDto, ExitCheckReport, RecentExportSummary, ThemeModeDto, UpdatePhaseDto,
+    WorkspaceView,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
@@ -43,6 +45,9 @@ use crate::shell::exit_dialog::render_exit_confirm_dialog;
 use crate::shell::overlays::{
     BannerCountdownState, BannerDeadline, render_top_notice_banner, render_web_active_lock_overlay,
     render_workspace_error_bar,
+};
+use crate::shell::search_state::{
+    ExpandAction, SEARCH_PAGE_SIZE, SidebarSearchState, search_local_preloaded_sessions,
 };
 use crate::shell::sidebar::{
     ShellRoute, SidebarCallbacks, filter_recent_sidebar_sessions, render_sidebar,
@@ -117,6 +122,13 @@ struct RenameSessionModalState {
     prior_focus: Option<FocusHandle>,
 }
 
+#[derive(Clone)]
+struct TopNoticeAction {
+    label: SharedString,
+    session_id: String,
+    previous_leaf_id: String,
+}
+
 #[derive(Default)]
 struct ClickOutsideGuard(Option<std::rc::Weak<std::cell::Cell<bool>>>);
 
@@ -159,6 +171,10 @@ pub struct AppShell {
     login_view: Entity<LoginView>,
     account_view: Entity<AccountView>,
     sidebar_search_input: Entity<InputState>,
+    sidebar_search: SidebarSearchState,
+    sidebar_search_debounce_task: Option<Task<()>>,
+    sidebar_search_prefetch_title_task: Option<Task<()>>,
+    sidebar_search_prefetch_content_task: Option<Task<()>>,
     command_palette: Option<Entity<CommandPaletteModal>>,
     command_palette_sub: Option<Subscription>,
     recent_exports_cache: Vec<RecentExportSummary>,
@@ -204,6 +220,7 @@ pub struct AppShell {
     update_dismiss_focus: FocusHandle,
     workspace_error: Option<SharedString>,
     top_notice: Option<SharedString>,
+    top_notice_action: Option<TopNoticeAction>,
     error_banner_timer: BannerCountdownState,
     notice_banner_timer: BannerCountdownState,
     shader_scheduler: ShaderFrameScheduler,
@@ -316,8 +333,13 @@ impl AppShell {
         subscriptions.push(cx.subscribe_in(
             &sidebar_search_input,
             window,
-            |this, _, ev: &InputEvent, _, cx| match ev {
-                InputEvent::Change => cx.notify(),
+            |this, _, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => {
+                    if !crate::sessions::input_is_composing(&this.sidebar_search_input, window, cx)
+                    {
+                        this.on_sidebar_search_changed(cx);
+                    }
+                }
                 InputEvent::Focus => this.dismiss_click_outside_surfaces(cx),
                 _ => {}
             },
@@ -387,6 +409,10 @@ impl AppShell {
             login_view,
             account_view,
             sidebar_search_input,
+            sidebar_search: SidebarSearchState::default(),
+            sidebar_search_debounce_task: None,
+            sidebar_search_prefetch_title_task: None,
+            sidebar_search_prefetch_content_task: None,
             command_palette: None,
             command_palette_sub: None,
             recent_exports_cache: Vec::new(),
@@ -432,6 +458,7 @@ impl AppShell {
             update_dismiss_focus: cx.focus_handle().tab_stop(true),
             workspace_error: None,
             top_notice: None,
+            top_notice_action: None,
             error_banner_timer: BannerCountdownState::new(),
             notice_banner_timer: BannerCountdownState::new(),
             shader_scheduler: ShaderFrameScheduler::new(),
@@ -952,6 +979,9 @@ impl AppShell {
                 if timer.expire(deadline, cx.background_executor().now()) {
                     *message = None;
                     *task = None;
+                    if !is_error {
+                        this.top_notice_action = None;
+                    }
                     cx.notify();
                 }
             });
@@ -1005,11 +1035,341 @@ impl AppShell {
 
     pub fn show_top_notice(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.top_notice = Some(message.into());
+        self.top_notice_action = None;
         let deadline = self
             .notice_banner_timer
             .start(cx.background_executor().now());
         self.schedule_banner_dismiss(false, deadline, cx);
         cx.notify();
+    }
+
+    fn show_top_notice_with_action(
+        &mut self,
+        message: impl Into<SharedString>,
+        action: TopNoticeAction,
+        cx: &mut Context<Self>,
+    ) {
+        self.top_notice = Some(message.into());
+        self.top_notice_action = Some(action);
+        let deadline = self
+            .notice_banner_timer
+            .start(cx.background_executor().now());
+        self.schedule_banner_dismiss(false, deadline, cx);
+        cx.notify();
+    }
+
+    pub fn sidebar_search_input(&self) -> &Entity<InputState> {
+        &self.sidebar_search_input
+    }
+
+    pub fn sidebar_search_state(&self) -> &SidebarSearchState {
+        &self.sidebar_search
+    }
+
+    fn clear_sidebar_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_search_debounce_task = None;
+        self.sidebar_search_prefetch_title_task = None;
+        self.sidebar_search_prefetch_content_task = None;
+        self.sidebar_search.clear();
+        self.sidebar_search_input.update(cx, |st, cx| {
+            st.set_value("", window, cx);
+            st.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn on_sidebar_search_changed(&mut self, cx: &mut Context<Self>) {
+        let raw_query = self.sidebar_search_input.read(cx).value().to_string();
+        let trimmed = raw_query.trim().to_owned();
+        self.sidebar_search_debounce_task = None;
+        self.sidebar_search_prefetch_title_task = None;
+        self.sidebar_search_prefetch_content_task = None;
+
+        if trimmed.is_empty() {
+            self.sidebar_search.clear();
+            cx.notify();
+            return;
+        }
+
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let sessions = self.all_sessions_view.read(cx).visible_sessions();
+        let local_preview = search_local_preloaded_sessions(
+            &trimmed,
+            active_sid.as_deref(),
+            &sessions,
+            &self.snapshot.loaded_sessions,
+        );
+        let seq = self
+            .sidebar_search
+            .begin_query(trimmed.clone(), local_preview);
+        cx.notify();
+
+        let client = self.client.clone();
+        self.sidebar_search_debounce_task = Some(cx.spawn(async move |weak, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let res = client
+                .search_sessions(
+                    trimmed,
+                    active_sid,
+                    0,
+                    SEARCH_PAGE_SIZE,
+                    0,
+                    SEARCH_PAGE_SIZE,
+                    None,
+                )
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_debounce_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some((next_title, next_content)) =
+                            this.sidebar_search.apply_first_page(seq, resp)
+                        {
+                            if let Some(off) = next_title {
+                                this.spawn_sidebar_search_prefetch_titles(seq, off, cx);
+                            }
+                            if let Some(off) = next_content {
+                                this.spawn_sidebar_search_prefetch_contents(seq, off, cx);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        this.sidebar_search.mark_first_page_failed(seq);
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn spawn_sidebar_search_prefetch_titles(
+        &mut self,
+        seq: u64,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self.sidebar_search.query.clone();
+        if query.trim().is_empty() {
+            return;
+        }
+        let token = self.sidebar_search.snapshot_token.clone();
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let client = self.client.clone();
+        self.sidebar_search_prefetch_title_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client
+                .search_sessions(query, active_sid, offset, SEARCH_PAGE_SIZE, 0, 1, token)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_prefetch_title_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some(next_off) = this.sidebar_search.finish_title_prefetch(
+                            seq,
+                            resp.title_matches,
+                            resp.title_has_more,
+                        ) {
+                            this.spawn_sidebar_search_prefetch_titles(seq, next_off, cx);
+                        }
+                    }
+                    Err(_) => this.sidebar_search.fail_title_prefetch(seq),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn spawn_sidebar_search_prefetch_contents(
+        &mut self,
+        seq: u64,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self.sidebar_search.query.clone();
+        if query.trim().is_empty() {
+            return;
+        }
+        let token = self.sidebar_search.snapshot_token.clone();
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let client = self.client.clone();
+        self.sidebar_search_prefetch_content_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client
+                .search_sessions(query, active_sid, 0, 1, offset, SEARCH_PAGE_SIZE, token)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_prefetch_content_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some(next_off) = this.sidebar_search.finish_content_prefetch(
+                            seq,
+                            resp.content_matches,
+                            resp.content_has_more,
+                        ) {
+                            this.spawn_sidebar_search_prefetch_contents(seq, next_off, cx);
+                        }
+                    }
+                    Err(_) => this.sidebar_search.fail_content_prefetch(seq),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn expand_sidebar_search_titles(&mut self, cx: &mut Context<Self>) {
+        let seq = self.sidebar_search.request_seq;
+        match self.sidebar_search.click_expand_titles() {
+            ExpandAction::Appended {
+                next_prefetch_offset: Some(next_off),
+            } => {
+                self.spawn_sidebar_search_prefetch_titles(seq, next_off, cx);
+            }
+            ExpandAction::FetchNow { offset } => {
+                self.spawn_sidebar_search_prefetch_titles(seq, offset, cx);
+            }
+            ExpandAction::Appended {
+                next_prefetch_offset: None,
+            }
+            | ExpandAction::WaitingInFlight
+            | ExpandAction::None => {}
+        }
+        cx.notify();
+    }
+
+    fn expand_sidebar_search_contents(&mut self, cx: &mut Context<Self>) {
+        let seq = self.sidebar_search.request_seq;
+        match self.sidebar_search.click_expand_contents() {
+            ExpandAction::Appended {
+                next_prefetch_offset: Some(next_off),
+            } => {
+                self.spawn_sidebar_search_prefetch_contents(seq, next_off, cx);
+            }
+            ExpandAction::FetchNow { offset } => {
+                self.spawn_sidebar_search_prefetch_contents(seq, offset, cx);
+            }
+            ExpandAction::Appended {
+                next_prefetch_offset: None,
+            }
+            | ExpandAction::WaitingInFlight
+            | ExpandAction::None => {}
+        }
+        cx.notify();
+    }
+
+    fn open_session_tree_focus(
+        &mut self,
+        sid: String,
+        focus_entry_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prior = window
+            .focused(cx)
+            .filter(|focus| focus != &self.root_focus)
+            .or_else(|| Some(self.workbench.read(cx).session_composer_focus(cx)));
+        self.set_workspace_route(ShellRoute::Session, SessionSubView::Tree, cx);
+        self.session_subview_prior_focus = prior;
+        self.branch_tree_view.update(cx, |view, cx| {
+            view.set_session_id_and_focus(sid, focus_entry_id, window, cx);
+            view.focus(window, cx);
+        });
+    }
+
+    fn select_sidebar_search_content(
+        &mut self,
+        hit: ContentSearchMatchDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sid = hit.session_id.clone();
+        let entry_id = hit.best_hit.entry_id.clone();
+        let query = self.sidebar_search.query.clone();
+
+        if hit.best_hit.on_active_branch {
+            self.activate_session_by_id(sid.clone(), cx);
+            self.workbench
+                .update(cx, |wb, cx| wb.locate_entry(sid, entry_id, query, cx));
+            self.root_focus.focus(window, cx);
+            return;
+        }
+
+        let is_running = self
+            .snapshot
+            .loaded_sessions
+            .get(&sid)
+            .is_some_and(|s| s.running)
+            || self
+                .snapshot
+                .sessions
+                .iter()
+                .any(|s| s.id == sid && s.running);
+        if is_running {
+            self.activate_session_by_id(sid.clone(), cx);
+            self.open_session_tree_focus(sid, entry_id, window, cx);
+            self.show_top_notice("当前会话正在输出，已在分支树定位该节点。", cx);
+            return;
+        }
+
+        let target_leaf = hit
+            .best_hit
+            .branch_leaf_id
+            .clone()
+            .unwrap_or_else(|| entry_id.clone());
+        let cached_prev_leaf = self
+            .snapshot
+            .loaded_sessions
+            .get(&sid)
+            .and_then(|s| s.leaf_id.clone());
+        let client = self.client.clone();
+        self.root_focus.focus(window, cx);
+        cx.spawn(async move |weak, cx| {
+            let previous_leaf = match cached_prev_leaf {
+                Some(prev) => Some(prev),
+                None => client
+                    .get_session_tree(sid.clone())
+                    .await
+                    .ok()
+                    .and_then(|val| {
+                        val.get("leafId")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                    }),
+            };
+            let nav_res = client
+                .navigate_session_tree(sid.clone(), target_leaf, false, None)
+                .await;
+            let _ = weak.update(cx, |this, cx| match nav_res {
+                Ok(_) => {
+                    this.activate_session_by_id(sid.clone(), cx);
+                    this.workbench.update(cx, |wb, cx| {
+                        wb.locate_entry(sid.clone(), entry_id, query, cx);
+                    });
+                    if let Some(prev_leaf) = previous_leaf {
+                        this.show_top_notice_with_action(
+                            "已切换至历史分支",
+                            TopNoticeAction {
+                                label: SharedString::from("返回原分支"),
+                                session_id: sid,
+                                previous_leaf_id: prev_leaf,
+                            },
+                            cx,
+                        );
+                    } else {
+                        this.show_top_notice("已切换至历史分支", cx);
+                    }
+                }
+                Err(err) => {
+                    this.show_workspace_error(err.to_string(), cx);
+                }
+            });
+        })
+        .detach();
     }
 
     fn cycle_theme_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1274,6 +1634,11 @@ impl AppShell {
                         && this.snapshot.channel_mode != ChannelModeDto::WebActive
                     {
                         this.restore_surface_focus(None, window, cx);
+                    }
+                    let sessions_changed =
+                        !std::sync::Arc::ptr_eq(&prev_snap.sessions, &this.snapshot.sessions);
+                    if sessions_changed && this.sidebar_search.is_active() {
+                        this.on_sidebar_search_changed(cx);
                     }
                     cx.notify();
                 });
@@ -2786,11 +3151,46 @@ impl AppShell {
                 .into_any_element(),
             )
         } else {
+            let (action_label, on_action) = match self.top_notice_action.clone() {
+                Some(act) if is_open => {
+                    let ent_act = entity.clone();
+                    let sid_back = act.session_id.clone();
+                    let leaf_back = act.previous_leaf_id.clone();
+                    let cb: overlays::NoticeActionFn = Rc::new(move |_, cx| {
+                        let s = sid_back.clone();
+                        let leaf = leaf_back.clone();
+                        ent_act.update(cx, |this, cx| {
+                            this.top_notice = None;
+                            this.top_notice_action = None;
+                            this.notice_dismiss_task = None;
+                            let client = this.client.clone();
+                            cx.spawn(async move |weak, cx| {
+                                let res = client
+                                    .navigate_session_tree(s.clone(), leaf, false, None)
+                                    .await;
+                                let _ = weak.update(cx, |this, cx| match res {
+                                    Ok(_) => {
+                                        this.activate_session_by_id(s, cx);
+                                        this.show_top_notice("已返回原分支", cx);
+                                    }
+                                    Err(err) => this.show_workspace_error(err.to_string(), cx),
+                                });
+                            })
+                            .detach();
+                            cx.notify();
+                        });
+                    });
+                    (Some(act.label), Some(cb))
+                }
+                _ => (None, None),
+            };
             Some(
                 render_top_notice_banner(
                     is_open,
                     progress,
                     msg,
+                    action_label,
+                    on_action,
                     palette,
                     transparency_enabled,
                     scale_factor,
@@ -3326,6 +3726,9 @@ impl Render for AppShell {
                 let s3 = entity.clone();
                 let s4 = entity.clone();
                 let s5 = entity.clone();
+                let s5_content = entity.clone();
+                let s5_exp_title = entity.clone();
+                let s5_exp_content = entity.clone();
                 let s5_menu = entity.clone();
                 let s7 = entity.clone();
                 let s8 = entity.clone();
@@ -3341,6 +3744,7 @@ impl Render for AppShell {
                     cx,
                     &self.sidebar_search_input,
                     &search_query,
+                    &self.sidebar_search,
                     self.sidebar_batch_mode,
                     &self.sidebar_selected_ids,
                     account_label,
@@ -3370,11 +3774,7 @@ impl Render for AppShell {
                         }),
                         on_clear_search: Rc::new(move |w, cx| {
                             s_clr.update(cx, |this, cx| {
-                                this.sidebar_search_input.update(cx, |st, cx| {
-                                    st.set_value("", w, cx);
-                                    st.focus(w, cx);
-                                });
-                                cx.notify();
+                                this.clear_sidebar_search(w, cx);
                             });
                         }),
                         on_open_all_sessions: Rc::new(move |window, cx| {
@@ -3397,6 +3797,21 @@ impl Render for AppShell {
                             s5.update(cx, |this, cx| {
                                 this.activate_session_by_id(sid, cx);
                                 this.root_focus.focus(window, cx);
+                            });
+                        }),
+                        on_select_search_content: Rc::new(move |hit, window, cx| {
+                            s5_content.update(cx, |this, cx| {
+                                this.select_sidebar_search_content(hit, window, cx);
+                            });
+                        }),
+                        on_expand_search_titles: Rc::new(move |_, cx| {
+                            s5_exp_title.update(cx, |this, cx| {
+                                this.expand_sidebar_search_titles(cx);
+                            });
+                        }),
+                        on_expand_search_contents: Rc::new(move |_, cx| {
+                            s5_exp_content.update(cx, |this, cx| {
+                                this.expand_sidebar_search_contents(cx);
                             });
                         }),
                         on_open_session_menu: Rc::new(move |sid, pos, window, cx| {

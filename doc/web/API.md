@@ -28,6 +28,7 @@
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/sessions` | 会话列表（返回 `{ id, title, updatedAt, running }[]`） |
+| `GET` | `/api/sessions/search` | 全库会话标题与全树正文搜索（支持 `q`、`activeSessionId`、`titleOffset`/`titleLimit`、`contentOffset`/`contentLimit`、`snapshotToken`），支持拼音与受限模糊，排除思考过程与 BitLocker 输出 |
 | `POST` | `/api/sessions` | 新建会话，可选指定初始模型与思考强度 |
 | `GET` | `/api/sessions/creation/<requestKey>` | 只读核对创建回执，返回 `status: "missing" \| "started" \| "done"`，完成时附 `sessionId` |
 | `GET` | `/api/sessions/<id>` | 会话完整快照（返回 `{ id, eventCursor, bitlocker, messages, entries, running, contextUsage, queue, ui }`，工作时长内嵌于 `assistant` 消息） |

@@ -1085,6 +1085,42 @@ impl AppHttpClient {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_sessions(
+        &self,
+        query: &str,
+        active_session_id: Option<&str>,
+        title_offset: usize,
+        title_limit: usize,
+        content_offset: usize,
+        content_limit: usize,
+        snapshot_token: Option<&str>,
+    ) -> Result<cst_search::SessionSearchResponseDto, ClientError> {
+        let qs = {
+            let mut ser = url::form_urlencoded::Serializer::new(String::new());
+            ser.append_pair("q", query);
+            if let Some(active) = active_session_id.filter(|s| !s.is_empty()) {
+                ser.append_pair("activeSessionId", active);
+            }
+            ser.append_pair("titleOffset", &title_offset.to_string());
+            ser.append_pair("titleLimit", &title_limit.clamp(1, 50).to_string());
+            ser.append_pair("contentOffset", &content_offset.to_string());
+            ser.append_pair("contentLimit", &content_limit.clamp(1, 50).to_string());
+            if let Some(tok) = snapshot_token.filter(|s| !s.is_empty()) {
+                ser.append_pair("snapshotToken", tok);
+            }
+            ser.finish()
+        };
+        self.request_json(
+            Method::GET,
+            &format!("/api/sessions/search?{qs}"),
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
     pub async fn list_recent_exports(
         &self,
         limit: usize,

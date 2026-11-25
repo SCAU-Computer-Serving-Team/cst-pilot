@@ -41,7 +41,7 @@
 | `web` | 兼容版：面向 Chromium 86 单独构建 Tailwind 3.4 样式并验证组件交互 | [web/SPEC.md](web/SPEC.md#浏览器基线与分发) |
 | `web` / `desktop` | 仪表盘：实现 `/dashboard` 用量概览、趋势、筛选与逐请求本地日志，确定本地存储位置、保留期和清理方式 | [web/SPEC.md](web/SPEC.md#仪表盘) |
 | `web` / `desktop` | 分享：复用会话导出接口，确定发送渠道、链接承载、敏感信息核对与销毁规则 | [web/SPEC.md](web/SPEC.md#命令与功能对应) |
-| `web` | 会话内全文搜索与侧栏会话列表搜索 | [web/SPEC.md](web/SPEC.md#聊天工作台) |
+| `web` / `desktop` | 会话内查找（`Ctrl+F` 当前会话内逐条定位；侧栏全文搜索与 `Ctrl+O` 拼音／模糊已实现） | [web/SPEC.md](web/SPEC.md#聊天工作台) |
 | `web` | 视觉令牌微调（`P2`）：将 `.composer-chip .chip-remove` 热区放大至 `≥ 20×20px`，校准 `/sessions` 会话行高至 `40px`，对齐 `/login` 缩放标签与 `special-tool` 附属图标最小尺寸 | [ux-e2e.md](web/test/ux-e2e.md) |
 | `telemetry` / `release` | 生产服务部署：上线 OA 请求级扣点接口 `/api/agent/llm/billing` 与版本升级签名清单接口 `/api/agent/releases/latest` | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退)、[release/SPEC.md](release/SPEC.md#rust-软件内升级) |
 | `pi-core` | 内部结构优化（非阶段 9 阻塞）：将 `pi-session` 38 个闭包整合为 `SessionHost` Trait，将 `AgentSessionInner` 80 个字段分组管理 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |

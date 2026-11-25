@@ -30,6 +30,8 @@ function AssistantTurnImpl({
 	actionsDisabled,
 	resultsByTurn,
 	requests,
+	locateEntryId,
+	locateToolCallId,
 	onFork,
 	onRetryTurn,
 	onNotice,
@@ -41,6 +43,8 @@ function AssistantTurnImpl({
 	actionsDisabled: boolean;
 	resultsByTurn: Map<string, Map<string, Message>>;
 	requests: PendingBitLocker[];
+	locateEntryId?: string;
+	locateToolCallId?: string;
 	onFork: (entryId: string) => void;
 	onRetryTurn?: (entryId: string, text: string, images: UserImagePart[]) => Promise<boolean>;
 	onNotice?: (message: string) => void;
@@ -80,6 +84,8 @@ function AssistantTurnImpl({
 			live={live}
 			resultsByTurn={resultsByTurn}
 			requests={requests}
+			locateEntryId={locateEntryId}
+			locateToolCallId={locateToolCallId}
 			firstProcessLabel={!live && endedAt === undefined ? "已完成" : `${live ? "工作中" : "已工作"} ${elapsed}`}
 		>
 			{last?.id && last.message.stopReason != null && last.message.stopReason !== "toolUse" && (
@@ -150,6 +156,8 @@ const AssistantTurn = memo(
 		prev.id === next.id &&
 		prev.resultsByTurn === next.resultsByTurn &&
 		prev.requests === next.requests &&
+		prev.locateEntryId === next.locateEntryId &&
+		prev.locateToolCallId === next.locateToolCallId &&
 		prev.onFork === next.onFork &&
 		prev.onRetryTurn === next.onRetryTurn &&
 		prev.onNotice === next.onNotice &&
@@ -159,6 +167,12 @@ const AssistantTurn = memo(
 		prev.turn.assistants.every((entry, index) => entry === next.turn.assistants[index]),
 );
 
+export type LocateRequest = {
+	entryId: string;
+	query: string;
+	nonce: number;
+};
+
 export function Conversation({
 	id,
 	entries,
@@ -167,6 +181,7 @@ export function Conversation({
 	running,
 	actionBusy = false,
 	summarizing,
+	locate = null,
 	refresh,
 	onCancelSummary,
 	onFork,
@@ -182,6 +197,7 @@ export function Conversation({
 	running: boolean;
 	actionBusy?: boolean;
 	summarizing: boolean;
+	locate?: LocateRequest | null;
 	refresh: () => Promise<void>;
 	onCancelSummary: () => Promise<void>;
 	onFork: (entryId: string) => void;
@@ -205,6 +221,87 @@ export function Conversation({
 	const [mountedAt] = useState(() => Date.now());
 	const resultsByTurn = useMemo(() => matchToolResults(entries), [entries]);
 	const history = useMemo(() => entries.filter(({ message }) => isConversationMessage(message)), [entries]);
+
+	// 解析搜索命中定位：若命中工具输出，先映射回对应的 assistant toolCall 所在轮次。
+	const locateResolved = useMemo(() => {
+		if (!locate?.entryId) return null;
+		let toolCallId: string | undefined;
+		let targetHistoryIndex = history.findIndex((item) => item.id === locate.entryId);
+		if (targetHistoryIndex < 0) {
+			const rawTool = entries.find((item) => item.id === locate.entryId && item.message.role === "toolResult");
+			if (rawTool?.message.toolCallId) {
+				toolCallId = rawTool.message.toolCallId;
+				targetHistoryIndex = history.findIndex(
+					(item) =>
+						item.message.role === "assistant" &&
+						Array.isArray(item.message.content) &&
+						item.message.content.some((part) => part.type === "toolCall" && part.id === toolCallId),
+				);
+			}
+		}
+		if (targetHistoryIndex < 0) return null;
+		return {
+			entryId: locate.entryId,
+			query: locate.query,
+			nonce: locate.nonce,
+			toolCallId,
+			targetHistoryIndex,
+			targetEntryId: history[targetHistoryIndex]?.id,
+		};
+	}, [entries, history, locate]);
+
+	const [activeLocate, setActiveLocate] = useState<{
+		entryId: string;
+		targetEntryId?: string;
+		toolCallId?: string;
+		query: string;
+		nonce: number;
+		fading: boolean;
+	} | null>(null);
+	const appliedLocateNonce = useRef<number | null>(null);
+
+	// 目标在截断窗外时立即扩窗并暂停跟随底部。
+	useEffect(() => {
+		if (!locateResolved) return;
+		const needed = history.length - locateResolved.targetHistoryIndex + 4;
+		if (needed > visibleCount) {
+			setVisibleCount(needed);
+		}
+		if (appliedLocateNonce.current !== locateResolved.nonce) {
+			appliedLocateNonce.current = locateResolved.nonce;
+			updateFollowing(false);
+			setActiveLocate({
+				entryId: locateResolved.entryId,
+				targetEntryId: locateResolved.targetEntryId,
+				toolCallId: locateResolved.toolCallId,
+				query: locateResolved.query,
+				nonce: locateResolved.nonce,
+				fading: false,
+			});
+		}
+	}, [history.length, locateResolved, updateFollowing, visibleCount]);
+
+	const activeLocateNonce = activeLocate?.nonce ?? null;
+	// 定位高亮保持 1.3s，随后 500ms 平滑消退并恢复常态（共 1.8s）。
+	useEffect(() => {
+		if (activeLocateNonce === null) return;
+		const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		const frame = requestAnimationFrame(() => {
+			const el = scroll.current?.querySelector<HTMLElement>('[data-located-turn="true"]');
+			el?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+		});
+		const fadeTimer = window.setTimeout(() => {
+			setActiveLocate((cur) => (cur && cur.nonce === activeLocateNonce ? { ...cur, fading: true } : cur));
+		}, 1300);
+		const clearTimer = window.setTimeout(() => {
+			setActiveLocate((cur) => (cur && cur.nonce === activeLocateNonce ? null : cur));
+		}, 1800);
+		return () => {
+			cancelAnimationFrame(frame);
+			window.clearTimeout(fadeTimer);
+			window.clearTimeout(clearTimer);
+		};
+	}, [activeLocateNonce]);
 	const sliceStart = useMemo(() => {
 		let start = Math.max(0, history.length - visibleCount);
 		while (start > 0 && history[start]?.message.role === "assistant") start--;
@@ -414,15 +511,35 @@ export function Conversation({
 				)}
 				{shownTurns.map((turn, turnIndex) => {
 					const turnKey = `turn-${turn.user?.message.clientMessageId ?? turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
-					if (turn.summary)
+					const locateMatchId = activeLocate?.targetEntryId ?? activeLocate?.entryId;
+					if (turn.summary) {
+						const isLocatedSummary = Boolean(locateMatchId && turn.summary.id === locateMatchId);
 						return (
-							<div className="turn-summary-wrap" key={turnKey} data-turn-key={turnKey}>
-								<SummaryEntry entry={turn.summary} />
+							<div
+								className="turn-summary-wrap"
+								key={turnKey}
+								data-turn-key={turnKey}
+								data-located-turn={isLocatedSummary ? "true" : undefined}
+								data-locate-fading={isLocatedSummary && activeLocate?.fading ? "true" : undefined}
+							>
+								<SummaryEntry entry={turn.summary} forceOpen={isLocatedSummary} />
 							</div>
 						);
+					}
 					const live = turnIndex === active;
+					const isLocatedUser = Boolean(locateMatchId && turn.user?.id === locateMatchId);
+					const isLocatedAssistant = Boolean(
+						locateMatchId && turn.assistants.some((entry) => entry.id === locateMatchId),
+					);
+					const isLocatedTurn = isLocatedUser || isLocatedAssistant;
 					return (
-						<div className="turn" key={turnKey} data-turn-key={turnKey}>
+						<div
+							className="turn"
+							key={turnKey}
+							data-turn-key={turnKey}
+							data-located-turn={isLocatedTurn ? "true" : undefined}
+							data-locate-fading={isLocatedTurn && activeLocate?.fading ? "true" : undefined}
+						>
 							{turn.user && (
 								<UserMessage
 									entryId={turn.user.id}
@@ -430,6 +547,8 @@ export function Conversation({
 									outgoing={outgoingById.get(turn.user.message.clientMessageId ?? "")}
 									fresh={turn.user.message.timestamp >= mountedAt - 2000}
 									running={actionsDisabled}
+									locateQuery={isLocatedUser ? activeLocate?.query : undefined}
+									locateFading={isLocatedUser && Boolean(activeLocate?.fading)}
 									onRetryTurn={onRetryTurn}
 									onNotice={onNotice}
 									onError={setError}
@@ -443,6 +562,8 @@ export function Conversation({
 									actionsDisabled={actionsDisabled}
 									resultsByTurn={resultsByTurn}
 									requests={requests}
+									locateEntryId={isLocatedAssistant ? activeLocate?.entryId : undefined}
+									locateToolCallId={isLocatedAssistant ? activeLocate?.toolCallId : undefined}
 									onFork={onFork}
 									onRetryTurn={onRetryTurn}
 									onNotice={onNotice}

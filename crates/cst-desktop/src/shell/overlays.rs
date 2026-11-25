@@ -333,6 +333,8 @@ pub fn render_workspace_error_bar(
         .child(card)
 }
 
+pub type NoticeActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// Non-blocking top notice banner (`h1BufF`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
 #[allow(clippy::too_many_arguments)]
@@ -340,12 +342,36 @@ pub fn render_top_notice_banner(
     interactive: bool,
     progress: f32,
     message: SharedString,
+    action_label: Option<SharedString>,
+    on_action: Option<NoticeActionFn>,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
     on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
+    let action_el = match (interactive, action_label, on_action) {
+        (true, Some(act_text), Some(cb)) => Some(
+            apply_scale(div(), scale::UI_MEDIUM)
+                .id("top-notice-action-btn")
+                .test_support()
+                .a11y_button("top-notice-action-btn", act_text.clone())
+                .h(height::INLINE)
+                .px(space::SM)
+                .rounded(radius::CONTROL)
+                .text_color(palette.accent_ink)
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .hover(|s| s.bg(palette.accent_subtle))
+                .on_click(move |_, w, cx| {
+                    (cb)(w, cx);
+                    cx.stop_propagation();
+                })
+                .child(cjk_inline_label(act_text)),
+        ),
+        _ => None,
+    };
     let card = render_frosted_surface(
         if interactive {
             "top-notice-banner"
@@ -364,7 +390,7 @@ pub fn render_top_notice_banner(
         progress.powi(3),
     ))
     .h(height::FIELD)
-    .max_w(px(480.0))
+    .max_w(px(520.0))
     .px(space::LG)
     .rounded(radius::ROW)
     .border_1()
@@ -389,7 +415,8 @@ pub fn render_top_notice_banner(
                     .min_w_0()
                     .truncate()
                     .child(cjk_inline_label(label)),
-            ),
+            )
+            .children(action_el),
     )
     .map(|el| {
         if interactive {

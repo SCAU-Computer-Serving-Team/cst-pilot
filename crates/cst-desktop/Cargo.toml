@@ -21,6 +21,7 @@ admin-manifest = []
 
 [dependencies]
 cst-os = { path = "../cst-os" }
+cst-search = { path = "../cst-search" }
 cst-client = { path = "../cst-client" }
 gpui-kit = "0.10.0"
 gpui = { package = "gpui-pre", version = "=0.3.12", default-features = false, features = ["windows-manifest-provided-by-host"] }

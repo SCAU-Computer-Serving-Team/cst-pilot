@@ -1,10 +1,11 @@
 import { Button, Tooltip } from "@heroui/react";
 import { Check, Copy, Pencil, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { OutgoingMessage } from "../data/message-outbox";
 import { messageOutbox } from "../data/use-message-outbox";
 import type { ContentPart, Message } from "../data/web-state";
 import { handleTextFieldVerticalArrow } from "../shell/input-shortcuts";
+import { matchQuery } from "../shell/search-matcher";
 import { useCopyFeedback } from "../shell/use-copy-feedback";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { textOf } from "./conversation-parts";
@@ -22,6 +23,8 @@ export function UserMessage({
 	fresh = false,
 	running = false,
 	format,
+	locateQuery,
+	locateFading = false,
 	onRetryTurn,
 	onNotice,
 	onError,
@@ -32,6 +35,8 @@ export function UserMessage({
 	fresh?: boolean;
 	running?: boolean;
 	format?: TranscriptFormat;
+	locateQuery?: string;
+	locateFading?: boolean;
 	onRetryTurn?: (entryId: string, text: string, images: UserImagePart[]) => Promise<boolean>;
 	onNotice?: (message: string) => void;
 	onError?: (message: string) => void;
@@ -65,6 +70,29 @@ export function UserMessage({
 		el.setSelectionRange(el.value.length, el.value.length);
 	}, [editing]);
 	const originalText = textOf(message);
+	const highlightedOriginal = useMemo(() => {
+		if (!locateQuery?.trim() || !originalText) return originalText;
+		const hit = matchQuery(originalText, locateQuery);
+		if (!hit?.spans.length) return originalText;
+		const nodes: React.ReactNode[] = [];
+		let cursor = 0;
+		for (const span of hit.spans) {
+			const start = Math.max(cursor, Math.min(span.start, originalText.length));
+			const end = Math.max(start, Math.min(span.end, originalText.length));
+			if (start > cursor) nodes.push(<Fragment key={`p-${cursor}`}>{originalText.slice(cursor, start)}</Fragment>);
+			if (end > start) {
+				nodes.push(
+					<mark key={`m-${start}`} className="locate-inline-mark" data-fading={locateFading || undefined}>
+						{originalText.slice(start, end)}
+					</mark>,
+				);
+			}
+			cursor = end;
+		}
+		if (cursor < originalText.length)
+			nodes.push(<Fragment key={`t-${cursor}`}>{originalText.slice(cursor)}</Fragment>);
+		return nodes;
+	}, [locateFading, locateQuery, originalText]);
 	const userImages: UserImagePart[] = Array.isArray(message.content)
 		? message.content.filter((part): part is UserImagePart => part.type === "image")
 		: [];
@@ -144,7 +172,7 @@ export function UserMessage({
 					</div>
 				) : (
 					<div className="user-bubble">
-						{originalText}
+						{highlightedOriginal}
 						{outgoing ? (
 							<OutgoingImages hashes={outgoing.images} />
 						) : (

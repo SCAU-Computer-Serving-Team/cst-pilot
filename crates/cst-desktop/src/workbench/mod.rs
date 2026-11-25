@@ -256,6 +256,19 @@ impl WorkbenchView {
         self.session_composer.read(cx).focus_handle(cx)
     }
 
+    /// Scrolls to `entry_id` inside `session_id` and highlights matched text briefly (`~1.8s`).
+    pub fn locate_entry(
+        &mut self,
+        session_id: String,
+        entry_id: String,
+        query: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.message_list.update(cx, |ml, cx| {
+            ml.locate_entry(session_id, entry_id, query, cx)
+        });
+    }
+
     pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.has_modal() {
             return false;

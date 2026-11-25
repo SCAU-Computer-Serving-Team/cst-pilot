@@ -51,6 +51,7 @@ flowchart TD
 | `decorators.rs` | 订阅会话事件写入 `cst-web-input-message`、`cst-web-work-duration` 与 `cst-web-tool-execution` 自定义条目，并把重启后的 `cst.bitlocker-state-verification` 复查记录挂载至未闭合 BitLocker 调用的 `execution.result`。输出快照与 SSE 时过滤内部 `system` 消息 |
 | `inbox.rs` / `attachments.rs` | 附件按原始字节魔数校验（限 PNG/JPEG/GIF/WebP，单次上限 `12 MiB`）并以 SHA-256 存入 `attachments/<id>/`。首条消息异步读取图片并调用 `prompt()` 期间置 `prompting = true`，阻塞并发 `steer` 插话以保证投递顺序 |
 | `receipts.rs` | 写操作按 `Idempotency-Key` 落盘 `started -> done` 回执并核对方法、路径与正文签名。相同键并发请求共享结果，取消或崩溃遗留 `started` 时返回 `409 conflict` |
+| `search_index.rs` | 维护跨会话标题与全树正文内存索引，按修改时间与大小增量校验并缓存至 `data/inbox/search-index.v1.json`。收录用户与助手文本、工具输出、总结以及非活动历史分支，排除思考过程、系统消息与 BitLocker 输出。查询支持拼音与受限模糊、置顶当前会话，并通过 `snapshotToken` 稳定分页 |
 
 ### 4. 零拷贝 SSE 广播与慢连接主动切断（`server.rs`、`events.rs`）
 

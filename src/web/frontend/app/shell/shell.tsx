@@ -15,33 +15,98 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, PrefetchPageLinks, useLocation } from "react-router";
+import {
+	type CSSProperties,
+	Fragment,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { Link, PrefetchPageLinks, useLocation, useNavigate } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { UserMessage } from "../conversation/user-message";
-import { apiJson, type ProviderStatus } from "../data/api";
+import { apiJson, type ProviderStatus, sessionPath } from "../data/api";
 import { attachTelemetryHints } from "../data/telemetry-hints";
 import { outgoingFor, useMessageOutbox } from "../data/use-message-outbox";
-import { useGlobalEvents } from "../data/web-state";
+import {
+	type ContentSearchMatch,
+	getCachedSessionDetails,
+	invalidateCachedSessionDetail,
+	type SearchMatchSpan,
+	searchSessionsApi,
+	useGlobalEvents,
+} from "../data/web-state";
+import { extractActiveSessionId } from "../palette/palette-model";
 import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
 import { handleTextFieldVerticalArrow } from "./input-shortcuts";
 import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
+import { matchQuery } from "./search-matcher";
 import { SessionActionsOverlay, useSessionActions } from "./session-actions";
 import { SessionEntry } from "./session-entry";
 import { filterRecentSessions, RECENT_SESSION_LIMIT } from "./session-list";
 import { SessionManagementToolbar } from "./session-management";
 import { useWorkspaceSessions } from "./sessions-context";
+import {
+	applyFirstSearchPage,
+	beginSidebarSearchQuery,
+	clearSidebarSearchState,
+	clickExpandContents,
+	clickExpandTitles,
+	createInitialSidebarSearchState,
+	finishContentPrefetch,
+	finishTitlePrefetch,
+	SEARCH_PAGE_SIZE,
+	type SidebarSearchState,
+	searchLocalPreloadedSessions,
+} from "./sidebar-search";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
 function avatarInitialFor(label: string): string {
 	const trimmed = label.trim();
 	if (!trimmed) return "";
 	return Array.from(trimmed)[0]?.toUpperCase() ?? "";
+}
+
+function HighlightedText({ text, spans }: { text: string; spans: readonly SearchMatchSpan[] }) {
+	if (!spans.length) return <>{text}</>;
+	const nodes: React.ReactNode[] = [];
+	let cursor = 0;
+	for (const span of spans) {
+		const start = Math.max(cursor, Math.min(span.start, text.length));
+		const end = Math.max(start, Math.min(span.end, text.length));
+		if (start > cursor) nodes.push(<Fragment key={`p-${cursor}`}>{text.slice(cursor, start)}</Fragment>);
+		if (end > start) {
+			nodes.push(
+				<mark key={`m-${start}`} className="sidebar-search-mark">
+					{text.slice(start, end)}
+				</mark>,
+			);
+		}
+		cursor = end;
+	}
+	if (cursor < text.length) nodes.push(<Fragment key={`t-${cursor}`}>{text.slice(cursor)}</Fragment>);
+	return <>{nodes}</>;
+}
+
+function formatSearchShortDate(updatedAt: string | null | undefined): string | null {
+	if (!updatedAt) return null;
+	const dt = new Date(updatedAt);
+	if (Number.isNaN(dt.getTime())) return null;
+	const now = new Date();
+	const sameDay =
+		dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth() && dt.getDate() === now.getDate();
+	if (sameDay) {
+		return `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+	}
+	return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}`;
 }
 
 export function Sidebar({
@@ -65,12 +130,20 @@ export function Sidebar({
 		if (!preview) return attachTelemetryHints(window);
 	}, [preview]);
 	const location = useLocation();
+	const navigate = useNavigate();
 	const state = useWorkspaceSessions();
 	const ready = preview || !!state.stage || !!state.error;
 	const startupPendingList = startup && !ready;
 	const [recentOpen, setRecentOpen] = useState(true);
 	const [searchQuery, setSearchQuery] = useState("");
 	const searchInputRef = useRef<HTMLInputElement>(null);
+	const [searchState, setSearchState] = useState<SidebarSearchState>(createInitialSidebarSearchState);
+	const searchStateRef = useRef(searchState);
+	searchStateRef.current = searchState;
+	const searchDebounceRef = useRef<number | undefined>(undefined);
+	const searchAbortRef = useRef<AbortController | null>(null);
+	const prefetchTitleAbortRef = useRef<AbortController | null>(null);
+	const prefetchContentAbortRef = useRef<AbortController | null>(null);
 	const startupPending = useRef(startup);
 	const [startupRows, setStartupRows] = useState(false);
 	useLayoutEffect(() => {
@@ -86,11 +159,261 @@ export function Sidebar({
 		return () => window.clearTimeout(timer);
 	}, [startup, ready]);
 	const sourceSessions = preview ? sampleSessions : state.sessions;
-	const sessions = useMemo(
-		() => filterRecentSessions(sourceSessions, searchQuery, RECENT_SESSION_LIMIT),
-		[sourceSessions, searchQuery],
-	);
+	const activeSessionId = useMemo(() => extractActiveSessionId(location.pathname), [location.pathname]);
+	const sessions = useMemo(() => filterRecentSessions(sourceSessions, "", RECENT_SESSION_LIMIT), [sourceSessions]);
 	const hasSearchQuery = searchQuery.trim().length > 0;
+
+	const cancelSearchRequests = useCallback(() => {
+		window.clearTimeout(searchDebounceRef.current);
+		searchDebounceRef.current = undefined;
+		searchAbortRef.current?.abort();
+		searchAbortRef.current = null;
+		prefetchTitleAbortRef.current?.abort();
+		prefetchTitleAbortRef.current = null;
+		prefetchContentAbortRef.current?.abort();
+		prefetchContentAbortRef.current = null;
+	}, []);
+
+	useEffect(() => () => cancelSearchRequests(), [cancelSearchRequests]);
+
+	const triggerTitlePrefetch = useCallback(
+		(seq: number, query: string, offset: number, snapshotToken: string) => {
+			if (preview || !query.trim()) return;
+			prefetchTitleAbortRef.current?.abort();
+			const controller = new AbortController();
+			prefetchTitleAbortRef.current = controller;
+			void searchSessionsApi(
+				{
+					query,
+					activeSessionId,
+					titleOffset: offset,
+					titleLimit: SEARCH_PAGE_SIZE,
+					contentOffset: 0,
+					contentLimit: 1,
+					snapshotToken: snapshotToken || undefined,
+				},
+				controller.signal,
+			)
+				.then((resp) => {
+					if (controller.signal.aborted) return;
+					const finished = finishTitlePrefetch(searchStateRef.current, seq, resp.titleMatches, resp.titleHasMore);
+					searchStateRef.current = finished.state;
+					setSearchState(finished.state);
+					if (finished.nextPrefetchOffset !== undefined) {
+						triggerTitlePrefetch(seq, query, finished.nextPrefetchOffset, finished.state.snapshotToken);
+					}
+				})
+				.catch(() => {
+					if (controller.signal.aborted) return;
+					setSearchState((cur) =>
+						cur.requestSeq === seq
+							? { ...cur, prefetchTitleInFlight: false, autoExpandTitlePending: false }
+							: cur,
+					);
+				});
+		},
+		[activeSessionId, preview],
+	);
+
+	const triggerContentPrefetch = useCallback(
+		(seq: number, query: string, offset: number, snapshotToken: string) => {
+			if (preview || !query.trim()) return;
+			prefetchContentAbortRef.current?.abort();
+			const controller = new AbortController();
+			prefetchContentAbortRef.current = controller;
+			void searchSessionsApi(
+				{
+					query,
+					activeSessionId,
+					titleOffset: 0,
+					titleLimit: 1,
+					contentOffset: offset,
+					contentLimit: SEARCH_PAGE_SIZE,
+					snapshotToken: snapshotToken || undefined,
+				},
+				controller.signal,
+			)
+				.then((resp) => {
+					if (controller.signal.aborted) return;
+					const finished = finishContentPrefetch(
+						searchStateRef.current,
+						seq,
+						resp.contentMatches,
+						resp.contentHasMore,
+					);
+					searchStateRef.current = finished.state;
+					setSearchState(finished.state);
+					if (finished.nextPrefetchOffset !== undefined) {
+						triggerContentPrefetch(seq, query, finished.nextPrefetchOffset, finished.state.snapshotToken);
+					}
+				})
+				.catch(() => {
+					if (controller.signal.aborted) return;
+					setSearchState((cur) =>
+						cur.requestSeq === seq
+							? { ...cur, prefetchContentInFlight: false, autoExpandContentPending: false }
+							: cur,
+					);
+				});
+		},
+		[activeSessionId, preview],
+	);
+
+	const runSidebarSearch = useCallback(
+		(rawQuery: string) => {
+			cancelSearchRequests();
+			const trimmed = rawQuery.trim();
+			if (!trimmed) {
+				const cleared = clearSidebarSearchState(searchStateRef.current);
+				searchStateRef.current = cleared;
+				setSearchState(cleared);
+				return;
+			}
+			const localPreview = searchLocalPreloadedSessions(
+				trimmed,
+				activeSessionId,
+				sourceSessions,
+				getCachedSessionDetails(),
+			);
+			const next = beginSidebarSearchQuery(searchStateRef.current, trimmed, localPreview);
+			const finalLocal = preview ? { ...next, loadingFirstPage: false, backendSynced: true } : next;
+			searchStateRef.current = finalLocal;
+			setSearchState(finalLocal);
+			if (preview) return;
+
+			const seq = finalLocal.requestSeq;
+			searchDebounceRef.current = window.setTimeout(() => {
+				const controller = new AbortController();
+				searchAbortRef.current = controller;
+				void searchSessionsApi(
+					{
+						query: trimmed,
+						activeSessionId,
+						titleOffset: 0,
+						titleLimit: SEARCH_PAGE_SIZE,
+						contentOffset: 0,
+						contentLimit: SEARCH_PAGE_SIZE,
+					},
+					controller.signal,
+				)
+					.then((resp) => {
+						if (controller.signal.aborted) return;
+						const applied = applyFirstSearchPage(searchStateRef.current, seq, resp);
+						searchStateRef.current = applied.state;
+						setSearchState(applied.state);
+						if (applied.prefetchTitleOffset !== undefined) {
+							triggerTitlePrefetch(seq, trimmed, applied.prefetchTitleOffset, applied.state.snapshotToken);
+						}
+						if (applied.prefetchContentOffset !== undefined) {
+							triggerContentPrefetch(seq, trimmed, applied.prefetchContentOffset, applied.state.snapshotToken);
+						}
+					})
+					.catch(() => {
+						if (controller.signal.aborted) return;
+						setSearchState((cur) => (cur.requestSeq === seq ? { ...cur, loadingFirstPage: false } : cur));
+					});
+			}, 100);
+		},
+		[activeSessionId, cancelSearchRequests, preview, sourceSessions, triggerContentPrefetch, triggerTitlePrefetch],
+	);
+
+	// 会话列表更新时，若处于搜索态则刷新结果。
+	useEffect(() => {
+		if (!searchQuery.trim()) return;
+		runSidebarSearch(searchQuery);
+	}, [runSidebarSearch, searchQuery]);
+
+	const clearSearch = useCallback(
+		(focusInput = true) => {
+			setSearchQuery("");
+			runSidebarSearch("");
+			if (focusInput) searchInputRef.current?.focus();
+		},
+		[runSidebarSearch],
+	);
+
+	const handleExpandTitles = useCallback(() => {
+		const res = clickExpandTitles(searchStateRef.current);
+		searchStateRef.current = res.state;
+		setSearchState(res.state);
+		if (res.action.kind === "appended" && res.action.nextPrefetchOffset !== undefined) {
+			triggerTitlePrefetch(
+				res.state.requestSeq,
+				res.state.query,
+				res.action.nextPrefetchOffset,
+				res.state.snapshotToken,
+			);
+		} else if (res.action.kind === "fetch_now") {
+			triggerTitlePrefetch(res.state.requestSeq, res.state.query, res.action.offset, res.state.snapshotToken);
+		}
+	}, [triggerTitlePrefetch]);
+
+	const handleExpandContents = useCallback(() => {
+		const res = clickExpandContents(searchStateRef.current);
+		searchStateRef.current = res.state;
+		setSearchState(res.state);
+		if (res.action.kind === "appended" && res.action.nextPrefetchOffset !== undefined) {
+			triggerContentPrefetch(
+				res.state.requestSeq,
+				res.state.query,
+				res.action.nextPrefetchOffset,
+				res.state.snapshotToken,
+			);
+		} else if (res.action.kind === "fetch_now") {
+			triggerContentPrefetch(res.state.requestSeq, res.state.query, res.action.offset, res.state.snapshotToken);
+		}
+	}, [triggerContentPrefetch]);
+
+	const handleSelectContentHit = useCallback(
+		async (item: ContentSearchMatch) => {
+			const sid = item.sessionId;
+			const entryId = item.bestHit.entryId;
+			const query = searchStateRef.current.query;
+			const suffix = preview ? "?preview=1" : "";
+			if (item.bestHit.onActiveBranch || preview) {
+				navigate(`/s/${encodeURIComponent(sid)}${suffix}`, {
+					state: { locateEntryId: entryId, locateQuery: query, locateNonce: Date.now() },
+				});
+				onNavigate?.();
+				return;
+			}
+			const isRunning = sourceSessions.some((s) => s.id === sid && s.running);
+			if (isRunning) {
+				navigate(`/s/${encodeURIComponent(sid)}/tree?focus=${encodeURIComponent(entryId)}`);
+				onNavigate?.();
+				return;
+			}
+			try {
+				let previousLeafId: string | null = null;
+				try {
+					const treeRes = await apiJson<{ leafId: string | null }>(sessionPath(sid, "/tree"));
+					previousLeafId = treeRes.leafId;
+				} catch {
+					const cached = getCachedSessionDetails().get(sid);
+					previousLeafId = cached?.entries.at(-1)?.id ?? null;
+				}
+				const targetLeaf = item.bestHit.branchLeafId ?? entryId;
+				await apiJson(sessionPath(sid, "/tree/navigate"), {
+					method: "POST",
+					body: { entryId: targetLeaf, summarize: false },
+				});
+				invalidateCachedSessionDetail(sid);
+				navigate(`/s/${encodeURIComponent(sid)}`, {
+					state: {
+						locateEntryId: entryId,
+						locateQuery: query,
+						locateNonce: Date.now(),
+						historyBranch: previousLeafId ? { previousLeafId } : undefined,
+					},
+				});
+				onNavigate?.();
+			} catch {
+				navigate(`/s/${encodeURIComponent(sid)}/tree?focus=${encodeURIComponent(entryId)}`);
+				onNavigate?.();
+			}
+		},
+		[navigate, onNavigate, preview, sourceSessions],
+	);
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const team = accountProvider(providers);
 	const teamSignedIn = team?.type === "oauth" || team?.type === "api_key";
@@ -268,7 +591,7 @@ export function Sidebar({
 				{/* 2. 主体导航与最近列表容器（pQpX5，gap 16px） */}
 				<div className="sidebar-body">
 					{/* 2a. 搜索记录框（oq4G4，高 36px） */}
-					<div className="sidebar-search-box">
+					<div className="sidebar-search-box" data-active={hasSearchQuery || undefined}>
 						<Search size={18} className="sidebar-search-icon" aria-hidden="true" />
 						<input
 							ref={searchInputRef}
@@ -280,14 +603,14 @@ export function Sidebar({
 							onChange={(event) => {
 								const next = event.target.value;
 								setSearchQuery(next);
-								if (next.trim() && !recentOpen) setRecentOpen(true);
+								if (!next.trim()) runSidebarSearch("");
 							}}
 							onKeyDown={(event) => {
 								if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 								if (event.key === "Escape" && searchQuery) {
 									event.preventDefault();
 									event.stopPropagation();
-									setSearchQuery("");
+									clearSearch(true);
 									return;
 								}
 								handleTextFieldVerticalArrow(event);
@@ -298,110 +621,235 @@ export function Sidebar({
 								type="button"
 								className="sidebar-search-clear"
 								aria-label="清空搜索"
-								onClick={() => {
-									setSearchQuery("");
-									searchInputRef.current?.focus();
-								}}
+								onClick={() => clearSearch(true)}
 							>
 								<X size={13} aria-hidden="true" />
 							</button>
 						)}
 					</div>
 
-					{/* 2b. 主功能导航（WKJAy，gap 6px） */}
-					<nav className="sidebar-primary-nav" aria-label="主导航">
-						<button
-							type="button"
-							className="sidebar-nav-item sidebar-dashboard"
-							disabled
-							title="仪表盘功能计划中"
-						>
-							<LayoutDashboard size={18} aria-hidden="true" />
-							<span>仪表盘</span>
-						</button>
-						<Link
-							className={`sidebar-nav-item sidebar-all ${!management.managing && location.pathname === "/sessions" ? "selected" : ""}`}
-							to={preview ? "/sessions?preview=1" : "/sessions"}
-							aria-current={location.pathname === "/sessions" ? "page" : undefined}
-							viewTransition
-							onClick={onNavigate}
-						>
-							<History size={18} aria-hidden="true" />
-							<span>全部会话</span>
-						</Link>
-					</nav>
+					{hasSearchQuery ? (
+						<section className="sidebar-search-panel" aria-label="搜索结果">
+							{searchState.titleMatches.length === 0 && searchState.contentMatches.length === 0 ? (
+								searchState.loadingFirstPage ? (
+									<div className="sidebar-search-empty">
+										<p className="sidebar-search-empty-sub">正在搜索…</p>
+									</div>
+								) : (
+									<div className="sidebar-search-empty">
+										<div className="sidebar-search-empty-badge" aria-hidden="true">
+											<Search size={16} className="sidebar-search-empty-icon" />
+										</div>
+										<div className="sidebar-search-empty-copy">
+											<p className="sidebar-search-empty-title">无匹配结果</p>
+											<p className="sidebar-search-empty-sub">清空后恢复导航与列表</p>
+										</div>
+										<button
+											type="button"
+											className="tier-1-btn-outline sidebar-search-empty-btn"
+											onClick={() => clearSearch(true)}
+										>
+											<X size={14} aria-hidden="true" />
+											<span>清空搜索</span>
+										</button>
+									</div>
+								)
+							) : (
+								<div className="sidebar-search-results">
+									{searchState.titleMatches.length > 0 && (
+										<section className="sidebar-search-group" aria-label="标题匹配结果">
+											<div className="sidebar-search-group-head">
+												<span>标题</span>
+												<span className="sidebar-search-group-count">{searchState.titleTotal}</span>
+											</div>
+											<div className="sidebar-search-group-list">
+												{searchState.titleMatches.map((item) => {
+													const active = activeSessionId === item.sessionId;
+													const titleSpans = matchQuery(item.title, searchState.query)?.spans ?? [];
+													const shortDate = formatSearchShortDate(item.updatedAt);
+													return (
+														<button
+															key={item.sessionId}
+															type="button"
+															className="sidebar-search-title-row"
+															data-active={active || undefined}
+															onClick={() => {
+																navigate(
+																	`/s/${encodeURIComponent(item.sessionId)}${preview ? "?preview=1" : ""}`,
+																);
+																onNavigate?.();
+															}}
+														>
+															<span className="sidebar-search-title-text">
+																<HighlightedText text={item.title} spans={titleSpans} />
+															</span>
+															{shortDate && (
+																<span className="sidebar-search-title-date">{shortDate}</span>
+															)}
+														</button>
+													);
+												})}
+											</div>
+											{searchState.titleHasMore && (
+												<button
+													type="button"
+													className="sidebar-search-expand"
+													onClick={handleExpandTitles}
+												>
+													<span>展开</span>
+													<ChevronDown size={14} aria-hidden="true" />
+												</button>
+											)}
+										</section>
+									)}
+									{searchState.titleMatches.length > 0 && searchState.contentMatches.length > 0 && (
+										<hr className="sidebar-search-divider" />
+									)}
+									{searchState.contentMatches.length > 0 && (
+										<section className="sidebar-search-group" aria-label="正文匹配结果">
+											<div className="sidebar-search-group-head">
+												<span>正文</span>
+												<span className="sidebar-search-group-count">{searchState.contentTotal}</span>
+											</div>
+											<div className="sidebar-search-group-list">
+												{searchState.contentMatches.map((item) => {
+													const active = activeSessionId === item.sessionId;
+													return (
+														<button
+															key={item.sessionId}
+															type="button"
+															className="sidebar-search-content-row"
+															data-active={active || undefined}
+															onClick={() => void handleSelectContentHit(item)}
+														>
+															<span className="sidebar-search-content-top">
+																<span className="sidebar-search-content-title">{item.title}</span>
+																<span className="sidebar-search-content-count">{item.hitCount} 处</span>
+															</span>
+															<span className="sidebar-search-content-snippet">
+																<HighlightedText
+																	text={item.bestHit.snippet}
+																	spans={item.bestHit.spans}
+																/>
+															</span>
+														</button>
+													);
+												})}
+											</div>
+											{searchState.contentHasMore && (
+												<button
+													type="button"
+													className="sidebar-search-expand"
+													onClick={handleExpandContents}
+												>
+													<span>展开</span>
+													<ChevronDown size={14} aria-hidden="true" />
+												</button>
+											)}
+										</section>
+									)}
+								</div>
+							)}
+						</section>
+					) : (
+						<>
+							{/* 2b. 主功能导航（WKJAy，gap 6px） */}
+							<nav className="sidebar-primary-nav" aria-label="主导航">
+								<button
+									type="button"
+									className="sidebar-nav-item sidebar-dashboard"
+									disabled
+									title="仪表盘功能计划中"
+								>
+									<LayoutDashboard size={18} aria-hidden="true" />
+									<span>仪表盘</span>
+								</button>
+								<Link
+									className={`sidebar-nav-item sidebar-all ${!management.managing && location.pathname === "/sessions" ? "selected" : ""}`}
+									to={preview ? "/sessions?preview=1" : "/sessions"}
+									aria-current={location.pathname === "/sessions" ? "page" : undefined}
+									viewTransition
+									onClick={onNavigate}
+								>
+									<History size={18} aria-hidden="true" />
+									<span>全部会话</span>
+								</Link>
+							</nav>
 
-					{/* 2c. 最近会话组（CzUNm / STl1A） */}
-					<div className="sidebar-recent">
-						<div className="sidebar-recent-bar">
-							<button
-								type="button"
-								className="sidebar-recent-heading"
-								aria-expanded={recentOpen}
-								style={{ "--startup-row": 0 } as CSSProperties}
-								onClick={() => {
-									setMenu(null);
-									if (recentOpen) finishManagement();
-									setRecentOpen((open) => !open);
-								}}
-							>
-								<span>最近</span>
-								<ChevronDown
-									size={14}
-									className="disc-chevron"
-									data-expanded={recentOpen ? "true" : "false"}
-									aria-hidden="true"
-								/>
-							</button>
-							<SessionManagementToolbar
-								active={management.managing}
-								allSelected={management.allSelected}
-								hasItems={sessions.length > 0}
-								selectedCount={management.count}
-								busy={management.busy}
-								onToggleAll={management.toggleAll}
-								onDelete={management.count > 0 ? () => management.requestDelete() : undefined}
-								onFinish={() => {
-									setMenu(null);
-									management.finish();
-									topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
-								}}
-							/>
-						</div>
-						{recentOpen && (
-							<div className="sidebar-recent-list">
-								{sessions.map((session, index) => (
-									<SessionEntry
-										key={session.id}
-										session={session}
-										index={index}
-										active={
-											location.pathname === `/s/${session.id}` ||
-											location.pathname.startsWith(`/s/${session.id}/`)
-										}
-										managing={management.managing}
-										selected={management.selection?.has(session.id) ?? false}
-										disabled={management.busy}
-										preview={preview}
-										showMoreButton
-										menuOpen={actions.menu?.id === session.id}
-										viewTransition={
-											location.pathname.startsWith("/settings") || location.pathname.endsWith("/export")
-										}
-										onToggle={() => {
+							{/* 2c. 最近会话组（CzUNm / STl1A） */}
+							<div className="sidebar-recent">
+								<div className="sidebar-recent-bar">
+									<button
+										type="button"
+										className="sidebar-recent-heading"
+										aria-expanded={recentOpen}
+										style={{ "--startup-row": 0 } as CSSProperties}
+										onClick={() => {
 											setMenu(null);
-											management.toggle(session.id);
+											if (recentOpen) finishManagement();
+											setRecentOpen((open) => !open);
 										}}
-										onNavigate={() => onNavigate?.()}
-										onOpenMenu={(x, y, toggle) => openSessionMenu(session, x, y, toggle)}
+									>
+										<span>最近</span>
+										<ChevronDown
+											size={14}
+											className="disc-chevron"
+											data-expanded={recentOpen ? "true" : "false"}
+											aria-hidden="true"
+										/>
+									</button>
+									<SessionManagementToolbar
+										active={management.managing}
+										allSelected={management.allSelected}
+										hasItems={sessions.length > 0}
+										selectedCount={management.count}
+										busy={management.busy}
+										onToggleAll={management.toggleAll}
+										onDelete={management.count > 0 ? () => management.requestDelete() : undefined}
+										onFinish={() => {
+											setMenu(null);
+											management.finish();
+											topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
+										}}
 									/>
-								))}
-								{!sessions.length && (state.stage || preview) && (
-									<p className="sidebar-empty">{hasSearchQuery ? "无匹配会话" : "暂无会话"}</p>
+								</div>
+								{recentOpen && (
+									<div className="sidebar-recent-list">
+										{sessions.map((session, index) => (
+											<SessionEntry
+												key={session.id}
+												session={session}
+												index={index}
+												active={
+													location.pathname === `/s/${session.id}` ||
+													location.pathname.startsWith(`/s/${session.id}/`)
+												}
+												managing={management.managing}
+												selected={management.selection?.has(session.id) ?? false}
+												disabled={management.busy}
+												preview={preview}
+												showMoreButton
+												menuOpen={actions.menu?.id === session.id}
+												viewTransition={
+													location.pathname.startsWith("/settings") ||
+													location.pathname.endsWith("/export")
+												}
+												onToggle={() => {
+													setMenu(null);
+													management.toggle(session.id);
+												}}
+												onNavigate={() => onNavigate?.()}
+												onOpenMenu={(x, y, toggle) => openSessionMenu(session, x, y, toggle)}
+											/>
+										))}
+										{!sessions.length && (state.stage || preview) && (
+											<p className="sidebar-empty">暂无会话</p>
+										)}
+									</div>
 								)}
 							</div>
-						)}
-					</div>
+						</>
+					)}
 					{state.error && (
 						<p className="sidebar-error" role="alert">
 							{state.error}

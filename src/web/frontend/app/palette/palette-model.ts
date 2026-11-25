@@ -1,3 +1,5 @@
+import { matchQuery } from "../shell/search-matcher.ts";
+
 export type PaletteSessionItem = {
 	id: string;
 	title: string;
@@ -57,6 +59,7 @@ export type PaletteEntry = {
 	trailingMeta?: string;
 	icon: PaletteIcon;
 	disabled: boolean;
+	isCurrent?: boolean;
 	target: PaletteTarget;
 	haystack: string;
 };
@@ -249,8 +252,9 @@ export function buildQuickOpenEntries(
 			trailingMeta: formatPaletteTime(session.updatedAt, now),
 			icon: "message-square",
 			disabled: false,
+			isCurrent,
 			target: { kind: "open_session", sessionId: session.id },
-			haystack: `${title} ${session.id} 会话 session`.toLowerCase(),
+			haystack: title,
 		};
 	});
 
@@ -269,7 +273,7 @@ export function buildQuickOpenEntries(
 			icon: isPng ? "image" : "file-code",
 			disabled: false,
 			target: { kind: "open_export", exportId: exp.id },
-			haystack: `${title} ${fileNames} ${isPng ? "png 图片" : "html 网页"} 导出 export`.toLowerCase(),
+			haystack: `${title} ${fileNames} ${isPng ? "png 图片" : "html 网页"}`,
 		};
 	});
 
@@ -277,9 +281,47 @@ export function buildQuickOpenEntries(
 }
 
 export function filterPaletteEntries(entries: readonly PaletteEntry[], query: string): PaletteEntry[] {
-	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	if (!tokens.length) return [...entries];
-	return entries.filter((entry) => tokens.every((token) => entry.haystack.includes(token)));
+	const trimmed = query.trim();
+	if (!trimmed) return [...entries];
+	const qLower = trimmed.toLowerCase();
+
+	const hasQuickOpen = entries.some(
+		(entry) => entry.target.kind === "open_session" || entry.target.kind === "open_export",
+	);
+	if (hasQuickOpen) {
+		const sessionHits: { isCurrent: boolean; score: number; index: number; entry: PaletteEntry }[] = [];
+		const exportHits: { score: number; index: number; entry: PaletteEntry }[] = [];
+		for (let index = 0; index < entries.length; index++) {
+			const entry = entries[index]!;
+			if (entry.target.kind === "open_session") {
+				const titleHit = matchQuery(entry.title, trimmed);
+				const score =
+					titleHit?.score ??
+					(qLower.length >= 4 && entry.target.sessionId.toLowerCase().includes(qLower) ? 500 : null);
+				if (score === null) continue;
+				sessionHits.push({ isCurrent: Boolean(entry.isCurrent), score, index, entry });
+			} else {
+				const titleHit = matchQuery(entry.title, trimmed);
+				const hayHit = titleHit ? null : matchQuery(entry.haystack, trimmed);
+				const score = titleHit ? titleHit.score : hayHit ? Math.max(0, hayHit.score - 50) : null;
+				if (score === null) continue;
+				exportHits.push({ score, index, entry });
+			}
+		}
+		sessionHits.sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || b.score - a.score || a.index - b.index);
+		exportHits.sort((a, b) => b.score - a.score || a.index - b.index);
+		return [...sessionHits.map((x) => x.entry), ...exportHits.map((x) => x.entry)];
+	}
+
+	const scored: { score: number; index: number; entry: PaletteEntry }[] = [];
+	for (let index = 0; index < entries.length; index++) {
+		const entry = entries[index]!;
+		const hit = matchQuery(entry.haystack, trimmed);
+		if (!hit) continue;
+		scored.push({ score: hit.score, index, entry });
+	}
+	scored.sort((a, b) => b.score - a.score || a.index - b.index);
+	return scored.map((x) => x.entry);
 }
 
 export function findFirstEnabledIndex(entries: readonly PaletteEntry[]): number {

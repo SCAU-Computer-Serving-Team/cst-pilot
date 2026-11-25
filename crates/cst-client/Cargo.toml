@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 cst-os = { path = "../cst-os" }
+cst-search = { path = "../cst-search" }
 base64.workspace = true
 bytes.workspace = true
 futures-core.workspace = true

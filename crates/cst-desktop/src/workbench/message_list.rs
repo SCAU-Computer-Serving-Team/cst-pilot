@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use chrono::{DateTime, Local};
@@ -11,8 +11,8 @@ use cst_client::{
     SessionViewSnapshot,
 };
 use gpui::{
-    EntityInputHandler as _, Image, ImageSource, KeyDownEvent, ObjectFit, ScrollEvent,
-    ScrollHandle, StyledImage as _,
+    EntityInputHandler as _, FontWeight, HighlightStyle, Image, ImageSource, KeyDownEvent,
+    ObjectFit, ScrollEvent, ScrollHandle, StyledImage as _, StyledText,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
@@ -22,7 +22,7 @@ use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, Focusable as _,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, TestSupportExt, Window, div, img, px,
+    StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt, Window, div, img, px,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -54,6 +54,168 @@ use crate::workbench::turn_segments::{
 };
 
 pub const DEFAULT_VISIBLE_TURN_WINDOW: usize = 30;
+const LOCATE_HOLD_MS: f32 = 1300.0;
+const LOCATE_FADE_MS: f32 = 500.0;
+const LOCATE_TOTAL_MS: u64 = 1800;
+
+#[derive(Debug, Clone)]
+struct LocateHighlightState {
+    session_id: String,
+    entry_id: String,
+    query: String,
+    started_at: Option<Instant>,
+    scroll_applied: bool,
+}
+
+#[derive(Debug, Clone)]
+struct LocateTarget {
+    turn_idx: usize,
+    segment_anchor: Option<(usize, usize)>,
+    tool_call_id: Option<String>,
+    is_compaction: bool,
+}
+
+fn find_locate_target(
+    session: &SessionViewSnapshot,
+    turns: &[Arc<PreparedTurn>],
+    target_entry_id: &str,
+) -> Option<LocateTarget> {
+    let source_entries = if !session.entries.is_empty() {
+        &session.entries
+    } else {
+        &session.messages
+    };
+    let tool_call_id: Option<String> = source_entries.iter().find_map(|raw| {
+        let eid = raw.get("id").and_then(Value::as_str)?;
+        if eid != target_entry_id {
+            return None;
+        }
+        let msg = raw.get("message").unwrap_or(raw);
+        if msg.get("role").and_then(Value::as_str) == Some("toolResult") {
+            msg.get("toolCallId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        } else {
+            None
+        }
+    });
+
+    for (idx, pt) in turns.iter().enumerate() {
+        if pt.turn.user.as_ref().and_then(|u| u.id.as_deref()) == Some(target_entry_id) {
+            return Some(LocateTarget {
+                turn_idx: idx,
+                segment_anchor: None,
+                tool_call_id: None,
+                is_compaction: false,
+            });
+        }
+        if pt.turn.compaction.as_ref().and_then(|c| c.id.as_deref()) == Some(target_entry_id) {
+            return Some(LocateTarget {
+                turn_idx: idx,
+                segment_anchor: None,
+                tool_call_id: None,
+                is_compaction: true,
+            });
+        }
+        if pt.turn.summary.as_ref().and_then(|s| s.id.as_deref()) == Some(target_entry_id) {
+            return Some(LocateTarget {
+                turn_idx: idx,
+                segment_anchor: None,
+                tool_call_id: None,
+                is_compaction: false,
+            });
+        }
+        if let Some(ref tcid) = tool_call_id {
+            for seg in &pt.segments {
+                let matched = seg.parts.iter().any(|tp| match &tp.part {
+                    ConversationPart::Tools(calls) => calls.iter().any(|c| c.id == *tcid),
+                    ConversationPart::Special { call, .. } => call.id == *tcid,
+                    _ => false,
+                });
+                if matched {
+                    return Some(LocateTarget {
+                        turn_idx: idx,
+                        segment_anchor: seg.expansion_anchor(),
+                        tool_call_id: Some(tcid.clone()),
+                        is_compaction: false,
+                    });
+                }
+            }
+        }
+        if pt
+            .turn
+            .assistants
+            .iter()
+            .any(|a| a.id.as_deref() == Some(target_entry_id))
+        {
+            let is_final_text_entry = pt.split.as_ref().is_some_and(|s| {
+                s.final_entry_id.as_deref() == Some(target_entry_id)
+                    && !s.final_text.trim().is_empty()
+            });
+            let segment_anchor = if !is_final_text_entry {
+                pt.segments.iter().find_map(|seg| {
+                    let has_entry = seg.parts.iter().any(|tp| tp.entry_key == target_entry_id);
+                    has_entry.then(|| seg.expansion_anchor()).flatten()
+                })
+            } else {
+                None
+            };
+            return Some(LocateTarget {
+                turn_idx: idx,
+                segment_anchor,
+                tool_call_id: None,
+                is_compaction: false,
+            });
+        }
+    }
+    None
+}
+
+fn render_located_text(
+    text: &str,
+    query: &str,
+    alpha: f32,
+    base_color: gpui::Hsla,
+    palette: &DesktopPalette,
+) -> gpui::AnyElement {
+    if alpha <= 0.01 || query.trim().is_empty() {
+        return SharedString::from(text.to_owned()).into_any_element();
+    }
+    let Some(matched) = cst_search::match_query(text, query) else {
+        return SharedString::from(text.to_owned()).into_any_element();
+    };
+    let mut tint = palette.accent_subtle;
+    tint.a *= alpha;
+    let ink = motion::lerp_hsla(base_color, palette.accent_ink, alpha);
+    let highlights: Vec<_> = matched
+        .spans
+        .into_iter()
+        .filter(|s| {
+            s.start < s.end
+                && s.end <= text.len()
+                && text.is_char_boundary(s.start)
+                && text.is_char_boundary(s.end)
+        })
+        .map(|s| {
+            (
+                s.start..s.end,
+                HighlightStyle {
+                    color: Some(ink),
+                    background_color: Some(tint),
+                    font_weight: Some(FontWeight::MEDIUM),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    if highlights.is_empty() {
+        SharedString::from(text.to_owned()).into_any_element()
+    } else {
+        StyledText::new(SharedString::from(text.to_owned()))
+            .with_highlights(highlights)
+            .into_any_element()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum MessageListEvent {
@@ -366,6 +528,8 @@ pub struct MessageListView {
     suppress_immediate_reveal: bool,
     content_reveal: motion::SurfaceReveal,
     inline_edit: Option<InlineBubbleEdit>,
+    locate_highlight: Option<LocateHighlightState>,
+    locate_clear_task: Option<Task<()>>,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -402,7 +566,33 @@ impl MessageListView {
             suppress_immediate_reveal: false,
             content_reveal: motion::SurfaceReveal::default(),
             inline_edit: None,
+            locate_highlight: None,
+            locate_clear_task: None,
         }
+    }
+
+    /// Scrolls to `entry_id` inside `session_id` and highlights it briefly (`1.3s` hold + `500ms` fade).
+    pub fn locate_entry(
+        &mut self,
+        session_id: String,
+        entry_id: String,
+        query: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.auto_follow_bottom = false;
+        self.locate_clear_task = None;
+        self.locate_highlight = Some(LocateHighlightState {
+            session_id,
+            entry_id,
+            query,
+            started_at: None,
+            scroll_applied: false,
+        });
+        cx.notify();
+    }
+
+    pub fn active_locate_entry_id(&self) -> Option<&str> {
+        self.locate_highlight.as_ref().map(|h| h.entry_id.as_str())
     }
 
     pub fn dismiss_inline_edit(&mut self, cx: &mut Context<Self>) -> bool {
@@ -446,7 +636,15 @@ impl MessageListView {
         self.suppress_immediate_reveal = !was_in_session;
         self.content_reveal.clear();
         self.last_observed_revision = 0;
-        self.auto_follow_bottom = true;
+        let keep_locate = self
+            .locate_highlight
+            .as_ref()
+            .is_some_and(|h| self.session_id.as_deref() == Some(h.session_id.as_str()));
+        if !keep_locate {
+            self.locate_highlight = None;
+            self.locate_clear_task = None;
+        }
+        self.auto_follow_bottom = !keep_locate;
         self.visible_turn_limit = DEFAULT_VISIBLE_TURN_WINDOW;
         self.segment_expansion_overrides.clear();
         self.expanded_thinking.clear();
@@ -465,7 +663,9 @@ impl MessageListView {
         self.attachment_cache.clear();
         self.attachment_loading.clear();
         self.attachment_generation = self.attachment_generation.wrapping_add(1);
-        self.scroll_handle.scroll_to_bottom();
+        if !keep_locate {
+            self.scroll_handle.scroll_to_bottom();
+        }
         cx.notify();
     }
 
@@ -936,6 +1136,7 @@ impl MessageListView {
         session_running: bool,
         turn_key: &str,
         user_entry: &TurnEntry,
+        locate_inline: Option<(&str, f32)>,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
         window: &mut Window,
@@ -1187,11 +1388,16 @@ impl MessageListView {
         }
 
         if !text.trim().is_empty() {
+            let text_el = if let Some((q, alpha)) = locate_inline {
+                render_located_text(&text, q, alpha, palette.text_primary, palette)
+            } else {
+                SharedString::from(text.clone()).into_any_element()
+            };
             bubble = bubble.child(
                 apply_scale(div(), scale::BODY)
                     .pb(space::MICRO)
                     .text_color(palette.text_primary)
-                    .child(SharedString::from(text.clone())),
+                    .child(text_el),
             );
         }
 
@@ -1764,6 +1970,7 @@ impl MessageListView {
         tool_results: &BTreeMap<String, Value>,
         messages_generation: u64,
         is_live_turn: bool,
+        locate_highlight: Option<(&str, &str, f32)>,
         mono_family: SharedString,
         markdown_style: &TextViewStyle,
         reduce_motion: bool,
@@ -2000,7 +2207,18 @@ impl MessageListView {
                                         .flex_1()
                                         .min_w_0()
                                         .text_color(palette.text_secondary)
-                                        .child(SharedString::from(summary_text.clone())),
+                                        .child(if let Some((_, q, alpha)) = locate_highlight {
+                                            render_located_text(
+                                                &summary_text,
+                                                q,
+                                                alpha,
+                                                palette.text_secondary,
+                                                palette,
+                                            )
+                                        } else {
+                                            SharedString::from(summary_text.clone())
+                                                .into_any_element()
+                                        }),
                                 )
                                 .child(copy_btn),
                         );
@@ -2064,11 +2282,15 @@ impl MessageListView {
             .gap(space::LG);
 
         if let Some(ref user_entry) = turn.user {
+            let user_locate = locate_highlight.and_then(|(eid, q, alpha)| {
+                (user_entry.id.as_deref() == Some(eid)).then_some((q, alpha))
+            });
             column = column.child(self.render_user_bubble(
                 &session.id,
                 session.running,
                 &turn_key,
                 user_entry,
+                user_locate,
                 palette,
                 entity,
                 window,
@@ -2962,6 +3184,96 @@ impl Render for MessageListView {
         let turns = &prepared.turns;
         let tool_results = prepared.tool_results.as_ref();
         let messages_generation = prepared.messages_generation;
+
+        // Resolve search-hit locate target: expand turn window + collapsed groups, scroll into view,
+        // and drive the smooth 1.3s hold + 500ms ease-out highlight fade (`pPhYS` / `vnuGq`).
+        let mut active_locate: Option<(usize, String, String, f32)> = None;
+        let mut pending_scroll_turn_idx: Option<usize> = None;
+        let mut schedule_locate_timers = false;
+        let mut clear_expired_locate = false;
+
+        if let Some(ref mut lh) = self.locate_highlight
+            && lh.session_id == session.id
+            && let Some(target) = find_locate_target(&session, turns, &lh.entry_id)
+        {
+            let total_turns = turns.len();
+            let required_limit = total_turns.saturating_sub(target.turn_idx);
+            if required_limit > self.visible_turn_limit {
+                self.visible_turn_limit = required_limit;
+            }
+            let target_turn = &turns[target.turn_idx].turn;
+            let turn_key = target_turn
+                .user
+                .as_ref()
+                .map(TurnEntry::stable_key)
+                .or_else(|| target_turn.summary.as_ref().map(TurnEntry::stable_key))
+                .or_else(|| target_turn.compaction.as_ref().map(TurnEntry::stable_key))
+                .or_else(|| target_turn.assistants.first().map(TurnEntry::stable_key))
+                .unwrap_or_else(|| format!("idx-{}", target.turn_idx));
+            if target.is_compaction {
+                self.expanded_compactions
+                    .insert(format!("compaction:{turn_key}"));
+            }
+            if let Some(anchor) = target.segment_anchor {
+                self.segment_expansion_overrides
+                    .insert((turn_key, anchor), true);
+            }
+            if let Some(ref tcid) = target.tool_call_id {
+                self.tool_card_expansion
+                    .insert(format!("tool-card-{tcid}"), true);
+            }
+
+            let now = cx.background_executor().now();
+            let started = *lh.started_at.get_or_insert_with(|| {
+                schedule_locate_timers = true;
+                now
+            });
+            if !lh.scroll_applied {
+                lh.scroll_applied = true;
+                self.auto_follow_bottom = false;
+                pending_scroll_turn_idx = Some(target.turn_idx);
+            }
+            let elapsed_ms = now.saturating_duration_since(started).as_secs_f32() * 1000.0;
+            if elapsed_ms >= LOCATE_TOTAL_MS as f32 {
+                clear_expired_locate = true;
+            } else {
+                let alpha = if reduce_motion || elapsed_ms <= LOCATE_HOLD_MS {
+                    1.0
+                } else {
+                    let t = ((elapsed_ms - LOCATE_HOLD_MS) / LOCATE_FADE_MS).clamp(0.0, 1.0);
+                    window.request_animation_frame();
+                    1.0 - motion::ease_out()(t)
+                };
+                active_locate = Some((
+                    target.turn_idx,
+                    lh.entry_id.clone(),
+                    lh.query.clone(),
+                    alpha,
+                ));
+            }
+        }
+        if clear_expired_locate {
+            self.locate_highlight = None;
+            self.locate_clear_task = None;
+        } else if schedule_locate_timers {
+            let hold_ms = LOCATE_HOLD_MS as u64;
+            let fade_ms = LOCATE_FADE_MS as u64;
+            self.locate_clear_task = Some(cx.spawn(async move |weak, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(hold_ms))
+                    .await;
+                let _ = weak.update(cx, |_, cx| cx.notify());
+                cx.background_executor()
+                    .timer(Duration::from_millis(fade_ms + 40))
+                    .await;
+                let _ = weak.update(cx, |this, cx| {
+                    this.locate_highlight = None;
+                    this.locate_clear_task = None;
+                    cx.notify();
+                });
+            }));
+        }
+
         let live_turn_idx = active_prepared_turn_index(turns, session.running);
         if self.auto_follow_bottom && (revision_changed || live_turn_idx.is_some()) {
             self.scroll_handle.scroll_to_bottom();
@@ -2979,17 +3291,40 @@ impl Render for MessageListView {
         let window_start = total_turns.saturating_sub(self.visible_turn_limit);
         let hidden_earlier_count = window_start;
 
+        if let Some(target_idx) = pending_scroll_turn_idx
+            && target_idx >= window_start
+        {
+            let child_idx = usize::from(hidden_earlier_count > 0) + (target_idx - window_start);
+            self.scroll_handle.scroll_to_item(child_idx);
+        }
+
         let outbox_items = self.client.with_outbox(|ob| ob.session_items(sid).to_vec());
 
         let entity = cx.entity();
 
-        let mut list_col = div()
-            .relative()
-            .top(reveal_dy)
-            .opacity(reveal_op)
-            .w_full()
-            .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
-            .mx_auto()
+        let wrap_row = |child: gpui::AnyElement| {
+            div()
+                .w_full()
+                .px(space::GROUP)
+                .flex_shrink_0()
+                .relative()
+                .top(reveal_dy)
+                .opacity(reveal_op)
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                        .mx_auto()
+                        .child(child),
+                )
+        };
+
+        let mut scroll_area = div()
+            .id("session-message-scroll-area")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll_handle)
+            .on_scroll(cx.listener(Self::on_scroll_wheel))
             .py(space::GROUP)
             .flex()
             .flex_col()
@@ -2999,45 +3334,55 @@ impl Render for MessageListView {
             let ent_more = entity.clone();
             let batch = hidden_earlier_count.min(DEFAULT_VISIBLE_TURN_WINDOW);
             let earlier_label = format!("显示更早的消息（还有 {hidden_earlier_count} 轮）");
-            list_col = list_col.child(
-                div().w_full().flex().justify_center().child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .id("show-earlier-turns-btn")
-                        .test_support()
-                        .a11y_button("show-earlier-turns-btn", earlier_label.clone())
-                        .h(height::CONTROL)
-                        .px(space::MD)
-                        .rounded(radius::FULL)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_surface)
-                        .text_color(palette.text_secondary)
-                        .flex()
-                        .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(move |_, _, cx| {
-                            #[cfg(feature = "test-support")]
-                            crate::ux_probe::mark_input("show_earlier");
-                            ent_more.update(cx, |this, cx| {
-                                this.visible_turn_limit += batch;
-                                this.scroll_to_top(cx);
-                                cx.notify();
-                            });
-                        })
-                        .child(cjk_inline_label(earlier_label)),
-                ),
-            );
+            scroll_area = scroll_area.child(wrap_row(
+                div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .id("show-earlier-turns-btn")
+                            .test_support()
+                            .a11y_button("show-earlier-turns-btn", earlier_label.clone())
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::FULL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_surface)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(move |_, _, cx| {
+                                #[cfg(feature = "test-support")]
+                                crate::ux_probe::mark_input("show_earlier");
+                                ent_more.update(cx, |this, cx| {
+                                    this.visible_turn_limit += batch;
+                                    this.scroll_to_top(cx);
+                                    cx.notify();
+                                });
+                            })
+                            .child(cjk_inline_label(earlier_label)),
+                    )
+                    .into_any_element(),
+            ));
         }
 
         for (idx, prepared_turn) in turns.iter().enumerate().skip(window_start) {
             let is_live = live_turn_idx == Some(idx);
-            list_col = list_col.child(self.render_turn_view(
+            let turn_locate = active_locate
+                .as_ref()
+                .filter(|(t_idx, _, _, _)| *t_idx == idx)
+                .map(|(_, eid, q, alpha)| (eid.as_str(), q.as_str(), *alpha));
+            let turn_el = self.render_turn_view(
                 &session,
                 idx,
                 prepared_turn,
                 tool_results,
                 messages_generation,
                 is_live,
+                turn_locate,
                 mono_family.clone(),
                 &markdown_style,
                 reduce_motion,
@@ -3048,14 +3393,31 @@ impl Render for MessageListView {
                 &entity,
                 window,
                 cx,
-            ));
+            );
+            let wrapped = if let Some((_, _, alpha)) = turn_locate {
+                let mut bar_color = palette.accent_ink;
+                bar_color.a *= alpha;
+                div()
+                    .id("located-search-hit-turn")
+                    .test_support()
+                    .w_full()
+                    .border_l_2()
+                    .border_color(bar_color)
+                    .pl(space::MD)
+                    .child(turn_el)
+                    .into_any_element()
+            } else {
+                turn_el
+            };
+            scroll_area = scroll_area.child(wrap_row(wrapped));
         }
 
         self.retain_seen_secret_inputs(true, cx);
 
         for ob_item in &outbox_items {
-            list_col = list_col
-                .child(self.render_outbox_bubble(sid, ob_item, &palette, &entity, window, cx));
+            scroll_area = scroll_area.child(wrap_row(
+                self.render_outbox_bubble(sid, ob_item, &palette, &entity, window, cx),
+            ));
         }
 
         if session.compacting {
@@ -3063,7 +3425,7 @@ impl Render for MessageListView {
                 .turn_started_instants
                 .entry(format!("compacting:{sid}"))
                 .or_insert_with(Instant::now);
-            list_col = list_col.child(
+            scroll_area = scroll_area.child(wrap_row(
                 div()
                     .id("session-compacting-status")
                     .test_support()
@@ -3089,8 +3451,9 @@ impl Render for MessageListView {
                         palette.text_primary,
                         scale::UI,
                         window,
-                    )),
-            );
+                    ))
+                    .into_any_element(),
+            ));
         }
 
         let show_scroll_bottom_btn =
@@ -3104,7 +3467,14 @@ impl Render for MessageListView {
                 show_scroll_bottom_btn,
             );
             if let Some(layer) = crate::ux_probe::bounds_probe_layer("message_col", None) {
-                list_col = list_col.relative().child(layer);
+                scroll_area = scroll_area.child(wrap_row(
+                    div()
+                        .relative()
+                        .w_full()
+                        .h(px(0.0))
+                        .child(layer)
+                        .into_any_element(),
+                ));
             }
         }
 
@@ -3116,15 +3486,7 @@ impl Render for MessageListView {
             .min_h_0()
             .min_w_0()
             .w_full()
-            .child(
-                div()
-                    .id("session-message-scroll-area")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll_handle)
-                    .on_scroll(cx.listener(Self::on_scroll_wheel))
-                    .child(div().w_full().px(space::GROUP).child(list_col)),
-            );
+            .child(scroll_area);
         #[cfg(feature = "test-support")]
         if let Some(layer) = crate::ux_probe::bounds_probe_layer("scroll_area", None) {
             outer = outer.child(layer);

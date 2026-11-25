@@ -33,6 +33,15 @@ export class SessionDetailCache {
 		return value;
 	}
 
+	has(id: string): boolean {
+		return this.entries.has(id);
+	}
+
+	/** 只读遍历当前已预载的会话详情快照，不改动 LRU 访问顺序。 */
+	snapshotDetails(): ReadonlyMap<string, SessionDetail> {
+		return this.entries;
+	}
+
 	put(value: SessionDetail): void {
 		this.revisions.set(value.id, {});
 		this.entries.delete(value.id);
