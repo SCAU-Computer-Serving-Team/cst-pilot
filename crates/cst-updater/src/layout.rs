@@ -190,6 +190,25 @@ pub fn classify(path: &str) -> Result<Area, String> {
     }
 }
 
+pub(crate) fn reject_retired_release_path(path: &str) -> Result<(), String> {
+    let path = path.to_ascii_lowercase();
+    if ["wiztree", "app/tools/wiztree"].iter().any(|prefix| {
+        path == *prefix
+            || path
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('/'))
+    }) {
+        return Err("发行包包含已移除的组件路径。".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn classify_release(path: &str) -> Result<Area, String> {
+    let area = classify(path)?;
+    reject_retired_release_path(path)?;
+    Ok(area)
+}
+
 /// Arrays are user choices and remain intact. Models-store merges by stable model id.
 pub fn merge_defaults(
     path: &str,

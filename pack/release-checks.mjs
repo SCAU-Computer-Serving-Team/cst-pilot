@@ -10,6 +10,9 @@ export const sha256 = (data) => crypto.createHash('sha256').update(data).digest(
 export function checkReleaseTree(root, files) {
   for (const rel of files) {
     if (path.posix.basename(rel).toLowerCase() === 'agents.md') throw new Error(`项目 AGENTS.md 不得进入发行包: ${rel}`);
+    if (/^(?:app\/tools\/)?wiztree(?:\/|$)/i.test(rel)) {
+      throw new Error(`发行树含已移除的组件: ${rel}`);
+    }
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }

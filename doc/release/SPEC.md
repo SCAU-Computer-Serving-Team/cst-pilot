@@ -32,7 +32,7 @@
 无论是打包输出树还是在线升级归档，均执行以下六条强制校验，违反任一条立即拒绝发布或安装：
 
 1. **禁止开发与测试文件**：不得包含任何路径下的 `AGENTS.md`、前端源码（`src/`）、测试目录或编译缓存。
-2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`.env` 或 `.env.*`。
+2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`.env` 或 `.env.*`。发行树与升级包也拒绝已退役的 `wiztree/` 和 `app/tools/wiztree/` 组件目录，含空目录。
 3. **禁止越界路径与链接**：归档与发行树不得包含符号链接、Windows 目录联接（Junction）、硬链接、保留设备名、备用数据流（ADS）、`..` 越界路径或大小写冲突路径。仅精确放行 `assets/fonts/SourceHanSansCN-VF.otf` 与 `assets/fonts/JetBrainsMono-{Regular,Medium}.ttf`，其余路径不得包含未裁剪 `.otf` 源文件。
 4. **禁止任何凭据或密钥**：全树扫描拒绝疑似 API 密钥、GitHub 令牌、云厂商密钥、JWT 或私钥块。所有 `.json` 递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`clientSecret`、`identityKey`、`token`、`secret`、`password` 或 `authorization` 字段。
 5. **预置配置精确匹配**：`agent/home/web-search.json` 与 `agent/home/telemetry.json` 必须与发行标准常量一致，禁止把构建机本机配置带入发行包。

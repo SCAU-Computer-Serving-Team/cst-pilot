@@ -1,8 +1,7 @@
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::fs::{File, Metadata};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use cst_os::KitLayout;
 use pi_runtime::ReadOperations;
@@ -27,6 +26,7 @@ struct HandleMeta {
     identity: FileIdentity,
     link_count: u64,
     is_dir: bool,
+    is_file: bool,
     file_size: u64,
 }
 
@@ -46,9 +46,9 @@ struct SessionInner {
     state_dir: PathBuf,
     state_keys: Vec<String>,
     state_identity: Option<FileIdentity>,
+    secret_paths: [PathBuf; 5],
     secret_keys: Vec<String>,
     secret_identities: Vec<FileIdentity>,
-    state_file_identities: OnceLock<Result<HashSet<FileIdentity>, String>>,
     #[cfg(test)]
     checks: AtomicUsize,
 }
@@ -79,30 +79,18 @@ impl PathGuard {
         let state_dir = self.layout.state_dir();
         let mut state_keys = Vec::with_capacity(2);
         push_unique_key(&mut state_keys, &state_dir);
-        let mut state_identity = None;
-        if let Ok(resolved) = state_dir.canonicalize() {
+        let state_identity = inspect_path(&state_dir).ok().map(|(resolved, meta)| {
             push_unique_key(&mut state_keys, &resolved);
-            if let Ok(meta) = path_meta(&resolved) {
-                state_identity = Some(meta.identity);
-            }
-        } else if let Ok(meta) = path_meta(&state_dir) {
-            state_identity = Some(meta.identity);
-        }
+            meta.identity
+        });
 
+        let secret_paths = self.secret_paths();
         let mut secret_keys = Vec::with_capacity(10);
         let mut secret_identities = Vec::with_capacity(5);
-        for secret in self.secret_paths() {
-            push_unique_key(&mut secret_keys, &secret);
-            if let Ok(resolved) = secret.canonicalize() {
+        for secret in &secret_paths {
+            push_unique_key(&mut secret_keys, secret);
+            if let Ok((resolved, meta)) = inspect_path(secret) {
                 push_unique_key(&mut secret_keys, &resolved);
-                if let Ok(meta) = path_meta(&resolved)
-                    && !secret_identities.contains(&meta.identity)
-                {
-                    secret_identities.push(meta.identity);
-                }
-            } else if let Ok(meta) = path_meta(&secret)
-                && !secret_identities.contains(&meta.identity)
-            {
                 secret_identities.push(meta.identity);
             }
         }
@@ -112,9 +100,9 @@ impl PathGuard {
                 state_dir,
                 state_keys,
                 state_identity,
+                secret_paths,
                 secret_keys,
                 secret_identities,
-                state_file_identities: OnceLock::new(),
                 #[cfg(test)]
                 checks: AtomicUsize::new(0),
             }),
@@ -143,22 +131,25 @@ impl PathGuardSession {
         self.inner.checks.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Fast directory check for non-symlink entries during `follow_links(false)` traversal.
-    /// Does not open handles when the canonical path key cleanly misses `.state/`.
+    /// Prune protected paths and refuse recursion into discovered directory links.
     pub fn allow_walk_dir(&self, path: &Path) -> bool {
-        if reject_alternate_stream(path).is_err() {
+        if self.verify_requested(path).is_err()
+            || !std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir() && !is_link(&meta))
+        {
             return false;
         }
-        let key = path_key(path);
-        !self.is_state_key(&key)
+        let Some(state_id) = self.inner.state_identity else {
+            return true;
+        };
+        path_meta(path).is_ok_and(|meta| meta.identity != state_id)
     }
 
     /// Check an arbitrary path (file or directory) against all protected targets.
     pub fn check_path(&self, path: impl AsRef<Path>) -> Result<PathBuf, String> {
         self.record_check();
         let path = path.as_ref();
-        reject_alternate_stream(path)?;
-        let (resolved, meta) = inspect_path(path)?;
+        self.verify_requested(path)?;
+        let (resolved, meta) = inspect_path(path).map_err(|_| "目标路径无法读取。")?;
         self.verify_resolved(&resolved, meta)?;
         Ok(resolved)
     }
@@ -167,47 +158,55 @@ impl PathGuardSession {
     pub fn open_file(&self, path: impl AsRef<Path>) -> Result<(File, u64), String> {
         self.record_check();
         let path = path.as_ref();
-        reject_alternate_stream(path)?;
-        let file = File::open(path).map_err(|_| "目标文件无法打开。")?;
-        let (resolved, meta) = inspect_opened_file(&file, path)?;
-        if meta.is_dir {
+        self.verify_requested(path)?;
+        let file = open_read_handle(path).map_err(|_| "目标文件无法打开。")?;
+        let (resolved, meta) = inspect_opened_file(&file, path).map_err(|_| denied())?;
+        if !meta.is_file {
             return Err("目标路径不是普通文件。".into());
         }
         self.verify_resolved(&resolved, meta)?;
         Ok((file, meta.file_size))
     }
 
+    pub(crate) fn verify_requested(&self, path: &Path) -> Result<(), String> {
+        reject_unsafe_windows_path(path)?;
+        if path.is_absolute() {
+            self.verify_key(path)
+        } else {
+            self.verify_key(&std::path::absolute(path).map_err(|_| denied())?)
+        }
+    }
+
+    fn verify_key(&self, path: &Path) -> Result<(), String> {
+        let key = path_key(path);
+        if self.is_state_key(&key) || self.inner.secret_keys.contains(&key) {
+            return Err(denied());
+        }
+        Ok(())
+    }
+
     fn verify_resolved(&self, resolved: &Path, meta: HandleMeta) -> Result<(), String> {
-        let key = path_key(resolved);
-        if self.is_state_key(&key) || self.is_secret_key(&key) {
+        self.verify_key(resolved)?;
+        if self.inner.secret_identities.contains(&meta.identity) {
             return Err(denied());
         }
         if let Some(state_id) = self.inner.state_identity {
             if meta.identity == state_id {
                 return Err(denied());
             }
-            if !meta.is_dir && self.inner.secret_identities.contains(&meta.identity) {
-                return Err(denied());
-            }
-            // Check ancestors for directory aliases pointing at `.state/`.
-            if meta.is_dir {
-                for ancestor in resolved.ancestors().skip(1) {
-                    if let Ok(anc_meta) = path_meta(ancestor)
-                        && anc_meta.identity == state_id
-                    {
-                        return Err(denied());
-                    }
+            // A canonical name can still use an alternate volume or mount name.
+            for ancestor in resolved.ancestors().skip(1) {
+                if path_meta(ancestor).is_ok_and(|meta| meta.identity == state_id) {
+                    return Err(denied());
                 }
             }
-        } else if !meta.is_dir && self.inner.secret_identities.contains(&meta.identity) {
-            return Err(denied());
         }
 
-        // Only multiply-linked regular files need `.state/` identity membership checks.
-        if !meta.is_dir && meta.link_count > 1 && self.inner.state_identity.is_some() {
-            let protected = self.state_file_identities()?;
-            if protected.contains(&meta.identity) {
-                return Err(denied());
+        if meta.is_file {
+            match meta.link_count {
+                0 => return Err(denied()),
+                1 => (),
+                _ => self.verify_hard_link(meta.identity)?,
             }
         }
         Ok(())
@@ -222,51 +221,74 @@ impl PathGuardSession {
         })
     }
 
-    fn is_secret_key(&self, key: &str) -> bool {
-        self.inner.secret_keys.iter().any(|secret| key == secret)
-    }
-
-    fn state_file_identities(&self) -> Result<&HashSet<FileIdentity>, String> {
-        let result = self.inner.state_file_identities.get_or_init(|| {
-            let state = match self.inner.state_dir.canonicalize() {
-                Ok(state) => state,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(HashSet::new());
-                }
+    // The per-call baseline remains useful for ordinary files. Hard links need live
+    // membership checks because protected files can be created or replaced mid-call.
+    fn verify_hard_link(&self, identity: FileIdentity) -> Result<(), String> {
+        for secret in &self.inner.secret_paths {
+            match path_meta(secret) {
+                Ok(meta) if meta.identity == identity => return Err(denied()),
+                Ok(_) => (),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => (),
                 Err(_) => return Err(denied()),
-            };
-            let mut ids = HashSet::new();
-            let mut walker = ignore::WalkBuilder::new(state);
-            walker
-                .hidden(false)
-                .ignore(false)
-                .git_ignore(false)
-                .git_global(false)
-                .git_exclude(false)
-                .parents(false)
-                .follow_links(false);
-            for (visited, entry) in walker.build().enumerate() {
-                if visited >= 100_000 {
-                    return Err(denied());
-                }
-                let entry = entry.map_err(|_| denied())?;
-                if entry.file_type().is_some_and(|kind| kind.is_symlink()) {
-                    return Err(denied());
-                }
-                if entry.file_type().is_some_and(|kind| kind.is_file()) {
-                    match path_meta(entry.path()) {
-                        Ok(meta) => {
-                            ids.insert(meta.identity);
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                        Err(_) => return Err(denied()),
-                    }
-                }
             }
-            Ok(ids)
-        });
-        result.as_ref().map_err(Clone::clone)
+        }
+
+        let state_dir = &self.inner.state_dir;
+        let (state, state_meta) = match inspect_path(state_dir) {
+            Ok((state, meta)) if meta.is_dir => (state, meta),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            _ => return Err(denied()),
+        };
+        let mut walker = ignore::WalkBuilder::new(&state);
+        walker.standard_filters(false).follow_links(false);
+        for (visited, entry) in walker.build().enumerate() {
+            if visited >= 100_000 {
+                return Err(denied());
+            }
+            let entry = entry.map_err(|_| denied())?;
+            let meta = std::fs::symlink_metadata(entry.path()).map_err(|_| denied())?;
+            if is_link(&meta) {
+                return Err(denied());
+            }
+            if meta.is_file()
+                && (path_meta(entry.path()).map_err(|_| denied())?.identity == identity)
+            {
+                return Err(denied());
+            }
+        }
+        if path_meta(state_dir).map_err(|_| denied())?.identity != state_meta.identity {
+            return Err(denied());
+        }
+        Ok(())
     }
+}
+
+fn is_link(meta: &Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+        meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+    }
+    #[cfg(not(windows))]
+    meta.file_type().is_symlink()
+}
+
+#[cfg(windows)]
+fn open_read_handle(path: &Path) -> io::Result<File> {
+    File::open(path)
+}
+
+#[cfg(not(windows))]
+fn open_read_handle(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    // A non-regular entry can appear between enumeration and opening. In
+    // particular, don't block waiting for a writer if the name is now a FIFO.
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
 }
 
 fn push_unique_key(target: &mut Vec<String>, path: &Path) {
@@ -293,21 +315,33 @@ fn handle_meta(file: &File) -> std::io::Result<HandleMeta> {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, GetFileInformationByHandle,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_TYPE_DISK,
+        GetFileInformationByHandle, GetFileType,
     };
 
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     let handle = HANDLE(file.as_raw_handle());
-    // SAFETY: `handle` is borrowed from a live `File` for the duration of the Win32 call.
-    unsafe { GetFileInformationByHandle(handle, &mut info) }
-        .map_err(|e| std::io::Error::from_raw_os_error(e.code().0))?;
+    // SAFETY: `handle` is borrowed from a live `File` for both Win32 calls.
+    if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
+        return Err(io::Error::other("not a disk file"));
+    }
+    unsafe { GetFileInformationByHandle(handle, &mut info) }.map_err(|error| {
+        let code = error.code().0 as u32;
+        if code >> 16 == 0x8007 {
+            io::Error::from_raw_os_error((code & 0xffff) as i32)
+        } else {
+            io::Error::other(error)
+        }
+    })?;
+    let is_dir = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
     Ok(HandleMeta {
         identity: FileIdentity {
             volume: info.dwVolumeSerialNumber,
             index: ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64),
         },
         link_count: u64::from(info.nNumberOfLinks),
-        is_dir: (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0,
+        is_dir,
+        is_file: !is_dir,
         file_size: ((info.nFileSizeHigh as u64) << 32) | (info.nFileSizeLow as u64),
     })
 }
@@ -348,18 +382,14 @@ fn path_meta(path: &Path) -> std::io::Result<HandleMeta> {
 }
 
 #[cfg(windows)]
-fn inspect_path(path: &Path) -> Result<(PathBuf, HandleMeta), String> {
-    let file = open_metadata_handle(path).map_err(|_| "目标路径无法读取。")?;
-    let meta = handle_meta(&file).map_err(|_| "目标路径无法读取。")?;
-    let resolved = handle_final_path(&file).map_err(|_| "目标路径无法读取。")?;
-    Ok((resolved, meta))
+fn inspect_path(path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
+    let file = open_metadata_handle(path)?;
+    inspect_opened_file(&file, path)
 }
 
 #[cfg(windows)]
-fn inspect_opened_file(file: &File, _path: &Path) -> Result<(PathBuf, HandleMeta), String> {
-    let meta = handle_meta(file).map_err(|_| denied())?;
-    let resolved = handle_final_path(file).map_err(|_| denied())?;
-    Ok((resolved, meta))
+fn inspect_opened_file(file: &File, _path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
+    Ok((handle_final_path(file)?, handle_meta(file)?))
 }
 
 #[cfg(not(windows))]
@@ -372,6 +402,7 @@ fn metadata_to_handle_meta(meta: &std::fs::Metadata) -> HandleMeta {
         },
         link_count: meta.nlink(),
         is_dir: meta.is_dir(),
+        is_file: meta.is_file(),
         file_size: meta.len(),
     }
 }
@@ -382,20 +413,18 @@ fn path_meta(path: &Path) -> std::io::Result<HandleMeta> {
 }
 
 #[cfg(not(windows))]
-fn inspect_path(path: &Path) -> Result<(PathBuf, HandleMeta), String> {
-    let resolved = path.canonicalize().map_err(|_| "目标路径无法读取。")?;
-    let meta = path_meta(&resolved).map_err(|_| "目标路径无法读取。")?;
+fn inspect_path(path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
+    let resolved = path.canonicalize()?;
+    let meta = path_meta(&resolved)?;
     Ok((resolved, meta))
 }
 
 #[cfg(not(windows))]
-fn inspect_opened_file(file: &File, path: &Path) -> Result<(PathBuf, HandleMeta), String> {
-    let meta = file.metadata().map_err(|_| denied())?;
-    let opened = metadata_to_handle_meta(&meta);
-    let resolved = path.canonicalize().map_err(|_| denied())?;
-    let current = path_meta(&resolved).map_err(|_| denied())?;
+fn inspect_opened_file(file: &File, path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
+    let opened = metadata_to_handle_meta(&file.metadata()?);
+    let (resolved, current) = inspect_path(path)?;
     if opened.identity != current.identity {
-        return Err(denied());
+        return Err(io::Error::other("path no longer identifies the open file"));
     }
     Ok((resolved, opened))
 }
@@ -405,9 +434,9 @@ fn denied() -> String {
 }
 
 pub(crate) fn path_key(path: &Path) -> String {
-    let value = path.to_string_lossy().replace('\\', "/");
+    let value = path.to_string_lossy();
     #[cfg(windows)]
-    let value = value.to_lowercase();
+    let value = value.replace('\\', "/").to_lowercase();
     let trimmed = value.trim_end_matches('/');
     #[cfg(windows)]
     if let Some(rest) = trimmed.strip_prefix("//?/unc/") {
@@ -420,13 +449,28 @@ pub(crate) fn path_key(path: &Path) -> String {
     trimmed.to_owned()
 }
 
-fn reject_alternate_stream(path: &Path) -> Result<(), String> {
+fn reject_unsafe_windows_path(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
-        // A colon is legal only in the drive prefix. Deny NT device paths too.
+        use std::path::{Component, Prefix};
+
+        // Colons are only allowed in an absolute DOS drive prefix. Limit
+        // extended paths to DOS/UNC and reject other Win32 namespaces.
         let raw = path.to_string_lossy();
-        let raw = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
-        if raw.starts_with(r"\\.\") || raw.char_indices().any(|(i, c)| c == ':' && i != 1) {
+        let colon = match path.components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::Disk(_) if path.is_absolute() => Some(1),
+                Prefix::VerbatimDisk(_) if path.is_absolute() => Some(5),
+                Prefix::UNC(server, _) if server != "." && server != "?" => None,
+                Prefix::VerbatimUNC(..) => None,
+                _ => return Err(denied()),
+            },
+            _ => None,
+        };
+        if raw
+            .match_indices(':')
+            .any(|(index, _)| Some(index) != colon)
+        {
             return Err(denied());
         }
     }

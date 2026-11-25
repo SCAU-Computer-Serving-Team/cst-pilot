@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use encoding_rs::{CoderResult, Encoding, GB18030, UTF_16BE, UTF_16LE};
+use encoding_rs::{CoderResult, Encoding, GB18030, UTF_8, UTF_16BE, UTF_16LE};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::{WalkBuilder, WalkState};
 use memchr::memmem::Finder;
@@ -29,7 +29,6 @@ const MAX_VISITED: usize = 500_000;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
 const WORKER_BUF_INIT: usize = 64 * 1024;
 const WORKER_BUF_SHRINK_THRESHOLD: usize = 1024 * 1024;
-const WRAPPER_RESERVE_BYTES: usize = 1024;
 const WEAK_MATCH_SCORE_THRESHOLD: i32 = 400;
 
 #[derive(Clone, Deserialize, JsonSchema)]
@@ -91,8 +90,10 @@ pub fn search(
     content_search: bool,
     cancel: &CancellationToken,
 ) -> Result<Value, String> {
+    let deadline = Instant::now() + SEARCH_TIMEOUT;
+    check_search_time(cancel, deadline)?;
     let session = guard.session();
-    search_with_session(&session, cwd, input, content_search, cancel)
+    search_with_session(&session, cwd, input, content_search, cancel, deadline)
 }
 
 fn search_with_session(
@@ -101,17 +102,15 @@ fn search_with_session(
     input: SearchInput,
     content_search: bool,
     cancel: &CancellationToken,
+    deadline: Instant,
 ) -> Result<Value, String> {
     if input.pattern.len() > 4096 || (content_search && input.pattern.is_empty()) {
         return Err("检索表达式为空或超过 4096 字节。".into());
     }
-    if cancel.is_cancelled() {
-        return Err("文件检索已取消。".into());
-    }
-    let deadline = Instant::now() + SEARCH_TIMEOUT;
+    check_search_time(cancel, deadline)?;
     let limit = input.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let context = input.context.unwrap_or(0).min(20);
-    let (raw_root, include) = search_root(cwd, input.path.as_deref())?;
+    let (raw_root, include) = search_root(session, cwd, input.path.as_deref())?;
     let root = session.check_path(raw_root)?;
     let canonical_cwd = cwd.canonicalize().ok();
     let relative_root = canonical_cwd.as_deref().unwrap_or(cwd).to_path_buf();
@@ -153,8 +152,8 @@ fn search_with_session(
 fn worker_threads() -> usize {
     let cores = std::thread::available_parallelism()
         .map(usize::from)
-        .unwrap_or(4);
-    cores.saturating_sub(2).clamp(2, 8)
+        .unwrap_or(1);
+    cores.saturating_sub(2).clamp(1, 8)
 }
 
 fn build_walker(
@@ -208,35 +207,40 @@ fn dir_is_excluded(
     search_root: &Path,
     excludes: &GlobSet,
 ) -> bool {
-    let (display, rel_to_root) = path_match_keys(path, relative_root, search_root);
-    let display_dir = format!("{display}/");
-    if excludes.is_match(&display) || excludes.is_match(&display_dir) {
-        return true;
-    }
-    if let Some(rel) = rel_to_root {
-        let rel_dir = format!("{rel}/");
-        if excludes.is_match(&rel) || excludes.is_match(&rel_dir) {
-            return true;
-        }
-    }
-    false
+    let keys = PathMatchKeys::new(path, relative_root, search_root, true);
+    keys.any(|key| excludes.is_match(key) || excludes.is_match(format!("{key}/")))
 }
 
-fn path_match_keys(
-    path: &Path,
-    relative_root: &Path,
-    search_root: &Path,
-) -> (String, Option<String>) {
-    let display = path
-        .strip_prefix(relative_root)
-        .map(normalize_path)
-        .unwrap_or_else(|_| normalize_path(path));
-    let rel_to_root = if search_root != relative_root {
-        path.strip_prefix(search_root).ok().map(normalize_path)
-    } else {
-        None
-    };
-    (display, rel_to_root)
+struct PathMatchKeys {
+    display: String,
+    absolute: Option<String>,
+    relative_to_search: Option<String>,
+}
+
+impl PathMatchKeys {
+    fn new(path: &Path, relative_root: &Path, search_root: &Path, filtered: bool) -> Self {
+        let relative = path.strip_prefix(relative_root).ok();
+        Self {
+            display: normalize_path(relative.unwrap_or(path)),
+            absolute: (filtered && relative.is_some()).then(|| normalize_path(path)),
+            relative_to_search: if filtered && search_root != relative_root {
+                path.strip_prefix(search_root).ok().map(normalize_path)
+            } else {
+                None
+            },
+        }
+    }
+
+    fn any(&self, mut matches: impl FnMut(&str) -> bool) -> bool {
+        matches(&self.display)
+            || self.relative_to_search.as_deref().is_some_and(&mut matches)
+            || self.absolute.as_deref().is_some_and(matches)
+    }
+
+    fn passes(&self, include: Option<&GlobSet>, excludes: &GlobSet) -> bool {
+        include.is_none_or(|glob| self.any(|key| glob.is_match(key)))
+            && (excludes.is_empty() || !self.any(|key| excludes.is_match(key)))
+    }
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -250,26 +254,6 @@ fn normalize_path(path: &Path) -> String {
         return rest.to_owned();
     }
     raw
-}
-
-fn passes_path_filters(
-    display: &str,
-    rel_to_root: Option<&str>,
-    include: Option<&GlobSet>,
-    excludes: &GlobSet,
-) -> bool {
-    if let Some(filter) = include {
-        let matched = filter.is_match(display) || rel_to_root.is_some_and(|r| filter.is_match(r));
-        if !matched {
-            return false;
-        }
-    }
-    if !excludes.is_empty()
-        && (excludes.is_match(display) || rel_to_root.is_some_and(|r| excludes.is_match(r)))
-    {
-        return false;
-    }
-    true
 }
 
 // ============================================================================
@@ -348,7 +332,7 @@ fn lowercase_into(input: &str, out: &mut String) {
 
 fn score_term(term: &str, haystack: &str, original: &str, filename_start: usize) -> Option<i32> {
     let filename = &haystack[filename_start..];
-    let orig_filename = original.get(filename_start..).unwrap_or(filename);
+    let orig_filename = original.rsplit('/').next().unwrap_or(original);
 
     // 1. Exact filename or exact filename stem match
     if filename == term {
@@ -383,10 +367,10 @@ fn score_term(term: &str, haystack: &str, original: &str, filename_start: usize)
     }
     // 5. Subsequence inside filename (preferred over full-path subsequence)
     if let Some(sub_score) = subsequence_score(term, filename, orig_filename) {
-        return Some(1_200 + sub_score);
+        return Some(1_200 + sub_score.clamp(-500, 700));
     }
-    // 6. Subsequence across full path
-    subsequence_score(term, haystack, original)
+    // Keep long full-path subsequences below stronger match classes.
+    subsequence_score(term, haystack, original).map(|score| score.min(600))
 }
 
 fn is_boundary_at(text: &str, byte_idx: usize) -> bool {
@@ -491,7 +475,6 @@ struct FindWorker {
     scratch: String,
     local: Vec<FindCandidate>,
     cutoff_score: i32,
-    since_deadline_check: usize,
     local_skipped: usize,
 }
 
@@ -503,7 +486,6 @@ impl FindWorker {
             scratch: String::with_capacity(256),
             local: Vec::with_capacity(init_cap),
             cutoff_score: i32::MIN,
-            since_deadline_check: 0,
             local_skipped: 0,
         }
     }
@@ -516,8 +498,7 @@ impl FindWorker {
             self.shared.set_error("文件检索已取消。");
             return WalkState::Quit;
         }
-        self.since_deadline_check += 1;
-        if self.since_deadline_check.is_multiple_of(64) && Instant::now() >= self.shared.deadline {
+        if Instant::now() >= self.shared.deadline {
             self.shared
                 .set_error("文件检索超过 30 秒，请缩小检索范围。");
             return WalkState::Quit;
@@ -540,18 +521,21 @@ impl FindWorker {
         }
 
         let path = entry.path();
-        let (display, rel_to_root) =
-            path_match_keys(path, &self.shared.relative_root, &self.shared.root);
-        if !passes_path_filters(
-            &display,
-            rel_to_root.as_deref(),
-            self.shared.include.as_ref(),
-            &self.shared.excludes,
-        ) {
+        let keys = PathMatchKeys::new(
+            path,
+            &self.shared.relative_root,
+            &self.shared.root,
+            self.shared.include.is_some() || !self.shared.excludes.is_empty(),
+        );
+        if !keys.passes(self.shared.include.as_ref(), &self.shared.excludes) {
             return WalkState::Continue;
         }
 
-        let Some(score) = self.shared.query.score_path(&display, &mut self.scratch) else {
+        let Some(score) = self
+            .shared
+            .query
+            .score_path(&keys.display, &mut self.scratch)
+        else {
             return WalkState::Continue;
         };
 
@@ -581,7 +565,7 @@ impl FindWorker {
 
         self.local.push(FindCandidate {
             score,
-            path: display,
+            path: keys.display,
         });
         if self.local.len() >= keep_cap.saturating_mul(2) {
             self.local
@@ -658,6 +642,7 @@ fn run_find(
         return Err(err);
     }
 
+    check_search_time(cancel, deadline)?;
     let mut candidates =
         std::mem::take(&mut *shared.collected.lock().unwrap_or_else(|e| e.into_inner()));
     let mut truncated = shared.truncated.load(AtomicOrdering::Relaxed);
@@ -669,23 +654,8 @@ fn run_find(
     candidates.sort_by(cmp_find_candidate);
 
     let top_score = candidates.first().map(|c| c.score);
-    let mut matches = Vec::with_capacity(candidates.len());
-    let mut output_bytes = WRAPPER_RESERVE_BYTES;
-    for candidate in candidates {
-        if !push_bounded(
-            &mut matches,
-            &mut output_bytes,
-            json!({"path": candidate.path}),
-            limit,
-        )? {
-            truncated = true;
-            break;
-        }
-    }
-
     let skipped = shared.skipped.load(AtomicOrdering::Relaxed);
     let mut obj = Map::new();
-    obj.insert("matches".into(), Value::Array(matches));
     obj.insert("truncated".into(), Value::Bool(truncated));
     obj.insert("skipped".into(), json!(skipped));
     if !query.unfiltered && top_score.is_some_and(|score| score < WEAK_MATCH_SCORE_THRESHOLD) {
@@ -694,131 +664,62 @@ fn run_find(
             Value::String("仅找到弱相关路径匹配，建议补充文件名关键词或缩小 path 范围。".into()),
         );
     }
-    Ok(Value::Object(obj))
+    Ok(bounded_output(
+        obj,
+        candidates
+            .into_iter()
+            .map(|candidate| (json!({"path": candidate.path}), None)),
+        limit,
+    ))
 }
-
-// ============================================================================
-// ffgrep: Parallel Walk + SIMD Prefilter + Bytes Regex + UTF-16/GB18030 Decode
-// ============================================================================
 
 enum ContentMatcher {
     LiteralSensitive(Box<Finder<'static>>),
-    LiteralAsciiInsensitive {
-        lower: Vec<u8>,
-        first_lo: u8,
-        first_hi: u8,
-    },
-    BytesRegex {
-        re: regex::bytes::Regex,
-        allow_whole_file_prefilter: bool,
-    },
+    LiteralInsensitive(regex::bytes::Regex),
+    Regex(regex::bytes::Regex),
 }
 
 impl ContentMatcher {
     fn build(pattern: &str, literal: bool, sensitive: bool) -> Result<Self, String> {
-        let is_plain = literal || regex::escape(pattern) == pattern;
-        if is_plain {
-            if sensitive {
-                return Ok(Self::LiteralSensitive(Box::new(
-                    Finder::new(pattern.as_bytes()).into_owned(),
-                )));
-            }
-            if pattern.is_ascii() {
-                let lower = pattern.to_ascii_lowercase().into_bytes();
-                let first_lo = lower[0];
-                let first_hi = first_lo.to_ascii_uppercase();
-                return Ok(Self::LiteralAsciiInsensitive {
-                    lower,
-                    first_lo,
-                    first_hi,
-                });
-            }
-            let escaped = regex::escape(pattern);
-            let re = BytesRegexBuilder::new(&escaped)
-                .case_insensitive(true)
-                .unicode(true)
-                .multi_line(true)
-                .crlf(true)
-                .size_limit(4 * 1024 * 1024)
-                .build()
-                .map_err(|_| "内容检索正则表达式无效或过大。")?;
-            return Ok(Self::BytesRegex {
-                re,
-                allow_whole_file_prefilter: true,
-            });
+        let literal = literal || regex::escape(pattern) == pattern;
+        if literal && sensitive {
+            return Ok(Self::LiteralSensitive(Box::new(
+                Finder::new(pattern.as_bytes()).into_owned(),
+            )));
         }
-
-        let re = BytesRegexBuilder::new(pattern)
+        let expression = if literal {
+            regex::escape(pattern)
+        } else {
+            pattern.to_owned()
+        };
+        let re = BytesRegexBuilder::new(&expression)
             .case_insensitive(!sensitive)
-            .unicode(true)
-            .multi_line(true)
-            .crlf(true)
             .size_limit(4 * 1024 * 1024)
             .build()
             .map_err(|_| "内容检索正则表达式无效或过大。")?;
-        let allow_whole_file_prefilter =
-            !pattern.contains("\\A") && !pattern.contains("\\z") && !pattern.contains("\\Z");
-        Ok(Self::BytesRegex {
-            re,
-            allow_whole_file_prefilter,
-        })
-    }
-
-    #[inline]
-    fn matches_whole_file(&self, content: &[u8]) -> bool {
-        match self {
-            Self::LiteralSensitive(finder) => finder.find(content).is_some(),
-            Self::LiteralAsciiInsensitive {
-                lower,
-                first_lo,
-                first_hi,
-            } => ascii_ci_contains(content, lower, *first_lo, *first_hi),
-            Self::BytesRegex {
-                re,
-                allow_whole_file_prefilter,
-            } => !*allow_whole_file_prefilter || re.is_match(content),
+        if literal {
+            Ok(Self::LiteralInsensitive(re))
+        } else {
+            Ok(Self::Regex(re))
         }
     }
 
-    #[inline]
+    // Only substring tests are safe on the whole file. Regexes can observe
+    // boundaries introduced by splitting lines and removing their terminators.
+    fn may_match_whole_file(&self, content: &[u8]) -> bool {
+        match self {
+            Self::LiteralSensitive(finder) => finder.find(content).is_some(),
+            Self::LiteralInsensitive(re) => re.is_match(content),
+            Self::Regex(_) => true,
+        }
+    }
+
     fn matches_line(&self, line: &[u8]) -> bool {
         match self {
             Self::LiteralSensitive(finder) => finder.find(line).is_some(),
-            Self::LiteralAsciiInsensitive {
-                lower,
-                first_lo,
-                first_hi,
-            } => ascii_ci_contains(line, lower, *first_lo, *first_hi),
-            Self::BytesRegex { re, .. } => re.is_match(line),
+            Self::LiteralInsensitive(re) | Self::Regex(re) => re.is_match(line),
         }
     }
-}
-
-#[inline]
-fn ascii_ci_contains(haystack: &[u8], lower_needle: &[u8], first_lo: u8, first_hi: u8) -> bool {
-    let needle_len = lower_needle.len();
-    if needle_len == 0 {
-        return true;
-    }
-    if haystack.len() < needle_len {
-        return false;
-    }
-    let last_start = haystack.len() - needle_len;
-    let search_slice = &haystack[..=last_start];
-    if first_lo == first_hi {
-        for pos in memchr::memchr_iter(first_lo, search_slice) {
-            if haystack[pos..pos + needle_len].eq_ignore_ascii_case(lower_needle) {
-                return true;
-            }
-        }
-    } else {
-        for pos in memchr::memchr2_iter(first_lo, first_hi, search_slice) {
-            if haystack[pos..pos + needle_len].eq_ignore_ascii_case(lower_needle) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 fn decode_into_buf(encoding: &'static Encoding, src: &[u8], dst: &mut Vec<u8>) {
@@ -849,44 +750,50 @@ fn decode_into_buf(encoding: &'static Encoding, src: &[u8], dst: &mut Vec<u8>) {
 /// Detect BOM / binary / UTF-8 / GB18030 and return searchable UTF-8 bytes without
 /// copying valid UTF-8 files. Returns `None` for binary files.
 fn decode_file_content<'a>(raw: &'a [u8], decode_buf: &'a mut Vec<u8>) -> Option<&'a [u8]> {
-    if let Some(rest) = raw.strip_prefix(b"\xFF\xFE") {
-        decode_into_buf(UTF_16LE, rest, decode_buf);
-        let probe_len = decode_buf.len().min(8192);
-        if memchr::memchr(0, &decode_buf[..probe_len]).is_some() {
-            return None;
-        }
-        return Some(decode_buf.as_slice());
-    }
-    if let Some(rest) = raw.strip_prefix(b"\xFE\xFF") {
-        decode_into_buf(UTF_16BE, rest, decode_buf);
-        let probe_len = decode_buf.len().min(8192);
-        if memchr::memchr(0, &decode_buf[..probe_len]).is_some() {
-            return None;
-        }
-        return Some(decode_buf.as_slice());
+    if let Some((encoding, rest)) = raw
+        .strip_prefix(b"\xFF\xFE")
+        .map(|rest| (UTF_16LE, rest))
+        .or_else(|| raw.strip_prefix(b"\xFE\xFF").map(|rest| (UTF_16BE, rest)))
+    {
+        decode_into_buf(encoding, rest, decode_buf);
+        return memchr::memchr(0, decode_buf)
+            .is_none()
+            .then_some(decode_buf.as_slice());
     }
 
-    let body = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(raw);
+    let utf8_bom = raw.strip_prefix(b"\xEF\xBB\xBF");
+    let body = utf8_bom.unwrap_or(raw);
     if memchr::memchr(0, body).is_some() {
         return None;
     }
     if std::str::from_utf8(body).is_ok() {
         return Some(body);
     }
-    decode_into_buf(GB18030, body, decode_buf);
+    let encoding = if utf8_bom.is_some() { UTF_8 } else { GB18030 };
+    decode_into_buf(encoding, body, decode_buf);
     Some(decode_buf.as_slice())
 }
 
-#[derive(Clone, Debug)]
-struct GrepMatch {
-    path: String,
-    line: usize,
-    text: String,
-    matched: bool,
+#[derive(Default)]
+struct GrepResults {
+    rows: Vec<(Value, usize)>,
+    bytes: usize,
 }
 
-fn cmp_grep_match(a: &GrepMatch, b: &GrepMatch) -> Ordering {
-    a.path.cmp(&b.path).then_with(|| a.line.cmp(&b.line))
+impl GrepResults {
+    fn push(&mut self, row: Value, limit: usize) -> bool {
+        if self.rows.len() >= limit {
+            return false;
+        }
+        let size = row.to_string().len();
+        let bytes = self.bytes + size + usize::from(!self.rows.is_empty());
+        if bytes > MAX_OUTPUT_BYTES {
+            return false;
+        }
+        self.bytes = bytes;
+        self.rows.push((row, size));
+        true
+    }
 }
 
 struct GrepShared {
@@ -902,14 +809,12 @@ struct GrepShared {
     cancel: CancellationToken,
     visited: AtomicUsize,
     remaining_bytes: AtomicUsize,
-    matched_total: AtomicUsize,
-    approx_output_bytes: AtomicUsize,
     skipped: AtomicUsize,
     skipped_large_files: AtomicUsize,
     truncated: AtomicBool,
     stop: AtomicBool,
     error: Mutex<Option<String>>,
-    collected: Mutex<Vec<GrepMatch>>,
+    collected: Mutex<GrepResults>,
 }
 
 impl GrepShared {
@@ -940,14 +845,30 @@ fn reserve_read_budget(remaining: &AtomicUsize, need: usize) -> bool {
     }
 }
 
+fn read_with_budget(
+    reader: impl Read,
+    size: usize,
+    remaining: &AtomicUsize,
+    buf: &mut Vec<u8>,
+) -> Option<io::Result<usize>> {
+    if !reserve_read_budget(remaining, size) {
+        return None;
+    }
+    // The size verified on the open handle bounds this read, including when
+    // another process appends to the file. Refund bytes never read on short reads.
+    buf.clear();
+    buf.reserve(size);
+    let result = reader.take(size as u64).read_to_end(buf);
+    remaining.fetch_add(size - buf.len(), AtomicOrdering::Relaxed);
+    Some(result)
+}
+
 struct GrepWorker {
     shared: Arc<GrepShared>,
     raw_buf: Vec<u8>,
     decode_buf: Vec<u8>,
-    local_matches: Vec<GrepMatch>,
     local_skipped: usize,
     local_skipped_large: usize,
-    since_deadline_check: usize,
 }
 
 impl GrepWorker {
@@ -956,10 +877,8 @@ impl GrepWorker {
             shared,
             raw_buf: Vec::with_capacity(WORKER_BUF_INIT),
             decode_buf: Vec::with_capacity(WORKER_BUF_INIT),
-            local_matches: Vec::new(),
             local_skipped: 0,
             local_skipped_large: 0,
-            since_deadline_check: 0,
         }
     }
 
@@ -971,8 +890,7 @@ impl GrepWorker {
             self.shared.set_error("文件检索已取消。");
             return WalkState::Quit;
         }
-        self.since_deadline_check += 1;
-        if self.since_deadline_check.is_multiple_of(8) && Instant::now() >= self.shared.deadline {
+        if Instant::now() >= self.shared.deadline {
             self.shared
                 .set_error("文件检索超过 30 秒，请缩小检索范围。");
             return WalkState::Quit;
@@ -995,16 +913,16 @@ impl GrepWorker {
         }
 
         let path = entry.path();
-        let (display, rel_to_root) =
-            path_match_keys(path, &self.shared.relative_root, &self.shared.root);
-        if !passes_path_filters(
-            &display,
-            rel_to_root.as_deref(),
-            self.shared.include.as_ref(),
-            &self.shared.excludes,
-        ) {
+        let keys = PathMatchKeys::new(
+            path,
+            &self.shared.relative_root,
+            &self.shared.root,
+            self.shared.include.is_some() || !self.shared.excludes.is_empty(),
+        );
+        if !keys.passes(self.shared.include.as_ref(), &self.shared.excludes) {
             return WalkState::Continue;
         }
+        let display = keys.display;
 
         let (file, file_size) = match self.shared.session.open_file(path) {
             Ok(pair) => pair,
@@ -1021,75 +939,78 @@ impl GrepWorker {
             self.local_skipped_large += 1;
             return WalkState::Continue;
         }
-        if !reserve_read_budget(&self.shared.remaining_bytes, file_size as usize) {
-            self.shared
-                .set_error("内容检索超过 256 MiB，请缩小检索范围。");
+        if self.shared.stop.load(AtomicOrdering::Relaxed) {
             return WalkState::Quit;
         }
-
-        self.raw_buf.clear();
-        let mut reader = file.take(MAX_FILE_BYTES + 1);
-        if reader.read_to_end(&mut self.raw_buf).is_err() {
-            self.local_skipped += 1;
-            return WalkState::Continue;
-        }
-        if self.raw_buf.len() as u64 > MAX_FILE_BYTES {
-            self.local_skipped += 1;
-            self.local_skipped_large += 1;
-            shrink_if_large(&mut self.raw_buf);
-            return WalkState::Continue;
-        }
-
-        let Some(content) = decode_file_content(&self.raw_buf, &mut self.decode_buf) else {
-            shrink_if_large(&mut self.raw_buf);
-            shrink_if_large(&mut self.decode_buf);
-            return WalkState::Continue;
-        };
-
-        if self.shared.matcher.matches_whole_file(content) {
-            let max_needed = self.shared.limit.saturating_add(1);
-            let before_len = self.local_matches.len();
-            let mut file_truncated = false;
-            scan_content(
-                content,
-                &display,
-                &self.shared.matcher,
-                self.shared.context,
-                max_needed,
-                &mut self.local_matches,
-                &mut self.local_skipped,
-                &mut file_truncated,
-            );
-            let added = self.local_matches.len() - before_len;
-            if added > 0 {
-                let added_bytes: usize = self.local_matches[before_len..]
-                    .iter()
-                    .map(|m| m.path.len() + m.text.len() + 56)
-                    .sum();
-                let new_total = self
-                    .shared
-                    .matched_total
-                    .fetch_add(added, AtomicOrdering::Relaxed)
-                    + added;
-                let new_bytes = self
-                    .shared
-                    .approx_output_bytes
-                    .fetch_add(added_bytes, AtomicOrdering::Relaxed)
-                    + added_bytes;
-                if file_truncated || new_total > self.shared.limit || new_bytes >= MAX_OUTPUT_BYTES
-                {
-                    self.shared.truncated.store(true, AtomicOrdering::Relaxed);
-                    self.shared.stop.store(true, AtomicOrdering::Relaxed);
-                    shrink_if_large(&mut self.raw_buf);
-                    shrink_if_large(&mut self.decode_buf);
-                    return WalkState::Quit;
+        match read_with_budget(
+            file,
+            file_size as usize,
+            &self.shared.remaining_bytes,
+            &mut self.raw_buf,
+        ) {
+            Some(Ok(_)) => (),
+            Some(Err(_)) => {
+                self.local_skipped += 1;
+                shrink_if_large(&mut self.raw_buf);
+                return WalkState::Continue;
+            }
+            None => {
+                if !self.shared.stop.swap(true, AtomicOrdering::Relaxed) {
+                    self.shared
+                        .set_error("内容检索超过 256 MiB，请缩小检索范围。");
                 }
+                return WalkState::Quit;
+            }
+        }
+
+        let shared = &self.shared;
+        if let Some(content) = decode_file_content(&self.raw_buf, &mut self.decode_buf) {
+            if let Err(error) = check_search_time(&shared.cancel, shared.deadline) {
+                shared.set_error(&error);
+            } else if !shared.stop.load(AtomicOrdering::Relaxed) {
+                self.local_skipped += scan_content(
+                    content,
+                    &shared.matcher,
+                    shared.context,
+                    |line| {
+                        if shared.stop.load(AtomicOrdering::Relaxed) {
+                            return false;
+                        }
+                        if line.is_multiple_of(256)
+                            && let Err(error) = check_search_time(&shared.cancel, shared.deadline)
+                        {
+                            shared.set_error(&error);
+                            return false;
+                        }
+                        true
+                    },
+                    |line, text, matched| {
+                        let mut collected =
+                            shared.collected.lock().unwrap_or_else(|e| e.into_inner());
+                        if shared.stop.load(AtomicOrdering::Relaxed) {
+                            return false;
+                        }
+                        if !collected.push(
+                            json!({"path": display, "line": line, "text": String::from_utf8_lossy(text), "matched": matched}),
+                            shared.limit,
+                        ) {
+                            shared.truncated.store(true, AtomicOrdering::Relaxed);
+                            shared.stop.store(true, AtomicOrdering::Relaxed);
+                            return false;
+                        }
+                        true
+                    },
+                );
             }
         }
 
         shrink_if_large(&mut self.raw_buf);
         shrink_if_large(&mut self.decode_buf);
-        WalkState::Continue
+        if shared.stop.load(AtomicOrdering::Relaxed) {
+            WalkState::Quit
+        } else {
+            WalkState::Continue
+        }
     }
 }
 
@@ -1105,14 +1026,6 @@ impl Drop for GrepWorker {
                 .skipped_large_files
                 .fetch_add(self.local_skipped_large, AtomicOrdering::Relaxed);
         }
-        if !self.local_matches.is_empty() {
-            let mut collected = self
-                .shared
-                .collected
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            collected.append(&mut self.local_matches);
-        }
     }
 }
 
@@ -1123,80 +1036,66 @@ fn shrink_if_large(buf: &mut Vec<u8>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn scan_content<'a>(
-    content: &'a [u8],
-    display: &str,
+fn scan_content(
+    content: &[u8],
     matcher: &ContentMatcher,
     context: usize,
-    max_file_matches: usize,
-    out: &mut Vec<GrepMatch>,
-    skipped: &mut usize,
-    file_truncated: &mut bool,
-) {
-    let mut before: VecDeque<(usize, &'a [u8])> = VecDeque::with_capacity(context);
+    mut should_continue: impl FnMut(usize) -> bool,
+    mut emit: impl FnMut(usize, &[u8], bool) -> bool,
+) -> usize {
+    let may_match = matcher.may_match_whole_file(content);
+    if !may_match && content.len() <= MAX_LINE_BYTES {
+        return 0;
+    }
+    let mut before = VecDeque::with_capacity(context);
     let mut after = 0usize;
-    let mut line_number = 0usize;
-    let mut start = 0usize;
-    let mut emitted_in_file = 0usize;
+    let mut skipped = 0;
+    let mut start = 0;
 
-    let mut process_line = |raw_line: &'a [u8], out: &mut Vec<GrepMatch>| -> bool {
-        line_number += 1;
+    let ends = memchr::memchr_iter(b'\n', content)
+        .map(|nl| nl + 1)
+        .chain(std::iter::once(content.len()));
+    for (index, end) in ends.enumerate() {
+        if start == end {
+            break;
+        }
+        let line_no = index + 1;
+        if !should_continue(line_no) {
+            break;
+        }
+        let raw_line = &content[start..end];
+        start = end;
         if raw_line.len() > MAX_LINE_BYTES {
-            *skipped += 1;
+            skipped += 1;
             before.clear();
             after = 0;
-            return true;
+            continue;
+        }
+        if !may_match {
+            continue;
         }
         let line = trim_line_end(raw_line);
         let matched = matcher.matches_line(line);
         if matched || after > 0 {
             if matched {
                 while let Some((prev_num, prev_bytes)) = before.pop_front() {
-                    if emitted_in_file >= max_file_matches {
-                        *file_truncated = true;
-                        return false;
+                    if !emit(prev_num, prev_bytes, false) {
+                        return skipped;
                     }
-                    out.push(GrepMatch {
-                        path: display.to_owned(),
-                        line: prev_num,
-                        text: String::from_utf8_lossy(prev_bytes).into_owned(),
-                        matched: false,
-                    });
-                    emitted_in_file += 1;
                 }
             }
-            if emitted_in_file >= max_file_matches {
-                *file_truncated = true;
-                return false;
+            if !emit(line_no, line, matched) {
+                break;
             }
-            out.push(GrepMatch {
-                path: display.to_owned(),
-                line: line_number,
-                text: String::from_utf8_lossy(line).into_owned(),
-                matched,
-            });
-            emitted_in_file += 1;
             after = if matched { context } else { after - 1 };
         } else if context > 0 {
-            before.push_back((line_number, line));
-            if before.len() > context {
+            if before.len() == context {
                 before.pop_front();
             }
+            before.push_back((line_no, line));
         }
-        true
-    };
-
-    for nl_pos in memchr::memchr_iter(b'\n', content) {
-        let end = nl_pos + 1;
-        if !process_line(&content[start..end], out) {
-            return;
-        }
-        start = end;
     }
-    if start < content.len() {
-        let _ = process_line(&content[start..], out);
-    }
+    skipped
 }
 
 #[inline]
@@ -1238,14 +1137,12 @@ fn run_grep(
         cancel: cancel.clone(),
         visited: AtomicUsize::new(0),
         remaining_bytes: AtomicUsize::new(MAX_TOTAL_READ_BYTES),
-        matched_total: AtomicUsize::new(0),
-        approx_output_bytes: AtomicUsize::new(WRAPPER_RESERVE_BYTES),
         skipped: AtomicUsize::new(0),
         skipped_large_files: AtomicUsize::new(0),
         truncated: AtomicBool::new(false),
         stop: AtomicBool::new(false),
         error: Mutex::new(None),
-        collected: Mutex::new(Vec::new()),
+        collected: Mutex::new(GrepResults::default()),
     });
 
     walker.build_parallel().run(|| {
@@ -1262,35 +1159,28 @@ fn run_grep(
         return Err(err);
     }
 
-    let mut collected =
-        std::mem::take(&mut *shared.collected.lock().unwrap_or_else(|e| e.into_inner()));
-    collected.sort_by(cmp_grep_match);
-
-    let mut matches = Vec::with_capacity(collected.len().min(limit));
-    let mut output_bytes = WRAPPER_RESERVE_BYTES;
-    let mut truncated = shared.truncated.load(AtomicOrdering::Relaxed);
-    for item in collected {
-        if !push_bounded(
-            &mut matches,
-            &mut output_bytes,
-            json!({
-                "path": item.path,
-                "line": item.line,
-                "text": item.text,
-                "matched": item.matched
-            }),
-            limit,
-        )? {
-            truncated = true;
-            break;
-        }
-    }
+    check_search_time(cancel, deadline)?;
+    let mut collected = std::mem::take(
+        &mut shared
+            .collected
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .rows,
+    );
+    collected.sort_by(|(a, _), (b, _)| {
+        a["path"]
+            .as_str()
+            .cmp(&b["path"].as_str())
+            .then_with(|| a["line"].as_u64().cmp(&b["line"].as_u64()))
+    });
 
     let skipped = shared.skipped.load(AtomicOrdering::Relaxed);
     let skipped_large = shared.skipped_large_files.load(AtomicOrdering::Relaxed);
     let mut obj = Map::new();
-    obj.insert("matches".into(), Value::Array(matches));
-    obj.insert("truncated".into(), Value::Bool(truncated));
+    obj.insert(
+        "truncated".into(),
+        Value::Bool(shared.truncated.load(AtomicOrdering::Relaxed)),
+    );
     obj.insert("skipped".into(), json!(skipped));
     if skipped_large > 0 {
         obj.insert("skippedLargeFiles".into(), json!(skipped_large));
@@ -1301,23 +1191,43 @@ fn run_grep(
             )),
         );
     }
-    Ok(Value::Object(obj))
+    Ok(bounded_output(
+        obj,
+        collected.into_iter().map(|(row, size)| (row, Some(size))),
+        limit,
+    ))
 }
 
 // ============================================================================
 // Shared Helpers
 // ============================================================================
 
-fn search_root(cwd: &Path, filter: Option<&str>) -> Result<(PathBuf, Option<GlobSet>), String> {
+fn search_root(
+    session: &PathGuardSession,
+    cwd: &Path,
+    filter: Option<&str>,
+) -> Result<(PathBuf, Option<GlobSet>), String> {
     let Some(filter) = filter.filter(|s| !s.is_empty()) else {
         return Ok((cwd.into(), None));
     };
     let path = cwd.join(filter);
+    session.verify_requested(&path)?;
     if path.exists() {
         return Ok((path, None));
     }
-    if filter.contains(['*', '?', '[', '{']) {
-        return Ok((cwd.into(), Some(globs(&[filter.into()])?)));
+
+    let normalized = normalize_path(Path::new(filter));
+    if let Some(wildcard) = normalized.find(['*', '?', '[', '{']) {
+        if Path::new(filter).is_absolute()
+            && let Some(separator) = normalized[..wildcard].rfind('/')
+        {
+            let suffix = &normalized[separator + 1..];
+            return Ok((
+                PathBuf::from(&normalized[..=separator]),
+                Some(globs(&[suffix.into()])?),
+            ));
+        }
+        return Ok((cwd.into(), Some(globs(&[normalized])?)));
     }
     Err("检索路径不存在。".into())
 }
@@ -1325,8 +1235,9 @@ fn search_root(cwd: &Path, filter: Option<&str>) -> Result<(PathBuf, Option<Glob
 fn globs(patterns: &[String]) -> Result<GlobSet, String> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        let pattern = pattern.replace('\\', "/");
+        let pattern = normalize_path(Path::new(pattern));
         let glob = GlobBuilder::new(&pattern)
+            .case_insensitive(cfg!(windows))
             .literal_separator(false)
             .build()
             .map_err(|_| "路径过滤表达式无效。".to_owned())?;
@@ -1334,6 +1245,7 @@ fn globs(patterns: &[String]) -> Result<GlobSet, String> {
         if pattern.ends_with('/') {
             builder.add(
                 GlobBuilder::new(&format!("{pattern}**"))
+                    .case_insensitive(cfg!(windows))
                     .literal_separator(false)
                     .build()
                     .map_err(|_| "路径排除表达式无效。".to_owned())?,
@@ -1343,22 +1255,39 @@ fn globs(patterns: &[String]) -> Result<GlobSet, String> {
     builder.build().map_err(|_| "路径过滤表达式无效。".into())
 }
 
-fn push_bounded(
-    matches: &mut Vec<Value>,
-    bytes: &mut usize,
-    value: Value,
-    limit: usize,
-) -> Result<bool, String> {
-    let size = serde_json::to_vec(&value)
-        .map_err(|_| "检索结果无法编码。")?
-        .len()
-        + 1;
-    if matches.len() >= limit || *bytes + size > MAX_OUTPUT_BYTES {
-        return Ok(false);
+fn check_search_time(cancel: &CancellationToken, deadline: Instant) -> Result<(), String> {
+    if cancel.is_cancelled() {
+        return Err("文件检索已取消。".into());
     }
-    *bytes += size;
-    matches.push(value);
-    Ok(true)
+    if Instant::now() >= deadline {
+        return Err("文件检索超过 30 秒，请缩小检索范围。".into());
+    }
+    Ok(())
+}
+
+fn bounded_output(
+    mut obj: Map<String, Value>,
+    rows: impl IntoIterator<Item = (Value, Option<usize>)>,
+    limit: usize,
+) -> Value {
+    obj.insert("matches".into(), Value::Array(Vec::new()));
+    let mut output = Value::Object(obj);
+    let mut bytes = output.to_string().len();
+    let matches = output["matches"]
+        .as_array_mut()
+        .expect("matches is an array");
+    for (row, size) in rows {
+        let next_bytes = bytes
+            + size.unwrap_or_else(|| row.to_string().len())
+            + usize::from(!matches.is_empty());
+        if matches.len() == limit || next_bytes > MAX_OUTPUT_BYTES {
+            output["truncated"] = Value::Bool(true);
+            break;
+        }
+        bytes = next_bytes;
+        matches.push(row);
+    }
+    output
 }
 
 #[cfg(test)]
@@ -1400,9 +1329,15 @@ mod tests {
                 "pattern": "needle", "path": "needle.*"
             }))
             .unwrap();
-            let value =
-                search_with_session(&session, &cwd, input, content, &CancellationToken::new())
-                    .unwrap();
+            let value = search_with_session(
+                &session,
+                &cwd,
+                input,
+                content,
+                &CancellationToken::new(),
+                Instant::now() + SEARCH_TIMEOUT,
+            )
+            .unwrap();
             assert_eq!(value["matches"].as_array().unwrap().len(), 1);
             assert!(
                 session.check_count() <= max_checks,
@@ -1553,6 +1488,211 @@ mod tests {
     }
 
     #[test]
+    fn regex_preserves_line_anchors_crlf_and_unicode_case_folding() {
+        let content = b"header\r\nneedle\r\r\nneedle\nfinal";
+        for pattern in [
+            r"^needle$",
+            r"(?-m:^needle$)",
+            r"\Aneedle\z",
+            r"(?mR:^needle$)",
+        ] {
+            let matcher = ContentMatcher::build(pattern, false, true).unwrap();
+            let mut matches = Vec::new();
+            assert_eq!(
+                scan_content(
+                    content,
+                    &matcher,
+                    0,
+                    |_| true,
+                    |line, text, matched| {
+                        assert!(matched);
+                        assert_eq!(text, b"needle");
+                        matches.push(line);
+                        true
+                    }
+                ),
+                0
+            );
+            assert_eq!(matches, [2, 3]);
+        }
+        let matcher = ContentMatcher::build("k", true, false).unwrap();
+        assert!(matcher.may_match_whole_file("K".as_bytes()));
+        assert!(matcher.matches_line("K".as_bytes()));
+        assert!(
+            !ContentMatcher::build("K", true, true)
+                .unwrap()
+                .matches_line(b"k")
+        );
+    }
+
+    #[test]
+    fn literal_prefilter_keeps_oversized_line_accounting() {
+        let mut content = vec![b'a'; MAX_LINE_BYTES];
+        content.extend_from_slice(b"\r\nshort\n");
+        let matcher = ContentMatcher::build("needle", true, true).unwrap();
+        assert_eq!(
+            scan_content(
+                &content,
+                &matcher,
+                0,
+                |_| true,
+                |_, _, _| panic!("unexpected match")
+            ),
+            1,
+        );
+    }
+
+    #[test]
+    fn decoding_handles_four_byte_characters_nul_and_invalid_sequences() {
+        let mut buffer = Vec::with_capacity(1);
+        for (little_endian, bom) in [(true, [0xff, 0xfe]), (false, [0xfe, 0xff])] {
+            let encode = |text: &str| {
+                bom.into_iter()
+                    .chain(text.encode_utf16().flat_map(|unit| {
+                        if little_endian {
+                            unit.to_le_bytes()
+                        } else {
+                            unit.to_be_bytes()
+                        }
+                    }))
+                    .collect::<Vec<u8>>()
+            };
+            let raw = encode("A𠮷\r\n");
+            assert_eq!(
+                decode_file_content(&raw, &mut buffer),
+                Some("A𠮷\r\n".as_bytes())
+            );
+            let with_nul = encode(&format!("{}\0", "a".repeat(MAX_LINE_BYTES + 1)));
+            assert!(decode_file_content(&with_nul, &mut buffer).is_none());
+            let mut odd = encode("A");
+            odd.push(0x61);
+            assert_eq!(
+                decode_file_content(&odd, &mut buffer),
+                Some("A\u{fffd}".as_bytes())
+            );
+        }
+        let (gb, _, had_errors) = GB18030.encode("A𠮷");
+        assert!(!had_errors);
+        assert_eq!(
+            decode_file_content(&gb, &mut buffer),
+            Some("A𠮷".as_bytes())
+        );
+        assert_eq!(
+            decode_file_content(b"\xef\xbb\xbfA\xff", &mut buffer),
+            Some("A\u{fffd}".as_bytes())
+        );
+    }
+
+    #[test]
+    fn verified_length_bounds_reads_and_refunds_unused_bytes() {
+        let remaining = AtomicUsize::new(5);
+        let mut buffer = Vec::new();
+        assert!(read_with_budget(&b"abcdef"[..], 6, &remaining, &mut buffer).is_none());
+        assert_eq!(remaining.load(AtomicOrdering::Relaxed), 5);
+        assert_eq!(
+            read_with_budget(&b"abcdef"[..], 3, &remaining, &mut buffer)
+                .unwrap()
+                .unwrap(),
+            3
+        );
+        assert_eq!(buffer, b"abc");
+        assert_eq!(
+            read_with_budget(&b"x"[..], 2, &remaining, &mut buffer)
+                .unwrap()
+                .unwrap(),
+            1
+        );
+        assert_eq!(buffer, b"x");
+        assert_eq!(remaining.load(AtomicOrdering::Relaxed), 1);
+    }
+
+    #[test]
+    fn concurrent_budget_reservations_never_overdraw() {
+        let budget = AtomicUsize::new(3201);
+        let granted = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    while reserve_read_budget(&budget, 3) {
+                        granted.fetch_add(3, AtomicOrdering::Relaxed);
+                    }
+                });
+            }
+        });
+        assert_eq!(granted.load(AtomicOrdering::Relaxed), 3201);
+        assert_eq!(budget.load(AtomicOrdering::Relaxed), 0);
+    }
+
+    #[test]
+    fn output_cap_includes_the_wrapper_and_json_escaping() {
+        let mut obj = Map::new();
+        obj.insert("truncated".into(), json!(false));
+        let baseline = bounded_output(obj.clone(), [], 1).to_string().len();
+        let padding = MAX_OUTPUT_BYTES - baseline - json!("\"").to_string().len();
+        let row = json!(format!("\"{}", "a".repeat(padding)));
+        let output = bounded_output(obj.clone(), [(row.clone(), None)], 1);
+        assert_eq!(output.to_string().len(), MAX_OUTPUT_BYTES);
+        assert_eq!(output["truncated"], false);
+        let output = bounded_output(obj, [(row, None), (json!(null), None)], 2);
+        assert_eq!(output["truncated"], true);
+        assert_eq!(output["matches"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn fff_exact_limit_and_ranked_top_k() {
+        let cwd = std::env::temp_dir().join(format!("cst-fff-limit-{}", uuid::Uuid::new_v4()));
+        for dir in ["a", "b", "c"] {
+            std::fs::create_dir_all(cwd.join(dir)).unwrap();
+            for n in 0..6 {
+                std::fs::write(cwd.join(dir).join(format!("match-{n}.txt")), b"match\r\n").unwrap();
+            }
+        }
+        let guard = PathGuard::new(&cwd).unwrap();
+        for (pattern, content) in [("", false), ("match", false), ("match", true)] {
+            let run = |limit| {
+                search(
+                    &guard,
+                    &cwd,
+                    serde_json::from_value(json!({"pattern": pattern, "limit": limit})).unwrap(),
+                    content,
+                    &CancellationToken::new(),
+                )
+                .unwrap()
+            };
+            let exact = run(18);
+            assert_eq!(exact["matches"].as_array().unwrap().len(), 18);
+            assert_eq!(exact["truncated"], false);
+            let limited = run(2);
+            assert_eq!(limited["matches"].as_array().unwrap().len(), 2);
+            assert_eq!(limited["truncated"], true);
+            if !content && !pattern.is_empty() {
+                assert_eq!(
+                    limited["matches"].as_array().unwrap().as_slice(),
+                    &exact["matches"].as_array().unwrap()[..2]
+                );
+            }
+        }
+        std::fs::remove_dir_all(cwd).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cross_drive_filters_match_absolute_and_search_relative_keys() {
+        let keys = PathMatchKeys::new(
+            Path::new(r"\\?\D:\logs\nested\report.txt"),
+            Path::new(r"\\?\C:\kit"),
+            Path::new(r"\\?\D:\logs"),
+            true,
+        );
+        let include = globs(&[r"nested\*.txt".into()]).unwrap();
+        let empty = globs(&[]).unwrap();
+        assert!(keys.passes(Some(&include), &empty));
+        let exclude = globs(&[r"d:\LOGS\nested\".into()]).unwrap();
+        assert!(!keys.passes(Some(&include), &exclude));
+        assert_eq!(keys.display, "D:/logs/nested/report.txt");
+    }
+
+    #[test]
     fn fff_exclude_works_consistently_for_external_absolute_path() {
         let root_a = std::env::temp_dir().join(format!("cst-fff-ext-a-{}", uuid::Uuid::new_v4()));
         let root_b = std::env::temp_dir().join(format!("cst-fff-ext-b-{}", uuid::Uuid::new_v4()));
@@ -1578,6 +1718,20 @@ mod tests {
             assert!(!path.contains('\\'));
         }
 
+        let absolute_pattern = format!("{}/*.txt", normalize_path(&root_b));
+        let exclude = normalize_path(&root_b.join("sub")) + "/";
+        for content in [false, true] {
+            let input = serde_json::from_value(json!({
+                "pattern": if content { "needle" } else { "e" },
+                "path": absolute_pattern,
+                "exclude": [exclude],
+            }))
+            .unwrap();
+            let value = search(&guard, &root_a, input, content, &CancellationToken::new()).unwrap();
+            let matches = value["matches"].as_array().unwrap();
+            assert_eq!(matches.len(), 1);
+            assert!(matches[0]["path"].as_str().unwrap().ends_with("/keep.txt"));
+        }
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
     }

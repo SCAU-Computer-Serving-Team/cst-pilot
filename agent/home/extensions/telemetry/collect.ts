@@ -158,8 +158,8 @@ function readDegraded(toolName: string, scope: string | undefined, result: unkno
 	}
 	if (toolName === "disk") {
 		if ((details as { degraded?: unknown }).degraded === true) return true;
-		const usage = details.usage as { method?: string; degradedFrom?: string } | undefined;
-		return usage?.method === "node-walk" || (usage?.degradedFrom ?? "") !== "";
+		const usage = details.usage as { truncated?: boolean; denied?: unknown[] } | undefined;
+		return usage?.truncated === true || (Array.isArray(usage?.denied) && usage.denied.length > 0);
 	}
 	if (toolName === "sys" || toolName === "driver" || toolName === "eventlog") {
 		const byScope = details[scope ?? ""] as { degraded?: unknown } | undefined;

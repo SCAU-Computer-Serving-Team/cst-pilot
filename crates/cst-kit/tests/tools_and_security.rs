@@ -137,6 +137,27 @@ fn every_credential_and_state_path_is_blocked_but_normal_documents_work() {
 }
 
 #[test]
+fn directory_pruning_distinguishes_state_from_ordinary_siblings() {
+    let fixture = Fixture::new();
+    fixture.write(".state/nested/item.txt", "fixture");
+    fixture.write(".state-notes/report.txt", "public");
+    let session = fixture.guard().session();
+
+    for dir in [".state", ".state/nested"] {
+        assert!(!session.allow_walk_dir(&fixture.path(dir)));
+    }
+    assert!(session.allow_walk_dir(&fixture.path(".state-notes")));
+    assert!(!session.allow_walk_dir(&fixture.path(".state-notes/report.txt")));
+    assert_eq!(
+        session
+            .open_file(fixture.path(".state-notes/report.txt"))
+            .unwrap()
+            .1,
+        6
+    );
+}
+
+#[test]
 fn traversal_and_hard_link_aliases_cannot_read_credentials() {
     let fixture = Fixture::new();
     fixture.write("data/config/auth.json", "synthetic-test-secret");
