@@ -897,6 +897,30 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         window.render_frame(cx);
         assert!(window.find("branch-tree-view").visible());
         assert!(window.try_find("branch-tree-kbd-hint-na2qi").is_none());
+        // Mouse entry via collapsed sidebar menu focuses tree WITHOUT activating keyboard brackets.
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_focused(window)
+        );
+        assert!(
+            !shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
+        // First arrow key illuminates current leaf without skipping.
+        window.press("down", cx);
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
         window.press("ctrl-o", cx);
         assert!(window.find("command-palette-modal-i70mz").visible());
         assert_eq!(
@@ -948,13 +972,154 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .await;
 
-    // Return from branch tree & re-expand sidebar before testing `ExportView` via `session-header-more-btn`
+    // Return from branch tree & re-expand sidebar before testing expanded-sidebar D2 + focus restore & `ExportView`
     cx.update_window(win_handle, |_, window, cx| {
         if window.try_find("branch-tree-close-btn").is_some() {
             window.click("branch-tree-close-btn", cx);
         }
         window.click("topbar-expand-sidebar-btn", cx);
         window.render_frame(cx);
+    })
+    .unwrap();
+
+    // 4c. Expanded-sidebar mouse entry (`session-header-more-btn` -> `session-header-tree-btn`)
+    // suppresses initial brackets, activates on first arrow key, and restores focus to `header_more_focus` on Esc.
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("session-header-more-btn", cx);
+        window.render_frame(cx);
+        window.click("session-header-tree-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("branch-tree-view").is_some()
+            && window.try_find("tree-node-row-e-user-1").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_focused(window)
+        );
+        assert!(
+            !shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
+        window.press("down", cx);
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
+        window.press("escape", cx);
+    })
+    .unwrap();
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("branch-tree-view").is_none());
+        assert_eq!(shell.read(cx).route(), ShellRoute::Session);
+        assert!(
+            shell
+                .read(cx)
+                .workbench()
+                .read(cx)
+                .header_more_focus()
+                .is_focused(window),
+            "closing BranchTree opened from expanded header menu must restore focus to session-header-more-btn"
+        );
+
+        // Keyboard entry via `Ctrl+P` -> 分支树 immediately activates brackets.
+        window.press("ctrl-p", cx);
+        window.input("tree", cx);
+    })
+    .unwrap();
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("enter", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("branch-tree-view").is_some()
+            && window.try_find("tree-node-row-e-user-1").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_focused(window)
+        );
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
+
+        // Navigate away to Settings and return via `navigate_back` -> brackets suppressed,
+        // and closing tree restores focus to chat composer (not shell root).
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        window.render_frame(cx);
+        window.click("settings-subpage-header-back-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("branch-tree-view").is_some()
+            && window.try_find("tree-node-row-e-user-1").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_focused(window)
+        );
+        assert!(
+            !shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .is_keyboard_active()
+        );
+        window.press("escape", cx);
+    })
+    .unwrap();
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("branch-tree-view").is_none());
+        assert_eq!(shell.read(cx).route(), ShellRoute::Session);
+        assert!(
+            shell
+                .read(cx)
+                .workbench()
+                .read(cx)
+                .session_composer_focus(cx)
+                .is_focused(window),
+            "closing BranchTree reached via navigate_back must restore focus to session composer"
+        );
     })
     .unwrap();
 

@@ -34,8 +34,13 @@ use crate::workbench::queue_bar::VisibleQueueItem;
 #[derive(Debug, Clone)]
 pub enum WorkbenchEvent {
     ActivatedSession(String),
-    MissingCredentials { provider: String },
-    OpenSlashRoute(SlashNavigationTarget),
+    MissingCredentials {
+        provider: String,
+    },
+    OpenSlashRoute {
+        target: SlashNavigationTarget,
+        from_keyboard: bool,
+    },
     OpenAccountPage,
     WorkspaceError(String),
     TopNotice(String),
@@ -247,6 +252,14 @@ impl WorkbenchView {
         });
     }
 
+    pub fn session_composer_focus(&self, cx: &gpui::App) -> FocusHandle {
+        self.session_composer.read(cx).focus_handle(cx)
+    }
+
+    pub fn header_more_focus(&self) -> FocusHandle {
+        self.header_more_focus.clone()
+    }
+
     pub fn dismiss_composer_popovers(&mut self, cx: &mut Context<Self>) -> bool {
         let mut closed = false;
         if self.header_menu_open {
@@ -437,7 +450,10 @@ impl WorkbenchView {
                     }
                     return;
                 }
-                cx.emit(WorkbenchEvent::OpenSlashRoute(*target));
+                cx.emit(WorkbenchEvent::OpenSlashRoute {
+                    target: *target,
+                    from_keyboard: true,
+                });
             }
             ComposerHostEvent::OpenAccountPage => {
                 cx.emit(WorkbenchEvent::OpenAccountPage);
@@ -614,6 +630,7 @@ impl Render for WorkbenchView {
                                 this.header_menu_open = !this.header_menu_open;
                                 if this.header_menu_open {
                                     this.header_menu_prior_focus = w.focused(cx);
+                                    this.header_more_focus.focus(w, cx);
                                 }
                                 cx.notify();
                             });
@@ -705,9 +722,10 @@ impl Render for WorkbenchView {
                             .on_click(move |_, _, cx| {
                                 ent_tree.update(cx, |this, cx| {
                                     this.header_menu_open = false;
-                                    cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                        SlashNavigationTarget::Tree,
-                                    ));
+                                    cx.emit(WorkbenchEvent::OpenSlashRoute {
+                                        target: SlashNavigationTarget::Tree,
+                                        from_keyboard: false,
+                                    });
                                     cx.notify();
                                 });
                             })
@@ -735,9 +753,10 @@ impl Render for WorkbenchView {
                             .on_click(move |_, _, cx| {
                                 ent_exp.update(cx, |this, cx| {
                                     this.header_menu_open = false;
-                                    cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                        SlashNavigationTarget::Export,
-                                    ));
+                                    cx.emit(WorkbenchEvent::OpenSlashRoute {
+                                        target: SlashNavigationTarget::Export,
+                                        from_keyboard: false,
+                                    });
                                     cx.notify();
                                 });
                             })

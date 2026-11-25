@@ -677,7 +677,46 @@ impl AppShell {
             Some(motion::RouteTransitionKind::SlideBackward),
             cx,
         );
-        self.restore_surface_focus(prior, window, cx);
+        if self.exit_dialog.is_some()
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+        {
+            self.restore_surface_focus(None, window, cx);
+            return;
+        }
+        let wb = self.workbench.read(cx);
+        let header_more = wb.header_more_focus();
+        let composer_focus = wb.session_composer_focus(cx);
+        let target = match prior {
+            Some(focus) if focus == header_more && self.sidebar_collapsed => {
+                self.topbar_session_more_focus.clone()
+            }
+            Some(focus) if focus == self.topbar_session_more_focus && !self.sidebar_collapsed => {
+                header_more
+            }
+            Some(focus) if focus != self.root_focus => focus,
+            _ => composer_focus,
+        };
+        target.focus(window, cx);
+        let weak = cx.entity().downgrade();
+        let verify_target = target.clone();
+        window.on_next_frame(move |window, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                if this.route == ShellRoute::Session
+                    && this.session_subview == SessionSubView::Chat
+                    && this.exit_dialog.is_none()
+                    && this.snapshot.channel_mode != ChannelModeDto::WebActive
+                    && !this.update_dialog.open
+                    && this.missing_key_modal.is_none()
+                    && window.focused(cx).as_ref() == Some(&verify_target)
+                    && !this.root_focus.contains(&verify_target, window)
+                {
+                    let fallback = this.workbench.read(cx).session_composer_focus(cx);
+                    fallback.focus(window, cx);
+                }
+            });
+        });
     }
 
     fn navigate_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -723,7 +762,7 @@ impl AppShell {
             self.root_focus.focus(window, cx);
         }
         if let Some(id) = session_id {
-            self.initialize_session_subview(dest_subview, id, window, cx);
+            self.initialize_session_subview(dest_subview, id, false, window, cx);
         }
     }
 
@@ -1491,7 +1530,7 @@ impl AppShell {
             }
             PaletteCommandTarget::SlashTree => {
                 if let Some(sid) = active_sid {
-                    self.open_session_tree(sid, window, cx);
+                    self.open_session_tree(sid, true, window, cx);
                 } else {
                     self.show_top_notice("请先进入一个会话后再查看分支树。", cx);
                 }
@@ -1591,31 +1630,54 @@ impl AppShell {
         }
     }
 
-    fn open_session_tree(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
-        let prior = window.focused(cx);
+    pub(super) fn open_session_tree(
+        &mut self,
+        sid: String,
+        from_keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prior = window
+            .focused(cx)
+            .filter(|focus| focus != &self.root_focus)
+            .or_else(|| Some(self.workbench.read(cx).session_composer_focus(cx)));
         self.set_workspace_route(ShellRoute::Session, SessionSubView::Tree, cx);
         self.session_subview_prior_focus = prior;
-        self.initialize_session_subview(SessionSubView::Tree, sid, window, cx);
+        self.initialize_session_subview(SessionSubView::Tree, sid, from_keyboard, window, cx);
     }
 
     fn open_session_export(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
-        let prior = window.focused(cx);
+        let prior = window
+            .focused(cx)
+            .filter(|focus| focus != &self.root_focus)
+            .or_else(|| Some(self.workbench.read(cx).session_composer_focus(cx)));
         self.set_workspace_route(ShellRoute::Session, SessionSubView::Export, cx);
         self.session_subview_prior_focus = prior;
-        self.initialize_session_subview(SessionSubView::Export, sid, window, cx);
+        self.initialize_session_subview(SessionSubView::Export, sid, false, window, cx);
     }
 
     fn initialize_session_subview(
         &mut self,
         subview: SessionSubView,
         sid: String,
+        from_keyboard: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(subview, SessionSubView::Tree | SessionSubView::Export)
+            && self.session_subview_prior_focus.is_none()
+        {
+            self.session_subview_prior_focus =
+                Some(self.workbench.read(cx).session_composer_focus(cx));
+        }
         match subview {
             SessionSubView::Tree => self.branch_tree_view.update(cx, |view, cx| {
                 view.set_session_id(sid, window, cx);
-                view.focus_from_keyboard(window, cx);
+                if from_keyboard {
+                    view.focus_from_keyboard(window, cx);
+                } else {
+                    view.focus(window, cx);
+                }
             }),
             SessionSubView::Export => {
                 self.export_view
@@ -2208,14 +2270,17 @@ impl AppShell {
                     cx.notify();
                 }
             }
-            WorkbenchEvent::OpenSlashRoute(target) => {
+            WorkbenchEvent::OpenSlashRoute {
+                target,
+                from_keyboard,
+            } => {
                 let active_sid = self
                     .client
                     .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
                 match target {
                     SlashNavigationTarget::Tree => {
                         if let Some(sid) = active_sid {
-                            self.open_session_tree(sid, window, cx);
+                            self.open_session_tree(sid, *from_keyboard, window, cx);
                         }
                     }
                     SlashNavigationTarget::Export => {

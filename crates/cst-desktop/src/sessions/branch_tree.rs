@@ -1160,6 +1160,21 @@ impl BranchTreeView {
         cx.notify();
     }
 
+    pub fn is_keyboard_active(&self) -> bool {
+        self.keyboard_active
+    }
+
+    pub fn is_focused(&self, window: &Window) -> bool {
+        self.focus_handle.is_focused(window)
+    }
+
+    pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+        self.keyboard_active = false;
+        self.last_pointer_pos = None;
+        cx.notify();
+    }
+
     pub(crate) fn focus_from_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_handle.focus(window, cx);
         self.keyboard_active = true;
