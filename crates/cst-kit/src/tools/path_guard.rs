@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::fs::{File, Metadata};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use cst_os::KitLayout;
 use pi_runtime::ReadOperations;
@@ -49,6 +50,9 @@ struct SessionInner {
     secret_paths: [PathBuf; 5],
     secret_keys: Vec<String>,
     secret_identities: Vec<FileIdentity>,
+    /// Canonical ancestor directories already verified not to match `state_identity`
+    /// during this single operation. Dropped with the session; never persists across calls.
+    verified_non_state_dirs: RwLock<HashSet<String>>,
     #[cfg(test)]
     checks: AtomicUsize,
 }
@@ -103,6 +107,7 @@ impl PathGuard {
                 secret_paths,
                 secret_keys,
                 secret_identities,
+                verified_non_state_dirs: RwLock::new(HashSet::new()),
                 #[cfg(test)]
                 checks: AtomicUsize::new(0),
             }),
@@ -195,11 +200,8 @@ impl PathGuardSession {
                 return Err(denied());
             }
             // A canonical name can still use an alternate volume or mount name.
-            for ancestor in resolved.ancestors().skip(1) {
-                if path_meta(ancestor).is_ok_and(|meta| meta.identity == state_id) {
-                    return Err(denied());
-                }
-            }
+            // Deduplicate verified canonical ancestor directories within this single session.
+            self.verify_ancestors_not_state(resolved, state_id)?;
         }
 
         if meta.is_file {
@@ -207,6 +209,55 @@ impl PathGuardSession {
                 0 => return Err(denied()),
                 1 => (),
                 _ => self.verify_hard_link(meta.identity)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_ancestors_not_state(
+        &self,
+        resolved: &Path,
+        state_id: FileIdentity,
+    ) -> Result<(), String> {
+        let Some(parent) = resolved.parent() else {
+            return Ok(());
+        };
+        let parent_key = path_key(parent);
+        if self
+            .inner
+            .verified_non_state_dirs
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&parent_key)
+        {
+            return Ok(());
+        }
+
+        let mut newly_verified = Vec::new();
+        for ancestor in resolved.ancestors().skip(1) {
+            let key = path_key(ancestor);
+            if self
+                .inner
+                .verified_non_state_dirs
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&key)
+            {
+                break;
+            }
+            if path_meta(ancestor).is_ok_and(|meta| meta.identity == state_id) {
+                return Err(denied());
+            }
+            newly_verified.push(key);
+        }
+        if !newly_verified.is_empty() {
+            let mut guard = self
+                .inner
+                .verified_non_state_dirs
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            if guard.len() < 16_384 {
+                guard.extend(newly_verified);
             }
         }
         Ok(())
