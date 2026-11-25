@@ -4,7 +4,7 @@
 
 ## 启动提权与便携环境隔离
 
-1. **启动器提权与环境净化**：正式便携启动器（当前由 `launcher.ps1` 承载，阶段 9–10 由原生软件端启动入口承接）校验管理员令牌并通过 Windows UAC 提权，拒绝授权时直接退出。启动器固定设置 `PI_CODING_AGENT_DIR=<工具包>/agent/home` 与 `PI_OFFLINE=1`，将 `TEMP` / `TMP` 重定向至 `.state/tmp/`，清除机主遗留密钥环境变量，并将已有 `wiztree/WizTree3.ini` 重命名为 `WizTree3.ini.bad` 以按机主显示器重建 DPI 状态。
+1. **启动器提权与环境净化**：正式便携启动器（当前由 `launcher.ps1` 承载，阶段 9–10 由原生软件端启动入口承接）校验管理员令牌并通过 Windows UAC 提权，拒绝授权时直接退出。启动器固定设置 `PI_CODING_AGENT_DIR=<工具包>/agent/home` 与 `PI_OFFLINE=1`，将 `TEMP` / `TMP` 重定向至 `.state/tmp/`，清除机主遗留密钥环境变量。
 2. **独立调试模式**：直接运行 `cst-server --standalone-web`（如 `pi-web-rust.cmd`）时跳过 UAC 提权，按当前终端权限启动服务并如实报告权限受限状态。
 3. **单实例互斥**：同一工具包数据目录同一时刻仅允许运行一个 `cst-server` 进程，仅监听回环地址 `127.0.0.1`（默认端口 `52831`，支持按需动态分配空闲端口）。
 

@@ -15,6 +15,12 @@ test('Web backend tests are rejected from release trees', () => {
 
 test("项目AGENTS.md不得进入任何发行目录",()=>{for(const file of ["AGENTS.md","doc/AGENTS.md","agent/home/agents.md"]){assert.throws(()=>checkReleaseTree(".",[file]),/AGENTS.md/);}});
 
+test('发行检查拒绝已移除的组件', () => {
+  for (const file of ['WizTree/WizTree64.exe', 'app/tools/wiztree/license.txt']) {
+    assert.throws(() => checkReleaseTree('.', [file]), /已移除的组件/);
+  }
+});
+
 test('遥测测试和待发队列不得进入发行树', () => {
   assert.throws(()=>checkReleaseTree('.', ['agent/home/extensions/telemetry/test/sender.test.ts']), /Telemetry 测试文件/);
   assert.throws(()=>checkReleaseTree('.', ['agent/home/telemetry/pending-target.jsonl']), /运行状态或凭据路径/);

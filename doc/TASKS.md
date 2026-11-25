@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 阶段 9 | `desktop` | 代码、无头测试与主要双主题真窗核查已完成。待补 Windows 前台输入、UAC、异构 DPI、远程桌面实机验收及剩余真窗复核项 | [9.desktop.md](rust/plan/9.desktop.md#开发步骤与验收方案) · [desktop-ui-audit.md](test/desktop-ui-audit.md) |
 | 阶段 9.2 | `os` / `updater` / `kit` / `server` / `desktop` / `xtask` | 代码实现与本地发行包基础测试已完成。待发布前真机与签名验收 | [9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) |
-| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 阶段 1（`ls`/`disk` 重构与 Rust 发行包移除 `WizTree`）已完成 `1A–1D` 代码、单元测试与本机实测，管理员本地 NTFS 根目录已默认启用 `$MFT` 并取消目录遍历条目上限。待补多环境实盘测试并完成 `1E` 验收。阶段 2–3（其余工具与全栈优化）尚未开始。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR.md](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) |
+| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 阶段 1（`ls`/`disk` 重构与全仓移除 `WizTree`）已完成 `1A–1D`，待补多环境实盘验收（`1E`）；阶段 `2A`（`fffind`/`ffgrep` 并行检索、单句柄核验与多编码改造）已完成代码、测试与本机基准对比；`2B`、`2C` 与阶段 3 尚未开始。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) · [ADR-018](ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎) |
 | 阶段 9.4 | `desktop` / `web` | 已确立全项目「键盘友好交互」正式产品特性与三态切换模型，并完成 P0（设置 · 常规「四角 / 游标」切换、全部会话、分支树、导出会话、`Ctrl+J` 输入聚焦）与 P1-1（双端确认与提示类模态弹窗方向键横切夹紧、危险色滑移指示器与自动化回归）。待按 `P1-2`（选择器、补全与排队栏）→ `P1-3`（设置页）→ `P1-4`（侧栏与抽屉）→ `P2`（对话浏览态、登录账号、灯箱与快捷面板视觉统一）顺序推进 | [SPEC.md](SPEC.md#键盘友好交互需求) · [9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) · [ADR.md](ADR.md#adr-016双端方向键选中态采用无底色滑移指示器支持四角与游标切换) · [storybook.html](../design/storybook.html) |
 | 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿。评估以 `cst-tui` 替代 `tree-parity.test.ts` 的旧 Pi 对照基准（无可靠新参照前保留当前对照基准） | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
 | 阶段 11 | `release` | 构建单文件便携引导器（`portable.exe`）与直观自有目录结构（根部仅保留主程序与清晰子目录，去除 `agent/home/` 等 Pi 遗留目录及过渡期 TS/`pack/` 资产），接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，保持文档功能、签名推送更新与设计系统一致 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) · [ADR.md](ADR.md#adr-006阶段-11-采用单文件便携引导器与直观子目录分发) |
@@ -20,14 +20,14 @@
 详细方案与通过条件见 [9.3.optimization.md](rust/plan/9.3.optimization.md)。验收勾选时附带测试版本、条件与结果或明确未覆盖项。
 
 - [x] **前置准备**：完成 `ls`/`disk` 与 `WizTree` 调研、本机非提权隔离对照、[ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) 决策与双人方案评审（实盘 MFT 移至 `1C` 必测项）
-- **阶段 1（首要目标：`ls`、`disk` 与 Rust 发行包移除 `WizTree`）**
+- **阶段 1（首要目标：`ls`、`disk` 与全仓移除 `WizTree`）**
   - [ ] **1A（代码、单元测试与本机 NVMe 实测已通过，待补多控制器与慢速 SMB 测试）**：`2026-11-24` release 端到端 20 轮实测通过（`space` P95 `0.6 ms`、`health` 非提权 P95 `6.9 ms` / 提权 `10.2 ms`、`info(C:)` P95 `151.0 ms`、`all(C:)` P95 `118.7 ms`，原生路径免 WMI 达标，Storage WMI `MSFT_PhysicalDisk` 在本机约 84–151 ms）。未覆盖：SATA/USB-SAT/RST 控制器与断连 SMB 实测
   - [ ] **1B（代码、单元测试与本机 NVMe 性能指标已通过，待补真实断连 UNC 测试）**：`2026-11-24` release 实测 `C:\Program Files` 热扫中位数 `393.4 ms`（达标 `≤ 500 ms`）、`System32` `167.6 ms`、`WinSxS`（24 万项）`12.37 s`、4 槽并发取消在 `32.1 ms` 退出且 `4.3 ms` 恢复可用。未覆盖：真实断连 UNC 槽位恢复
-  - [ ] **1D（代码、单元测试与干净 `xtask dist` 发行包实测已通过，待补真实旧版二进制升级测试）**：`2026-11-24` `xtask dist --profile release` 产出 42 文件（解包 `105.76 MiB` / ZIP `43.14 MiB`），零 `wiztree` 文件、`app/licenses/ntfs-ng-LICENSE.txt` 纳入 `SHA256SUMS` 且 ZIP 与目录树校验和健康检查基础测试通过，更新器测试验证旧 WizTree 文件移除后逐字节回滚。未覆盖：已发布旧版二进制的就地升级测试
+  - [x] **1D（全仓代码、打包脚本、Skills、文档收口与干净 `xtask dist` 发行包实测已通过）**：`2026-11-24` `xtask dist --profile release` 产出 42 文件（解包 `105.76 MiB` / ZIP `43.14 MiB`），`app/licenses/ntfs-ng-LICENSE.txt` 纳入 `SHA256SUMS`，ZIP 与目录树校验和健康检查通过；`2026-11-25` 全仓清理所有剩余 `WizTree` 代码、过渡脚本与测试夹具，并完成文档与 Skills 同步
   - [ ] **1C（管理员本地 NTFS 根目录已默认启用 `$MFT`，可用 `CST_DISABLE_MFT=1` 关闭。本机 512e NVMe 提权实盘测试已通过，待补测 BitLocker 加密与锁定状态、4Kn 与热拔插）**：`2026-11-24` 管理员提权（Samsung 970 EVO + WD SN580 512e NVMe，未加密卷）实测通过。`C:\`（212 万记录 / 165 万文件 / `214.80 GB`）冷扫 `4.61–5.91 s`、估算驻留 `58.26 MiB`、进程 Working Set `8.6 -> 97.5 MiB`（双卷 `107.3 MiB`，全周期峰值 `411.9 MiB`）。热 `ls`（`C:\` / `Windows` / `Program Files`）`2.2–22.5 ms` 均命中 `native-index`。`Program Files` 统计口径 `35.76 GB` vs `walk` `35.8 GB`。`D:\` 取消 `31.3 ms` 且紧邻复扫 `1.33 s` 直接成功。未覆盖：4Kn 盘、BitLocker 加密与锁定两态、热拔插换盘
   - [ ] **1E**：基于真实发布产物完成 Win10/11、WinPE、BitLocker、SATA/USB-SAT/RST、OneDrive、热拔插及三类只读布局验收
-- **阶段 2（其余诊断与检索工具优化，阶段 1 验收完成后启动代码改造）**
-  - [ ] **2A**：`fffind` / `ffgrep` 单次操作内身份复用降耗与 UTF-16 LE / GB18030 回退解码评估
+- **阶段 2（其余诊断与检索工具优化）**
+  - [x] **2A（代码、同行评审复核、单元测试与本机前后基准对比已通过）**：`2026-11-25` 完成 `PathGuardSession` 单次基线与单句柄核验（含会话内已核验父目录去重与多硬链接实时复核）、`build_parallel` 并行遍历（上限 8 线程）、字面预筛与逐行 `regex::bytes`、纯 Rust 相关性打分、UTF-16 LE/BE BOM 与 GB18030 解码、`10 MiB` 单文件上限及跨盘符过滤修复。经 `gpt-6.2-sol`（`xhigh`）同行评审与二次实测收口，`cst-kit` 307 项测试与 `clippy -D warnings` 全过；4,005 文件（`28.32 MiB`）Release 实测：`fffind` `175.47 -> 31.97 ms`（`5.5×`）、`ffgrep` 字面 `12,699.18 -> 176.54 ms`（`71.9×`）、正则 `10,056.81 -> 142.64 ms`（`70.5×`）、UTF-16 LE 与 GB18030 由 `0` 命中升至 `30` 命中（`17.07–30.21 ms`），峰值内存 `8.09–9.78 MiB`。详表见 [file-search-fff.md](optimize/file-search-fff.md)
   - [ ] **2B**：`sys(io)` `GetProcessIoCounters` 边界验证与 `sys(gpu)` 双显卡核显传感器保留
   - [ ] **2C**：联网检索并发容错（明确 `get_search_content` 范围）与 `runbook` / 提示词规范逐项整理
 - **阶段 3（运行时、服务端与桌面端优化，量化后独立立项）**

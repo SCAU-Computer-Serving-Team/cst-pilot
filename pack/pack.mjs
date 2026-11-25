@@ -88,7 +88,6 @@ const CONFIG = {
     { src: "assets", dst: "assets", exclude: ["make-logo.cjs"] }, // 只发行图片，不带生成脚本
     { src: "doc", dst: "doc", exclude: ["test/"] },
     { src: "pwsh", dst: "pwsh", exclude: ["Schemas/", "preview/", "Install-PowerShellRemoting.ps1", "RegisterManifest.ps1"] },
-    { src: "wiztree", dst: "wiztree", exclude: ["WizTree3.ini", "WizTree3.ini.bad", "tmp/"] }, // 运行态配置与备份不进发行包
     { src: "lhm", dst: "lhm", exclude: [] },
     { src: "agent/home/bin", dst: "agent/home/bin", exclude: [] },
     { src: "agent/home/skills", dst: "agent/home/skills", exclude: [] },
@@ -308,7 +307,7 @@ for (const f of CONFIG.REPO_HOME_FILES) {
 const catalogPath = path.join(out, "agent", "home", "models-store.json");
 const catalog = supplementDeepSeekFlash(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
 fs.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
-console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源（含 DeepSeek 官方 Flash 离线模型）");
+console.log("  仓库侧: pi.cmd/文档/pwsh/lhm/home 资源（含 DeepSeek 官方 Flash 离线模型）");
 fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recursive: true });
 
 // ---------- [4] 发行 settings.json ----------

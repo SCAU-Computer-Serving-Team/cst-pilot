@@ -121,7 +121,7 @@ environmentId = HMAC-SHA256(identityKey, message)
 |---|---|
 | `name` / `scope` | 工具名与子功能名（省略参数时取默认 `scope`） |
 | `calls` / `failures` | 已结束调用次数 / `isError=true` 次数 |
-| `degraded` / `truncated` | 结果标记 `degraded`（含 `disk usage` 降级 `node-walk`）次数 / 输出裁剪次数 |
+| `degraded` / `truncated` | 结果标记 `degraded`（含 `disk`/`ls` 附 `degradedFrom` 通道回退）次数 / 输出裁剪次数 |
 | `totalMs` / `maxMs` | 执行耗时总和 / 单次最大耗时（毫秒） |
 | `resultBytes` | 结果文本 UTF-8 字节数累计 |
 | `entriesTotal` | `runbook` 与 `runbook_deliver` 成功交付的命令条目总数。`command_plan` 仅计工具调用次数 |

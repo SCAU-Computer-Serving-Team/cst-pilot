@@ -3,13 +3,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { collectDisk } from "./disk-core.ts";
 import { diagnosticResult, OUTPUT_GUIDELINE } from "./result.ts";
-import type { VolumeIndex } from "./wz-index.ts";
-export default function registerDisk(pi: ExtensionAPI, index: VolumeIndex) {
+
+export default function registerDisk(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "disk",
 		label: "Disk Info",
 		description:
-			"只读磁盘信息工具，按 scope 选择子功能：space=各卷空间；info=物理盘型号/类型/健康状态；health=SMART 寿命/温度/通电小时（需管理员，权限不足自动降级）；usage=目录占用排行、单个大文件、扩展名聚合、一年未动的大文件（WizTree 快速全扫，失败自动降级为慢速统计，结果为下界）；all=space+info+health 一次取全。详细指南见 skill「disk」。" +
+			"只读磁盘信息工具，按 scope 选择子功能：space=各卷空间；info=物理盘型号/类型/健康状态；health=SMART 寿命/温度/通电小时（需管理员，权限不足自动降级）；usage=目录占用排行（逐文件递归统计，达到预算后返回下界）；all=space+info+health 一次取全。详细指南见 skill「disk」。" +
 			" 输出 JSON 最多 50 KiB，超限标注 outputTruncated；请缩小查询范围获取省略内容。",
 		promptSnippet: "Query disk space, drive info, health, and directory usage ranking (read-only)",
 		promptGuidelines: [
@@ -33,7 +33,7 @@ export default function registerDisk(pi: ExtensionAPI, index: VolumeIndex) {
 		}),
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const result = await collectDisk(params, ctx.cwd, index, signal);
+			const result = await collectDisk(params, ctx.cwd, signal);
 			return diagnosticResult(result);
 		},
 	});

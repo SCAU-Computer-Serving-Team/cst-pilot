@@ -649,6 +649,12 @@ fn base_field_title(key: &str) -> Option<&'static str> {
         "findMode" => "匹配模式",
         "matchCount" => "命中数",
         "returnedMatches" => "返回命中",
+        "matches" => "匹配结果",
+        "line" => "行号",
+        "matched" => "命中行",
+        "skipped" => "已跳过",
+        "skippedLargeFiles" => "跳过大文件",
+        "degradedFrom" => "降级来源",
         "truncation" => "截断",
         "truncatedBy" => "截断方式",
         "totalLines" => "总行数",
@@ -2690,7 +2696,7 @@ mod tests {
                 .clone(),
             execution: None,
         };
-        // Clean native-walk is Success without any WizTree warning
+        // Clean native-walk is Success without any fast-index fallback warning
         let clean = map_tool(
             &call,
             &ToolResultInput {
@@ -2708,7 +2714,7 @@ mod tests {
             },
         );
         assert_eq!(clean.status, CardStatus::Success);
-        assert!(!format!("{:?}", clean.blocks).contains("WizTree"));
+        assert!(!format!("{:?}", clean.blocks).contains("快速卷索引不可用"));
 
         // MFT fallback emits generic fast-index warning notice
         let fallback = map_tool(
@@ -2727,25 +2733,6 @@ mod tests {
             },
         );
         assert!(format!("{:?}", fallback.blocks).contains("快速卷索引不可用"));
-        assert!(!format!("{:?}", fallback.blocks).contains("WizTree"));
-
-        // Legacy session replay (`method: "wiztree"` / `"node-walk"`) still renders cleanly
-        let legacy = map_tool(
-            &call,
-            &ToolResultInput {
-                details: Some(json!({
-                    "usage": {
-                        "method": "node-walk",
-                        "root": "C:\\old",
-                        "totalGB": 5.0,
-                        "degradedFrom": "wiztree",
-                        "topDirs": [{"path": "C:\\old\\a", "sizeGB": 5.0, "pct": 100.0}]
-                    }
-                })),
-                ..Default::default()
-            },
-        );
-        assert!(format!("{:?}", legacy.blocks).contains("快速卷索引不可用"));
     }
 }
 

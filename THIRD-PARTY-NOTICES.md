@@ -32,8 +32,7 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 
 | 组件 | 版本 | 许可证 | 来源 | 用途与条款 |
 |---|---|---|---|---|
-| WizTree（仅冻结的旧版 Node 过渡包） | 4.x | 专有软件；**仅个人使用免费，商业使用需购买授权** | https://diskanalyzer.com | Rust 发行版已移除（改用 MIT / Apache-2.0 的 `ntfs-ng` 与 Win32 原生遍历）。仅冻结至阶段 11 的旧版 Node 过渡包仍引用 |
-| ntfs-ng | 0.1.2 | MIT（原包为 MIT / Apache-2.0 双许可，本项目按 MIT 分发） | https://crates.io/crates/ntfs-ng | Rust 发行版纯 Rust NTFS `$MFT` 只读解析引擎，许可证原文见随包 `app/licenses/ntfs-ng-LICENSE.txt` |
+| ntfs-ng | 0.1.2 | MIT（原包为 MIT / Apache-2.0 双许可，本项目按 MIT 分发） | https://crates.io/crates/ntfs-ng | 纯 Rust NTFS `$MFT` 只读解析引擎，许可证原文见随包 `app/licenses/ntfs-ng-LICENSE.txt` |
 | ib-matcher / ib-pinyin-data | 0.4.5 / 0.1.0 | MIT | https://crates.io/crates/ib-matcher | Rust 侧栏搜索与快速打开的中文拼音（全拼／简拼／多音字）匹配引擎 |
 | strsim | 0.11.1 | MIT | https://crates.io/crates/strsim | Rust 侧栏搜索与快速打开的受限编辑距离模糊打分 |
 | pinyin-match | 1.2.10 | MIT | https://www.npmjs.com/package/pinyin-match | Web 前端侧栏搜索与快速打开的中文拼音匹配库 |
@@ -62,5 +61,4 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 
 1. 本项目自身代码（diagnostics 工具、启动器、打包脚本、文档）以 MIT 分发，原文见仓库与发行包根目录的 `LICENSE`。
 2. 发行包内 `VERSION` 与 `SHA256SUMS` 用于完整性校验；`SHA256SUMS` 覆盖装配完成时的发行树。
-3. 冻结的旧版 Node 过渡包内若携带 WizTree，其商用授权条款请阅读对应过渡包内 `wiztree/license.txt`；Rust 发行版已彻底移除 WizTree。
-4. 上游 npm 包未随附许可证文本时，本文件只登记许可证类型与来源链接。当前属此情况的有 `@ff-labs/pi-fff` 系列（含 fff-bin-win32-x64、fff-node、fff-bun）与 `@yuuang/ffi-rs-win32-x64-msvc`，均为 MIT。
+3. 上游 npm 包未随附许可证文本时，本文件只登记许可证类型与来源链接。当前属此情况的有 `@ff-labs/pi-fff` 系列（含 fff-bin-win32-x64、fff-node、fff-bun）与 `@yuuang/ffi-rs-win32-x64-msvc`，均为 MIT。

@@ -29,9 +29,9 @@
 
 ### ls 与 disk（存储分析）
 
-- **ls 大小来源与预算**：每次在单一调用级预算（**50 万条目、30 秒**）内实时枚举目标目录直接子项。默认使用受控并发 Win32 目录遍历一次统计所有直接子目录，直接文件与兄弟子目录共享查询范围确定性硬链接去重表（跳过符号链接、重解析点与云占位目录；完全驻留云文件正常计入）。目录自身不可打开时输出 `bytes: null`。实验开关 `CST_ENABLE_MFT=1` 开启且全部直接子目录均命中同卷有效 `$MFT` 快照（核验 `FileReference` 与 `PathPolicy::LIVE` 路径一致）时返回 `method: "native-index"`，否则整次统一走 `walk`，不混用两套归属口径。超限或遇到权限拒绝时停止并标注 `totalSize` 为下界，任一子项不完整时全部 `pct` 置 `null`。UNC 路径直接走原生遍历。
+- **ls 大小来源与预算**：实时枚举目标目录直接子项，不设条目数上限，统一受外层 215 秒超时与取消信号控制。管理员权限下查询本地 NTFS 盘根且无缓存时自动建立 120 秒 `$MFT` 卷缓存；同卷子目录查询优先复用已有有效快照。全部直接子目录通过 `FileReference` 与 `PathPolicy::LIVE` 路径核验时返回 `method: "native-index"`，任一项未命中则整次统一走受控并发 Win32 目录遍历（`method: "walk"`），不混用两套归属口径。走 `walk` 时直接文件与兄弟子目录共享查询范围确定性硬链接去重表（跳过符号链接、重解析点与云占位目录；完全驻留云文件正常计入），目录自身不可打开输出 `bytes: null`。超时或遇到权限拒绝时标注 `totalSize` 为下界，任一子项不完整时全部 `pct` 置 `null`。UNC 路径直接走原生遍历。
 - **disk space / info / health**：容量按二进制 GiB（`字节 ÷ 2³⁰`）换算，`freeGB: 0` 表示剩余空间为零。`space` 与 `volumes` 使用 Win32 原生接口（带线程防弹窗与网络卷统一短超时隔离，`all` 复用同次卷探测），盘符映射优先 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（要求全部 extent 可验证，否则回退 WMI），`health` 优先 Win32 原生 NVMe/ATA 存储 IOCTL（交叉核验序列号并严格输出 `API.md` 6 项字段），不支持或身份不明时回退单次批量 WMI。指定 `drive` 且关联失败时，`info` 返回全量 `physicalDisks` 并附 `infoNotice`，`health` 拒绝查询 SMART 并说明原因。SMART 仅在遭遇权限拒绝时提示管理员权限，`smart: null` 不代表硬盘健康或损坏。
-- **disk usage 扫描与降级**：发行路径默认使用受控并发 Win32 `FileIdBothDirectoryInfo` 遍历（`method: "native-walk"`）。仅在通过实盘门禁或显式设置实验开关 `CST_ENABLE_MFT=1`（且未设 `CST_DISABLE_MFT=1`）时，已提权的本地 NTFS 盘根尝试纯 Rust `ntfs-ng` 直读 `$MFT`（`method: "native-mft"`），损坏或缺失记录拒绝发布快照并自动回退 `native-walk` 附 `degradedFrom`。两套后端均输出 `topDirs`（含不同深度，父子不可相加）、`topFiles`（`{ path, sizeGB, modified }`）、`extAgg`、`staleFiles`（≥50 MiB 且 ≥1 年未修改），并执行确定性硬链接去重与云占位保护。
+- **disk usage 扫描与降级**：管理员权限下的本地 NTFS 盘根默认使用纯 Rust `ntfs-ng` 直读 `$MFT`（`method: "native-mft"`，可用 `CST_DISABLE_MFT=1` 关闭），完整快照写入 120 秒卷缓存供 `ls` 复用；记录损坏、超内存上限或卷身份变化时拒绝发布快照并自动回退 `native-walk` 附 `degradedFrom`。子目录、普通权限、非 NTFS 卷与 UNC 路径直接走无条目上限的受控并发 Win32 `FileIdBothDirectoryInfo` 遍历（`method: "native-walk"`，受外层 215 秒超时与取消信号控制）。两套后端均输出 `topDirs`（含不同深度，父子不可相加）、`topFiles`（`{ path, sizeGB, modified }`）、`extAgg`、`staleFiles`（≥50 MiB 且 ≥1 年未修改），并执行确定性硬链接去重与云占位保护。
 
 ### sys 与 startup（实时负载与启动配置）
 
@@ -44,6 +44,12 @@
 
 - **eventlog 场景与权限**：内置场景事件范围见 [API.md](API.md#eventlog-内置事件范围)。`boot` 合并系统启停与 WHEA 并按 `logName + recordId` 去重后再截断 `top`。`crash` 保留 Information 级 WER（1001）与 Hang（1002），`app` 子串过滤作用于全部分组，`7045` 归入 `boot` 新装服务。`security` 执行前检查管理员令牌，非管理员直接返回 `admin: false, degraded: true`。
 - **driver 枚举与查找**：`problem` 筛选 `Status=Error/Unknown`。`core` 网卡仅保留 `NetConnectionID` 非空项，签名驱动版本按 `Net`、`Bluetooth`、`MEDIA`、`Display` 四类查询。`external` 覆盖 `USB*`、`BTHENUM*`、`DISPLAY*` 与可移动磁盘。`find` 要求至少传入一个条件，多个条件按 AND 组合，`id` 同时匹配 `deviceId` 与 `hardwareIds`。
+
+### fffind 与 ffgrep（受控文件检索）
+
+- **单次基线与并发边界**：每次检索建立独立的瞬态 `PathGuardSession`，不跨调用缓存。遍历禁用符号链接与目录联接跟随（`follow_links(false)`），并发工作线程上限为 8 线程（预留 2 个逻辑核余量），打开文件后在同句柄上复核规范路径、硬链接数与文件标识。
+- **路径排序与跨盘过滤**：`fffind` 对匹配路径按相关性排序（精确文件名与前缀高于分散子序列），支持空格多词交集；全部结果为弱匹配时附 `notice` 提示收窄范围。`include` 与 `exclude` 统一按正斜杠路径匹配，跨盘符绝对路径与相对路径行为一致。
+- **编码解码与资源护栏**：`ffgrep` 依次识别 UTF-16 LE/BE BOM 转码、无 BOM 含 `0x00` 判二进制跳过、UTF-8 零拷贝与 GB18030 回退解码。单文件上限 `10 MiB`（超限跳过并记入 `skippedLargeFiles` 与 `notice`），单行上限 `8 KiB`，单次总读取上限 `256 MiB`，最多遍历 50 万项，超时 30 秒，输出超 50 KiB 前受控截断并置 `truncated: true`。
 
 ## 命令方案与交付
 

@@ -10,6 +10,9 @@ export const sha256 = (data) => crypto.createHash('sha256').update(data).digest(
 export function checkReleaseTree(root, files) {
   for (const rel of files) {
     if (path.posix.basename(rel).toLowerCase() === 'agents.md') throw new Error(`项目 AGENTS.md 不得进入发行包: ${rel}`);
+    if (/^(?:app\/tools\/)?wiztree(?:\/|$)/i.test(rel)) {
+      throw new Error(`发行树含已移除的组件: ${rel}`);
+    }
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }
@@ -17,7 +20,7 @@ export function checkReleaseTree(root, files) {
       const name = {oauth:'OAuth',web:'Web',telemetry:'Telemetry'}[rel.split('/')[3].toLowerCase()];
       throw new Error(`${name} 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^(artifacts|outbox)\/|^agent\/home\/(auth\.json|models\.json|mcp-auth\.json|web-settings\.json|desktop\.json|desktop-settings\.json|device\.json|identity\.json|fff\/|npm\/|telemetry\/|session-exports\/|command-plans\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^(artifacts|outbox)\/|^agent\/home\/(auth\.json|models\.json|mcp-auth\.json|web-settings\.json|desktop\.json|desktop-settings\.json|device\.json|identity\.json|fff\/|npm\/|telemetry\/|session-exports\/|command-plans\/)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
@@ -78,7 +81,6 @@ export const REQUIRED_RELEASE_FILES = [
   'licenses/pi-LICENSE.txt',
   'licenses/MPL-2.0.txt',
   'pwsh/LICENSE.txt',
-  'wiztree/license.txt',
   'assets/fonts/SourceHanSansCN-VF.otf',
   'assets/fonts/LICENSE.txt',
   'assets/fonts/JetBrainsMono-Regular.ttf',

@@ -18,7 +18,7 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 		fast = join(home, "fast.txt");
 	await writeFile(fast, "FAST_READ_RESULT");
 	await mkdir(join(home, "extensions"), { recursive: true });
-	// 确定性慢目录工具：真实Pi派发与文件读取，只有等待时间人为控制，避免每次重建整盘WizTree。
+	// 确定性慢目录工具：真实Pi派发与文件读取，只有等待时间人为控制，避免每次全盘扫描。
 	await writeFile(
 		join(home, "extensions", "slow-ls.ts"),
 		`import {Type} from '@sinclair/typebox';import {access,readdir} from 'node:fs/promises';export default function(pi){pi.registerTool({name:'ls',label:'ls',description:'List test directory after gate',parameters:Type.Object({path:Type.String()}),async execute(id,args,signal){while(true){if(signal?.aborted)throw new Error('aborted');try{await access(${JSON.stringify(gate)});break;}catch{}await new Promise(r=>setTimeout(r,30));}return {content:[{type:'text',text:JSON.stringify(await readdir(args.path))}],details:{}};}});}`,

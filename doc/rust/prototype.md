@@ -63,6 +63,6 @@ flowchart LR
 | 场景 | 采用选型 | 选型依据 |
 |---|---|---|
 | 原生系统与加密卷查询 | 微软官方 `windows`（`0.62.2`）+ `wmi`（`0.18.4`） | 直接调用 Win32、注册表、PDH 性能计数器、Event Log（`EvtQuery`）与 `PacketPrivacy` 加密 WMI（`Win32_EncryptableVolume`），消除外部脚本拼接开销与注入风险 |
-| 磁盘空间与文件检索 | 随包 `WizTree64.exe` + `csv` + `ignore` | 使用 `csv` 恒定内存流式维护 Top-N 最小堆并建立进程内卷缓存。WizTree 不可用时回退标准库与 `ignore` 有界遍历 |
+| 磁盘空间与文件检索 | `ntfs-ng`（`0.1.2`）+ Win32 并行 `FileIdBothDirectoryInfo` + `ignore` | 管理员本地 NTFS 根目录默认直读 `$MFT` 并维护 120 秒进程内卷缓存；子目录与非 NTFS 卷走无条目上限并行 Win32 遍历；文件模糊查找与正则搜索由 `ignore` 驱动 |
 | 硬件传感器隔离采集 | `LibreHardwareMonitorLib` + `.NET 10` 自包含 `cst-lhm-host.exe` | 将依赖硬件厂商适配的传感器探针隔离在受 Job Object 管控的辅助子进程内，保护主服务稳定性 |
 | 会话导出（PNG / HTML） | `chromiumoxide`（`0.9.1`）+ 本机 Edge / Chrome | 通过 CDP 复用机主已有浏览器与独立 `BrowserContext` 渲染 `/_export` 只读页面，完成高清分图截图与离线资源内嵌 |

@@ -53,7 +53,7 @@ impl Fixture {
             ),
             ("data/sessions/session.jsonl", b"synthetic session data\n"),
             ("artifacts/2026-11-09/runbook/01.txt", b"user command text"),
-            (".state/tmp/wiztree/old.csv", b"scan cache"),
+            (".state/tmp/cache/old.tmp", b"scan cache"),
             ("user-note.txt", b"unrelated user file"),
         ] {
             f.write(name, bytes)
@@ -76,7 +76,7 @@ impl Fixture {
             "data/config/auth.json",
             "data/sessions/session.jsonl",
             "artifacts/2026-11-09/runbook/01.txt",
-            ".state/tmp/wiztree/old.csv",
+            ".state/tmp/cache/old.tmp",
             "user-note.txt",
         ]
         .into_iter()

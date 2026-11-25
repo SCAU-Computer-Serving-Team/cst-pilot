@@ -19,7 +19,7 @@ flowchart LR
 
 | 子目录 | 核心文件与职责 |
 |---|---|
-| `src/kit.rs`、`src/tools/` | 锁定 17 工具白名单，加载 `APPEND_SYSTEM.md` 与 8 份技能。`path_guard.rs` 规范化路径并按文件身份拦截凭据及硬链接。`fff.rs` 基于 `ignore` 与 `regex` 实现检索。`ssrf.rs` 与 `web_access.rs` 实现 DNS 私网拦截与会话有界检索缓存 |
+| `src/kit.rs`、`src/tools/` | 锁定 17 工具白名单，加载 `APPEND_SYSTEM.md` 与 8 份技能。`path_guard.rs` 通过单次调用级 `PathGuardSession` 与单句柄 `GetFileInformationByHandle` / `GetFinalPathNameByHandleW` 拦截凭据、`.state/` 及硬链接。`fff.rs` 基于 `ignore` 并行遍历、`memchr` 字节预筛、`regex::bytes`、`encoding_rs`（UTF-16 / GB18030）与纯 Rust 相关性打分实现检索。`ssrf.rs` 与 `web_access.rs` 实现 DNS 私网拦截与会话有界检索缓存 |
 | `src/diagnostics/` | `win_native.rs`（含 `win_native/windows/storage.rs` IOCTL 层）与 `storage_tools.rs` 在阻塞线程池内初始化多线程 COM 并绑定分工具时间预算（常规查询 30 秒，`ls` 与 `disk usage` 215 秒，最多 4 个并发阻塞槽位）。`walk.rs` 实现有界并行 `FileIdBothDirectoryInfo` 遍历与 `CancelSynchronousIo` 取消，`mft.rs` 与 `volume_index.rs` 管理纯 Rust `ntfs-ng` `$MFT` 扫描与卷级缓存，`hardware/pdh.rs` 本地化计数器双采样，`result.rs` 执行 50 KiB 模型文本结构化裁剪 |
 | `src/runbook/` | `plan_store.rs` 管理 `data/plans/<ID>/v*.json` 版本锁与导出。`sequence_store.rs` 管理当天递增序号与改名替换。`storage.rs` 持有各级目录句柄拒绝重解析点与硬链接 |
 | `src/bitlocker/` | `credentials.rs` 实现 `SessionDataPolicy` 与瞬态 `Zeroizing<String>` 凭据表（释放本机 `BSTR` 前逐单元清零）。`wmi_encryptable.rs` 建立 `PacketPrivacy` 加密 DCOM 连接调用 `UnlockWithNumericalPassword` 与 `Decrypt`。`lock.rs` 维护跨进程卷锁，`core.rs` 执行状态复查 |
@@ -32,7 +32,7 @@ flowchart LR
 
 ## 共享目录大小缓存（`VolumeIndex`）
 
-`volume_index.rs` 与 `mft.rs` 提供进程内按盘符缓存纯 Rust `ntfs-ng` 紧凑索引的能力（当前默认关闭，须通过阶段 `1C` 实盘门禁或设置实验开关 `CST_ENABLE_MFT=1` 开启，`CST_DISABLE_MFT=1` 始终强制关闭并阻断缓存读取）：
+`volume_index.rs` 与 `mft.rs` 提供进程内按盘符缓存纯 Rust `ntfs-ng` 紧凑索引的能力。管理员权限下的本地 NTFS 根目录默认启用，`CST_DISABLE_MFT=1` 强制关闭扫描与缓存读取：
 
 | 内部字段 | 存储内容 |
 |---|---|

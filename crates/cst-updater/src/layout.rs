@@ -168,11 +168,6 @@ pub fn classify(path: &str) -> Result<Area, String> {
         ) || p.starts_with(".env.")
             || *p == "agents.md"
     }) || (lower.ends_with(".otf") && path != "app/fonts/SourceHanSansCN-VF.otf")
-        || lower.starts_with("app/tools/wiztree/tmp/")
-        || matches!(
-            lower.as_str(),
-            "app/tools/wiztree/wiztree3.ini" | "app/tools/wiztree/wiztree3.ini.bad"
-        )
     {
         return Err("升级包包含运行状态或开发文件。".into());
     }
@@ -195,19 +190,20 @@ pub fn classify(path: &str) -> Result<Area, String> {
     }
 }
 
-/// Rejects retired third-party component paths (`app/tools/wiztree` and any child, case-insensitive)
-/// for newly packaged/verified release trees and archives (both files and empty directories).
-pub fn reject_retired_release_path(path: &str) -> Result<(), String> {
-    let lower = path.to_lowercase();
-    if lower == "app/tools/wiztree" || lower.starts_with("app/tools/wiztree/") {
-        return Err("升级包包含已移除的第三方组件路径（app/tools/wiztree）。".into());
+pub(crate) fn reject_retired_release_path(path: &str) -> Result<(), String> {
+    let path = path.to_ascii_lowercase();
+    if ["wiztree", "app/tools/wiztree"].iter().any(|prefix| {
+        path == *prefix
+            || path
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('/'))
+    }) {
+        return Err("发行包包含已移除的组件路径。".into());
     }
     Ok(())
 }
 
-/// Stricter classifier for newly packaged/verified releases: rejects retired components
-/// (`app/tools/wiztree/`) while [`classify`] keeps legacy installation cleanup & rollback working.
-pub fn classify_release(path: &str) -> Result<Area, String> {
+pub(crate) fn classify_release(path: &str) -> Result<Area, String> {
     let area = classify(path)?;
     reject_retired_release_path(path)?;
     Ok(area)

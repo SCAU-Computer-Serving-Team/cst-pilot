@@ -952,4 +952,4 @@ async function routeScope(
 	}
 }
 
-/** pi 加载器会自动加载 extensions\ 下所有 .ts；共享模块用空 factory 保持安静（wz-index 同款）。 */
+/** pi 加载器会自动加载 extensions\ 下所有 .ts；共享模块用空 factory 保持安静。 */

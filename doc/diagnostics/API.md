@@ -30,7 +30,7 @@
 |---|---|
 | `path` | 规范化目录路径 |
 | `totalChildren` / `totalSize` | 可见直接子项总数（不含已隐去的工具包敏感路径名）/ 已统计直接子项大小文本（含已隐去敏感路径的已知大小，不完整时为下界） |
-| `method` | `"native-index"`（命中共享卷缓存且未遍历子目录）或 `"walk"`（原生并行遍历，可能同时使用部分缓存） |
+| `method` | `"native-index"`（全部直接子目录命中同卷有效 `$MFT` 缓存）或 `"walk"`（原生并行目录遍历） |
 | `entries[]` | 按归属字节降序排列（同目录本地 NTFS 硬链接按确定性规则去重），元素为 `{ name, type: "dir"\|"file"\|"unknown", size: string\|null, bytes: number\|null, pct: number\|null }`，`pct` 以 `totalSize` 对应总量为分母 |
 | `omitted` | 可见项超出 `top` 截断时存在，结构为 `{ count, size, unknownCount, note }` |
 | `notice` | 预算截断、权限受限或敏感路径隐藏说明 |
@@ -143,7 +143,7 @@
 | 工具 | 核心参数 | 安全与返回契约 |
 |---|---|---|
 | `read` | `{ path, offset?, limit? }` | 拦截敏感配置、`.state/`、设备路径与备用数据流。文本单次上限 2000 行 / 50 KiB，图片自动做 EXIF 修正与自适应缩放 |
-| `fffind` / `ffgrep` | `{ pattern, path?, exclude?, limit?, context?, caseSensitive?, literal? }`（`limit` 默认 30、最大 1000） | 遵守 `.gitignore` 并跳过受保护凭据文件，返回 `{ matches, truncated: boolean, skipped: number }`（`fffind` 项为 `{ path }`，`ffgrep` 项为 `{ path, line, text, matched }`，文本超 50 KiB 报错提示收窄范围） |
+| `fffind` / `ffgrep` | `{ pattern, path?, exclude?, limit?, context?, caseSensitive?, literal? }`（`limit` 默认 30、最大 1000） | 遵守 `.gitignore` 并跳过受保护凭据与链接；`fffind` 按相关性排序输出 `{ path }`，`ffgrep` 支持 UTF-16 LE/BE BOM 与 GB18030 回退、单文件限 `10 MiB`，输出 `{ path, line, text, matched }`；返回 `{ matches, truncated: boolean, skipped: number, skippedLargeFiles?: number, notice?: string }`，逼近 50 KiB 受控截断 |
 | `web_search` / `source_check` | `{ query?, claim?, queries?, numResults? }`（1–3 词，`numResults` 默认 5、上限 10） | 关闭环境代理并阻断私网与跨私网重定向（仅放行 `198.18.0.0/15`），返回 `{ responseId, queries: { query, preview }[], provider: "exa" }` |
 | `fetch_content` | `{ url?, urls? }`（1–5 个 URL） | 经 SSRF 校验抓取网页正文写入会话缓存，返回 `{ responseId, urls: { url, preview }[] }` |
 | `get_search_content` | `{ responseId, offset?, limit?, findText? }`（单次最多 6000 字符） | 从会话内存缓存（上限 32 条 / 8 MiB / 单条 2 MiB / TTL 30 分钟）分页或定位读取，返回 `{ responseId, content, totalCharacters, offset }` |

@@ -359,19 +359,25 @@ impl Collector {
         if text_truncated
             || details.pointer("/truncation/truncated") == Some(&Value::Bool(true))
             || details.get("outputTruncated") == Some(&Value::Bool(true))
+            || details.get("truncated") == Some(&Value::Bool(true))
         {
             add(&mut agg.truncated, 1);
         }
         let scope = agg.scope.as_deref().unwrap_or("");
         if details.get("degraded") == Some(&Value::Bool(true))
             || details.get(&agg.name).and_then(|v| v.get("degraded")) == Some(&Value::Bool(true))
-            || details.get(scope).and_then(|v| v.get("degraded")) == Some(&Value::Bool(true))
+            || (!scope.is_empty()
+                && details.get(scope).and_then(|v| v.get("degraded")) == Some(&Value::Bool(true)))
             || (agg.name == "disk"
-                && (details.pointer("/usage/method").and_then(Value::as_str) == Some("node-walk")
-                    || details
-                        .pointer("/usage/degradedFrom")
-                        .and_then(Value::as_str)
-                        .is_some_and(|v| !v.is_empty())))
+                && details
+                    .pointer("/usage/degradedFrom")
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.is_empty()))
+            || (agg.name == "ls"
+                && details
+                    .get("degradedFrom")
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.is_empty()))
         {
             add(&mut agg.degraded, 1);
         }

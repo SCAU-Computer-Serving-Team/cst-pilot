@@ -23,7 +23,7 @@ jobs:
   rust:
     name: Rust 核心
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
       PI_OFFLINE: '1'
@@ -47,6 +47,8 @@ jobs:
             ~/.cargo/git
             ${{ runner.temp }}/cst-rust/target
           key: rust-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-1.99.1-
       - name: 格式检查
         run: cargo fmt --all --check
       - name: Clippy 检查
@@ -72,7 +74,7 @@ jobs:
   rust-desktop:
     name: Rust 桌面端
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
       PI_OFFLINE: '1'
@@ -96,6 +98,8 @@ jobs:
             ~/.cargo/git
             ${{ runner.temp }}/cst-desktop-rust/target
           key: rust-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-1.99.1-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -213,6 +217,8 @@ jobs:
             ~/.cargo/git
             target
           key: rust-web-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-web-${{ runner.os }}-1.99.1-
       - name: Rust Web 后端测试与构建
         if: inputs.full
         shell: pwsh

@@ -137,6 +137,27 @@ fn every_credential_and_state_path_is_blocked_but_normal_documents_work() {
 }
 
 #[test]
+fn directory_pruning_distinguishes_state_from_ordinary_siblings() {
+    let fixture = Fixture::new();
+    fixture.write(".state/nested/item.txt", "fixture");
+    fixture.write(".state-notes/report.txt", "public");
+    let session = fixture.guard().session();
+
+    for dir in [".state", ".state/nested"] {
+        assert!(!session.allow_walk_dir(&fixture.path(dir)));
+    }
+    assert!(session.allow_walk_dir(&fixture.path(".state-notes")));
+    assert!(!session.allow_walk_dir(&fixture.path(".state-notes/report.txt")));
+    assert_eq!(
+        session
+            .open_file(fixture.path(".state-notes/report.txt"))
+            .unwrap()
+            .1,
+        6
+    );
+}
+
+#[test]
 fn traversal_and_hard_link_aliases_cannot_read_credentials() {
     let fixture = Fixture::new();
     fixture.write("data/config/auth.json", "synthetic-test-secret");
@@ -321,6 +342,75 @@ fn search_bounds_long_lines_output_and_respects_cancellation() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn ffgrep_50kib_truncation_stays_valid_and_does_not_fail_json_limit() {
+    let fixture = Fixture::new();
+    let payload = format!("MATCH_LINE {}\n", "z".repeat(1600));
+    for i in 0..80 {
+        fixture.write(&format!("bulk/file_{i:02}.log"), &payload.repeat(3));
+    }
+    let input = serde_json::from_value(json!({
+        "pattern": "match_line",
+        "literal": true,
+        "limit": 1000,
+        "context": 1
+    }))
+    .unwrap();
+    let result = search(
+        &fixture.guard(),
+        &fixture.0,
+        input,
+        true,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(result["truncated"], true);
+    assert!(result["matches"].as_array().unwrap().len() >= 10);
+    assert!(serde_json::to_string(&result).unwrap().len() <= 50 * 1024);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junction_to_state_is_not_traversed_by_fff() {
+    let fixture = Fixture::new();
+    fixture.write(".state/hidden.txt", "JUNCTION_SECRET_MARKER");
+    fixture.write("public/visible.txt", "PUBLIC_OK_MARKER");
+    let junction = fixture.path("public/state-junction");
+    let status = std::process::Command::new("cmd")
+        .args([
+            "/C",
+            "mklink",
+            "/J",
+            &junction.to_string_lossy(),
+            &fixture.path(".state").to_string_lossy(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success(), "mklink /J failed");
+
+    let guard = fixture.guard();
+    assert!(guard.check(&junction).is_err());
+    assert!(guard.open(junction.join("hidden.txt")).is_err());
+
+    for (pattern, content) in [("hidden", false), ("JUNCTION_SECRET_MARKER", true)] {
+        let found = search(
+            &guard,
+            &fixture.0,
+            file_input(pattern),
+            content,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        let text = found.to_string();
+        assert!(!text.contains("hidden.txt"), "leaked via junction: {text}");
+        assert!(
+            !text.contains("JUNCTION_SECRET_MARKER"),
+            "leaked content via junction: {text}"
+        );
+    }
+    let _ = std::fs::remove_dir(&junction);
 }
 
 #[test]
@@ -705,4 +795,49 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
             .all(|name| expected.contains(name))
     );
     created.session.shutdown().await.unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn offline_and_reparse_files_are_skipped_without_opening_in_read_and_ffgrep() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_OFFLINE, SetFileAttributesW,
+    };
+    use windows::core::PCWSTR;
+
+    let fixture = Fixture::new();
+    fixture.write("notes/local.log", "OFFLINE_CLOUD_NEEDLE\n");
+    let offline_path = fixture.path("notes/offline.log");
+    fixture.write("notes/offline.log", "OFFLINE_CLOUD_NEEDLE\n");
+
+    let wide: Vec<u16> = offline_path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_OFFLINE) }.unwrap();
+
+    let guard = fixture.guard();
+    assert!(guard.open(&offline_path).is_err());
+    assert!(
+        GuardedReadOperations(guard.clone())
+            .read_bytes(&offline_path)
+            .is_err()
+    );
+
+    let result = search(
+        &guard,
+        &fixture.0,
+        file_input("OFFLINE_CLOUD_NEEDLE"),
+        true,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let matches = result["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["path"], "notes/local.log");
+    assert!(result["skipped"].as_u64().unwrap() >= 1);
+
+    let _ = unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_NORMAL) };
 }

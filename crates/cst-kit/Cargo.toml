@@ -21,7 +21,8 @@ rand = "=0.10.3"
 zeroize = "=1.9.1"
 globset = "=0.4.21"
 ignore = "=0.4.34"
-same-file = "=1.0.6"
+memchr = "=2.8.3"
+encoding_rs = "=0.8.44"
 futures-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true
@@ -40,6 +41,9 @@ semver = "=1.0.28"
 [dev-dependencies]
 pi-ai = { path = "../pi-ai", features = ["test-support"] }
 zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.191"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "=0.18.4"
