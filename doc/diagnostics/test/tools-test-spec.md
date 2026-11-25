@@ -143,7 +143,7 @@
 | P1 | `crates/cst-kit/src/diagnostics/driver.rs` | **已修**：`driver(core)` 全失败判定修正为 5 次查询 |
 | P1 | `crates/cst-kit/src/bitlocker/core.rs` | **已修**：指定 `drive` 且卷列表为空时优先透出 `collectionErrors` 真实原因与脱敏错误码 |
 | P1 | `crates/cst-kit/src/diagnostics/win_native/windows/events.rs`、`eventlog.rs` | **已修**：延迟 `EvtFormatMessage` 至最终 `top` 或消息筛选候选，消除 10 万条提前格式化与误计 `unreadable` |
-| P1 | `crates/cst-kit/src/tools/fff.rs`、`path_guard.rs` | **已修**：阶段 2A 完成 `PathGuardSession` 单次基线与单句柄核验、`build_parallel` 并行检索（上限 8 线程）、`memchr` / `regex::bytes` 零拷贝匹配、纯 Rust 相关性打分、UTF-16 LE/BE BOM 与 GB18030 回退解码、`10 MiB` 单文件上限与跨盘符 `exclude` 修复；4,005 文件实测由 `12.70 s` 降至 `169.3 ms` |
+| P1 | `crates/cst-kit/src/tools/fff.rs`、`path_guard.rs` | **已修**：阶段 2A 完成 `PathGuardSession` 单次基线与单句柄核验、`build_parallel` 并行检索（上限 8 线程）、`memchr` / `regex::bytes` 零拷贝匹配、纯 Rust 相关性打分、UTF-16 LE/BE BOM 与 GB18030 回退解码、`10 MiB` 单文件上限与跨盘符 `exclude` 修复；4,005 文件实测由 `12.70 s` 降至 `176.54 ms` |
 | P1 | `crates/cst-kit/src/diagnostics/walk.rs` | **已修**：`walk::usage` 入口补充目录存在性与重解析点校验，不存在路径直接报错 |
 | P2 | `crates/cst-kit/src/diagnostics/hardware/pdh.rs`、`sys_load.rs` | **已修**：GPU 存在有效引擎样本时不误触发二次重采；仅引擎无样本时单重采引擎并保留首轮显存数据 |
 | P2 | `crates/cst-kit/src/diagnostics/win_native/windows.rs`、`mod.rs` | **已修**：同次诊断阻塞任务内复用 COM、Tokio 运行时与同命名空间 WMI 连接，结束即释放 |

@@ -20,7 +20,7 @@ description: ls 只读目录占用浏览参考。按体积倒序查看目录直�
 |---|---|
 | `path` | 规范化后的目录路径 |
 | `totalChildren` / `totalSize` | 可见直接子项总数与已统计体积合计；结果不完整时 `totalSize` 为下界 |
-| `method` | `native-index`（全部子目录命中同卷有效 `$MFT` 快照）或 `walk`（原生并行目录遍历） |
+| `method` | `native-index`（全部子目录命中同卷有效索引快照）或 `walk`（原生并行目录遍历） |
 | `entries[]` | 按已知字节降序排列：`name`、`type`（`file` / `dir` / `unknown`）、`bytes`、`size`、`pct`。大小未知时 `bytes` 与 `size` 为 `null`；任一子项不完整或总量为 0 时全部 `pct` 为 `null` |
 | `omitted` | 超出 `top` 截断时存在，含 `count`、`size`、`unknownCount`、`note`；不能将未知项当作小文件 |
 | `notice` | 说明结果不完整原因（超时、链接、云占位或访问限制）或敏感路径隐藏说明 |
@@ -28,8 +28,8 @@ description: ls 只读目录占用浏览参考。按体积倒序查看目录直�
 
 ## 大小引擎与缓存规则
 
-1. **进程内 `$MFT` 快照复用（`method: "native-index"`）**：默认启用（`CST_DISABLE_MFT=1` 可关闭）。管理员权限下查询本地 NTFS 盘根且无缓存时自动建立 120 秒卷缓存；同卷子目录查询优先复用已有有效缓存。每次查缓存前实时核对卷身份，换盘立即失效；仅当全部直接子目录同时通过 `FileReference` 与 `PathPolicy::LIVE` 路径核验时返回 `native-index`。
-2. **并行 Win32 目录遍历（`method: "walk"`）**：任一子目录未命中缓存、处于非管理员环境、查询非 NTFS 卷或 UNC 路径时，整次统一走受控并行 Win32 `FileIdBothDirectoryInfo`（回退 `FindFirstFileExW`）遍历。不混用整卷缓存与局部遍历口径，不设条目上限，受外层 215 秒超时与取消信号控制。
+1. **整卷索引快照复用（`method: "native-index"`）**：管理员权限下查询本地 NTFS 盘根且无缓存时自动建立 120 秒卷缓存；同卷子目录查询优先复用已有有效缓存。每次查缓存前核对卷身份与目录路径，换盘或目录变更立即失效；仅当全部直接子目录命中核验时返回 `native-index`。
+2. **原生并行目录遍历（`method: "walk"`）**：任一子目录未命中缓存、处于非管理员环境、查询非 NTFS 卷或 UNC 路径时，整次统一走原生并行目录遍历。不混用整卷缓存与局部遍历口径，不设条目上限，受外层超时与取消信号控制。整卷索引建立失败回退时附 `degradedFrom`。
 
 ## 边界规则
 

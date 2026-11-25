@@ -857,7 +857,7 @@ fn read_with_budget(
     // The size verified on the open handle bounds this read, including when
     // another process appends to the file. Refund bytes never read on short reads.
     buf.clear();
-    buf.reserve(size);
+    buf.reserve(size.saturating_add(1));
     let result = reader.take(size as u64).read_to_end(buf);
     remaining.fetch_add(size - buf.len(), AtomicOrdering::Relaxed);
     Some(result)
@@ -920,6 +920,10 @@ impl GrepWorker {
             self.shared.include.is_some() || !self.shared.excludes.is_empty(),
         );
         if !keys.passes(self.shared.include.as_ref(), &self.shared.excludes) {
+            return WalkState::Continue;
+        }
+        if entry_should_skip_content_read(&entry) {
+            self.local_skipped += 1;
             return WalkState::Continue;
         }
         let display = keys.display;
@@ -1202,6 +1206,22 @@ fn run_grep(
 // Shared Helpers
 // ============================================================================
 
+fn entry_should_skip_content_read(entry: &ignore::DirEntry) -> bool {
+    if entry.path_is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if let Ok(meta) = entry.metadata()
+            && (meta.file_attributes() & super::path_guard::FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn search_root(
     session: &PathGuardSession,
     cwd: &Path,
@@ -1217,17 +1237,28 @@ fn search_root(
     }
 
     let normalized = normalize_path(Path::new(filter));
-    if let Some(wildcard) = normalized.find(['*', '?', '[', '{']) {
-        if Path::new(filter).is_absolute()
-            && let Some(separator) = normalized[..wildcard].rfind('/')
-        {
-            let suffix = &normalized[separator + 1..];
-            return Ok((
-                PathBuf::from(&normalized[..=separator]),
-                Some(globs(&[suffix.into()])?),
-            ));
+    let is_abs = Path::new(filter).is_absolute();
+    let mut pattern = normalized.as_str();
+    if !is_abs {
+        while let Some(rest) = pattern.strip_prefix("./") {
+            pattern = rest;
         }
-        return Ok((cwd.into(), Some(globs(&[normalized])?)));
+    }
+    if let Some(wildcard) = pattern.find(['*', '?', '[', '{']) {
+        if let Some(separator) = pattern[..wildcard].rfind('/') {
+            let suffix = &pattern[separator + 1..];
+            if is_abs {
+                let root = PathBuf::from(&pattern[..=separator]);
+                session.verify_requested(&root)?;
+                return Ok((root, Some(globs(&[suffix.into()])?)));
+            }
+            let rel_dir = cwd.join(&pattern[..separator]);
+            session.verify_requested(&rel_dir)?;
+            if rel_dir.is_dir() {
+                return Ok((rel_dir, Some(globs(&[suffix.into()])?)));
+            }
+        }
+        return Ok((cwd.into(), Some(globs(&[pattern.into()])?)));
     }
     Err("检索路径不存在。".into())
 }
@@ -1734,5 +1765,107 @@ mod tests {
         }
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn relative_dot_prefix_nested_prefix_and_parent_globs_resolve_and_match() {
+        let mut exact_buf = Vec::with_capacity(4);
+        let budget = AtomicUsize::new(4);
+        assert_eq!(
+            read_with_budget(&b"abcd"[..], 4, &budget, &mut exact_buf)
+                .unwrap()
+                .unwrap(),
+            4
+        );
+        assert!(exact_buf.capacity() <= 8);
+
+        let base = std::env::temp_dir().join(format!("cst-fff-relglob-{}", uuid::Uuid::new_v4()));
+        let kit_root = base.join("kit");
+        let cwd = kit_root.join("work");
+        let sibling = kit_root.join("sibling");
+        std::fs::create_dir_all(cwd.join("crates/src/tools")).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::create_dir_all(kit_root.join(".state")).unwrap();
+
+        std::fs::write(cwd.join("top.txt"), b"needle_top\n").unwrap();
+        std::fs::write(cwd.join("crates/src/lib.rs"), b"needle_rs\n").unwrap();
+        std::fs::write(cwd.join("crates/src/tools/fff.rs"), b"needle_rs\n").unwrap();
+        std::fs::write(sibling.join("ext.log"), b"needle_ext\n").unwrap();
+        std::fs::write(kit_root.join(".state/secret.txt"), b"needle_secret\n").unwrap();
+
+        let guard = PathGuard::new(&kit_root).unwrap();
+        let cancel = CancellationToken::new();
+
+        for content in [false, true] {
+            let dot_top = search(
+                &guard,
+                &cwd,
+                serde_json::from_value(json!({
+                    "pattern": if content { "needle_top" } else { "top" },
+                    "path": "./*.txt"
+                }))
+                .unwrap(),
+                content,
+                &cancel,
+            )
+            .unwrap();
+            assert_eq!(dot_top["matches"][0]["path"], "top.txt");
+
+            let dot_nested = search(
+                &guard,
+                &cwd,
+                serde_json::from_value(json!({
+                    "pattern": if content { "needle_rs" } else { "rs" },
+                    "path": "./crates/src/**/*.rs"
+                }))
+                .unwrap(),
+                content,
+                &cancel,
+            )
+            .unwrap();
+            let mut paths: Vec<&str> = dot_nested["matches"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["path"].as_str().unwrap())
+                .collect();
+            paths.sort_unstable();
+            assert_eq!(paths, vec!["crates/src/lib.rs", "crates/src/tools/fff.rs"]);
+
+            let parent_glob = search(
+                &guard,
+                &cwd,
+                serde_json::from_value(json!({
+                    "pattern": if content { "needle_ext" } else { "ext" },
+                    "path": "../sibling/*.log"
+                }))
+                .unwrap(),
+                content,
+                &cancel,
+            )
+            .unwrap();
+            assert_eq!(parent_glob["matches"].as_array().unwrap().len(), 1);
+            assert!(
+                parent_glob["matches"][0]["path"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("/sibling/ext.log")
+            );
+
+            let blocked_state = search(
+                &guard,
+                &cwd,
+                serde_json::from_value(json!({
+                    "pattern": "secret",
+                    "path": "../.state/*.txt"
+                }))
+                .unwrap(),
+                content,
+                &cancel,
+            );
+            assert!(blocked_state.is_err());
+        }
+
+        std::fs::remove_dir_all(base).unwrap();
     }
 }

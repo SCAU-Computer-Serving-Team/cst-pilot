@@ -796,3 +796,48 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
     );
     created.session.shutdown().await.unwrap();
 }
+
+#[cfg(windows)]
+#[test]
+fn offline_and_reparse_files_are_skipped_without_opening_in_read_and_ffgrep() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_OFFLINE, SetFileAttributesW,
+    };
+    use windows::core::PCWSTR;
+
+    let fixture = Fixture::new();
+    fixture.write("notes/local.log", "OFFLINE_CLOUD_NEEDLE\n");
+    let offline_path = fixture.path("notes/offline.log");
+    fixture.write("notes/offline.log", "OFFLINE_CLOUD_NEEDLE\n");
+
+    let wide: Vec<u16> = offline_path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_OFFLINE) }.unwrap();
+
+    let guard = fixture.guard();
+    assert!(guard.open(&offline_path).is_err());
+    assert!(
+        GuardedReadOperations(guard.clone())
+            .read_bytes(&offline_path)
+            .is_err()
+    );
+
+    let result = search(
+        &guard,
+        &fixture.0,
+        file_input("OFFLINE_CLOUD_NEEDLE"),
+        true,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let matches = result["matches"].as_array().unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["path"], "notes/local.log");
+    assert!(result["skipped"].as_u64().unwrap() >= 1);
+
+    let _ = unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_NORMAL) };
+}

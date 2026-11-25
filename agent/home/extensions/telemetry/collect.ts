@@ -143,27 +143,42 @@ function contentText(result: unknown): string {
 	return "";
 }
 
+function hasNonEmptyString(value: unknown): boolean {
+	return typeof value === "string" && value.length > 0;
+}
+
 function readTruncated(result: unknown): boolean {
-	if (contentText(result).includes("outputTruncated")) return true;
-	const truncation = (result as { details?: { truncation?: { truncated?: unknown } } } | undefined)?.details
-		?.truncation;
-	return truncation?.truncated === true;
+	const text = contentText(result);
+	if (text) {
+		try {
+			const parsed = JSON.parse(text) as { outputTruncated?: unknown } | null;
+			if (parsed && typeof parsed === "object" && parsed.outputTruncated === true) return true;
+		} catch {
+			// Non-JSON content text does not carry outputTruncated metadata.
+		}
+	}
+	const details = (result as { details?: Record<string, unknown> } | undefined)?.details;
+	if (details === undefined || typeof details !== "object") return false;
+	const truncation = details.truncation as { truncated?: unknown } | undefined;
+	return truncation?.truncated === true || details.outputTruncated === true || details.truncated === true;
 }
 
 function readDegraded(toolName: string, scope: string | undefined, result: unknown): boolean {
 	const details = (result as { details?: Record<string, unknown> } | undefined)?.details;
 	if (details === undefined || typeof details !== "object") return false;
-	if (toolName === "startup" || toolName === "bitlocker") {
-		return (details[toolName] as { degraded?: unknown } | undefined)?.degraded === true;
+	if (details.degraded === true) return true;
+	const byTool = details[toolName] as { degraded?: unknown } | undefined;
+	if (byTool !== undefined && typeof byTool === "object" && byTool.degraded === true) return true;
+	if (scope) {
+		const byScope = details[scope] as { degraded?: unknown } | undefined;
+		if (byScope !== undefined && typeof byScope === "object" && byScope.degraded === true) return true;
 	}
 	if (toolName === "disk") {
-		if ((details as { degraded?: unknown }).degraded === true) return true;
-		const usage = details.usage as { truncated?: boolean; denied?: unknown[] } | undefined;
-		return usage?.truncated === true || (Array.isArray(usage?.denied) && usage.denied.length > 0);
+		const usage = details.usage as { degradedFrom?: unknown } | undefined;
+		return usage !== undefined && typeof usage === "object" && hasNonEmptyString(usage.degradedFrom);
 	}
-	if (toolName === "sys" || toolName === "driver" || toolName === "eventlog") {
-		const byScope = details[scope ?? ""] as { degraded?: unknown } | undefined;
-		return byScope?.degraded === true;
+	if (toolName === "ls") {
+		return hasNonEmptyString(details.degradedFrom);
 	}
 	return false;
 }

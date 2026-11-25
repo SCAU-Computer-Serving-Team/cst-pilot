@@ -135,3 +135,28 @@ test("disk usage distinguishes clean native-walk and MFT fallback", () => {
 	);
 	assert.match(JSON.stringify(fallback.blocks), /快速卷索引不可用/);
 });
+
+test("ffgrep maps skippedLargeFiles, skipped, match rows, and empty matches to Chinese labels", () => {
+	const hit = mapTool(
+		call("ffgrep"),
+		result(
+			{
+				truncated: false,
+				skipped: 2,
+				skippedLargeFiles: 1,
+				notice: "已跳过 1 个超过 10 MiB 的大文件",
+				matches: [{ path: "src/main.rs", line: 12, text: "panic!", matched: true }],
+			},
+			"",
+		),
+	);
+	const serialized = JSON.stringify(hit.blocks);
+	assert.match(serialized, /已跳过/);
+	assert.match(serialized, /跳过大文件/);
+	assert.match(serialized, /行号/);
+	assert.match(serialized, /命中行/);
+	assert.doesNotMatch(serialized, /skippedLargeFiles/);
+
+	const empty = mapTool(call("fffind"), result({ truncated: false, skipped: 0, matches: [] }, ""));
+	assert.match(JSON.stringify(empty.blocks), /匹配结果：本次没有结果/);
+});

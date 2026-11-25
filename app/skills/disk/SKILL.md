@@ -18,11 +18,11 @@ description: disk 只读磁盘诊断参考。排查分区容量（space）、硬
 
 ## 各 scope 来源、降级与判读
 
-1. **`space`**：Win32 `GetDiskFreeSpaceExW`（带线程防弹窗与网络卷 4 槽 / 2 秒超时隔离）。返回 `space[]`：`drive`、`totalGB`、`freeGB`、`usedPct`（二进制 GiB，`bytes / 2^30`）。`freeGB: 0` 表示零剩余。
-2. **`info`**：盘符关联优先变长 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（全 extent 核验，失败回退 WMI）；逻辑卷走 Win32 原生枚举；物理盘查 `MSFT_PhysicalDisk`（Storage WMI 不可用时回退 SetupAPI 与存储 IOCTL）。指定 `drive` 且关联失败时，`physicalDisks` 保留全量设备并附 `infoNotice` 与 `degraded: true`。
-3. **`health`**：核验序列号后优先 Win32 原生存储 IOCTL（NVMe Log `0x02` 与只读 ATA SMART），受限或身份不匹配时回退单次批量 WMI `MSFT_StorageReliabilityCounter`。输出 `smart[]` 固定 6 项键：`DeviceId`、`Wear`、`Temperature`、`PowerOnHours`、`ReadErrorsTotal`、`WriteErrorsTotal`。`smart: null` 表示未取回数据，不能据此判断健康或故障；仅在出现访问拒绝时提示管理员权限，部分失败见 `smartErrors`。
-4. **`usage`**：管理员权限下的本地 NTFS 根目录默认用纯 Rust `ntfs-ng` 直读 `$MFT`（`method: "native-mft"`，可用 `CST_DISABLE_MFT=1` 关闭），完整快照写入进程内 120 秒卷缓存供 `ls` 复用。子目录、非管理员、非 NTFS、UNC 路径或 `$MFT` 失败时走无条目上限的并行 Win32 `FileIdBothDirectoryInfo` 遍历（`method: "native-walk"`，受外层 215 秒超时与取消信号控制）。仅 `$MFT` 失败回退时附 `degradedFrom`。
-5. **`all`**：一次返回 `space`、`info` 与 `health`，复用同次原生卷探测，不含 `usage`。
+1. **`space`**：查询各逻辑卷剩余容量（网络卷独立短超时隔离）。返回 `space[]`：`drive`、`totalGB`、`freeGB`、`usedPct`（二进制 GiB，`bytes / 2^30`）。`freeGB: 0` 表示零剩余。
+2. **`info`**：查询盘符与物理盘映射、逻辑卷及物理硬盘信息。指定 `drive` 且盘符关联失败时，`physicalDisks` 保留全量设备并附 `infoNotice` 与 `degraded: true`。
+3. **`health`**：优先通过原生存储接口读取 NVMe 与 ATA SMART 健康度，受限时回退系统存储可靠性计数器。输出 `smart[]` 固定 6 项键：`DeviceId`、`Wear`、`Temperature`、`PowerOnHours`、`ReadErrorsTotal`、`WriteErrorsTotal`。`smart: null` 表示未取回数据，不能据此判断健康或故障；仅在出现访问拒绝时提示管理员权限，部分失败见 `smartErrors`。
+4. **`usage`**：管理员权限下的本地 NTFS 根目录默认建立整卷索引（`method: "native-mft"`），完整快照写入 120 秒卷缓存供 `ls` 复用。子目录、非管理员、非 NTFS、UNC 路径或整卷索引不可用时，走无条目上限的原生并行目录遍历（`method: "native-walk"`，受外层超时与取消信号控制）。仅整卷索引失败回退时附 `degradedFrom`。
+5. **`all`**：一次返回 `space`、`info` 与 `health`，不含 `usage`。
 
 ## usage 字段与统计口径
 

@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct FileIdentity {
     #[cfg(windows)]
-    volume: u32,
+    volume: u64,
     #[cfg(windows)]
-    index: u64,
+    id: [u8; 16],
     #[cfg(not(windows))]
     dev: u64,
     #[cfg(not(windows))]
@@ -24,11 +24,58 @@ struct FileIdentity {
 
 #[derive(Clone, Copy, Debug)]
 struct HandleMeta {
-    identity: FileIdentity,
+    identity: Option<FileIdentity>,
     link_count: u64,
     is_dir: bool,
     is_file: bool,
+    unhydrated: bool,
     file_size: u64,
+}
+
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_DIRECTORY_BITS: u32 = 0x0000_0010;
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_REPARSE_POINT_BITS: u32 = 0x0000_0400;
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_OFFLINE_BITS: u32 = 0x0000_1000;
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_RECALL_ON_OPEN_BITS: u32 = 0x0004_0000;
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS_BITS: u32 = 0x0040_0000;
+#[cfg(any(windows, test))]
+pub(crate) const FILE_ATTRIBUTE_UNHYDRATED_MASK: u32 = FILE_ATTRIBUTE_OFFLINE_BITS
+    | FILE_ATTRIBUTE_RECALL_ON_OPEN_BITS
+    | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS_BITS;
+
+#[cfg(any(windows, test))]
+fn build_windows_file_identity(
+    ex_id: Option<(u64, [u8; 16])>,
+    vol32: u32,
+    index64: u64,
+) -> Option<(u64, [u8; 16])> {
+    if let Some((vol, id)) = ex_id {
+        if vol != 0 && id != [0u8; 16] && id != [0xFFu8; 16] {
+            return Some((vol, id));
+        }
+        return None;
+    }
+    if vol32 != 0 && index64 != 0 && index64 != u64::MAX {
+        let mut id = [0u8; 16];
+        id[..8].copy_from_slice(&index64.to_le_bytes());
+        return Some((u64::from(vol32), id));
+    }
+    None
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn should_reject_windows_open_attrs(attrs: u32, reparse_tag: Option<u32>) -> bool {
+    if attrs & (FILE_ATTRIBUTE_DIRECTORY_BITS | FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0 {
+        return true;
+    }
+    if attrs & FILE_ATTRIBUTE_REPARSE_POINT_BITS != 0 {
+        return !reparse_tag.is_some_and(crate::diagnostics::walk::is_cloud_reparse_tag);
+    }
+    false
 }
 
 #[derive(Clone)]
@@ -83,7 +130,7 @@ impl PathGuard {
         let state_dir = self.layout.state_dir();
         let mut state_keys = Vec::with_capacity(2);
         push_unique_key(&mut state_keys, &state_dir);
-        let state_identity = inspect_path(&state_dir).ok().map(|(resolved, meta)| {
+        let state_identity = inspect_path(&state_dir).ok().and_then(|(resolved, meta)| {
             push_unique_key(&mut state_keys, &resolved);
             meta.identity
         });
@@ -95,7 +142,9 @@ impl PathGuard {
             push_unique_key(&mut secret_keys, secret);
             if let Ok((resolved, meta)) = inspect_path(secret) {
                 push_unique_key(&mut secret_keys, &resolved);
-                secret_identities.push(meta.identity);
+                if let Some(id) = meta.identity {
+                    secret_identities.push(id);
+                }
             }
         }
 
@@ -146,7 +195,7 @@ impl PathGuardSession {
         let Some(state_id) = self.inner.state_identity else {
             return true;
         };
-        path_meta(path).is_ok_and(|meta| meta.identity != state_id)
+        path_meta(path).is_ok_and(|meta| meta.identity != Some(state_id))
     }
 
     /// Check an arbitrary path (file or directory) against all protected targets.
@@ -166,6 +215,9 @@ impl PathGuardSession {
         self.verify_requested(path)?;
         let file = open_read_handle(path).map_err(|_| "目标文件无法打开。")?;
         let (resolved, meta) = inspect_opened_file(&file, path).map_err(|_| denied())?;
+        if meta.unhydrated {
+            return Err("目标文件无法打开。".into());
+        }
         if !meta.is_file {
             return Err("目标路径不是普通文件。".into());
         }
@@ -192,11 +244,13 @@ impl PathGuardSession {
 
     fn verify_resolved(&self, resolved: &Path, meta: HandleMeta) -> Result<(), String> {
         self.verify_key(resolved)?;
-        if self.inner.secret_identities.contains(&meta.identity) {
+        if let Some(id) = meta.identity
+            && self.inner.secret_identities.contains(&id)
+        {
             return Err(denied());
         }
         if let Some(state_id) = self.inner.state_identity {
-            if meta.identity == state_id {
+            if meta.identity == Some(state_id) {
                 return Err(denied());
             }
             // A canonical name can still use an alternate volume or mount name.
@@ -208,7 +262,12 @@ impl PathGuardSession {
             match meta.link_count {
                 0 => return Err(denied()),
                 1 => (),
-                _ => self.verify_hard_link(meta.identity)?,
+                _ => {
+                    let Some(id) = meta.identity else {
+                        return Err(denied());
+                    };
+                    self.verify_hard_link(id)?;
+                }
             }
         }
         Ok(())
@@ -219,48 +278,12 @@ impl PathGuardSession {
         resolved: &Path,
         state_id: FileIdentity,
     ) -> Result<(), String> {
-        let Some(parent) = resolved.parent() else {
-            return Ok(());
-        };
-        let parent_key = path_key(parent);
-        if self
-            .inner
-            .verified_non_state_dirs
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(&parent_key)
-        {
-            return Ok(());
-        }
-
-        let mut newly_verified = Vec::new();
-        for ancestor in resolved.ancestors().skip(1) {
-            let key = path_key(ancestor);
-            if self
-                .inner
-                .verified_non_state_dirs
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&key)
-            {
-                break;
-            }
-            if path_meta(ancestor).is_ok_and(|meta| meta.identity == state_id) {
-                return Err(denied());
-            }
-            newly_verified.push(key);
-        }
-        if !newly_verified.is_empty() {
-            let mut guard = self
-                .inner
-                .verified_non_state_dirs
-                .write()
-                .unwrap_or_else(|e| e.into_inner());
-            if guard.len() < 16_384 {
-                guard.extend(newly_verified);
-            }
-        }
-        Ok(())
+        verify_ancestors_with(
+            &self.inner.verified_non_state_dirs,
+            resolved,
+            state_id,
+            |ancestor| path_meta(ancestor).map(|meta| meta.identity),
+        )
     }
 
     fn is_state_key(&self, key: &str) -> bool {
@@ -277,7 +300,9 @@ impl PathGuardSession {
     fn verify_hard_link(&self, identity: FileIdentity) -> Result<(), String> {
         for secret in &self.inner.secret_paths {
             match path_meta(secret) {
-                Ok(meta) if meta.identity == identity => return Err(denied()),
+                Ok(meta) if meta.identity == Some(identity) || meta.identity.is_none() => {
+                    return Err(denied());
+                }
                 Ok(_) => (),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => (),
                 Err(_) => return Err(denied()),
@@ -301,17 +326,67 @@ impl PathGuardSession {
             if is_link(&meta) {
                 return Err(denied());
             }
-            if meta.is_file()
-                && (path_meta(entry.path()).map_err(|_| denied())?.identity == identity)
-            {
-                return Err(denied());
+            if meta.is_file() {
+                let entry_id = path_meta(entry.path())
+                    .map_err(|_| denied())?
+                    .identity
+                    .ok_or_else(denied)?;
+                if entry_id == identity {
+                    return Err(denied());
+                }
             }
         }
-        if path_meta(state_dir).map_err(|_| denied())?.identity != state_meta.identity {
+        if state_meta.identity.is_none()
+            || path_meta(state_dir).map_err(|_| denied())?.identity != state_meta.identity
+        {
             return Err(denied());
         }
         Ok(())
     }
+}
+
+fn verify_ancestors_with(
+    cache: &RwLock<HashSet<String>>,
+    resolved: &Path,
+    state_id: FileIdentity,
+    mut lookup: impl FnMut(&Path) -> io::Result<Option<FileIdentity>>,
+) -> Result<(), String> {
+    let Some(parent) = resolved.parent() else {
+        return Ok(());
+    };
+    let parent_key = path_key(parent);
+    if cache
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&parent_key)
+    {
+        return Ok(());
+    }
+
+    let mut newly_verified = Vec::new();
+    for ancestor in resolved.ancestors().skip(1) {
+        let key = path_key(ancestor);
+        if cache
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&key)
+        {
+            break;
+        }
+        match lookup(ancestor) {
+            Ok(Some(id)) if id == state_id => return Err(denied()),
+            Ok(Some(_)) => newly_verified.push(key),
+            // Never cache unverified (`Err`) or identity-less ancestors as safe.
+            Ok(None) | Err(_) => {}
+        }
+    }
+    if !newly_verified.is_empty() {
+        let mut guard = cache.write().unwrap_or_else(|e| e.into_inner());
+        if guard.len() < 16_384 {
+            guard.extend(newly_verified);
+        }
+    }
+    Ok(())
 }
 
 fn is_link(meta: &Metadata) -> bool {
@@ -328,17 +403,55 @@ fn is_link(meta: &Metadata) -> bool {
 
 #[cfg(windows)]
 fn open_read_handle(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_TYPE_DISK, FileAttributeTagInfo, GetFileInformationByHandleEx, GetFileType,
+    };
+
+    // Inspect target attributes without following reparse points or requesting FILE_READ_DATA,
+    // preventing cloud-placeholder hydration, outbound SMB symlink traversal, and pipe blocking.
+    let pre = std::fs::symlink_metadata(path)?;
+    let attrs = pre.file_attributes();
+    if attrs & (FILE_ATTRIBUTE_DIRECTORY_BITS | FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0 {
+        return Err(io::Error::other("non-regular or unhydrated cloud file"));
+    }
+    if attrs & FILE_ATTRIBUTE_REPARSE_POINT_BITS != 0 {
+        let raw_reparse = std::fs::OpenOptions::new()
+            .read(false)
+            .access_mode(0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(path)?;
+        let handle = HANDLE(raw_reparse.as_raw_handle());
+        if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
+            return Err(io::Error::other("not a disk file"));
+        }
+        let mut tag_info = FILE_ATTRIBUTE_TAG_INFO::default();
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileAttributeTagInfo,
+                (&raw mut tag_info).cast(),
+                std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        }
+        .map_err(io::Error::other)?;
+        if should_reject_windows_open_attrs(tag_info.FileAttributes, Some(tag_info.ReparseTag)) {
+            return Err(io::Error::other("reparse point rejected"));
+        }
+    }
     File::open(path)
 }
 
 #[cfg(not(windows))]
 fn open_read_handle(path: &Path) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
-    // A non-regular entry can appear between enumeration and opening. In
-    // particular, don't block waiting for a writer if the name is now a FIFO.
+    // Refuse symlinks atomically and don't block waiting for a writer if the name is a FIFO.
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NONBLOCK)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
         .open(path)
 }
 
@@ -366,13 +479,13 @@ fn handle_meta(file: &File) -> std::io::Result<HandleMeta> {
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_TYPE_DISK,
-        GetFileInformationByHandle, GetFileType,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ID_INFO, FILE_TYPE_DISK,
+        FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, GetFileType,
     };
 
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     let handle = HANDLE(file.as_raw_handle());
-    // SAFETY: `handle` is borrowed from a live `File` for both Win32 calls.
+    // SAFETY: `handle` is borrowed from a live `File` for all Win32 calls.
     if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
         return Err(io::Error::other("not a disk file"));
     }
@@ -384,15 +497,28 @@ fn handle_meta(file: &File) -> std::io::Result<HandleMeta> {
             io::Error::other(error)
         }
     })?;
+    let mut id_info = FILE_ID_INFO::default();
+    let ex_id = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileIdInfo,
+            (&raw mut id_info).cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    }
+    .ok()
+    .map(|()| (id_info.VolumeSerialNumber, id_info.FileId.Identifier));
+
+    let index64 = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+    let identity = build_windows_file_identity(ex_id, info.dwVolumeSerialNumber, index64)
+        .map(|(volume, id)| FileIdentity { volume, id });
     let is_dir = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
     Ok(HandleMeta {
-        identity: FileIdentity {
-            volume: info.dwVolumeSerialNumber,
-            index: ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64),
-        },
+        identity,
         link_count: u64::from(info.nNumberOfLinks),
         is_dir,
         is_file: !is_dir,
+        unhydrated: (info.dwFileAttributes & FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0,
         file_size: ((info.nFileSizeHigh as u64) << 32) | (info.nFileSizeLow as u64),
     })
 }
@@ -446,14 +572,16 @@ fn inspect_opened_file(file: &File, _path: &Path) -> io::Result<(PathBuf, Handle
 #[cfg(not(windows))]
 fn metadata_to_handle_meta(meta: &std::fs::Metadata) -> HandleMeta {
     use std::os::unix::fs::MetadataExt;
+    let identity = (meta.dev() != 0 && meta.ino() != 0).then_some(FileIdentity {
+        dev: meta.dev(),
+        ino: meta.ino(),
+    });
     HandleMeta {
-        identity: FileIdentity {
-            dev: meta.dev(),
-            ino: meta.ino(),
-        },
+        identity,
         link_count: meta.nlink(),
         is_dir: meta.is_dir(),
         is_file: meta.is_file(),
+        unhydrated: false,
         file_size: meta.len(),
     }
 }
@@ -474,7 +602,7 @@ fn inspect_path(path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
 fn inspect_opened_file(file: &File, path: &Path) -> io::Result<(PathBuf, HandleMeta)> {
     let opened = metadata_to_handle_meta(&file.metadata()?);
     let (resolved, current) = inspect_path(path)?;
-    if opened.identity != current.identity {
+    if opened.identity.is_none() || opened.identity != current.identity {
         return Err(io::Error::other("path no longer identifies the open file"));
     }
     Ok((resolved, opened))
@@ -513,7 +641,7 @@ fn reject_unsafe_windows_path(path: &Path) -> Result<(), String> {
                 Prefix::Disk(_) if path.is_absolute() => Some(1),
                 Prefix::VerbatimDisk(_) if path.is_absolute() => Some(5),
                 Prefix::UNC(server, _) if server != "." && server != "?" => None,
-                Prefix::VerbatimUNC(..) => None,
+                Prefix::VerbatimUNC(server, _) if server != "." && server != "?" => None,
                 _ => return Err(denied()),
             },
             _ => None,
@@ -573,5 +701,139 @@ impl ReadOperations for GuardedReadOperations {
 
     fn open_reader(&self, path: &Path) -> Result<Box<dyn BufRead + Send>, String> {
         Ok(Box::new(BufReader::new(self.0.open(path)?)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_128bit_file_identity_distinguishes_high_bits_and_rejects_sentinels() {
+        let mut id_a = [0u8; 16];
+        id_a[0] = 7;
+        id_a[12] = 1;
+        let mut id_b = id_a;
+        id_b[12] = 2;
+
+        let a = build_windows_file_identity(Some((0x1234_5678, id_a)), 0x5678, u64::MAX).unwrap();
+        let b = build_windows_file_identity(Some((0x1234_5678, id_b)), 0x5678, u64::MAX).unwrap();
+        assert_ne!(a, b);
+
+        // Fallback to 64-bit when FileIdInfo is unavailable, while rejecting 0 and u64::MAX.
+        let fallback = build_windows_file_identity(None, 42, 99).unwrap();
+        assert_eq!(fallback.0, 42);
+        assert_eq!(&fallback.1[..8], &99u64.to_le_bytes());
+
+        assert!(build_windows_file_identity(Some((1, [0u8; 16])), 1, 99).is_none());
+        assert!(build_windows_file_identity(Some((1, [0xFFu8; 16])), 1, 99).is_none());
+        assert!(build_windows_file_identity(Some((0, id_a)), 1, 99).is_none());
+        assert!(build_windows_file_identity(None, 42, 0).is_none());
+        assert!(build_windows_file_identity(None, 42, u64::MAX).is_none());
+        assert!(build_windows_file_identity(None, 0, 99).is_none());
+    }
+
+    #[test]
+    fn windows_pre_open_classifier_blocks_unhydrated_cloud_and_symlinks() {
+        const CLOUD_TAG: u32 = 0x9000_101A;
+        const ONEDRIVE_TAG: u32 = 0x8000_0021;
+        const SYMLINK_TAG: u32 = 0xA000_000C;
+
+        // Normal local file -> allowed
+        assert!(!should_reject_windows_open_attrs(0x20, None));
+        // Hydrated local OneDrive files -> allowed
+        assert!(!should_reject_windows_open_attrs(
+            FILE_ATTRIBUTE_REPARSE_POINT_BITS,
+            Some(CLOUD_TAG)
+        ));
+        assert!(!should_reject_windows_open_attrs(
+            FILE_ATTRIBUTE_REPARSE_POINT_BITS,
+            Some(ONEDRIVE_TAG)
+        ));
+        // Online-only / recall-on-open / offline placeholders -> blocked before File::open
+        for bit in [
+            FILE_ATTRIBUTE_OFFLINE_BITS,
+            FILE_ATTRIBUTE_RECALL_ON_OPEN_BITS,
+            FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS_BITS,
+        ] {
+            assert!(should_reject_windows_open_attrs(bit, None));
+            assert!(should_reject_windows_open_attrs(
+                FILE_ATTRIBUTE_REPARSE_POINT_BITS | bit,
+                Some(CLOUD_TAG)
+            ));
+        }
+        // Symlinks, junctions, directories, and unknown reparse tags -> blocked
+        assert!(should_reject_windows_open_attrs(
+            FILE_ATTRIBUTE_REPARSE_POINT_BITS,
+            Some(SYMLINK_TAG)
+        ));
+        assert!(should_reject_windows_open_attrs(
+            FILE_ATTRIBUTE_REPARSE_POINT_BITS,
+            None
+        ));
+        assert!(should_reject_windows_open_attrs(
+            FILE_ATTRIBUTE_DIRECTORY_BITS,
+            None
+        ));
+    }
+
+    #[test]
+    fn ancestor_verification_never_caches_error_or_sentinel_ancestors_as_safe() {
+        #[cfg(windows)]
+        let make_id = |b: u8| FileIdentity {
+            volume: 1,
+            id: [b; 16],
+        };
+        #[cfg(not(windows))]
+        let make_id = |b: u8| FileIdentity {
+            dev: 1,
+            ino: u64::from(b),
+        };
+
+        let state_id = make_id(9);
+        let safe_id = make_id(2);
+        let cache = RwLock::new(HashSet::new());
+        let resolved = Path::new("/kit/unreadable/sentinel/safe/doc.txt");
+
+        verify_ancestors_with(&cache, resolved, state_id, |ancestor| {
+            let key = path_key(ancestor);
+            if key.ends_with("/safe") {
+                Ok(Some(safe_id))
+            } else if key.ends_with("/sentinel") {
+                Ok(None)
+            } else {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            }
+        })
+        .unwrap();
+
+        let cached = cache.read().unwrap();
+        assert!(cached.iter().any(|k| k.ends_with("/safe")));
+        assert!(!cached.iter().any(|k| k.ends_with("/sentinel")));
+        assert!(!cached.iter().any(|k| k.ends_with("/unreadable")));
+        drop(cached);
+
+        let err = verify_ancestors_with(
+            &cache,
+            Path::new("/kit/alias/sub/doc.txt"),
+            state_id,
+            |ancestor| {
+                if path_key(ancestor).ends_with("/alias") {
+                    Ok(Some(state_id))
+                } else {
+                    Ok(Some(safe_id))
+                }
+            },
+        );
+        assert!(err.is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn reject_unsafe_windows_path_blocks_verbatim_unc_device_servers() {
+        assert!(reject_unsafe_windows_path(Path::new(r"\\.\pipe\demo")).is_err());
+        assert!(reject_unsafe_windows_path(Path::new(r"\\?\UNC\.\pipe\demo")).is_err());
+        assert!(reject_unsafe_windows_path(Path::new(r"\\?\UNC\?\GLOBALROOT\demo")).is_err());
+        assert!(reject_unsafe_windows_path(Path::new(r"\\?\UNC\fileserver\share\a.log")).is_ok());
     }
 }

@@ -23,7 +23,6 @@ globset = "=0.4.21"
 ignore = "=0.4.34"
 memchr = "=2.8.3"
 encoding_rs = "=0.8.44"
-same-file = "=1.0.6"
 futures-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true

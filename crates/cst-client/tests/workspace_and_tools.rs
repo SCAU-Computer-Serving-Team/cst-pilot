@@ -473,4 +473,39 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     assert_eq!(listing[0].metrics[0].value, "10.0 MB");
     assert_eq!(listing[1].metrics.len(), 1);
     assert_eq!(listing[1].metrics[0].value, "大小未知");
+
+    // 7. ffgrep & fffind map skippedLargeFiles, skipped, match rows, and empty matches to Chinese labels
+    let grep_view = map_tool(
+        &make_call("ffgrep", json!({ "pattern": "panic" })),
+        &make_result(
+            Some(json!({
+                "truncated": false,
+                "skipped": 2,
+                "skippedLargeFiles": 1,
+                "notice": "已跳过 1 个超过 10 MiB 的大文件",
+                "matches": [{ "path": "src/main.rs", "line": 12, "text": "panic!", "matched": true }]
+            })),
+            "",
+            false,
+        ),
+    );
+    let grep_json = serde_json::to_string(&grep_view.blocks).unwrap();
+    for expected_label in ["已跳过", "跳过大文件", "行号", "命中行"] {
+        assert!(
+            grep_json.contains(expected_label),
+            "missing `{expected_label}` in {grep_json}"
+        );
+    }
+    assert!(!grep_json.contains("skippedLargeFiles"));
+
+    let empty_find = map_tool(
+        &make_call("fffind", json!({ "pattern": "none" })),
+        &make_result(
+            Some(json!({ "truncated": false, "skipped": 0, "matches": [] })),
+            "",
+            false,
+        ),
+    );
+    let empty_json = serde_json::to_string(&empty_find.blocks).unwrap();
+    assert!(empty_json.contains("匹配结果：本次没有结果"));
 }

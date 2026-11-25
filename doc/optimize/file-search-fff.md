@@ -19,8 +19,8 @@
 
 1. **单次操作基线与单句柄核验（`path_guard.rs`）**：
    - 每次调用创建瞬态 `PathGuardSession`，一次性解析 5 处凭据与 `.state/` 的规范键和文件标识，不持长期 OS 句柄，调用结束立即销毁。
-   - Windows 打开文件后，在同一句柄上调用 `GetFileType`、`GetFileInformationByHandle` 与 `GetFinalPathNameByHandleW` 完成磁盘文件类型、规范路径、硬链接数、文件大小与身份核验，消除校验与打开间竞态。
-   - 会话内以 `RwLock<HashSet<String>>` 对已核验的非 `.state/` 规范祖先目录去重（上限 16,384 项，随会话销毁），兼顾跨挂载别名防护与低系统调用开销；多硬链接文件（`link_count > 1`）实时复核凭据与 `.state/` 成员。
+   - 打开文件前先通过不跟随重解析点且零读取权限的元数据检查跳过云端未驻留占位文件与非云重解析链接；Windows 打开句柄后在同一句柄上调用 `GetFileType`、`GetFileInformationByHandle`、`GetFileInformationByHandleEx`（`FileIdInfo` 128 位身份，兼容 ReFS）与 `GetFinalPathNameByHandleW` 完成核验，消除校验与打开间竞态。
+   - 会话内以 `RwLock<HashSet<String>>` 对已确认持有有效非 `.state/` 身份的规范祖先目录去重（读取失败或无有效身份的祖先不写缓存，上限 16,384 项，随会话销毁），兼顾跨挂载别名防护与低系统调用开销；多硬链接文件（`link_count > 1`）实时复核凭据与 `.state/` 成员。
    - 复用 `Cargo.lock` 既有依赖 `memchr = "=2.8.3"`、`encoding_rs = "=0.8.44"` 与 Unix 侧 `libc = "=0.2.191"`，无新增外部下载。
 2. **并行遍历与缓冲复用（`fff.rs`）**：
    - 使用 `ignore::WalkBuilder::build_parallel()`，工作线程数取 `(逻辑核数 - 2).clamp(1, 8)`，保持 `follow_links(false)` 并拒绝符号链接、目录联接与 `.git`。

@@ -415,6 +415,62 @@ fn tool_metrics_count_once_and_omit_all_business_arguments_and_body() {
     assert_eq!(disk_fb.calls, 3);
     assert_eq!(disk_fb.degraded, 2);
     assert_eq!(disk_fb.truncated, 1);
+
+    // Partial access (`denied` / `usage.truncated`) without `degradedFrom` is NOT degraded.
+    state.tool_start(
+        "6",
+        "disk",
+        &json!({"scope":"usage","path":"C:\\Users"}),
+        1500,
+    );
+    let partial_walk = cst_kit::diagnostics::result::diagnostic_result(
+        json!({"usage":{"method":"native-walk","truncated":true,"denied":["C:\\Users\\Locked"],"totalGB":2.0}}),
+    )
+    .unwrap();
+    state.tool_end("6", &partial_walk, false, Some(15), 1515);
+
+    // `ls` fallback from MFT (`degradedFrom: "mft"`) counts as `ls.degraded`.
+    state.tool_start("7", "ls", &json!({"path":"C:\\"}), 1520);
+    let ls_fb = cst_kit::diagnostics::result::diagnostic_result(
+        json!({"path":"C:\\","method":"walk","degradedFrom":"mft","entries":[]}),
+    )
+    .unwrap();
+    state.tool_end("7", &ls_fb, false, Some(18), 1538);
+
+    // Top-level `truncated: true` (`ffgrep` / `fffind`) counts as `truncated`.
+    state.tool_start("8", "ffgrep", &json!({"pattern":"err"}), 1540);
+    let grep_trunc = cst_kit::diagnostics::result::diagnostic_result(
+        json!({"truncated":true,"skipped":1,"matches":[]}),
+    )
+    .unwrap();
+    state.tool_end("8", &grep_trunc, false, Some(9), 1549);
+
+    let aligned = state.snapshot(4, true, "quit", 2003, None);
+    let disk_aligned = aligned
+        .metrics
+        .tools
+        .iter()
+        .find(|t| t.name == "disk")
+        .unwrap();
+    assert_eq!(disk_aligned.calls, 4);
+    assert_eq!(disk_aligned.degraded, 2);
+    assert_eq!(disk_aligned.truncated, 1);
+    let ls_aligned = aligned
+        .metrics
+        .tools
+        .iter()
+        .find(|t| t.name == "ls")
+        .unwrap();
+    assert_eq!(ls_aligned.calls, 1);
+    assert_eq!(ls_aligned.degraded, 1);
+    let grep_aligned = aligned
+        .metrics
+        .tools
+        .iter()
+        .find(|t| t.name == "ffgrep")
+        .unwrap();
+    assert_eq!(grep_aligned.calls, 1);
+    assert_eq!(grep_aligned.truncated, 1);
     let rb = record
         .metrics
         .tools
