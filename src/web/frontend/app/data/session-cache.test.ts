@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recentSessionIds, SessionDetailCache } from "./session-cache.ts";
+import { recentSessionIds, SessionDetailCache, StaleSessionDetailError } from "./session-cache.ts";
 import type { SessionDetail, SessionRow } from "./web-state.ts";
 
 const detail = (id: string): SessionDetail => ({
@@ -89,7 +89,7 @@ test("删除淘汰缓存，过期在途结果不得复活；较新的事件更�
 	const pending = cache.load("a");
 	cache.remove("a");
 	task.resolve(detail("a"));
-	await pending;
+	await assert.rejects(pending, StaleSessionDetailError);
 	assert.equal(cache.peek("a"), undefined);
 	const task2 = deferred<SessionDetail>();
 	const latest = new SessionDetailCache(() => task2.promise);

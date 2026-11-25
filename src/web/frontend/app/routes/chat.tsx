@@ -13,7 +13,12 @@ import { apiJson, sessionPath } from "../data/api";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import { presentError } from "../data/error-presenter";
 import { outgoingFor, useMessageOutbox } from "../data/use-message-outbox";
-import { type SessionDetail, useSessionDetail, useSessionTitle } from "../data/web-state";
+import {
+	invalidateCachedSessionDetail,
+	type SessionDetail,
+	useSessionDetail,
+	useSessionTitle,
+} from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
 import { readDurationMs } from "../shell/motion-tokens";
 import { Notification } from "../shell/notification";
@@ -143,7 +148,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 			locateEntryId?: string;
 			locateQuery?: string;
 			locateNonce?: number;
-			historyBranch?: { previousLeafId: string };
+			historyBranch?: { previousLeafId: string; targetLeaf: string };
 		} | null;
 		if (!state) return;
 		let consumed = false;
@@ -159,17 +164,20 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 			});
 			consumed = true;
 		}
-		if (state.historyBranch?.previousLeafId && sessionId) {
-			const prevLeaf = state.historyBranch.previousLeafId;
+		if (state.historyBranch?.previousLeafId && state.historyBranch.targetLeaf && sessionId) {
+			const { previousLeafId, targetLeaf } = state.historyBranch;
 			showToast("success", "已切换至历史分支", 5000, {
 				label: "返回原分支",
 				onPress: () => {
 					setToast(null);
 					void apiJson(sessionPath(sessionId, "/tree/navigate"), {
 						method: "POST",
-						body: { entryId: prevLeaf, summarize: false },
+						body: { entryId: previousLeafId, expectedLeafId: targetLeaf },
 					})
-						.then(() => refresh())
+						.then(() => {
+							invalidateCachedSessionDetail(sessionId);
+							return refresh();
+						})
 						.then(() => showSuccess("已返回原分支"))
 						.catch((cause) =>
 							showToast("danger", cause instanceof Error ? cause.message : "返回原分支失败", 4000),

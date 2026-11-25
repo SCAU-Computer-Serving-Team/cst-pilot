@@ -682,9 +682,34 @@ impl AppHttpClient {
         summarize: bool,
         custom_instructions: Option<&str>,
     ) -> Result<Value, ClientError> {
+        self.navigate_tree_request(session_id, entry_id, summarize, custom_instructions, None)
+            .await
+    }
+
+    pub async fn navigate_session_tree_to_leaf(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+        expected_leaf: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        self.navigate_tree_request(session_id, entry_id, false, None, Some(expected_leaf))
+            .await
+    }
+
+    async fn navigate_tree_request(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+        summarize: bool,
+        custom_instructions: Option<&str>,
+        expected_leaf: Option<Option<&str>>,
+    ) -> Result<Value, ClientError> {
         let sid = encode_segment(session_id);
         let mut body = serde_json::Map::new();
         body.insert("entryId".into(), Value::String(entry_id.to_owned()));
+        if let Some(expected) = expected_leaf {
+            body.insert("expectedLeafId".into(), json!(expected));
+        }
         if summarize {
             body.insert("summarize".into(), Value::Bool(true));
         }

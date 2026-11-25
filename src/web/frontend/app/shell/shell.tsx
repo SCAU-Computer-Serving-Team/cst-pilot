@@ -39,6 +39,7 @@ import {
 	getCachedSessionDetails,
 	invalidateCachedSessionDetail,
 	type SearchMatchSpan,
+	type SessionSearchResponse,
 	searchSessionsApi,
 	useGlobalEvents,
 } from "../data/web-state";
@@ -63,6 +64,7 @@ import {
 	createInitialSidebarSearchState,
 	finishContentPrefetch,
 	finishTitlePrefetch,
+	replaceExpiredSearchSnapshot,
 	SEARCH_PAGE_SIZE,
 	type SidebarSearchState,
 	searchLocalPreloadedSessions,
@@ -139,7 +141,18 @@ export function Sidebar({
 	const searchInputRef = useRef<HTMLInputElement>(null);
 	const [searchState, setSearchState] = useState<SidebarSearchState>(createInitialSidebarSearchState);
 	const searchStateRef = useRef(searchState);
-	searchStateRef.current = searchState;
+	const publishSearchState = useCallback((next: SidebarSearchState) => {
+		searchStateRef.current = next;
+		setSearchState(next);
+	}, []);
+	const selectionSeq = useRef(0);
+	const locationKeyRef = useRef(location.key);
+	useLayoutEffect(() => {
+		locationKeyRef.current = location.key;
+		return () => {
+			selectionSeq.current += 1;
+		};
+	}, [location.key]);
 	const searchDebounceRef = useRef<number | undefined>(undefined);
 	const searchAbortRef = useRef<AbortController | null>(null);
 	const prefetchTitleAbortRef = useRef<AbortController | null>(null);
@@ -176,6 +189,17 @@ export function Sidebar({
 
 	useEffect(() => () => cancelSearchRequests(), [cancelSearchRequests]);
 
+	const resetExpiredSnapshot = useCallback(
+		(seq: number, resp: SessionSearchResponse) => {
+			const current = searchStateRef.current;
+			const replacement = replaceExpiredSearchSnapshot(current, seq, resp);
+			if (replacement === current) return;
+			cancelSearchRequests();
+			publishSearchState(replacement);
+		},
+		[cancelSearchRequests, publishSearchState],
+	);
+
 	const triggerTitlePrefetch = useCallback(
 		(seq: number, query: string, offset: number, snapshotToken: string) => {
 			if (preview || !query.trim()) return;
@@ -195,24 +219,26 @@ export function Sidebar({
 				controller.signal,
 			)
 				.then((resp) => {
-					if (controller.signal.aborted) return;
+					if (controller.signal.aborted || searchStateRef.current.requestSeq !== seq) return;
+					if (resp.snapshotToken !== snapshotToken) {
+						resetExpiredSnapshot(seq, resp);
+						return;
+					}
 					const finished = finishTitlePrefetch(searchStateRef.current, seq, resp.titleMatches, resp.titleHasMore);
-					searchStateRef.current = finished.state;
-					setSearchState(finished.state);
+					publishSearchState(finished.state);
 					if (finished.nextPrefetchOffset !== undefined) {
 						triggerTitlePrefetch(seq, query, finished.nextPrefetchOffset, finished.state.snapshotToken);
 					}
 				})
 				.catch(() => {
 					if (controller.signal.aborted) return;
-					setSearchState((cur) =>
-						cur.requestSeq === seq
-							? { ...cur, prefetchTitleInFlight: false, autoExpandTitlePending: false }
-							: cur,
-					);
+					const cur = searchStateRef.current;
+					if (cur.requestSeq === seq) {
+						publishSearchState({ ...cur, prefetchTitleInFlight: false, autoExpandTitlePending: false });
+					}
 				});
 		},
-		[activeSessionId, preview],
+		[activeSessionId, preview, publishSearchState, resetExpiredSnapshot],
 	);
 
 	const triggerContentPrefetch = useCallback(
@@ -234,29 +260,31 @@ export function Sidebar({
 				controller.signal,
 			)
 				.then((resp) => {
-					if (controller.signal.aborted) return;
+					if (controller.signal.aborted || searchStateRef.current.requestSeq !== seq) return;
+					if (resp.snapshotToken !== snapshotToken) {
+						resetExpiredSnapshot(seq, resp);
+						return;
+					}
 					const finished = finishContentPrefetch(
 						searchStateRef.current,
 						seq,
 						resp.contentMatches,
 						resp.contentHasMore,
 					);
-					searchStateRef.current = finished.state;
-					setSearchState(finished.state);
+					publishSearchState(finished.state);
 					if (finished.nextPrefetchOffset !== undefined) {
 						triggerContentPrefetch(seq, query, finished.nextPrefetchOffset, finished.state.snapshotToken);
 					}
 				})
 				.catch(() => {
 					if (controller.signal.aborted) return;
-					setSearchState((cur) =>
-						cur.requestSeq === seq
-							? { ...cur, prefetchContentInFlight: false, autoExpandContentPending: false }
-							: cur,
-					);
+					const cur = searchStateRef.current;
+					if (cur.requestSeq === seq) {
+						publishSearchState({ ...cur, prefetchContentInFlight: false, autoExpandContentPending: false });
+					}
 				});
 		},
-		[activeSessionId, preview],
+		[activeSessionId, preview, publishSearchState, resetExpiredSnapshot],
 	);
 
 	const runSidebarSearch = useCallback(
@@ -265,8 +293,7 @@ export function Sidebar({
 			const trimmed = rawQuery.trim();
 			if (!trimmed) {
 				const cleared = clearSidebarSearchState(searchStateRef.current);
-				searchStateRef.current = cleared;
-				setSearchState(cleared);
+				publishSearchState(cleared);
 				return;
 			}
 			const localPreview = searchLocalPreloadedSessions(
@@ -277,8 +304,7 @@ export function Sidebar({
 			);
 			const next = beginSidebarSearchQuery(searchStateRef.current, trimmed, localPreview);
 			const finalLocal = preview ? { ...next, loadingFirstPage: false, backendSynced: true } : next;
-			searchStateRef.current = finalLocal;
-			setSearchState(finalLocal);
+			publishSearchState(finalLocal);
 			if (preview) return;
 
 			const seq = finalLocal.requestSeq;
@@ -299,8 +325,7 @@ export function Sidebar({
 					.then((resp) => {
 						if (controller.signal.aborted) return;
 						const applied = applyFirstSearchPage(searchStateRef.current, seq, resp);
-						searchStateRef.current = applied.state;
-						setSearchState(applied.state);
+						publishSearchState(applied.state);
 						if (applied.prefetchTitleOffset !== undefined) {
 							triggerTitlePrefetch(seq, trimmed, applied.prefetchTitleOffset, applied.state.snapshotToken);
 						}
@@ -310,11 +335,20 @@ export function Sidebar({
 					})
 					.catch(() => {
 						if (controller.signal.aborted) return;
-						setSearchState((cur) => (cur.requestSeq === seq ? { ...cur, loadingFirstPage: false } : cur));
+						const cur = searchStateRef.current;
+						if (cur.requestSeq === seq) publishSearchState({ ...cur, loadingFirstPage: false });
 					});
 			}, 100);
 		},
-		[activeSessionId, cancelSearchRequests, preview, sourceSessions, triggerContentPrefetch, triggerTitlePrefetch],
+		[
+			activeSessionId,
+			cancelSearchRequests,
+			preview,
+			publishSearchState,
+			sourceSessions,
+			triggerContentPrefetch,
+			triggerTitlePrefetch,
+		],
 	);
 
 	// 会话列表更新时，若处于搜索态则刷新结果。
@@ -334,8 +368,7 @@ export function Sidebar({
 
 	const handleExpandTitles = useCallback(() => {
 		const res = clickExpandTitles(searchStateRef.current);
-		searchStateRef.current = res.state;
-		setSearchState(res.state);
+		publishSearchState(res.state);
 		if (res.action.kind === "appended" && res.action.nextPrefetchOffset !== undefined) {
 			triggerTitlePrefetch(
 				res.state.requestSeq,
@@ -346,12 +379,11 @@ export function Sidebar({
 		} else if (res.action.kind === "fetch_now") {
 			triggerTitlePrefetch(res.state.requestSeq, res.state.query, res.action.offset, res.state.snapshotToken);
 		}
-	}, [triggerTitlePrefetch]);
+	}, [publishSearchState, triggerTitlePrefetch]);
 
 	const handleExpandContents = useCallback(() => {
 		const res = clickExpandContents(searchStateRef.current);
-		searchStateRef.current = res.state;
-		setSearchState(res.state);
+		publishSearchState(res.state);
 		if (res.action.kind === "appended" && res.action.nextPrefetchOffset !== undefined) {
 			triggerContentPrefetch(
 				res.state.requestSeq,
@@ -362,10 +394,13 @@ export function Sidebar({
 		} else if (res.action.kind === "fetch_now") {
 			triggerContentPrefetch(res.state.requestSeq, res.state.query, res.action.offset, res.state.snapshotToken);
 		}
-	}, [triggerContentPrefetch]);
+	}, [publishSearchState, triggerContentPrefetch]);
 
 	const handleSelectContentHit = useCallback(
 		async (item: ContentSearchMatch) => {
+			const seq = ++selectionSeq.current;
+			const origin = locationKeyRef.current;
+			const isCurrent = () => selectionSeq.current === seq && origin === locationKeyRef.current;
 			const sid = item.sessionId;
 			const entryId = item.bestHit.entryId;
 			const query = searchStateRef.current.query;
@@ -384,30 +419,27 @@ export function Sidebar({
 				return;
 			}
 			try {
-				let previousLeafId: string | null = null;
-				try {
-					const treeRes = await apiJson<{ leafId: string | null }>(sessionPath(sid, "/tree"));
-					previousLeafId = treeRes.leafId;
-				} catch {
-					const cached = getCachedSessionDetails().get(sid);
-					previousLeafId = cached?.entries.at(-1)?.id ?? null;
-				}
+				const { leafId: previousLeafId } = await apiJson<{ leafId: string | null }>(sessionPath(sid, "/tree"));
+				if (!isCurrent()) return;
 				const targetLeaf = item.bestHit.branchLeafId ?? entryId;
 				await apiJson(sessionPath(sid, "/tree/navigate"), {
 					method: "POST",
-					body: { entryId: targetLeaf, summarize: false },
+					body: { entryId: targetLeaf, expectedLeafId: previousLeafId },
 				});
 				invalidateCachedSessionDetail(sid);
+				if (!isCurrent()) return;
 				navigate(`/s/${encodeURIComponent(sid)}`, {
 					state: {
 						locateEntryId: entryId,
 						locateQuery: query,
 						locateNonce: Date.now(),
-						historyBranch: previousLeafId ? { previousLeafId } : undefined,
+						historyBranch:
+							previousLeafId && previousLeafId !== targetLeaf ? { previousLeafId, targetLeaf } : undefined,
 					},
 				});
 				onNavigate?.();
 			} catch {
+				if (!isCurrent()) return;
 				navigate(`/s/${encodeURIComponent(sid)}/tree?focus=${encodeURIComponent(entryId)}`);
 				onNavigate?.();
 			}
@@ -690,7 +722,7 @@ export function Sidebar({
 													);
 												})}
 											</div>
-											{searchState.titleHasMore && (
+											{searchState.snapshotToken && searchState.titleHasMore && (
 												<button
 													type="button"
 													className="sidebar-search-expand"
@@ -736,7 +768,7 @@ export function Sidebar({
 													);
 												})}
 											</div>
-											{searchState.contentHasMore && (
+											{searchState.snapshotToken && searchState.contentHasMore && (
 												<button
 													type="button"
 													className="sidebar-search-expand"

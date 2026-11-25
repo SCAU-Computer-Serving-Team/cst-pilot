@@ -128,6 +128,7 @@ struct TopNoticeAction {
     label: SharedString,
     session_id: String,
     previous_leaf_id: String,
+    selected_leaf_id: String,
 }
 
 #[derive(Default)]
@@ -176,6 +177,7 @@ pub struct AppShell {
     sidebar_search_debounce_task: Option<Task<()>>,
     sidebar_search_prefetch_title_task: Option<Task<()>>,
     sidebar_search_prefetch_content_task: Option<Task<()>>,
+    search_selection_seq: u64,
     command_palette: Option<Entity<CommandPaletteModal>>,
     command_palette_sub: Option<Subscription>,
     recent_exports_cache: Vec<RecentExportSummary>,
@@ -414,6 +416,7 @@ impl AppShell {
             sidebar_search_debounce_task: None,
             sidebar_search_prefetch_title_task: None,
             sidebar_search_prefetch_content_task: None,
+            search_selection_seq: 0,
             command_palette: None,
             command_palette_sub: None,
             recent_exports_cache: Vec::new(),
@@ -585,6 +588,7 @@ impl AppShell {
         forced_transition: Option<motion::RouteTransitionKind>,
         cx: &mut Context<Self>,
     ) {
+        self.search_selection_seq = self.search_selection_seq.wrapping_add(1);
         if self.route != route || self.session_subview != subview {
             #[cfg(feature = "test-support")]
             crate::ux_probe::mark_input("route_switch");
@@ -1068,6 +1072,7 @@ impl AppShell {
     }
 
     fn clear_sidebar_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_selection_seq = self.search_selection_seq.wrapping_add(1);
         self.sidebar_search_debounce_task = None;
         self.sidebar_search_prefetch_title_task = None;
         self.sidebar_search_prefetch_content_task = None;
@@ -1124,6 +1129,9 @@ impl AppShell {
                 )
                 .await;
             let _ = weak.update(cx, |this, cx| {
+                if seq != this.sidebar_search.request_seq {
+                    return;
+                }
                 this.sidebar_search_debounce_task = None;
                 match res {
                     Ok(resp) => {
@@ -1167,9 +1175,18 @@ impl AppShell {
                 .search_sessions(query, active_sid, offset, SEARCH_PAGE_SIZE, 0, 1, token)
                 .await;
             let _ = weak.update(cx, |this, cx| {
+                if seq != this.sidebar_search.request_seq {
+                    return;
+                }
                 this.sidebar_search_prefetch_title_task = None;
                 match res {
                     Ok(resp) => {
+                        if this.sidebar_search.snapshot_token.as_deref()
+                            != Some(resp.snapshot_token.as_str())
+                        {
+                            this.on_sidebar_search_changed(cx);
+                            return;
+                        }
                         if let Some(next_off) = this.sidebar_search.finish_title_prefetch(
                             seq,
                             resp.title_matches,
@@ -1205,9 +1222,18 @@ impl AppShell {
                 .search_sessions(query, active_sid, 0, 1, offset, SEARCH_PAGE_SIZE, token)
                 .await;
             let _ = weak.update(cx, |this, cx| {
+                if seq != this.sidebar_search.request_seq {
+                    return;
+                }
                 this.sidebar_search_prefetch_content_task = None;
                 match res {
                     Ok(resp) => {
+                        if this.sidebar_search.snapshot_token.as_deref()
+                            != Some(resp.snapshot_token.as_str())
+                        {
+                            this.on_sidebar_search_changed(cx);
+                            return;
+                        }
                         if let Some(next_off) = this.sidebar_search.finish_content_prefetch(
                             seq,
                             resp.content_matches,
@@ -1278,7 +1304,6 @@ impl AppShell {
         self.session_subview_prior_focus = prior;
         self.branch_tree_view.update(cx, |view, cx| {
             view.set_session_id_and_focus(sid, focus_entry_id, window, cx);
-            view.focus(window, cx);
         });
     }
 
@@ -1288,6 +1313,8 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.search_selection_seq = self.search_selection_seq.wrapping_add(1);
+        let selection_seq = self.search_selection_seq;
         let sid = hit.session_id.clone();
         let entry_id = hit.best_hit.entry_id.clone();
         let query = self.sidebar_search.query.clone();
@@ -1322,51 +1349,61 @@ impl AppShell {
             .branch_leaf_id
             .clone()
             .unwrap_or_else(|| entry_id.clone());
-        let cached_prev_leaf = self
-            .snapshot
-            .loaded_sessions
-            .get(&sid)
-            .and_then(|s| s.leaf_id.clone());
         let client = self.client.clone();
         self.root_focus.focus(window, cx);
-        cx.spawn(async move |weak, cx| {
-            let previous_leaf = match cached_prev_leaf {
-                Some(prev) => Some(prev),
-                None => client
-                    .get_session_tree(sid.clone())
-                    .await
-                    .ok()
-                    .and_then(|val| {
-                        val.get("leafId")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::to_owned)
-                    }),
-            };
-            let nav_res = client
-                .navigate_session_tree(sid.clone(), target_leaf, false, None)
-                .await;
-            let _ = weak.update(cx, |this, cx| match nav_res {
-                Ok(_) => {
-                    this.activate_session_by_id(sid.clone(), cx);
-                    this.workbench.update(cx, |wb, cx| {
-                        wb.locate_entry(sid.clone(), entry_id, query, cx);
-                    });
-                    if let Some(prev_leaf) = previous_leaf {
-                        this.show_top_notice_with_action(
-                            "已切换至历史分支",
-                            TopNoticeAction {
-                                label: SharedString::from("返回原分支"),
-                                session_id: sid,
-                                previous_leaf_id: prev_leaf,
-                            },
-                            cx,
-                        );
-                    } else {
-                        this.show_top_notice("已切换至历史分支", cx);
-                    }
+        cx.spawn_in(window, async move |weak, cx| {
+            let tree = client.get_session_tree(sid.clone()).await;
+            if !weak
+                .update_in(cx, |this, _, _| this.search_selection_seq == selection_seq)
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let nav_res = async {
+                let tree = tree?;
+                let previous_leaf = tree["leafId"].as_str().map(str::to_owned);
+                client
+                    .navigate_session_tree_to_leaf(
+                        sid.clone(),
+                        target_leaf.clone(),
+                        previous_leaf.clone(),
+                    )
+                    .await?;
+                Ok::<_, cst_client::ClientError>(previous_leaf)
+            }
+            .await;
+            let _ = weak.update_in(cx, |this, window, cx| {
+                if this.search_selection_seq != selection_seq
+                    || this.snapshot.channel_mode == ChannelModeDto::WebActive
+                {
+                    return;
                 }
-                Err(err) => {
-                    this.show_workspace_error(err.to_string(), cx);
+                match nav_res {
+                    Ok(previous_leaf) => {
+                        this.activate_session_by_id(sid.clone(), cx);
+                        this.workbench.update(cx, |wb, cx| {
+                            wb.locate_entry(sid.clone(), entry_id, query, cx);
+                        });
+                        if let Some(prev_leaf) = previous_leaf.filter(|prev| prev != &target_leaf) {
+                            this.show_top_notice_with_action(
+                                "已切换至历史分支",
+                                TopNoticeAction {
+                                    label: SharedString::from("返回原分支"),
+                                    session_id: sid,
+                                    previous_leaf_id: prev_leaf,
+                                    selected_leaf_id: target_leaf,
+                                },
+                                cx,
+                            );
+                        } else {
+                            this.show_top_notice("已切换至历史分支", cx);
+                        }
+                    }
+                    Err(err) => {
+                        this.activate_session_by_id(sid.clone(), cx);
+                        this.open_session_tree_focus(sid, entry_id, window, cx);
+                        this.show_top_notice(err.to_string(), cx);
+                    }
                 }
             });
         })
@@ -3157,9 +3194,11 @@ impl AppShell {
                     let ent_act = entity.clone();
                     let sid_back = act.session_id.clone();
                     let leaf_back = act.previous_leaf_id.clone();
+                    let selected_leaf = act.selected_leaf_id.clone();
                     let cb: overlays::NoticeActionFn = Rc::new(move |_, cx| {
                         let s = sid_back.clone();
                         let leaf = leaf_back.clone();
+                        let expected = selected_leaf.clone();
                         ent_act.update(cx, |this, cx| {
                             this.top_notice = None;
                             this.top_notice_action = None;
@@ -3167,7 +3206,7 @@ impl AppShell {
                             let client = this.client.clone();
                             cx.spawn(async move |weak, cx| {
                                 let res = client
-                                    .navigate_session_tree(s.clone(), leaf, false, None)
+                                    .navigate_session_tree_to_leaf(s.clone(), leaf, Some(expected))
                                     .await;
                                 let _ = weak.update(cx, |this, cx| match res {
                                     Ok(_) => {

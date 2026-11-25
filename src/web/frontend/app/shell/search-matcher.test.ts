@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { buildSnippet, matchQuery } from "./search-matcher.ts";
+import { buildSnippet, matchQuery, scalarSpansToUtf16 } from "./search-matcher.ts";
 
 type GoldenCase = {
 	name: string;
@@ -58,6 +58,31 @@ test("shared golden fixture matches contract identically to Rust cst-search", ()
 		assert.ok(lo, `pair "${pair.name}" lower did not match`);
 		assert.ok(hi.score > lo.score, `pair "${pair.name}" expected ${hi.score} > ${lo.score}`);
 	}
+});
+
+test("API spans use scalar offsets for Chinese and non-BMP characters", () => {
+	const text = "工具 · 🙂显卡";
+	const spans = scalarSpansToUtf16(text, [
+		{ start: 5, end: 8 },
+		{ start: 6, end: 8 },
+		{ start: 7, end: 20 },
+	]);
+	assert.deepEqual(
+		spans.map(({ start, end }) => text.slice(start, end)),
+		["🙂显卡", "显卡"],
+	);
+});
+
+test("literal and fuzzy matches stay on character boundaries", () => {
+	const literal = matchQuery("İ🙂显卡", "显卡");
+	assert.deepEqual(literal?.spans, [{ start: 3, end: 5 }]);
+	assert.equal(matchQuery("🙂😂", "🙂🙃"), null);
+	const { snippet, spans } = buildSnippet(`${"🙂".repeat(30)}显卡${"🙂".repeat(30)}`, "显卡", "工具 · ", 12);
+	assert.ok([...snippet].every((char) => !/^[\uD800-\uDFFF]$/u.test(char)));
+	assert.deepEqual(
+		spans.map(({ start, end }) => snippet.slice(start, end)),
+		["显卡"],
+	);
 });
 
 test("buildSnippet centers around matched span and keeps prefix", () => {

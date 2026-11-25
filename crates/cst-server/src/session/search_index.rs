@@ -1,10 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use cst_os::fs_safe::atomic_write_json_sync;
 use cst_search::{
     ContentSearchBestHitDto, ContentSearchMatchDto, SearchContentKind, SessionSearchResponseDto,
     TitleSearchMatchDto, build_snippet, collapse_whitespace, match_query,
@@ -18,12 +19,11 @@ use pi_session::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::locks::atomic_write_json;
 use crate::session::UnflushedSessionSnapshot;
 use crate::session::index::SessionIndexStore;
 use crate::session::slot::SessionSlot;
 
-const SEARCH_INDEX_SCHEMA_VERSION: u32 = 1;
+const SEARCH_INDEX_SCHEMA_VERSION: u32 = 2;
 const MAX_TOOL_RESULT_INDEX_CHARS: usize = 4096;
 const MAX_QUERY_SNAPSHOT_CACHE: usize = 8;
 const QUERY_SNAPSHOT_TTL: Duration = Duration::from_secs(60);
@@ -34,7 +34,7 @@ const MAX_PAGE_LIMIT: usize = 50;
 #[serde(rename_all = "camelCase")]
 struct PersistedSearchIndex {
     schema_version: u32,
-    sessions: BTreeMap<String, IndexedSession>,
+    sessions: BTreeMap<String, Arc<IndexedSession>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ pub struct IndexedSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(default)]
-    pub mtime_ms: u64,
+    pub mtime_ns: u64,
     #[serde(default)]
     pub file_size: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,7 +108,10 @@ struct CachedSearchSnapshot {
 struct IndexState {
     synced_initial: bool,
     dirty: bool,
-    sessions: BTreeMap<String, IndexedSession>,
+    sessions: BTreeMap<String, Arc<IndexedSession>>,
+    // Live writes win over an in-flight startup scan, even if equal to the disk cache.
+    startup_overrides: HashSet<String>,
+    removed: HashSet<String>,
 }
 
 /// Full-tree session search index backed by an in-memory map + atomic disk cache
@@ -119,6 +122,7 @@ pub struct SessionSearchIndex {
     sessions_root: PathBuf,
     cache_path: PathBuf,
     state: Arc<RwLock<IndexState>>,
+    startup_sync: Arc<Mutex<()>>,
     query_cache: Arc<Mutex<VecDeque<CachedSearchSnapshot>>>,
     persist_notify: Arc<Notify>,
     persist_spawned: Arc<std::sync::atomic::AtomicBool>,
@@ -136,7 +140,10 @@ impl SessionSearchIndex {
                 synced_initial: false,
                 dirty: false,
                 sessions: loaded,
+                startup_overrides: HashSet::new(),
+                removed: HashSet::new(),
             })),
+            startup_sync: Arc::new(Mutex::new(())),
             query_cache: Arc::new(Mutex::new(VecDeque::new())),
             persist_notify: Arc::new(Notify::new()),
             persist_spawned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -146,17 +153,17 @@ impl SessionSearchIndex {
 
     pub fn close(&self) {
         self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
-        self.persist_notify.notify_waiters();
+        self.persist_notify.notify_one();
     }
 
     fn schedule_persist(&self) {
         if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
-        if !self
-            .persist_spawned
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        if let Ok(handle) = tokio::runtime::Handle::try_current()
+            && !self
+                .persist_spawned
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
             let this = self.clone();
             handle.spawn(async move {
@@ -180,24 +187,15 @@ impl SessionSearchIndex {
                             sessions: guard.sessions.clone(),
                         }
                     };
-                    let _ =
-                        atomic_write_json(&this.cache_path, &snapshot, "保存会话搜索索引").await;
+                    let path = this.cache_path.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        atomic_write_json_sync(&path, &snapshot, "保存会话搜索索引")
+                    })
+                    .await;
                 }
             });
         }
         self.persist_notify.notify_one();
-    }
-
-    pub async fn persist_now(&self) {
-        let snapshot = {
-            let mut guard = self.state.write().expect("search index write lock");
-            guard.dirty = false;
-            PersistedSearchIndex {
-                schema_version: SEARCH_INDEX_SCHEMA_VERSION,
-                sessions: guard.sessions.clone(),
-            }
-        };
-        let _ = atomic_write_json(&self.cache_path, &snapshot, "保存会话搜索索引").await;
     }
 
     pub fn is_synced(&self) -> bool {
@@ -207,167 +205,129 @@ impl SessionSearchIndex {
             .synced_initial
     }
 
-    /// Incrementally reconciles cached index against disk `.jsonl` files, `unflushed/`, `deleted/`,
-    /// and a pre-extracted snapshot of currently loaded live sessions (without pinning slots).
-    pub fn sync_all(&self, index_store: &SessionIndexStore, live_sessions: Vec<IndexedSession>) {
-        let disk_files = collect_session_jsonl_files(&self.sessions_root);
-        let unflushed_list = index_store.list_all_unflushed_sync();
-
-        let existing_fingerprints: HashMap<String, (Option<String>, u64, u64)> = {
+    /// Reconciles the startup cache with disk once. Live slot updates publish independently.
+    pub fn sync_all(&self, index_store: &SessionIndexStore) {
+        let _sync = self.startup_sync.lock().expect("search index startup lock");
+        let cached_by_path: HashMap<_, _> = {
             let guard = self.state.read().expect("search index read lock");
+            if guard.synced_initial {
+                return;
+            }
             guard
                 .sessions
-                .iter()
-                .map(|(id, s)| (id.clone(), (s.path.clone(), s.mtime_ms, s.file_size)))
+                .values()
+                .filter_map(|session| Some((session.path.clone()?, session.clone())))
                 .collect()
         };
-
-        let mut seen_ids: BTreeSet<String> = BTreeSet::new();
-        let mut parsed_updates: Vec<IndexedSession> = Vec::new();
-
-        for path in disk_files {
-            let meta = match fs::metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
+        // A duplicated session ID cannot be opened unambiguously by the session pool.
+        let mut disk_sessions = BTreeMap::new();
+        let mut duplicate_ids = HashSet::new();
+        for path in collect_session_jsonl_files(&self.sessions_root) {
+            let Some((mtime_ns, size)) = file_fingerprint(&path) else {
+                continue;
             };
-            let mtime_ms = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let file_size = meta.len();
-            let path_str = path.to_string_lossy().into_owned();
-
-            // Check if any cached session matches this exact file fingerprint.
-            if let Some((cached_id, _)) = existing_fingerprints.iter().find(|(_, fp)| {
-                fp.0.as_deref() == Some(path_str.as_str()) && fp.1 == mtime_ms && fp.2 == file_size
-            }) {
-                if !index_store.is_deleted_sync(cached_id).unwrap_or(false) {
-                    seen_ids.insert(cached_id.clone());
-                }
-                continue;
-            }
-
-            if let Some(indexed) = parse_jsonl_session_file(&path, mtime_ms, file_size)
-                && !index_store.is_deleted_sync(&indexed.id).unwrap_or(false)
+            let path_str = path.to_string_lossy();
+            let session = cached_by_path
+                .get(path_str.as_ref())
+                .filter(|item| item.mtime_ns == mtime_ns && item.file_size == size)
+                .cloned()
+                .or_else(|| parse_jsonl_session_file(&path, mtime_ns, size).map(Arc::new));
+            let Some(session) = session else { continue };
+            let id = &session.id;
+            if !index_store
+                .is_deleted_sync(id)
+                .is_ok_and(|deleted| !deleted)
             {
-                seen_ids.insert(indexed.id.clone());
-                parsed_updates.push(indexed);
-            }
-        }
-
-        // Overlay unflushed snapshots not yet persisted on disk.
-        for snap in unflushed_list {
-            if index_store.is_deleted_sync(&snap.id).unwrap_or(false) {
                 continue;
             }
-            seen_ids.insert(snap.id.clone());
-            if !existing_fingerprints.contains_key(&snap.id)
-                && !parsed_updates.iter().any(|u| u.id == snap.id)
+            if disk_sessions.insert(id.clone(), session.clone()).is_some() {
+                duplicate_ids.insert(id.clone());
+            }
+        }
+        for snap in index_store.list_all_unflushed_sync() {
+            if index_store
+                .is_deleted_sync(&snap.id)
+                .is_ok_and(|deleted| !deleted)
             {
-                parsed_updates.push(indexed_from_unflushed(&snap));
+                disk_sessions
+                    .entry(snap.id.clone())
+                    .or_insert_with(|| Arc::new(indexed_from_unflushed(&snap)));
             }
         }
+        for id in duplicate_ids {
+            disk_sessions.remove(&id);
+        }
+        self.finish_startup_sync(disk_sessions);
+    }
 
-        // Overlay live sessions (always freshest for active / streaming / newly mutated sessions).
-        for live in live_sessions {
-            if index_store.is_deleted_sync(&live.id).unwrap_or(false) {
-                continue;
-            }
-            seen_ids.insert(live.id.clone());
-            parsed_updates.retain(|u| u.id != live.id);
-            parsed_updates.push(live);
-        }
-
-        let mut changed = false;
-        {
-            let mut guard = self.state.write().expect("search index write lock");
-            let before_len = guard.sessions.len();
-            guard.sessions.retain(|id, _| seen_ids.contains(id));
-            if guard.sessions.len() != before_len {
-                changed = true;
-            }
-            for item in parsed_updates {
-                if guard.sessions.get(&item.id) != Some(&item) {
-                    guard.sessions.insert(item.id.clone(), item);
-                    changed = true;
-                }
-            }
-            guard.synced_initial = true;
-            if changed {
-                guard.dirty = true;
+    fn finish_startup_sync(&self, mut disk_sessions: BTreeMap<String, Arc<IndexedSession>>) {
+        let mut guard = self.state.write().expect("search index write lock");
+        for id in std::mem::take(&mut guard.startup_overrides) {
+            if let Some(live) = guard.sessions.get(&id) {
+                disk_sessions.insert(id, live.clone());
             }
         }
-        if changed {
+        disk_sessions.retain(|id, _| !guard.removed.contains(id));
+        guard.dirty |= guard.sessions != disk_sessions;
+        guard.sessions = disk_sessions;
+        guard.synced_initial = true;
+        let dirty = guard.dirty;
+        drop(guard);
+        if dirty {
             self.schedule_persist();
         }
     }
 
     pub fn upsert_unflushed(&self, snap: &UnflushedSessionSnapshot) {
-        let item = indexed_from_unflushed(snap);
-        let mut guard = self.state.write().expect("search index write lock");
-        if guard.sessions.get(&item.id) == Some(&item) {
-            return;
-        }
-        guard.sessions.insert(item.id.clone(), item);
-        guard.dirty = true;
-        drop(guard);
-        self.schedule_persist();
+        self.upsert(indexed_from_unflushed(snap));
     }
 
     pub fn upsert_from_slot(&self, slot: &SessionSlot) {
-        let item = extract_indexed_from_slot(slot);
-        let mut guard = self.state.write().expect("search index write lock");
-        if guard.sessions.get(&item.id) == Some(&item) {
-            return;
-        }
-        guard.sessions.insert(item.id.clone(), item);
-        guard.dirty = true;
-        drop(guard);
-        self.schedule_persist();
+        slot.session()
+            .with_session_manager(|manager| self.upsert_from_manager(manager));
     }
 
     pub fn upsert_from_manager(&self, manager: &SessionManager) {
-        let item = extract_indexed_from_manager(manager);
+        self.upsert(extract_indexed_from_manager(manager));
+    }
+
+    fn upsert(&self, item: IndexedSession) {
         let mut guard = self.state.write().expect("search index write lock");
-        if guard.sessions.get(&item.id) == Some(&item) {
+        if guard.removed.contains(&item.id) {
             return;
         }
-        guard.sessions.insert(item.id.clone(), item);
+        if !guard.synced_initial {
+            guard.startup_overrides.insert(item.id.clone());
+        }
+        if guard.sessions.get(&item.id).map(Arc::as_ref) == Some(&item) {
+            return;
+        }
+        guard.sessions.insert(item.id.clone(), Arc::new(item));
         guard.dirty = true;
         drop(guard);
         self.schedule_persist();
-    }
-
-    pub fn update_title(&self, session_id: &str, title: &str, updated_at: Option<String>) {
-        let trimmed = title.trim();
-        let mut guard = self.state.write().expect("search index write lock");
-        if let Some(entry) = guard.sessions.get_mut(session_id) {
-            entry.title = if trimmed.is_empty() {
-                "新对话".to_owned()
-            } else {
-                trimmed.to_owned()
-            };
-            entry.is_placeholder_title = trimmed.is_empty();
-            if let Some(ts) = updated_at
-                && let Some(ms) = parse_iso_timestamp_ms(&ts)
-                && ms >= entry.updated_at_ms
-            {
-                entry.updated_at_ms = ms;
-                entry.updated_at = Some(ts);
-            }
-            guard.dirty = true;
-            drop(guard);
-            self.schedule_persist();
-        }
     }
 
     pub fn remove(&self, session_id: &str) {
         let mut guard = self.state.write().expect("search index write lock");
-        if guard.sessions.remove(session_id).is_some() {
-            guard.dirty = true;
-            drop(guard);
+        guard.removed.insert(session_id.to_owned());
+        let changed = guard.sessions.remove(session_id).is_some();
+        // Existing pages cannot be compacted in place without shifting their offsets.
+        let mut cache = self.query_cache.lock().expect("query cache lock");
+        cache.retain(|snap| {
+            !snap
+                .title_matches
+                .iter()
+                .any(|item| item.session_id == session_id)
+                && !snap
+                    .content_matches
+                    .iter()
+                    .any(|item| item.session_id == session_id)
+        });
+        guard.dirty |= changed;
+        drop(cache);
+        drop(guard);
+        if changed {
             self.schedule_persist();
         }
     }
@@ -382,7 +342,8 @@ impl SessionSearchIndex {
         let content_limit = params.content_limit.clamp(1, MAX_PAGE_LIMIT);
 
         // Reuse cached snapshot when client pages with a valid matching `snapshotToken`.
-        if let Some(req_token) = params.snapshot_token.filter(|t| !t.is_empty()) {
+        let requested_token = params.snapshot_token.filter(|token| !token.is_empty());
+        if let Some(req_token) = requested_token {
             let mut cache = self.query_cache.lock().expect("query cache lock");
             let now = Instant::now();
             cache.retain(|snap| now.duration_since(snap.created_at) <= QUERY_SNAPSHOT_TTL);
@@ -402,7 +363,7 @@ impl SessionSearchIndex {
         }
 
         // Compute full sorted matches over all indexed sessions.
-        let sessions_snapshot: Vec<IndexedSession> = {
+        let sessions_snapshot: Vec<Arc<IndexedSession>> = {
             let guard = self.state.read().expect("search index read lock");
             guard.sessions.values().cloned().collect()
         };
@@ -500,6 +461,10 @@ impl SessionSearchIndex {
                 .then_with(|| a.5.session_id.cmp(&b.5.session_id))
         });
 
+        // A concurrent delete either filters these results or invalidates the published snapshot.
+        let guard = self.state.read().expect("search index read lock");
+        title_scored.retain(|item| !guard.removed.contains(&item.3.session_id));
+        content_scored.retain(|item| !guard.removed.contains(&item.5.session_id));
         let token = uuid_v7().replace('-', "");
         let snap = CachedSearchSnapshot {
             token,
@@ -510,13 +475,18 @@ impl SessionSearchIndex {
             content_matches: content_scored.into_iter().map(|x| x.5).collect(),
         };
 
-        let response = slice_snapshot(
-            &snap,
-            params.title_offset,
-            title_limit,
-            params.content_offset,
-            content_limit,
-        );
+        let response = if requested_token.is_some() {
+            // A replaced snapshot always restarts both groups at page one.
+            slice_snapshot(&snap, 0, DEFAULT_PAGE_LIMIT, 0, DEFAULT_PAGE_LIMIT)
+        } else {
+            slice_snapshot(
+                &snap,
+                params.title_offset,
+                title_limit,
+                params.content_offset,
+                content_limit,
+            )
+        };
 
         let mut cache = self.query_cache.lock().expect("query cache lock");
         let now = Instant::now();
@@ -563,7 +533,7 @@ fn slice_snapshot(
     }
 }
 
-fn load_persisted_cache(path: &Path) -> Option<BTreeMap<String, IndexedSession>> {
+fn load_persisted_cache(path: &Path) -> Option<BTreeMap<String, Arc<IndexedSession>>> {
     let bytes = fs::read(path).ok()?;
     let parsed: PersistedSearchIndex = serde_json::from_slice(&bytes).ok()?;
     if parsed.schema_version != SEARCH_INDEX_SCHEMA_VERSION {
@@ -614,22 +584,30 @@ fn indexed_from_unflushed(snap: &UnflushedSessionSnapshot) -> IndexedSession {
         updated_at: Some(snap.created_at.clone()),
         updated_at_ms,
         path: None,
-        mtime_ms: 0,
+        mtime_ns: 0,
         file_size: 0,
         leaf_id: None,
         chunks: Vec::new(),
     }
 }
 
-fn parse_jsonl_session_file(path: &Path, mtime_ms: u64, file_size: u64) -> Option<IndexedSession> {
+fn file_fingerprint(path: &Path) -> Option<(u64, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some((mtime.as_nanos().try_into().ok()?, meta.len()))
+}
+
+fn parse_jsonl_session_file(path: &Path, mtime_ns: u64, file_size: u64) -> Option<IndexedSession> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
     let mut header: Option<SessionHeader> = None;
     let mut entries: Vec<SessionEntry> = Vec::new();
 
+    let mut complete = true;
     for line_res in reader.lines() {
         let Ok(line) = line_res else {
+            complete = false;
             break;
         };
         let trimmed = line.trim();
@@ -649,6 +627,9 @@ fn parse_jsonl_session_file(path: &Path, mtime_ms: u64, file_size: u64) -> Optio
     }
 
     let hdr = header?;
+    if file_fingerprint(path) != Some((mtime_ns, file_size)) {
+        return None;
+    }
     let leaf_id = entries.last().map(|e| e.id().to_owned());
     let mut indexed = build_indexed_session(
         &hdr.id,
@@ -656,17 +637,14 @@ fn parse_jsonl_session_file(path: &Path, mtime_ms: u64, file_size: u64) -> Optio
         None,
         leaf_id.as_deref(),
         &entries,
-        mtime_ms,
+        mtime_ns / 1_000_000,
     );
-    indexed.path = Some(path.to_string_lossy().into_owned());
-    indexed.mtime_ms = mtime_ms;
-    indexed.file_size = file_size;
+    if complete {
+        indexed.path = Some(path.to_string_lossy().into_owned());
+        indexed.mtime_ns = mtime_ns;
+        indexed.file_size = file_size;
+    }
     Some(indexed)
-}
-
-pub fn extract_indexed_from_slot(slot: &SessionSlot) -> IndexedSession {
-    slot.session()
-        .with_session_manager(extract_indexed_from_manager)
 }
 
 fn extract_indexed_from_manager(sm: &SessionManager) -> IndexedSession {
@@ -678,20 +656,13 @@ fn extract_indexed_from_manager(sm: &SessionManager) -> IndexedSession {
     let entries = sm.get_entries();
     let leaf_id = sm.get_leaf_id().map(str::to_owned);
     let session_name = sm.get_session_name();
-    let (path_str, mtime_ms, file_size) = sm
+    let (path_str, mtime_ns, file_size) = sm
         .get_session_file()
-        .and_then(|p| {
-            let meta = fs::metadata(p).ok()?;
-            let mt = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            Some((p.to_string_lossy().into_owned(), mt, meta.len()))
+        .and_then(|path| {
+            let (mtime, size) = file_fingerprint(path)?;
+            Some((Some(path.to_string_lossy().into_owned()), mtime, size))
         })
-        .map(|(p, mt, sz)| (Some(p), mt, sz))
-        .unwrap_or((None, 0, 0));
+        .unwrap_or_default();
 
     let mut indexed = build_indexed_session(
         &id,
@@ -699,11 +670,14 @@ fn extract_indexed_from_manager(sm: &SessionManager) -> IndexedSession {
         session_name.as_deref(),
         leaf_id.as_deref(),
         &entries,
-        mtime_ms,
+        mtime_ns / 1_000_000,
     );
-    indexed.path = path_str;
-    indexed.mtime_ms = mtime_ms;
-    indexed.file_size = file_size;
+    // An in-memory branch selection may differ from the leaf reconstructed from JSONL.
+    if sm.is_flushed() && leaf_id.as_deref() == entries.last().map(SessionEntry::id) {
+        indexed.path = path_str;
+        indexed.mtime_ns = mtime_ns;
+        indexed.file_size = file_size;
+    }
     indexed
 }
 
@@ -809,16 +783,14 @@ fn compute_descendant_newest_leaves(
             }
             if expanded {
                 visiting.remove(&node);
-                let mut best = (*ts_map.get(&node).unwrap_or(&0), node.clone());
-                if let Some(kids) = children_map.get(&node) {
-                    for kid in kids {
-                        if let Some(kid_best) = memo.get(kid)
-                            && kid_best.0 >= best.0
-                        {
-                            best = kid_best.clone();
-                        }
-                    }
-                }
+                let best = children_map
+                    .get(&node)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|kid| memo.get(kid))
+                    .max_by_key(|(timestamp, _)| *timestamp)
+                    .cloned()
+                    .unwrap_or_else(|| (*ts_map.get(&node).unwrap_or(&0), node.clone()));
                 memo.insert(node, best);
             } else {
                 if !visiting.insert(node.clone()) {
@@ -998,7 +970,7 @@ fn build_indexed_session(
         updated_at,
         updated_at_ms: latest_ts_ms,
         path: None,
-        mtime_ms: file_mtime_ms,
+        mtime_ns: 0,
         file_size: 0,
         leaf_id: leaf_id.map(str::to_owned),
         chunks,
@@ -1206,14 +1178,14 @@ mod tests {
                 let sid = format!("s-{i:02}");
                 guard.sessions.insert(
                     sid.clone(),
-                    IndexedSession {
+                    Arc::new(IndexedSession {
                         id: sid,
                         title: format!("磁盘缓存清理案例 {i:02}"),
                         is_placeholder_title: false,
                         updated_at: Some(format_iso_timestamp(10_000 + i * 1000)),
                         updated_at_ms: 10_000 + i * 1000,
                         path: None,
-                        mtime_ms: 0,
+                        mtime_ns: 0,
                         file_size: 0,
                         leaf_id: Some("e1".into()),
                         chunks: vec![IndexedChunk {
@@ -1224,7 +1196,7 @@ mod tests {
                             branch_leaf_id: None,
                             text: format!("检测到本地缓存目录占用空间 {i} GB"),
                         }],
-                    },
+                    }),
                 );
             }
             guard.synced_initial = true;
@@ -1271,6 +1243,98 @@ mod tests {
         for item in &page2.content_matches {
             assert!(!p1_ids.contains(item.session_id.as_str()));
         }
+        idx.remove("s-01");
+        let after_delete = idx.search(SearchQueryParams {
+            active_session_id: Some("s-01"),
+            snapshot_token: Some(&page1.snapshot_token),
+            title_offset: 10,
+            title_limit: 1,
+            content_offset: 10,
+            content_limit: 1,
+            ..SearchQueryParams::new("huancun")
+        });
+        assert_ne!(after_delete.snapshot_token, page2.snapshot_token);
+        assert_eq!(after_delete.title_total, 13);
+        assert_eq!(after_delete.content_total, 13);
+        assert_eq!(after_delete.title_matches.len(), 10);
+        assert_eq!(after_delete.content_matches.len(), 10);
+        assert_eq!(after_delete.title_matches[0].session_id, "s-13");
+        assert!(
+            !after_delete
+                .content_matches
+                .iter()
+                .any(|item| item.session_id == "s-01")
+        );
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn startup_scan_excludes_duplicate_files_and_reads_current_unflushed_metadata() {
+        let tmp = std::env::temp_dir().join(format!("cst-search-idx-{}", uuid_v7()));
+        let sessions = tmp.join("sessions");
+        let inbox = tmp.join("inbox");
+        let index_store = SessionIndexStore::new(sessions.clone(), inbox.clone());
+        let index = SessionSearchIndex::new(sessions.clone(), inbox);
+        let mut manager = SessionManager::create("/search-index", sessions.clone(), None).unwrap();
+        let duplicated = manager.get_session_id().to_owned();
+        manager
+            .append_message(AgentMessage::User(UserMessage::new("duplicated entry")))
+            .unwrap();
+        let path = manager.get_session_file().unwrap().to_path_buf();
+        drop(manager);
+        let other = sessions.join("another");
+        fs::create_dir_all(&other).unwrap();
+        fs::copy(path, other.join("copied.jsonl")).unwrap();
+
+        let mut unflushed = UnflushedSessionSnapshot {
+            id: "draft".to_owned(),
+            created_at: format_iso_timestamp(1000),
+            cwd: "/search-index".to_owned(),
+            session_dir: sessions.to_string_lossy().into_owned(),
+            parent_session: None,
+            name: Some("outdated title".to_owned()),
+            model: None,
+            thinking_level: None,
+        };
+        index.state.write().unwrap().sessions.insert(
+            unflushed.id.clone(),
+            Arc::new(indexed_from_unflushed(&unflushed)),
+        );
+        unflushed.name = Some("renamed draft".to_owned());
+        index_store.write_unflushed_sync(&unflushed).unwrap();
+        index.sync_all(&index_store);
+
+        let guard = index.state.read().unwrap();
+        assert!(!guard.sessions.contains_key(&duplicated));
+        assert_eq!(guard.sessions["draft"].title, "renamed draft");
+        drop(guard);
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn startup_merge_cannot_undo_a_live_write_or_tombstone() {
+        fn item(id: &str, name: &str) -> IndexedSession {
+            build_indexed_session(id, "", Some(name), None, &[], 0)
+        }
+        let tmp = std::env::temp_dir().join(format!("cst-search-idx-{}", uuid_v7()));
+        let idx = SessionSearchIndex::new(tmp.join("sessions"), tmp.join("inbox"));
+        let scanned = BTreeMap::from([
+            ("renamed".to_owned(), Arc::new(item("renamed", "old title"))),
+            (
+                "removed".to_owned(),
+                Arc::new(item("removed", "deleted title")),
+            ),
+        ]);
+        idx.upsert(item("renamed", "new title"));
+        idx.upsert(item("created", "new session"));
+        idx.remove("removed");
+        idx.upsert(item("removed", "late callback"));
+        idx.finish_startup_sync(scanned);
+
+        let guard = idx.state.read().unwrap();
+        assert!(guard.synced_initial);
+        assert_eq!(guard.sessions["renamed"].title, "new title");
+        assert!(guard.sessions.contains_key("created"));
+        assert!(!guard.sessions.contains_key("removed"));
     }
 }

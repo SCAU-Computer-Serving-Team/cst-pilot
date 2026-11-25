@@ -237,6 +237,7 @@ pub struct SessionPool {
     pub global_events: SessionEvents,
     pub multiplex_hub: MultiplexHub,
     pub search: SessionSearchIndex,
+    search_query_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl SessionPool {
@@ -289,6 +290,7 @@ impl SessionPool {
             global_events,
             multiplex_hub,
             search,
+            search_query_slots: Arc::new(tokio::sync::Semaphore::new(2)),
         };
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let bg = pool.clone();
@@ -1048,6 +1050,7 @@ impl SessionPool {
         }
 
         self.index.mark_deleted_sync(id)?;
+        self.search.remove(id);
 
         slot.hosted.finalize_telemetry("delete").await;
         {
@@ -1063,7 +1066,6 @@ impl SessionPool {
         let _ = fs::remove_file(self.inbox_root.join(format!("{id}.json")));
         self.images.delete_session_attachments(id).await;
         self.index.clear_created_for_deleted(id).await;
-        self.search.remove(id);
 
         self.global_events
             .publish("state", &json!({"type": "sessions_changed"}));
@@ -1074,29 +1076,50 @@ impl SessionPool {
         if self.closed.load(Ordering::SeqCst) {
             return;
         }
-        let live_sessions: Vec<search_index::IndexedSession> = {
-            let slots = self.slots.lock().await;
-            slots
-                .values()
-                .map(|slot| search_index::extract_indexed_from_slot(slot))
-                .collect()
-        };
         let search = self.search.clone();
         let index = self.index.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            search.sync_all(&index, live_sessions);
-        })
-        .await;
+        let _ = tokio::task::spawn_blocking(move || search.sync_all(&index)).await;
     }
 
     pub async fn search_sessions(
         &self,
         params: SearchQueryParams<'_>,
     ) -> cst_search::SessionSearchResponseDto {
-        if !self.search.is_synced() {
-            self.sync_search_index().await;
-        }
-        self.search.search(params)
+        let search = self.search.clone();
+        let index = self.index.clone();
+        let query = params.query.to_owned();
+        let active_session_id = params.active_session_id.map(str::to_owned);
+        let snapshot_token = params.snapshot_token.map(str::to_owned);
+        let SearchQueryParams {
+            title_offset,
+            title_limit,
+            content_offset,
+            content_limit,
+            ..
+        } = params;
+        let permit = self
+            .search_query_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("search query semaphore");
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            if !search.is_synced() {
+                search.sync_all(&index);
+            }
+            search.search(SearchQueryParams {
+                query: &query,
+                active_session_id: active_session_id.as_deref(),
+                title_offset,
+                title_limit,
+                content_offset,
+                content_limit,
+                snapshot_token: snapshot_token.as_deref(),
+            })
+        })
+        .await
+        .unwrap_or_default()
     }
 
     pub async fn list(&self) -> Result<Vec<SessionListRow>, SessionPoolError> {
