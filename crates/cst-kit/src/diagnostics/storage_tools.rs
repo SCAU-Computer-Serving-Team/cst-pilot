@@ -43,7 +43,7 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
                             &target,
                             input.top.unwrap_or(20).clamp(1, 50),
                             control,
-                            WalkLimits::default(),
+                            WalkLimits::unbounded(),
                             &filter,
                         )
                     },
@@ -54,7 +54,7 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
         },
     );
     ls.prompt_snippet =
-        Some("按大小浏览目录，仅统计直接子项，未知大小和预算下界在结果中说明。".into());
+        Some("按大小浏览目录，仅统计直接子项，未知大小和未完整统计在结果中说明。".into());
     let disk_filter = filter;
     let mut disk = ToolDefinition::from_typed(
         "disk",
@@ -94,8 +94,10 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
             }
         },
     );
-    disk.prompt_snippet =
-        Some("查询磁盘空间、设备、SMART 或目录树占用；整卷占用默认走原生并行目录遍历。".into());
+    disk.prompt_snippet = Some(
+        "查询磁盘空间、设备、SMART 或整卷/目录树占用；管理员权限下本地 NTFS 根目录默认直读 $MFT 整盘索引，其余场景自动使用原生并行目录遍历。"
+            .into(),
+    );
     vec![ls, disk]
 }
 
@@ -121,10 +123,10 @@ pub fn run_usage_with_filter(
     control: &Control,
     filter: &SensitivePathFilter,
 ) -> Result<serde_json::Value, String> {
-    // MFT acceleration is strictly opt-in (gated by `index.allows_mft()`) and limited to elevated
-    // local NTFS volume roots. Default release path, regular subdirectories, non-NTFS volumes,
-    // UNC paths, and non-elevated runs go directly to bounded parallel Win32 directory walk
-    // without spurious `degradedFrom`.
+    // MFT acceleration is enabled by default for elevated local NTFS volume roots (kill-switched
+    // via `CST_DISABLE_MFT=1`). Regular subdirectories, non-NTFS volumes, UNC paths, and
+    // non-elevated runs go directly to unbounded parallel Win32 directory walk without spurious
+    // `degradedFrom`.
     let attempt = if index.allows_mft()
         && is_volume_root(target)
         && cst_os::is_elevated().unwrap_or(false)
@@ -165,14 +167,14 @@ pub fn run_usage_with_filter(
     match attempt {
         MftAttempt::Succeeded(value) => Ok(value),
         MftAttempt::NotEligible => {
-            super::walk::usage_with_filter(target, top, control, WalkLimits::default(), filter)
+            super::walk::usage_with_filter(target, top, control, WalkLimits::unbounded(), filter)
         }
         MftAttempt::Degraded(reason) => {
             let mut value = super::walk::usage_with_filter(
                 target,
                 top,
                 control,
-                WalkLimits::default(),
+                WalkLimits::unbounded(),
                 filter,
             )?;
             value["degradedFrom"] = serde_json::json!(format!("native-mft: {reason}"));

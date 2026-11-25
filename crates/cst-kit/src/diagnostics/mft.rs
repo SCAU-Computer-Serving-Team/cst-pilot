@@ -98,10 +98,10 @@ pub fn mft_disabled_by_env() -> bool {
     env_truthy("CST_DISABLE_MFT")
 }
 
-/// Experimental opt-in gate for raw `$MFT` reads. Default is OFF in release paths until Stage 1C
-/// live-volume gates pass; `CST_DISABLE_MFT=1` always takes precedence over `CST_ENABLE_MFT=1`.
+/// Raw `$MFT` reads are enabled by default for elevated local NTFS volume roots;
+/// set `CST_DISABLE_MFT=1` to force-disable both MFT scanning and cache reads.
 pub fn mft_enabled() -> bool {
-    !mft_disabled_by_env() && env_truthy("CST_ENABLE_MFT")
+    !mft_disabled_by_env()
 }
 
 #[cfg(windows)]
@@ -520,7 +520,7 @@ pub fn scan_ntfs_volume_with_filter(
 ) -> Result<ScanSnapshot, String> {
     control.check()?;
     if !mft_enabled() {
-        return Err("原生 $MFT 直读未启用（需通过实盘门禁或设置 CST_ENABLE_MFT=1）。".into());
+        return Err("原生 $MFT 直读已通过 CST_DISABLE_MFT 禁用。".into());
     }
     if drive.len() != 2 || !drive.as_bytes()[0].is_ascii_alphabetic() || drive.as_bytes()[1] != b':'
     {

@@ -178,27 +178,29 @@ fn topn_is_descending_bounded_and_deterministic() {
 }
 
 #[test]
-fn default_production_gate_never_opens_raw_mft_without_opt_in() {
-    // Unless CST_ENABLE_MFT=1 is explicitly set in the process environment, production
-    // VolumeIndex must keep raw $MFT scanning off and route directly to `native-walk`.
-    if std::env::var("CST_ENABLE_MFT").is_ok() {
+fn default_production_gate_enables_mft_and_subdirectories_run_unbounded_walk() {
+    // Unless CST_DISABLE_MFT=1 is set in the process environment, production VolumeIndex enables
+    // raw $MFT for elevated local NTFS volume roots, while subdirectories run unbounded walk.
+    if std::env::var("CST_DISABLE_MFT").is_ok() {
         return;
     }
     let fixture = Fixture::new();
     fs::write(fixture.0.join("sample.bin"), [1u8; 4096]).unwrap();
     let source = Arc::new(MockScan::new(mock_snapshot("C:\\", &[("C:\\", 12)], &[])));
     let prod = VolumeIndex::new_production(source.clone());
-    assert!(!prod.allows_mft());
-    assert!(
-        prod.scan(Path::new("C:\\"), true, &control())
-            .unwrap()
-            .is_none()
-    );
-    assert!(prod.cached(Path::new("C:\\")).is_none());
+    assert!(prod.allows_mft());
     let usage = storage_tools::run_usage(&prod, &fixture.0, 10, &control()).unwrap();
     assert_eq!(usage["method"], "native-walk");
     assert!(usage.get("degradedFrom").is_none());
+    assert!(usage["stats"].get("budget").is_none());
     assert_eq!(source.calls.load(Ordering::SeqCst), 0);
+    assert!(
+        prod.scan(Path::new("C:\\"), true, &control())
+            .unwrap()
+            .is_some()
+    );
+    assert!(prod.cached(Path::new("C:\\")).is_some());
+    assert_eq!(source.calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

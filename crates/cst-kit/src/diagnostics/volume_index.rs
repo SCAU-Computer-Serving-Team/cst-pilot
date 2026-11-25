@@ -180,8 +180,8 @@ impl VolumeIndex {
         Self::with_limits(source, false, MAX_CACHE_BYTES, FAILED_RETRY_TTL)
     }
 
-    /// Creates the production index gated by [`super::mft::mft_enabled`] (default OFF until
-    /// Stage 1C live-volume gates pass).
+    /// Creates the production index gated by [`super::mft::mft_enabled`] (default ON for elevated
+    /// local NTFS volume roots unless disabled via `CST_DISABLE_MFT=1`).
     pub fn new_production(source: Arc<dyn ScanSource>) -> Self {
         Self::with_limits(source, true, MAX_CACHE_BYTES, FAILED_RETRY_TTL)
     }

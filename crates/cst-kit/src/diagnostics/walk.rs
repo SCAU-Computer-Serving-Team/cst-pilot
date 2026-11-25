@@ -41,6 +41,16 @@ pub struct WalkLimits {
     pub entries: usize,
     pub timeout: Duration,
 }
+impl WalkLimits {
+    /// Unbounded directory walk with no artificial entry-count or 30-second cap;
+    /// still respects the caller's outer [`Control`] cancellation token and timeout.
+    pub fn unbounded() -> Self {
+        Self {
+            entries: usize::MAX,
+            timeout: Duration::MAX,
+        }
+    }
+}
 impl Default for WalkLimits {
     fn default() -> Self {
         Self {
@@ -1508,13 +1518,22 @@ pub fn usage_with_filter(
     } else {
         ""
     };
-    let notice = if outcome.incomplete {
-        format!("扫描因预算、链接、云占位或访问限制未完成，大小为下界，占比未计算。{ext_note}")
+    let notice = if outcome.exhausted {
+        format!("扫描因超时或上限未完成，大小为下界，占比未计算。{ext_note}")
+    } else if outcome.incomplete {
+        format!("部分目录因链接、云占位或访问限制未统计完整，大小为下界，占比未计算。{ext_note}")
     } else {
         format!(
             "原生并行目录遍历完成；{ext_note}目录排行包含不同深度，父子目录不可相加，陈旧文件为至少 50 MiB 且一年未修改。"
         )
     };
+    let mut stats = json!({
+        "filesScanned": outcome.scanned,
+        "elapsedSec": rounded(start.elapsed().as_secs_f64(), 1)
+    });
+    if limits.entries < usize::MAX {
+        stats["budget"] = json!(limits.entries);
+    }
     Ok(json!({
         "method": "native-walk",
         "root": display_path(root),
@@ -1523,11 +1542,7 @@ pub fn usage_with_filter(
         "topFiles": top_files,
         "extAgg": ext_agg,
         "staleFiles": stale_files,
-        "stats": {
-            "filesScanned": outcome.scanned,
-            "elapsedSec": rounded(start.elapsed().as_secs_f64(), 1),
-            "budget": limits.entries
-        },
+        "stats": stats,
         "truncated": outcome.incomplete,
         "denied": outcome.denied,
         "notice": notice

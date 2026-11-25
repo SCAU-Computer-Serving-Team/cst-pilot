@@ -56,8 +56,8 @@ pub fn run_with_filter(
     }
     let mut budget = WalkBudget::new(limits);
 
-    // Use warm volume snapshot only when allowed by the index (disabled by default in production
-    // until Stage 1C live-volume gates pass, and always bypassed when `CST_DISABLE_MFT=1`).
+    // Use warm volume snapshot when allowed by the index (enabled by default for elevated local
+    // NTFS volumes, bypassed when `CST_DISABLE_MFT=1`).
     let snapshot = if !index.allows_mft() {
         None
     } else if let Some(cached) = index.cached(target) {
@@ -308,14 +308,19 @@ fn measure(
             "note": "已按已知大小截断，未知大小不参与排序"
         });
     }
+    let reason = if budget.exhausted {
+        "超时、上限、链接或访问限制"
+    } else {
+        "链接、云占位或访问限制"
+    };
     let notice = match (budget.incomplete, hidden_sensitive) {
-        (true, true) => Some(
-            "部分子项因预算、链接或访问限制未统计完整，大小为下界，全部占比未计算。已隐去工具包敏感路径名，其已知大小仍计入 totalSize。",
-        ),
-        (true, false) => {
-            Some("部分子项因预算、链接或访问限制未统计完整，大小为下界，全部占比未计算。")
-        }
-        (false, true) => Some("已隐去工具包敏感路径名，其体积仍计入 totalSize。"),
+        (true, true) => Some(format!(
+            "部分子项因{reason}未统计完整，大小为下界，全部占比未计算。已隐去工具包敏感路径名，其已知大小仍计入 totalSize。"
+        )),
+        (true, false) => Some(format!(
+            "部分子项因{reason}未统计完整，大小为下界，全部占比未计算。"
+        )),
+        (false, true) => Some("已隐去工具包敏感路径名，其体积仍计入 totalSize。".into()),
         (false, false) => None,
     };
     if let Some(text) = notice {

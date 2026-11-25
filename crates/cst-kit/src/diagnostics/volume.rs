@@ -25,7 +25,7 @@ impl ScanSource for NativeScanSource {
     fn scan_volume(&self, drive: &str, control: &Control) -> Result<ScanSnapshot, String> {
         control.check()?;
         if !super::mft::mft_enabled() {
-            return Err("原生 $MFT 直读默认关闭，当前使用目录遍历。".into());
+            return Err("原生 $MFT 直读已通过 CST_DISABLE_MFT 禁用，当前使用目录遍历。".into());
         }
         let identity = volume_identity(drive)?;
         if !identity.filesystem.eq_ignore_ascii_case("NTFS") {
