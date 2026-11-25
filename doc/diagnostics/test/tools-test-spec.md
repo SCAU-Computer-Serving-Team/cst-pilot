@@ -22,7 +22,7 @@
 
 | 工具 | 实现与外部依赖 | 现有测试口径 | 已核实的设计缺陷与风险点 |
 |---|---|---|---|
-| `read` | `pi-runtime` 内置读取 + `PathGuard`（纯 Rust） | `tools_and_security.rs` 覆盖敏感路径、硬链接、ADS 拦截；缺少大文件/编码/图片兼容测试 | `PathGuard::open` 重复两次 `check()`，单次打开触发 15+ 次文件句柄与规范化系统调用；BMP 图片魔数识别为 `image/bmp`，需核对上游视觉模型兼容性；GBK/UTF-16 文本日志按 UTF-8 读取会替换乱码 |
+| `read` | `pi-runtime` 内置读取 + `PathGuard`（纯 Rust） | `tools_and_security.rs` 覆盖敏感路径、硬链接、ADS 拦截；缺少大文件/编码/图片兼容测试 | `PathGuard::open` 已改为单次会话单句柄核验；BMP 图片魔数识别为 `image/bmp`，需核对上游视觉模型兼容性；GBK/UTF-16 文本日志按 UTF-8 读取会替换乱码 |
 | `ls` | `VolumeIndex`（`ntfs-ng` `$MFT` 缓存）+ 并行 Win32 `walk.rs` | `storage_scan.rs` 与 `live_windows_tools.rs` 覆盖缓存、硬链接去重、重解析点、敏感路径隐藏与取消 | 待补真实断连 UNC 槽位恢复、4Kn、BitLocker 两态与热拔插实机回归 |
 | `disk` | Win32 `GetDiskFreeSpaceExW` + 存储 IOCTL（`NVMe` / `ATA` / 盘符映射 / SetupAPI）+ WMI 回退 + `ntfs-ng` `$MFT` + 并行 `walk.rs` | `diagnostics_contract.rs`、`storage_scan.rs` 与 `live_windows_tools.rs` 覆盖本机 NVMe 实测与契约 | 待补 SATA/USB-SAT/RST 控制器、断连 SMB、4Kn 与 BitLocker 锁定卷实机回归 |
 | `sys` | WMI + Win32 Toolhelp + PDH 本地化计数器 + `nvidia-smi.exe` + `lhm/host/cst-lhm-host.exe` | `diagnostics_contract.rs`、`sys_load.rs` 替身测试 + `lhm-host/test.ps1`；无真实 PDH/WMI/显卡集成测试 | 仓库与默认发行装配缺少已编译的 `lhm/host/cst-lhm-host.exe`，导致 `sensor` 与 `gpu` 的 LHM 分支默认报错降级；`pdh.rs:188-192` 将短暂退出的 GPU 进程无效实例记为 `engine` 错误，触发 `sys_load.rs:141-143` 二次 1.2 秒重采并覆写首轮 `memory` 样本；双显卡笔记本存在 `nvidia-smi` 时跳过 `lhmGpu`，核显传感器缺失；`hardware.rs:83` 仅查 `System32\nvidia-smi.exe` 未兜底旧版 `NVSMI` 目录；`io` 用 WMI `Win32_Process` 双采样替代原生进程 I/O API；`overview` 在 `Manufacturer` 为空时丢弃 `bios` 字段；`proc` 的 `cpuPct` 未钳制上界 `100.0` |
@@ -33,8 +33,8 @@
 | `runbook_deliver` | 纯 Rust + 命名管道目录锁 + `artifacts/<日期>/runbook/` UTF-8 BOM/CRLF | `runbook_and_plan.rs` 覆盖幂等复用、篡改拒绝、链接拦截 | 跨区写入（`data/plans` 与 `artifacts/` 位于不同挂载点或只读介质）需补测试；同 `command_plan` 经 50 KiB 通用裁剪 |
 | `runbook` | 纯 Rust + 命名管道目录锁 + `artifacts/<日期>/runbook/` | `runbook_and_plan.rs` 覆盖序号 01–999、覆盖替换、并发锁 | **`shell` 字段大小写不一致**：`runbook` 返回 `"cmd" \| "PowerShell"`，而 `command_plan` / `runbook_deliver` 返回 `"cmd" \| "powershell"`；只读介质与中文长标题截断边界需补实机用例 |
 | `bitlocker` | COM/WMI `PacketPrivacy` + `Win32_EncryptableVolume` + `Zeroizing` + 命名管道锁 | `bitlocker_privacy.rs` 7 项 + `bitlocker_execution.rs` 18 项 + 1 项 BSTR 清零单测（控制流覆盖充分） | **`bitlocker/core.rs:157-162` 判定顺序错误**：指定 `drive` 时若因家庭版缺少命名空间或权限不足导致 `volumes` 为空且 `collection_errors` 非空，会先命中“未找到唯一卷”并吞掉真实权限/命名空间原因；缺少真实加密卷与家庭中文版实机回归 |
-| `fffind` | 纯 Rust（`ignore` + `globset` + `PathGuard`） | `tools_and_security.rs` 4 项（与 `ffgrep` 共用） | `walker.filter_entry` 对每个遍历条目调用 `PathGuard::check`，每个文件触发约 15–20 次文件系统句柄/规范化调用，万级文件目录极易命中 30 秒超时；绝对路径查询时 `include_path` 保留反斜杠而 `display` 转为正斜杠，导致 `exclude` glob 跨盘符行为不一致；允许空 `pattern` 且无相关性打分，仅按遍历顺序截断 |
-| `ffgrep` | 纯 Rust（`ignore` + `regex` + `PathGuard`） | `tools_and_security.rs` 4 项（与 `fffind` 共用） | 在 `filter_entry` 的每次 `PathGuard::check` 之外，`guard.open` 再额外调用两次 `check`，单文件约 50 次系统调用；`line.contains(&0)` 会把 Windows 常见的 UTF-16 LE 文本（如 PowerShell 输出、DISM/CBS 日志、`.reg`）误判为二进制跳过；GBK/GB18030 中文日志经 `from_utf8_lossy` 变成替换符导致中文匹配失败；输出超 50 KiB 直接报错（与诊断工具自动裁剪不同） |
+| `fffind` | 纯 Rust（`ignore` 并行遍历 + `globset` + 相关性打分 + `PathGuardSession`） | `fff.rs` 单测 + `tools_and_security.rs` 覆盖敏感路径、硬链接、目录联接、相关性排序、弱匹配提示与跨盘 `exclude` | 已在阶段 2A 完成并行化、相关性排序与跨盘斜杠统一；待补十万级超大目录实机基准 |
+| `ffgrep` | 纯 Rust（`ignore` 并行遍历 + `memchr` + `regex::bytes` + `encoding_rs` + `PathGuardSession`） | `fff.rs` 单测 + `tools_and_security.rs` 覆盖 UTF-16 LE/BE、GB18030、二进制跳过、10 MiB 大文件跳过、8 KiB 超长行、50 KiB 截断与目录联接隔离 | 已在阶段 2A 完成单句柄核验、并行检索、多编码与 50 KiB 受控截断；超 `10 MiB` 单文件跳过并提示改用 `read` 分段查看 |
 | `web_search` | Exa MCP / REST + `SafeHttpClient`（SSRF 守卫）+ 内存缓存 | `tools_and_security.rs` + `ssrf.rs` 单测（全部离线 Mock） | 多关键词（2–3 词）串行请求，任一失败立即抛错丢弃已完成关键词，与桌面端 `web_search_bar` 的“部分查询失败保留其余关键词”契约不一致；结果仅输出拼接文本 `preview`（1200 字），无结构化标题/URL 列表；关闭系统代理，校园网仅配置 HTTP 代理无 TUN 时无法访问；`web-search.json` 仅允许 `198.18.0.0/15` |
 | `source_check` | 与 `web_search` 共用完全相同实现（`web_access.rs:236-247`） | 无独立测试 | 工具名暗示“来源核验”，但实际代码与 `web_search` 完全一致，未做域名权威性校验或交叉核验，容易误导模型与测试预期 |
 | `fetch_content` | `SafeHttpClient` + HTML 文本提取 + 内存缓存 | `tools_and_security.rs` 1 项 Mock 测试 | 1–5 个 URL 串行抓取，单个 404/超时即导致整批失败；简易正则/标签剥离对非 UTF-8 编码页面（GBK/GB2312 中文政企站点）与重度 JS 渲染页面未做编码检测与提示 |
@@ -100,7 +100,7 @@
 | `T35` | `fffind` / `ffgrep` 敏感路径与硬链接隐藏 | 语义 / 兼容 | 在工作区创建指向 `data/config/auth.json` 与 `.state/` 的硬链接和目录联接，分别模糊搜索与正则搜索 | L1 | 敏感文件、硬链接与 `.state/` 全部零命中、不报错中断，正常文件可检出 |
 | `T36` | `fffind` / `ffgrep` 万级文件性能基准 | 性能 | 在包含 10,000+ 文件的目录执行 `fffind` 与 `ffgrep`（含 `exclude`、取消令牌） | L2 | 耗时 ≤ 3 秒（监控 `PathGuard::check` 系统调用放大问题）；取消后 500 ms 内退出；单次读取总字节 ≤ 256 MiB |
 | `T37` | `fffind` / `ffgrep` 跨目录、反斜杠与通配符 | 兼容 / 语义 | 分别传相对路径、绝对路径（跨盘符）、含中文/空格路径、`exclude: ["*.log", "sub/**"]` | L1 | 相对与绝对路径下 `exclude` glob 行为一致；返回的 `path` 统一使用正斜杠且不越权 |
-| `T38` | `ffgrep` Windows 常见文本编码与超长行 | 兼容 / 语义 | 检索 UTF-8、UTF-8 BOM、UTF-16 LE、GBK 中文日志、真二进制文件、单行 >8 KiB 压缩日志 | L1 | 真二进制静默跳过；超 8 KiB 行计入 `skipped` 且不 OOM；UTF-16 LE 与 GBK 行为与规范文档一致（若不支持须明确记录或补转码） |
+| `T38` | `ffgrep` Windows 常见文本编码、大文件与超长行 | 兼容 / 语义 | 检索 UTF-8、UTF-8 BOM、UTF-16 LE/BE BOM、GB18030 中文日志、真二进制文件、>10 MiB 大文件、单行 >8 KiB 压缩日志 | L1 | UTF-16 LE/BE 与 GB18030 正确检出；真二进制静默跳过；>10 MiB 文件跳过并记入 `skippedLargeFiles` 与 `notice`；超 8 KiB 行计入 `skipped` 且内存受控 |
 | `T39` | `ffgrep` 上下文、50 KiB 上限与 `truncated` | 性能 / 语义 | 构造大量命中配合 `context: 3`、`limit: 1000` 逼近 50 KiB 输出上限 | L1 | 在 50 KiB 前受控截断并置 `truncated: true`，不会因边界估算偏差反触发硬报错 |
 | `T40` | `web_search` / `source_check` 单次与批量关键词 | 语义 / 兼容 | 传 1 个和 3 个关键词（含中文），模拟第 2 个关键词上游 500/超时 | L1 | 单次正常返回 `responseId` 与预览并入缓存；确认批量局部失败策略与 `tool_presenter` / `web_search_bar` 的 UI 预期一致；明确 `source_check` 是否与 `web_search` 保持同构或增加核验字段 |
 | `T41` | `web_search` / `fetch_content` SSRF 与重定向红线 | 兼容 / 语义 | 目标分别为回环 IPv4/IPv6、私网段、`169.254.169.254`、IPv4-mapped IPv6、公网 302 跳转内网、HTTPS 降级 HTTP、DNS 混合解析（公网+私网）、`198.18.x.x` TUN 网段 | L1 | 除显式允许的 `198.18.0.0/15` 外全部拦截；带凭据与 POST 请求绝不跟随重定向；重定向链超限终止 |
@@ -143,7 +143,7 @@
 | P1 | `crates/cst-kit/src/diagnostics/driver.rs` | **已修**：`driver(core)` 全失败判定修正为 5 次查询 |
 | P1 | `crates/cst-kit/src/bitlocker/core.rs` | **已修**：指定 `drive` 且卷列表为空时优先透出 `collectionErrors` 真实原因与脱敏错误码 |
 | P1 | `crates/cst-kit/src/diagnostics/win_native/windows/events.rs`、`eventlog.rs` | **已修**：延迟 `EvtFormatMessage` 至最终 `top` 或消息筛选候选，消除 10 万条提前格式化与误计 `unreadable` |
-| P1 | `crates/cst-kit/src/tools/fff.rs`、`path_guard.rs` | **已修**：遍历阶段先按路径条件筛候选再做文件级 `PathGuard` 校验；同步修复 Windows 扩展路径 `cwd` 导致相对 glob 漏匹配问题（注：2,500 文件 `ffgrep` 仍耗时约 5.2 秒，后续可进一步缓存只读会话级保护句柄） |
+| P1 | `crates/cst-kit/src/tools/fff.rs`、`path_guard.rs` | **已修**：阶段 2A 完成 `PathGuardSession` 单次基线与单句柄核验、`build_parallel` 并行检索（上限 8 线程）、`memchr` / `regex::bytes` 零拷贝匹配、纯 Rust 相关性打分、UTF-16 LE/BE BOM 与 GB18030 回退解码、`10 MiB` 单文件上限与跨盘符 `exclude` 修复；4,005 文件实测由 `12.70 s` 降至 `169.3 ms` |
 | P1 | `crates/cst-kit/src/diagnostics/walk.rs` | **已修**：`walk::usage` 入口补充目录存在性与重解析点校验，不存在路径直接报错 |
 | P2 | `crates/cst-kit/src/diagnostics/hardware/pdh.rs`、`sys_load.rs` | **已修**：GPU 存在有效引擎样本时不误触发二次重采；仅引擎无样本时单重采引擎并保留首轮显存数据 |
 | P2 | `crates/cst-kit/src/diagnostics/win_native/windows.rs`、`mod.rs` | **已修**：同次诊断阻塞任务内复用 COM、Tokio 运行时与同命名空间 WMI 连接，结束即释放 |
@@ -157,4 +157,3 @@
 ### 6.2 待拍板的设计议题
 
 1. **`web_search` 与 `source_check` 定位及批量失败策略**：两者当前实现完全相同，且 2–3 个关键词任一失败即整批报错（与桌面端 UI 设计的局部失败展示不一致）。需确认将多词改为逐项容错返回，并决定保留 `source_check` 作为差异化核验工具或合并精简。
-2. **`ffgrep` 对 Windows 常见非 UTF-8 编码的支持**：现场排查常需检索 GBK 中文日志与 UTF-16 LE PowerShell/DISM 日志，当前一律按 UTF-8 读取或判为二进制跳过。需确认是否引入编码探测（UTF-16 BOM + GB18030 回退）以提升诊断实用性。

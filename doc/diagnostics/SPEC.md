@@ -45,6 +45,12 @@
 - **eventlog 场景与权限**：内置场景事件范围见 [API.md](API.md#eventlog-内置事件范围)。`boot` 合并系统启停与 WHEA 并按 `logName + recordId` 去重后再截断 `top`。`crash` 保留 Information 级 WER（1001）与 Hang（1002），`app` 子串过滤作用于全部分组，`7045` 归入 `boot` 新装服务。`security` 执行前检查管理员令牌，非管理员直接返回 `admin: false, degraded: true`。
 - **driver 枚举与查找**：`problem` 筛选 `Status=Error/Unknown`。`core` 网卡仅保留 `NetConnectionID` 非空项，签名驱动版本按 `Net`、`Bluetooth`、`MEDIA`、`Display` 四类查询。`external` 覆盖 `USB*`、`BTHENUM*`、`DISPLAY*` 与可移动磁盘。`find` 要求至少传入一个条件，多个条件按 AND 组合，`id` 同时匹配 `deviceId` 与 `hardwareIds`。
 
+### fffind 与 ffgrep（受控文件检索）
+
+- **单次基线与并发边界**：每次检索建立独立的瞬态 `PathGuardSession`，不跨调用缓存。遍历禁用符号链接与目录联接跟随（`follow_links(false)`），并发工作线程上限为 8 线程（预留 2 个逻辑核余量），打开文件后在同句柄上复核规范路径、硬链接数与文件标识。
+- **路径排序与跨盘过滤**：`fffind` 对匹配路径按相关性排序（精确文件名与前缀高于分散子序列），支持空格多词交集；全部结果为弱匹配时附 `notice` 提示收窄范围。`include` 与 `exclude` 统一按正斜杠路径匹配，跨盘符绝对路径与相对路径行为一致。
+- **编码解码与资源护栏**：`ffgrep` 依次识别 UTF-16 LE/BE BOM 转码、无 BOM 含 `0x00` 判二进制跳过、UTF-8 零拷贝与 GB18030 回退解码。单文件上限 `10 MiB`（超限跳过并记入 `skippedLargeFiles` 与 `notice`），单行上限 `8 KiB`，单次总读取上限 `256 MiB`，最多遍历 50 万项，超时 30 秒，输出超 50 KiB 前受控截断并置 `truncated: true`。
+
 ## 命令方案与交付
 
 1. **多轮方案**：每批新增或修改修复命令均调用 `command_plan`。新建返回稳定 UUID 与版本 1。修订须同时传入 `runbookId` 与当前最新 `baseVersion`，冲突时拒绝覆盖。

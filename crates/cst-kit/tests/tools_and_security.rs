@@ -324,6 +324,75 @@ fn search_bounds_long_lines_output_and_respects_cancellation() {
 }
 
 #[test]
+fn ffgrep_50kib_truncation_stays_valid_and_does_not_fail_json_limit() {
+    let fixture = Fixture::new();
+    let payload = format!("MATCH_LINE {}\n", "z".repeat(1600));
+    for i in 0..80 {
+        fixture.write(&format!("bulk/file_{i:02}.log"), &payload.repeat(3));
+    }
+    let input = serde_json::from_value(json!({
+        "pattern": "match_line",
+        "literal": true,
+        "limit": 1000,
+        "context": 1
+    }))
+    .unwrap();
+    let result = search(
+        &fixture.guard(),
+        &fixture.0,
+        input,
+        true,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(result["truncated"], true);
+    assert!(result["matches"].as_array().unwrap().len() >= 10);
+    assert!(serde_json::to_string(&result).unwrap().len() <= 50 * 1024);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junction_to_state_is_not_traversed_by_fff() {
+    let fixture = Fixture::new();
+    fixture.write(".state/hidden.txt", "JUNCTION_SECRET_MARKER");
+    fixture.write("public/visible.txt", "PUBLIC_OK_MARKER");
+    let junction = fixture.path("public/state-junction");
+    let status = std::process::Command::new("cmd")
+        .args([
+            "/C",
+            "mklink",
+            "/J",
+            &junction.to_string_lossy(),
+            &fixture.path(".state").to_string_lossy(),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success(), "mklink /J failed");
+
+    let guard = fixture.guard();
+    assert!(guard.check(&junction).is_err());
+    assert!(guard.open(junction.join("hidden.txt")).is_err());
+
+    for (pattern, content) in [("hidden", false), ("JUNCTION_SECRET_MARKER", true)] {
+        let found = search(
+            &guard,
+            &fixture.0,
+            file_input(pattern),
+            content,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        let text = found.to_string();
+        assert!(!text.contains("hidden.txt"), "leaked via junction: {text}");
+        assert!(
+            !text.contains("JUNCTION_SECRET_MARKER"),
+            "leaked content via junction: {text}"
+        );
+    }
+    let _ = std::fs::remove_dir(&junction);
+}
+
+#[test]
 fn ssrf_blocks_private_special_ipv6_and_mapped_addresses_and_limits_tun_exception() {
     let policy = NetworkPolicy::default();
     for value in [
