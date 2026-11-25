@@ -1,7 +1,11 @@
+use std::rc::Rc;
+
 use cst_client::ClientHandle;
+use gpui::{KeyDownEvent, MouseMoveEvent};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Context, EventEmitter, FocusHandle, InteractiveElement, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
@@ -10,6 +14,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::login_view::LoginMethodTab;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{KbdTone, use_dialog_action_nav};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius,
     render_subpage_header_xwjof, scale, space,
@@ -356,8 +361,54 @@ impl Render for AccountView {
             window,
             cx,
         );
+        let logout_nav = use_dialog_action_nav(
+            "account-logout-confirm",
+            self.logout_confirm_open,
+            0,
+            window,
+            cx,
+        );
         let confirm_modal_opt = self.logout_confirm_open.then(|| {
+            let kbd_style = snap.desktop_settings.keyboard_focus_style;
             let scale_factor = window.scale_factor();
+            let entity = cx.entity();
+            let ent_cancel = entity.clone();
+            let ent_confirm = entity.clone();
+            let on_cancel: crate::theme::kbd_focus::DialogActionCallback = Rc::new(move |w, cx| {
+                ent_cancel.update(cx, |this, cx| {
+                    this.dismiss_logout_confirm(w, cx);
+                });
+            });
+            let on_confirm: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_confirm.update(cx, |this, cx| {
+                        this.logout_cstoa_only(w, cx);
+                    });
+                });
+            let focuses = [
+                self.logout_cancel_focus.clone(),
+                self.logout_confirm_focus.clone(),
+            ];
+            logout_nav.clear_tracker(cx);
+            let kbd_active = logout_nav.is_keyboard_active(cx);
+            let tracker_cancel = logout_nav.tracker(cx);
+            let tracker_confirm = logout_nav.tracker(cx);
+            let kbd_overlay = logout_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [KbdTone::Neutral, KbdTone::Danger],
+                false,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = logout_nav.clone();
+            let nav_key = logout_nav.clone();
+            let nav_click_cancel = logout_nav.clone();
+            let nav_click_confirm = logout_nav.clone();
+            let click_cancel = Rc::clone(&on_cancel);
+            let click_confirm = Rc::clone(&on_confirm);
+
             let card = render_frosted_surface(
                 "account-logout-confirm-dialog",
                 FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
@@ -401,6 +452,7 @@ impl Render for AccountView {
             )
             .child(
                 div()
+                    .relative()
                     .w_full()
                     .pt(space::XS)
                     .flex()
@@ -414,14 +466,6 @@ impl Render for AccountView {
                             .a11y_button("account-logout-cancel-btn", "取消")
                             .track_focus(&self.logout_cancel_focus)
                             .tab_index(0)
-                            .on_key_down(cx.listener(
-                                |this, event: &gpui::KeyDownEvent, window, cx| {
-                                    if crate::settings::activates_button(event) {
-                                        this.dismiss_logout_confirm(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -431,11 +475,13 @@ impl Render for AccountView {
                             .text_color(palette.text_primary)
                             .flex()
                             .items_center()
-                            .hover(|s| s.bg(palette.bg_surface))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.dismiss_logout_confirm(window, cx);
-                            }))
-                            .child(cjk_inline_label("取消")),
+                            .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_surface)))
+                            .on_click(move |_, window, cx| {
+                                nav_click_cancel.clear_keyboard(window, cx);
+                                click_cancel(window, cx);
+                            })
+                            .child(cjk_inline_label("取消"))
+                            .on_prepaint(move |bounds, _, _| tracker_cancel.set(0, bounds)),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
@@ -444,14 +490,6 @@ impl Render for AccountView {
                             .a11y_button("account-logout-confirm-btn", "退出 CSTOA")
                             .track_focus(&self.logout_confirm_focus)
                             .tab_index(0)
-                            .on_key_down(cx.listener(
-                                |this, event: &gpui::KeyDownEvent, window, cx| {
-                                    if crate::settings::activates_button(event) {
-                                        this.logout_cstoa_only(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -459,12 +497,17 @@ impl Render for AccountView {
                             .text_color(palette.text_on_accent)
                             .flex()
                             .items_center()
-                            .hover(|s| s.bg(palette.status_danger_hover))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.logout_cstoa_only(window, cx);
-                            }))
-                            .child(cjk_inline_label("退出 CSTOA")),
-                    ),
+                            .when(!kbd_active, |el| {
+                                el.hover(|s| s.bg(palette.status_danger_hover))
+                            })
+                            .on_click(move |_, window, cx| {
+                                nav_click_confirm.clear_keyboard(window, cx);
+                                click_confirm(window, cx);
+                            })
+                            .child(cjk_inline_label("退出 CSTOA"))
+                            .on_prepaint(move |bounds, _, _| tracker_confirm.set(1, bounds)),
+                    )
+                    .child(kbd_overlay),
             );
 
             render_frosted_surface(
@@ -485,6 +528,9 @@ impl Render for AccountView {
             .flex()
             .items_center()
             .justify_center()
+            .on_mouse_move(move |ev: &MouseMoveEvent, w, cx| {
+                nav_move.handle_mouse_move(ev, w, cx);
+            })
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -494,6 +540,19 @@ impl Render for AccountView {
             .child(
                 div()
                     .tab_stop(false)
+                    .on_key_down(move |ev: &KeyDownEvent, w, cx| {
+                        if nav_key.handle_key_down(
+                            ev,
+                            &focuses,
+                            false,
+                            on_cancel.as_ref(),
+                            on_confirm.as_ref(),
+                            w,
+                            cx,
+                        ) {
+                            cx.stop_propagation();
+                        }
+                    })
                     .focus_trap("account-logout-confirm-trap", &self.logout_trap_focus)
                     .child(motion::animate_modal_enter(
                         "account-logout-confirm-anim",

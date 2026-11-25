@@ -1408,8 +1408,16 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
             .value();
         assert_eq!(draft_val.as_ref(), "分析蓝屏转储（分支回填）");
 
-        // Click `"去配置"` -> navigates to `Settings · 模型服务`
-        window.click("missing-key-configure-btn", cx);
+        // Keyboard nav in `missing-key-dialog-e7fety`: default on cancel, `←` clamps, `→` focuses `"去配置"`, `Enter` activates!
+        assert_eq!(window.find("missing-key-cancel-btn").focused(), Some(true));
+        window.press("left", cx);
+        assert_eq!(window.find("missing-key-cancel-btn").focused(), Some(true));
+        window.press("right", cx);
+        assert_eq!(
+            window.find("missing-key-configure-btn").focused(),
+            Some(true)
+        );
+        window.press("enter", cx);
         window.render_frame(cx);
         assert!(window.find("settings-providers-tab").visible());
         assert!(window.find("providers-cstoa-pinned-card").visible());
@@ -1423,13 +1431,29 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
 
-    // 7. `AccountView` CSTOA-only logout (`sVucQ` confirm + `Esc` cancel + confirm logout) -> `LoginView` (`864px` sky + `300px` viewport + offline QR)
+    // 7. `AccountView` CSTOA-only logout (`sVucQ` confirm + `←→` clamping + `Esc` cancel + confirm logout) -> `LoginView` (`864px` sky + `300px` viewport + offline QR)
     cx.update_window(win_handle, |_, window, cx| {
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Account, cx));
         window.render_frame(cx);
         assert!(window.find("account-view").visible());
         window.click("account-cstoa-logout-btn", cx);
         assert!(window.find("account-logout-confirm-dialog").visible());
+        assert_eq!(
+            window.find("account-logout-cancel-btn").focused(),
+            Some(true)
+        );
+        // Left at safe cancel button clamps without wrapping onto destructive logout.
+        window.press("left", cx);
+        assert_eq!(
+            window.find("account-logout-cancel-btn").focused(),
+            Some(true)
+        );
+        window.press("right", cx);
+        assert_eq!(
+            window.find("account-logout-confirm-btn").focused(),
+            Some(true)
+        );
+        window.press("left", cx);
         assert_eq!(
             window.find("account-logout-cancel-btn").focused(),
             Some(true)
@@ -1443,12 +1467,11 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
             Some(true)
         );
         window.press("enter", cx);
-        window.press("tab", cx);
+        window.press("right", cx);
         assert_eq!(
             window.find("account-logout-confirm-btn").focused(),
             Some(true)
         );
-        window.press("enter", cx);
         window.press("enter", cx);
     })
     .unwrap();

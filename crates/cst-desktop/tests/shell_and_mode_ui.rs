@@ -1210,11 +1210,46 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
         let card = window.find("exit-dialog-card-pfook");
         assert_eq!(f32::from(card.bounds().size.width), 384.0);
         assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        // Left at safe cancel button clamps without wrapping onto destructive exit.
+        window.press("left", cx);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        // Right glides onto confirm exit, and right again clamps at confirm exit.
+        window.press("right", cx);
+        assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
+        window.press("right", cx);
+        assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
+        // Left returns to safe cancel; End / Home jump across endpoints.
+        window.press("left", cx);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        window.press("end", cx);
+        assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
+        window.press("home", cx);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        // Tab loop still stays trapped inside the dialog.
         window.press("tab", cx);
         assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
         window.press("tab", cx);
         assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
 
+        // Space on focused cancel button dismisses safely without triggering exit.
+        window.press("space", cx);
+        assert!(window.try_find("exit-dialog-card-pfook").is_none());
+    })
+    .unwrap();
+
+    // Re-open exit dialog and verify Esc also dismisses safely without calling `/api/app/exit`.
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("window-btn-close", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("exit-dialog-card-pfook").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
         window.press("escape", cx);
         assert!(window.try_find("exit-dialog-card-pfook").is_none());
     })

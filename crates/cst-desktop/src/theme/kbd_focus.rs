@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use cst_client::KeyboardFocusStyleDto;
 use gpui::{
-    AnyElement, Bounds, ContentMask, Corners, PathBuilder, Point, ScrollHandle, canvas, fill,
+    AnyElement, Bounds, ContentMask, Corners, Entity, FocusHandle, KeyDownEvent, MouseMoveEvent,
+    PathBuilder, Point, ScrollHandle, canvas, fill,
 };
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::{App, Hsla, IntoElement, Pixels, SharedString, Styled, Window, point, px, rgba};
@@ -28,6 +29,14 @@ pub fn kbd_bracket_accent(palette: &DesktopPalette) -> Hsla {
     match palette.mode {
         ResolvedTheme::Light => rgba(0x1A4B_E0FF).into(),
         ResolvedTheme::Dark => rgba(0x688F_F8FF).into(),
+    }
+}
+
+/// StoryBook Section B interactive danger corner-bracket / rail color (`--kbd-bracket-danger`).
+pub fn kbd_bracket_danger(palette: &DesktopPalette) -> Hsla {
+    match palette.mode {
+        ResolvedTheme::Light => rgba(0xDC26_26FF).into(),
+        ResolvedTheme::Dark => rgba(0xE548_4DFF).into(),
     }
 }
 
@@ -383,6 +392,7 @@ fn paint_rounded_corner(
 pub enum KbdTone {
     Neutral,
     Accent,
+    Danger,
 }
 
 /// Rail bar placement for `KeyboardFocusStyleDto::Rail` on standalone controls.
@@ -679,6 +689,8 @@ pub fn render_gliding_control_indicator<const N: usize>(
             let mut color = match (style, tone) {
                 (KeyboardFocusStyleDto::Brackets, KbdTone::Accent)
                 | (KeyboardFocusStyleDto::Rail, KbdTone::Accent) => kbd_bracket_accent(&palette),
+                (KeyboardFocusStyleDto::Brackets, KbdTone::Danger)
+                | (KeyboardFocusStyleDto::Rail, KbdTone::Danger) => kbd_bracket_danger(&palette),
                 (KeyboardFocusStyleDto::Brackets, KbdTone::Neutral) => kbd_bracket_color(&palette),
                 (KeyboardFocusStyleDto::Rail, KbdTone::Neutral) => kbd_rail_color(&palette),
             };
@@ -719,9 +731,349 @@ pub fn render_gliding_control_indicator<const N: usize>(
     .into_any_element()
 }
 
+/// Shared action callback stored by modal dialog action rows so both click and keyboard
+/// activation reuse the same handler without repeating trait-object types.
+pub type DialogActionCallback = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// Pure horizontal navigation action for modal dialog action buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogNavStep {
+    Move(usize),
+    Activate(usize),
+    TabActivated,
+    Ignore,
+}
+
+/// Resolves horizontal keyboard navigation for modal dialog action rows.
+/// Clamps at edges (`left` stops at `0`, `right` stops at `button_count - 1`) so pressing `←` on
+/// a safe left-aligned cancel button never wraps onto a destructive right-aligned action.
+pub fn resolve_dialog_nav_key(
+    key: &str,
+    modifiers: gpui::Modifiers,
+    is_held: bool,
+    current_idx: usize,
+    button_count: usize,
+) -> DialogNavStep {
+    if button_count == 0 {
+        return DialogNavStep::Ignore;
+    }
+    let cur = current_idx.min(button_count - 1);
+    if key == "tab" && !modifiers.control && !modifiers.alt && !modifiers.platform {
+        return DialogNavStep::TabActivated;
+    }
+    if modifiers != gpui::Modifiers::default() {
+        return DialogNavStep::Ignore;
+    }
+    match key {
+        "left" => DialogNavStep::Move(cur.saturating_sub(1)),
+        "right" => DialogNavStep::Move((cur + 1).min(button_count - 1)),
+        "home" => DialogNavStep::Move(0),
+        "end" => DialogNavStep::Move(button_count - 1),
+        "enter" | "space" if !is_held => DialogNavStep::Activate(cur),
+        _ => DialogNavStep::Ignore,
+    }
+}
+
+struct DialogNavInner {
+    was_open: bool,
+    keyboard_active: bool,
+    last_pointer_pos: Option<Point<Pixels>>,
+    tracker: KbdBoundsTracker<2>,
+    fallback_focus: [FocusHandle; 2],
+}
+
+/// Shared keyboard navigation and gliding indicator coordinator for 2-button modal dialog footers.
+#[derive(Clone)]
+pub struct DialogActionNav {
+    id_prefix: &'static str,
+    state: Entity<DialogNavInner>,
+    default_idx: usize,
+}
+
+/// Synchronizes a keyed `DialogActionNav` with the modal's open state so each open cycle starts
+/// with a fresh keyboard indicator and pointer-mutex baseline.
+pub fn use_dialog_action_nav(
+    id_prefix: &'static str,
+    is_open: bool,
+    default_idx: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> DialogActionNav {
+    let state = window.use_keyed_state(
+        SharedString::from(format!("{id_prefix}-dialog-nav")),
+        cx,
+        |_, cx| DialogNavInner {
+            was_open: false,
+            keyboard_active: false,
+            last_pointer_pos: None,
+            tracker: KbdBoundsTracker::new(),
+            fallback_focus: [
+                cx.focus_handle().tab_stop(true),
+                cx.focus_handle().tab_stop(true),
+            ],
+        },
+    );
+    let was_open = state.read(cx).was_open;
+    if is_open && !was_open {
+        let mouse = window.mouse_position();
+        state.update(cx, |inner, _| {
+            inner.was_open = true;
+            inner.keyboard_active = true;
+            inner.last_pointer_pos = Some(mouse);
+            inner.tracker.clear();
+        });
+    } else if !is_open && was_open {
+        state.update(cx, |inner, _| {
+            inner.was_open = false;
+            inner.keyboard_active = false;
+            inner.last_pointer_pos = None;
+            inner.tracker.clear();
+        });
+    }
+    DialogActionNav {
+        id_prefix,
+        state,
+        default_idx: default_idx.min(1),
+    }
+}
+
+impl DialogActionNav {
+    pub fn fallback_focus(&self, slot: usize, cx: &App) -> FocusHandle {
+        self.state.read(cx).fallback_focus[slot.min(1)].clone()
+    }
+
+    pub fn tracker(&self, cx: &App) -> KbdBoundsTracker<2> {
+        self.state.read(cx).tracker.clone()
+    }
+
+    pub fn clear_tracker(&self, cx: &App) {
+        self.state.read(cx).tracker.clear();
+    }
+
+    pub fn is_keyboard_active(&self, cx: &App) -> bool {
+        self.state.read(cx).keyboard_active
+    }
+
+    pub fn clear_keyboard(&self, window: &mut Window, cx: &mut App) {
+        if self.state.read(cx).keyboard_active {
+            self.state.update(cx, |inner, _| {
+                inner.keyboard_active = false;
+            });
+            window.refresh();
+        }
+    }
+
+    pub fn handle_mouse_move(&self, event: &MouseMoveEvent, window: &mut Window, cx: &mut App) {
+        if !self.state.read(cx).keyboard_active {
+            return;
+        }
+        let moved = self.state.update(cx, |inner, _| {
+            if pointer_moved_past_threshold(&mut inner.last_pointer_pos, event.position) {
+                inner.keyboard_active = false;
+                true
+            } else {
+                false
+            }
+        });
+        if moved {
+            window.refresh();
+        }
+    }
+
+    pub fn active_slot(&self, focuses: &[FocusHandle; 2], window: &Window) -> usize {
+        if focuses[0].is_focused(window) {
+            0
+        } else if focuses[1].is_focused(window) {
+            1
+        } else {
+            self.default_idx
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_key_down(
+        &self,
+        event: &KeyDownEvent,
+        focuses: &[FocusHandle; 2],
+        require_button_focus: bool,
+        on_left: &dyn Fn(&mut Window, &mut App),
+        on_right: &dyn Fn(&mut Window, &mut App),
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let button_focused = focuses[0].is_focused(window) || focuses[1].is_focused(window);
+        if require_button_focus && !button_focused {
+            if event.keystroke.key.as_str() == "tab"
+                && !event.keystroke.modifiers.control
+                && !event.keystroke.modifiers.alt
+                && !event.keystroke.modifiers.platform
+            {
+                let mouse = window.mouse_position();
+                self.state.update(cx, |inner, _| {
+                    inner.keyboard_active = true;
+                    inner.last_pointer_pos = Some(mouse);
+                });
+                window.refresh();
+            }
+            return false;
+        }
+        let cur = self.active_slot(focuses, window);
+        match resolve_dialog_nav_key(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            event.is_held,
+            cur,
+            2,
+        ) {
+            DialogNavStep::Move(next) => {
+                let mouse = window.mouse_position();
+                focuses[next].focus(window, cx);
+                self.state.update(cx, |inner, _| {
+                    inner.keyboard_active = true;
+                    inner.last_pointer_pos = Some(mouse);
+                });
+                window.refresh();
+                true
+            }
+            DialogNavStep::Activate(idx) => {
+                let mouse = window.mouse_position();
+                self.state.update(cx, |inner, _| {
+                    inner.keyboard_active = true;
+                    inner.last_pointer_pos = Some(mouse);
+                });
+                if idx == 0 {
+                    on_left(window, cx);
+                } else {
+                    on_right(window, cx);
+                }
+                true
+            }
+            DialogNavStep::TabActivated => {
+                let mouse = window.mouse_position();
+                self.state.update(cx, |inner, _| {
+                    inner.keyboard_active = true;
+                    inner.last_pointer_pos = Some(mouse);
+                });
+                window.refresh();
+                false
+            }
+            DialogNavStep::Ignore => false,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_overlay(
+        &self,
+        kbd_style: KeyboardFocusStyleDto,
+        focuses: &[FocusHandle; 2],
+        tones: [KbdTone; 2],
+        require_button_focus: bool,
+        palette: &DesktopPalette,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let slot = if !self.is_keyboard_active(cx) {
+            None
+        } else if focuses[0].is_focused(window) {
+            Some(0)
+        } else if focuses[1].is_focused(window) {
+            Some(1)
+        } else if require_button_focus {
+            None
+        } else {
+            Some(self.default_idx)
+        };
+        let target = slot.map(|s| KbdControlSpec {
+            slot: s,
+            corner_radius: 4.0,
+            tone: tones[s],
+            rail: KbdRailPlacement::BottomCenter,
+        });
+        render_gliding_control_indicator(
+            self.id_prefix,
+            kbd_style,
+            target,
+            self.tracker(cx),
+            palette,
+            window,
+            cx,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dialog_nav_clamps_without_wrapping_onto_destructive_action() {
+        let plain = gpui::Modifiers::default();
+        assert_eq!(
+            resolve_dialog_nav_key("left", plain, false, 0, 2),
+            DialogNavStep::Move(0)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("right", plain, false, 0, 2),
+            DialogNavStep::Move(1)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("right", plain, false, 1, 2),
+            DialogNavStep::Move(1)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("left", plain, false, 1, 2),
+            DialogNavStep::Move(0)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("home", plain, false, 1, 2),
+            DialogNavStep::Move(0)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("end", plain, false, 0, 2),
+            DialogNavStep::Move(1)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("enter", plain, false, 1, 2),
+            DialogNavStep::Activate(1)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("space", plain, false, 0, 2),
+            DialogNavStep::Activate(0)
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("enter", plain, true, 0, 2),
+            DialogNavStep::Ignore
+        );
+        assert_eq!(
+            resolve_dialog_nav_key("tab", plain, false, 0, 2),
+            DialogNavStep::TabActivated
+        );
+        assert_eq!(
+            resolve_dialog_nav_key(
+                "tab",
+                gpui::Modifiers {
+                    shift: true,
+                    ..plain
+                },
+                false,
+                1,
+                2
+            ),
+            DialogNavStep::TabActivated
+        );
+    }
+
+    #[test]
+    fn danger_bracket_color_matches_storybook_light_and_dark() {
+        assert_eq!(
+            kbd_bracket_danger(&DesktopPalette::light()),
+            Hsla::from(rgba(0xDC26_26FF))
+        );
+        assert_eq!(
+            kbd_bracket_danger(&DesktopPalette::dark()),
+            Hsla::from(rgba(0xE548_4DFF))
+        );
+    }
 
     #[test]
     fn pointer_mutex_uses_distance_from_keyboard_activation() {
