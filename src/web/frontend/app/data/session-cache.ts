@@ -9,6 +9,8 @@ export function recentSessionIds(rows: readonly SessionRow[]): string[] {
 	return [...new Set([...rows].sort((a, b) => timestamp(b) - timestamp(a)).map((row) => row.id))].slice(0, 10);
 }
 
+export class StaleSessionDetailError extends Error {}
+
 /** 标签页内存缓存；预载与点击共享请求，旧响应不得覆盖更新或复活已删除会话。 */
 export class SessionDetailCache {
 	private readonly entries = new Map<string, SessionDetail>();
@@ -72,8 +74,13 @@ export class SessionDetailCache {
 		const request = this.fetchDetail(id)
 			.then((value) => {
 				if (value.id !== id) throw new Error("会话 ID 与请求不一致");
-				if (this.revisions.get(id) === revision) this.put(value);
-				return this.peek(id) ?? value;
+				if (this.revisions.get(id) === revision) {
+					this.put(value);
+					return value;
+				}
+				const current = this.peek(id);
+				if (!current) throw new StaleSessionDetailError();
+				return current;
 			})
 			.finally(() => {
 				if (this.pending.get(id)?.task === request) this.pending.delete(id);

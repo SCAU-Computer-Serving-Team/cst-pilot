@@ -20,17 +20,35 @@ export type QueryMatch = {
 
 export function normalizeText(input: string): string {
 	let out = "";
-	for (let i = 0; i < input.length; i++) {
-		const code = input.charCodeAt(i);
-		if (code >= 0xff01 && code <= 0xff5e) {
-			out += String.fromCharCode(code - 0xfee0).toLowerCase();
-		} else if (code === 0x3000) {
-			out += " ";
-		} else {
-			out += input[i].toLowerCase();
-		}
+	for (const char of input) {
+		const code = char.codePointAt(0)!;
+		const mapped =
+			code >= 0xff01 && code <= 0xff5e ? String.fromCharCode(code - 0xfee0) : code === 0x3000 ? " " : char;
+		// Keep one scalar for each original character, matching Rust's normalization.
+		const lower = mapped.toLowerCase();
+		out += String.fromCodePoint(lower.codePointAt(0)!);
 	}
 	return out;
+}
+
+function scalarOffsets(text: string): number[] {
+	const offsets = [0];
+	let offset = 0;
+	for (const char of text) {
+		offset += char.length;
+		offsets.push(offset);
+	}
+	return offsets;
+}
+
+/** Search API spans count Unicode scalar values; DOM string slices count UTF-16 units. */
+export function scalarSpansToUtf16(text: string, spans: readonly MatchSpan[]): MatchSpan[] {
+	const offsets = scalarOffsets(text);
+	return spans.flatMap((span) => {
+		const start = offsets[span.start];
+		const end = offsets[span.end];
+		return start !== undefined && end !== undefined && start < end ? [{ start, end }] : [];
+	});
 }
 
 export function splitQueryTerms(query: string): string[] {
@@ -171,7 +189,7 @@ function matchPinyinTerm(normText: string, term: string): { score: number; span:
 	return null;
 }
 
-function osaDistance(a: string, b: string): number {
+function osaDistance(a: readonly string[], b: readonly string[]): number {
 	const m = a.length;
 	const n = b.length;
 	if (m === 0) return n;
@@ -192,7 +210,7 @@ function osaDistance(a: string, b: string): number {
 	return d[m][n];
 }
 
-function sharedCharCount(term: string, window: string): number {
+function sharedCharCount(term: readonly string[], window: readonly string[]): number {
 	let matched = 0;
 	const used = new Uint8Array(window.length);
 	for (let i = 0; i < term.length; i++) {
@@ -208,7 +226,10 @@ function sharedCharCount(term: string, window: string): number {
 	return matched;
 }
 
-function matchBoundedEdit(normText: string, term: string): { score: number; span: MatchSpan } | null {
+function matchBoundedEdit(
+	normText: readonly string[],
+	term: readonly string[],
+): { score: number; span: MatchSpan } | null {
 	const tlen = term.length;
 	if (tlen < 3 || tlen > 48) return null;
 	const maxDist = tlen <= 5 ? 1 : 2;
@@ -226,7 +247,7 @@ function matchBoundedEdit(normText: string, term: string): { score: number; span
 			if (end > scanLen) break;
 			if (/\s/.test(normText[end - 1])) continue;
 			const win = normText.slice(start, end);
-			if (/\s/.test(win)) continue;
+			if (win.some((char) => /\s/.test(char))) continue;
 			const shared = sharedCharCount(term, win);
 			if (shared < tlen - maxDist) continue;
 			if (tlen === 3 && shared < 2) continue;
@@ -244,7 +265,10 @@ function matchBoundedEdit(normText: string, term: string): { score: number; span
 	return { score: best.dist <= 1 ? SCORE_FUZZY_EDIT1 : SCORE_FUZZY_EDIT2, span: best.span };
 }
 
-function matchBoundedSubsequence(normText: string, term: string): { score: number; span: MatchSpan } | null {
+function matchBoundedSubsequence(
+	normText: readonly string[],
+	term: readonly string[],
+): { score: number; span: MatchSpan } | null {
 	const tlen = term.length;
 	if (tlen < 3) return null;
 	const scanLen = Math.min(normText.length, MAX_FUZZY_SCAN_CHARS);
@@ -259,6 +283,7 @@ function matchBoundedSubsequence(normText: string, term: string): { score: numbe
 			const limit = Math.min(scanLen, prev + 1 + maxGap + 1);
 			let found = -1;
 			for (let idx = prev + 1; idx < limit; idx++) {
+				if (/\s/.test(normText[idx])) break;
 				if (normText[idx] === term[k]) {
 					found = idx;
 					break;
@@ -290,8 +315,14 @@ function matchSingleTerm(normText: string, term: string): { score: number; span:
 	const pinyinHit = matchPinyinTerm(normText, term);
 	if (pinyinHit) return pinyinHit;
 
-	if (term.length >= 3) {
-		return matchBoundedEdit(normText, term) ?? matchBoundedSubsequence(normText, term);
+	const termChars = [...term];
+	if (termChars.length >= 3 && termChars.length <= MAX_FUZZY_SCAN_CHARS) {
+		const textChars = [...normText].slice(0, MAX_FUZZY_SCAN_CHARS);
+		const hit = matchBoundedEdit(textChars, termChars) ?? matchBoundedSubsequence(textChars, termChars);
+		if (hit) {
+			const [span] = scalarSpansToUtf16(normText, [hit.span]);
+			if (span) return { score: hit.score, span };
+		}
 	}
 	return null;
 }
@@ -352,16 +383,13 @@ export function buildSnippet(
 	if (!clean) return { snippet: prefix, spans: [] };
 	const maxBody = Math.max(12, maxBodyChars);
 	const matched = matchQuery(clean, query);
-	const firstStart = matched?.spans[0]?.start ?? 0;
-
-	let winStart = 0;
-	let winEnd = clean.length;
-	if (clean.length > maxBody) {
-		const lead = Math.min(Math.floor(maxBody / 3), firstStart);
-		winStart = Math.max(0, firstStart - lead);
-		winEnd = Math.min(clean.length, winStart + maxBody);
-		if (winEnd - winStart < maxBody) winStart = Math.max(0, winEnd - maxBody);
-	}
+	const offsets = scalarOffsets(clean);
+	const scalarCount = offsets.length - 1;
+	const firstStart = Math.max(0, offsets.indexOf(matched?.spans[0]?.start ?? 0));
+	const lead = Math.min(Math.floor(maxBody / 3), firstStart);
+	const last = Math.min(scalarCount, firstStart - lead + maxBody);
+	const winStart = offsets[Math.max(0, last - maxBody)];
+	const winEnd = offsets[last];
 
 	const leading = winStart > 0 ? "…" : "";
 	const trailing = winEnd < clean.length ? "…" : "";

@@ -187,18 +187,11 @@ fn render_located_text(
     let mut tint = palette.accent_subtle;
     tint.a *= alpha;
     let ink = motion::lerp_hsla(base_color, palette.accent_ink, alpha);
-    let highlights: Vec<_> = matched
-        .spans
+    let highlights: Vec<_> = cst_search::scalar_spans_to_byte_ranges(text, &matched.spans)
         .into_iter()
-        .filter(|s| {
-            s.start < s.end
-                && s.end <= text.len()
-                && text.is_char_boundary(s.start)
-                && text.is_char_boundary(s.end)
-        })
-        .map(|s| {
+        .map(|range| {
             (
-                s.start..s.end,
+                range,
                 HighlightStyle {
                     color: Some(ink),
                     background_color: Some(tint),

@@ -37,7 +37,7 @@ percent-encoding = "=2.3.2"
 rand = "=0.10.3"
 regex.workspace = true
 reqwest.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2.workspace = true
 subtle = "=2.6.1"

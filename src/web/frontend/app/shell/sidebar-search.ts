@@ -129,6 +129,29 @@ export function applyFirstSearchPage(
 	};
 }
 
+export function replaceExpiredSearchSnapshot(
+	prev: SidebarSearchState,
+	seq: number,
+	resp: SessionSearchResponse,
+): SidebarSearchState {
+	if (
+		seq !== prev.requestSeq ||
+		resp.query !== prev.query ||
+		!resp.snapshotToken ||
+		resp.snapshotToken === prev.snapshotToken
+	)
+		return prev;
+	const { state } = applyFirstSearchPage(prev, seq, resp);
+	return {
+		...state,
+		requestSeq: seq + 1,
+		prefetchTitleInFlight: false,
+		prefetchContentInFlight: false,
+		autoExpandTitlePending: false,
+		autoExpandContentPending: false,
+	};
+}
+
 function appendUnique<T extends { sessionId: string }>(target: readonly T[], incoming: readonly T[]): T[] {
 	const seen = new Set(target.map((item) => item.sessionId));
 	const next = [...target];

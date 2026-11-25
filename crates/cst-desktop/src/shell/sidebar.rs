@@ -1276,23 +1276,19 @@ fn render_highlighted_text(
     spans: &[MatchSpan],
     palette: &DesktopPalette,
 ) -> gpui::AnyElement {
-    let mut highlights = Vec::new();
-    for s in spans {
-        if s.start < s.end
-            && s.end <= text.len()
-            && text.is_char_boundary(s.start)
-            && text.is_char_boundary(s.end)
-        {
-            highlights.push((
-                s.start..s.end,
+    let highlights: Vec<_> = cst_search::scalar_spans_to_byte_ranges(text, spans)
+        .into_iter()
+        .map(|range| {
+            (
+                range,
                 HighlightStyle {
                     color: Some(palette.accent_ink),
                     font_weight: Some(FontWeight::MEDIUM),
                     ..Default::default()
                 },
-            ));
-        }
-    }
+            )
+        })
+        .collect();
     if highlights.is_empty() {
         cjk_inline_label(SharedString::from(text.to_owned())).into_any_element()
     } else {
@@ -1453,7 +1449,7 @@ fn render_sidebar_search_body(
             ));
         }
 
-        if search_state.title_has_more {
+        if search_state.backend_synced && search_state.title_has_more {
             let cb_expand = Rc::clone(&on_expand_titles);
             group = group.child(render_search_expand_btn(
                 "sidebar-search-expand-titles-btn",
@@ -1506,7 +1502,7 @@ fn render_sidebar_search_body(
             ));
         }
 
-        if search_state.content_has_more {
+        if search_state.backend_synced && search_state.content_has_more {
             let cb_expand = Rc::clone(&on_expand_contents);
             group = group.child(render_search_expand_btn(
                 "sidebar-search-expand-contents-btn",

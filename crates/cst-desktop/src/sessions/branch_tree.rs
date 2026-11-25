@@ -1171,6 +1171,9 @@ impl BranchTreeView {
         cx: &mut Context<Self>,
     ) {
         self.set_session_id(session_id, window, cx);
+        self.search_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.focus_handle.focus(window, cx);
         self.filter_mode = TreeFilterMode::All;
         self.collapsed_heads.clear();
         self.selected_id = Some(focus_entry_id.clone());

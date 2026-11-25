@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { scalarSpansToUtf16 } from "../shell/search-matcher";
 import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
 import { type BitLockerSnapshot, newestBitLocker } from "./bitlocker-state";
@@ -11,7 +12,7 @@ import {
 	subscribeSessionEvents,
 } from "./event-stream";
 import { OptimisticSessionDeletion } from "./optimistic-session-deletion";
-import { recentSessionIds, SessionDetailCache } from "./session-cache";
+import { recentSessionIds, SessionDetailCache, StaleSessionDetailError } from "./session-cache";
 import { commitMessage, containsAssistant } from "./session-stream";
 import { StreamHealth } from "./stream-health";
 import { StreamPacer } from "./stream-player";
@@ -106,28 +107,6 @@ export function invalidateCachedSessionDetail(id: string): void {
 	sessionDetails.remove(id);
 }
 
-function utf8ByteSpansToUtf16(text: string, spans: readonly SearchMatchSpan[]): SearchMatchSpan[] {
-	if (!spans.length) return [];
-	const byteToUtf16 = new Map<number, number>();
-	let bytePos = 0;
-	byteToUtf16.set(0, 0);
-	for (let i = 0; i < text.length; ) {
-		const cp = text.codePointAt(i)!;
-		const utf16Len = cp > 0xffff ? 2 : 1;
-		const utf8Len = cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
-		i += utf16Len;
-		bytePos += utf8Len;
-		byteToUtf16.set(bytePos, i);
-	}
-	const out: SearchMatchSpan[] = [];
-	for (const s of spans) {
-		const start = byteToUtf16.get(s.start);
-		const end = byteToUtf16.get(s.end);
-		if (start !== undefined && end !== undefined && start < end) out.push({ start, end });
-	}
-	return out;
-}
-
 export async function searchSessionsApi(
 	params: {
 		query: string;
@@ -155,7 +134,7 @@ export async function searchSessionsApi(
 			...item,
 			bestHit: {
 				...item.bestHit,
-				spans: utf8ByteSpansToUtf16(item.bestHit.snippet, item.bestHit.spans ?? []),
+				spans: scalarSpansToUtf16(item.bestHit.snippet, item.bestHit.spans ?? []),
 			},
 		})),
 	};
@@ -403,7 +382,12 @@ export function useSessionDetail(id: string | undefined) {
 			setStreaming((message) => (message && !containsAssistant(next, message) ? message : undefined));
 			setError("");
 		} catch (cause) {
-			if (activeId.current !== id || sequence !== requestSequence.current) return;
+			if (
+				activeId.current !== id ||
+				sequence !== requestSequence.current ||
+				cause instanceof StaleSessionDetailError
+			)
+				return;
 			setError(cause instanceof Error ? cause.message : "无法读取会话");
 		}
 	}, [id]);
@@ -476,6 +460,7 @@ export function useSessionDetail(id: string | undefined) {
 							"agent_end",
 							"agent_start",
 							"session_tree",
+							"compaction_end",
 							"tool_execution_start",
 							"tool_execution_end",
 							"tool_execution_update",

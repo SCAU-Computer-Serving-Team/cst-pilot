@@ -18,7 +18,7 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { draftKey } from "../composer/drafts";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionTitle, useSessionTree } from "../data/web-state";
@@ -82,6 +82,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
 	const focusParam = params.get("focus")?.trim() || null;
+	const focusKey = useLocation().key;
 	const sample = useMemo(() => (preview ? sampleTree() : undefined), [preview]);
 	const live = useSessionTree(preview ? undefined : sessionId);
 	const tree = sample?.tree ?? live.tree;
@@ -113,13 +114,14 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const [kbdActive, setKbdActive] = useState(() => Boolean(focusParam));
 	const appliedFocusRef = useRef<string | null>(null);
 	useEffect(() => {
-		if (!focusParam || appliedFocusRef.current === focusParam) return;
-		appliedFocusRef.current = focusParam;
+		if (!focusParam || appliedFocusRef.current === focusKey) return;
+		appliedFocusRef.current = focusKey;
+		setQuery("");
 		setFilter("all");
 		setFolded(new Set());
 		setCursorId(focusParam);
 		setKbdActive(true);
-	}, [focusParam]);
+	}, [focusKey, focusParam]);
 	const clearKeyboard = useCallback(() => setKbdActive(false), []);
 	const kbdStyle = useKeyboardFocusStyle();
 	const listRef = useRef<HTMLUListElement>(null);
