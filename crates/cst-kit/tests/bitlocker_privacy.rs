@@ -40,10 +40,10 @@ impl Fixture {
         Self(p.canonicalize().unwrap())
     }
     fn resources(&self) {
-        fs::create_dir_all(self.0.join("agent/home")).unwrap();
-        fs::write(self.0.join("agent/home/APPEND_SYSTEM.md"), "测试").unwrap();
+        fs::create_dir_all(self.0.join("app/prompts")).unwrap();
+        fs::write(self.0.join("app/prompts/APPEND_SYSTEM.md"), "测试").unwrap();
         for name in SKILL_NAMES {
-            let p = self.0.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = self.0.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,

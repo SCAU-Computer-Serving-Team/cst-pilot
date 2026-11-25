@@ -5,7 +5,7 @@ use gpui_kit::{Hsla, IntoElement, ParentElement, SharedString, Styled, Window, d
 use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::theme::{DesktopPalette, apply_scale, scale};
+use crate::theme::{DesktopPalette, TypographyScale, apply_scale, cjk_inline_label, scale};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecialToolKind {
@@ -53,6 +53,8 @@ pub struct TurnEntry {
     pub role: String,
     pub timestamp_ms: u64,
     pub duration_ms: Option<u64>,
+    pub work_started_ms: Option<u64>,
+    pub work_ended_ms: Option<u64>,
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,
     pub provider: Option<String>,
@@ -84,6 +86,11 @@ impl TurnEntry {
             .get("durationMs")
             .or_else(|| val.get("durationMs"))
             .and_then(Value::as_u64);
+        let work = msg.get("work").or_else(|| val.get("work"));
+        let work_started_ms = work
+            .and_then(|w| w.get("startedAt"))
+            .and_then(Value::as_u64);
+        let work_ended_ms = work.and_then(|w| w.get("endedAt")).and_then(Value::as_u64);
         let stop_reason = msg
             .get("stopReason")
             .and_then(Value::as_str)
@@ -102,6 +109,8 @@ impl TurnEntry {
             role,
             timestamp_ms,
             duration_ms,
+            work_started_ms,
+            work_ended_ms,
             stop_reason,
             error_message,
             provider,
@@ -155,8 +164,12 @@ pub fn is_standalone_tool(call: &ToolCallPart, result: Option<&Value>) -> bool {
             .get("content")
             .and_then(Value::as_array);
         if content.is_some_and(|arr| {
-            arr.iter()
-                .any(|p| p.get("type").and_then(Value::as_str) == Some("image"))
+            arr.iter().any(|p| {
+                p.get("type").and_then(Value::as_str) == Some("image")
+                    && p.get("data")
+                        .and_then(Value::as_str)
+                        .is_some_and(|data| !data.trim().is_empty())
+            })
         }) {
             return true;
         }
@@ -302,13 +315,17 @@ pub struct Turn {
     pub user: Option<TurnEntry>,
     pub assistants: Vec<TurnEntry>,
     pub summary: Option<TurnEntry>,
+    pub compaction: Option<TurnEntry>,
 }
 
 pub fn is_conversation_role(role: &str) -> bool {
-    matches!(role, "user" | "assistant" | "branchSummary")
+    matches!(
+        role,
+        "user" | "assistant" | "branchSummary" | "compactionSummary"
+    )
 }
 
-/// Groups visible session entries into turns (`user` + following `assistant`s; `branchSummary` stands alone).
+/// Groups visible session entries into turns (`user` + following `assistant`s; `branchSummary` / `compactionSummary` stand alone).
 /// Also builds a lookup map from `toolCallId` -> `toolResult` JSON payload.
 pub fn group_turns_and_results(raw_entries: &[Value]) -> (Vec<Turn>, BTreeMap<String, Value>) {
     let mut turns: Vec<Turn> = Vec::new();
@@ -335,15 +352,24 @@ pub fn group_turns_and_results(raw_entries: &[Value]) -> (Vec<Turn>, BTreeMap<St
                 user: Some(entry),
                 assistants: Vec::new(),
                 summary: None,
+                compaction: None,
             }),
             "branchSummary" => turns.push(Turn {
                 user: None,
                 assistants: Vec::new(),
                 summary: Some(entry),
+                compaction: None,
+            }),
+            "compactionSummary" => turns.push(Turn {
+                user: None,
+                assistants: Vec::new(),
+                summary: None,
+                compaction: Some(entry),
             }),
             "assistant" => {
                 if let Some(last) = turns.last_mut()
                     && last.summary.is_none()
+                    && last.compaction.is_none()
                 {
                     last.assistants.push(entry);
                 } else {
@@ -351,6 +377,7 @@ pub fn group_turns_and_results(raw_entries: &[Value]) -> (Vec<Turn>, BTreeMap<St
                         user: None,
                         assistants: vec![entry],
                         summary: None,
+                        compaction: None,
                     });
                 }
             }
@@ -368,7 +395,7 @@ pub fn active_turn_index(turns: &[Turn], running: bool) -> Option<usize> {
     let mut idx = turns.len();
     while idx > 0 {
         idx -= 1;
-        if turns[idx].summary.is_none() {
+        if turns[idx].summary.is_none() && turns[idx].compaction.is_none() {
             return Some(idx);
         }
     }
@@ -400,7 +427,7 @@ pub struct AssistantErrorPresentation {
 }
 
 pub fn format_assistant_error(provider: Option<&str>, raw_err: &str) -> AssistantErrorPresentation {
-    let prov = provider.filter(|s| !s.is_empty()).unwrap_or("模型服务");
+    let prov = provider.filter(|s| !s.is_empty()).unwrap_or("提供商");
     let lower = raw_err.to_ascii_lowercase();
     let headline = if lower.contains("401")
         || lower.contains("403")
@@ -409,7 +436,7 @@ pub fn format_assistant_error(provider: Option<&str>, raw_err: &str) -> Assistan
         || raw_err.contains("凭据")
         || raw_err.contains("密钥")
     {
-        format!("{prov} 凭据无效或已过期，请在「设置 · 模型服务」更新后重试。")
+        format!("{prov} 凭据无效或已过期，请在「设置 · 提供商」更新后重试。")
     } else if lower.contains("429") || lower.contains("rate limit") || raw_err.contains("频繁") {
         format!("{prov} 请求过于频繁，请稍后重试或切换其他模型。")
     } else {
@@ -428,11 +455,19 @@ pub fn split_turn(assistants: &[TurnEntry]) -> SplitTurnOutput {
     let mut final_text = String::new();
     let mut final_entry_id = None;
     let mut total_duration_ms = 0u64;
+    let mut earliest_work_start: Option<u64> = None;
+    let mut latest_work_end: Option<u64> = None;
     let mut was_aborted = false;
     let mut assistant_error = None;
 
     for (index, entry) in assistants.iter().enumerate() {
         total_duration_ms = total_duration_ms.saturating_add(entry.duration_ms.unwrap_or(0));
+        if let Some(ws) = entry.work_started_ms {
+            earliest_work_start = Some(earliest_work_start.map_or(ws, |cur| cur.min(ws)));
+        }
+        if let Some(we) = entry.work_ended_ms {
+            latest_work_end = Some(latest_work_end.map_or(we, |cur| cur.max(we)));
+        }
         let is_final = index + 1 == assistants.len();
         if is_final {
             final_entry_id = entry.id.clone();
@@ -443,6 +478,8 @@ pub fn split_turn(assistants: &[TurnEntry]) -> SplitTurnOutput {
                 && !err_msg.trim().is_empty()
             {
                 assistant_error = Some(format_assistant_error(entry.provider.as_deref(), err_msg));
+            } else if entry.stop_reason.as_deref() == Some("error") {
+                assistant_error = Some(format_assistant_error(entry.provider.as_deref(), ""));
             }
         }
 
@@ -481,6 +518,12 @@ pub fn split_turn(assistants: &[TurnEntry]) -> SplitTurnOutput {
         }
     }
 
+    if total_duration_ms == 0
+        && let (Some(ws), Some(we)) = (earliest_work_start, latest_work_end)
+    {
+        total_duration_ms = we.saturating_sub(ws);
+    }
+
     SplitTurnOutput {
         process,
         final_text,
@@ -502,39 +545,109 @@ pub struct TurnSegment {
     pub kind: TurnSegmentKind,
     pub key: String,
     pub parts: Vec<TurnPart>,
+    expansion_anchor: Option<(usize, usize)>,
+}
+
+impl TurnSegment {
+    /// Source part / call offsets before result-dependent splitting.
+    pub fn expansion_anchor(&self) -> Option<(usize, usize)> {
+        self.expansion_anchor
+    }
+}
+
+fn push_turn_segment_item(
+    segments: &mut Vec<TurnSegment>,
+    kind: TurnSegmentKind,
+    item: TurnPart,
+    anchor: (usize, usize),
+) {
+    if let Some(prev) = segments.last_mut()
+        && prev.kind == kind
+    {
+        prev.parts.push(item);
+        return;
+    }
+    let key = format!(
+        "{}-{}-{}",
+        if kind == TurnSegmentKind::Visible {
+            "visible"
+        } else {
+            "process"
+        },
+        item.timestamp_ms,
+        segments.len()
+    );
+    segments.push(TurnSegment {
+        kind,
+        key,
+        parts: vec![item],
+        expansion_anchor: (kind == TurnSegmentKind::Process).then_some(anchor),
+    });
 }
 
 /// Groups `process` parts into alternating `Process` and `Visible` (special tools / standalone images) segments,
 /// always preserving `process-start` at index `0` for the turn working-duration header.
 pub fn build_turn_segments(process: Vec<TurnPart>) -> Vec<TurnSegment> {
+    build_turn_segments_with_results(process, &BTreeMap::new())
+}
+
+/// Splits `process` parts with `tool_results` awareness so standalone `read`+image calls render outside
+/// the collapsible `Process` header just like web `splitToolCalls`.
+pub fn build_turn_segments_with_results(
+    process: Vec<TurnPart>,
+    tool_results: &BTreeMap<String, Value>,
+) -> Vec<TurnSegment> {
     let mut segments: Vec<TurnSegment> = Vec::new();
-    for item in process {
-        let kind = match item.part {
+    for (part_idx, item) in process.into_iter().enumerate() {
+        match item.part {
             ConversationPart::Special { .. } | ConversationPart::Image(_) => {
-                TurnSegmentKind::Visible
+                push_turn_segment_item(
+                    &mut segments,
+                    TurnSegmentKind::Visible,
+                    item,
+                    (part_idx, 0),
+                );
             }
-            _ => TurnSegmentKind::Process,
-        };
-        if let Some(prev) = segments.last_mut()
-            && prev.kind == kind
-        {
-            prev.parts.push(item);
-        } else {
-            let key = format!(
-                "{}-{}-{}",
-                if kind == TurnSegmentKind::Visible {
-                    "visible"
-                } else {
-                    "process"
-                },
-                item.timestamp_ms,
-                segments.len()
-            );
-            segments.push(TurnSegment {
-                kind,
-                key,
-                parts: vec![item],
-            });
+            ConversationPart::Text(ref text) => {
+                if !text.trim().is_empty() {
+                    push_turn_segment_item(
+                        &mut segments,
+                        TurnSegmentKind::Process,
+                        item,
+                        (part_idx, 0),
+                    );
+                }
+            }
+            ConversationPart::Tools(calls) => {
+                let mut calls = calls.into_iter().enumerate().peekable();
+                let kind_for = |call: &ToolCallPart| {
+                    if is_standalone_tool(call, tool_results.get(&call.id)) {
+                        TurnSegmentKind::Visible
+                    } else {
+                        TurnSegmentKind::Process
+                    }
+                };
+                while let Some((first_idx, first)) = calls.next() {
+                    let kind = kind_for(&first);
+                    let mut run = vec![first];
+                    // Keep standalone calls as separate parts, preserving subsequent element IDs.
+                    while let Some((_, call)) = calls.next_if(|(_, call)| {
+                        kind == TurnSegmentKind::Process && kind_for(call) == kind
+                    }) {
+                        run.push(call);
+                    }
+                    let part = TurnPart {
+                        entry_key: item.entry_key.clone(),
+                        timestamp_ms: item.timestamp_ms,
+                        is_final_entry: item.is_final_entry,
+                        part: ConversationPart::Tools(run),
+                    };
+                    push_turn_segment_item(&mut segments, kind, part, (part_idx, first_idx));
+                }
+            }
+            _ => {
+                push_turn_segment_item(&mut segments, TurnSegmentKind::Process, item, (part_idx, 0))
+            }
         }
     }
     if segments
@@ -547,6 +660,7 @@ pub fn build_turn_segments(process: Vec<TurnPart>) -> Vec<TurnSegment> {
                 kind: TurnSegmentKind::Process,
                 key: "process-start".to_owned(),
                 parts: Vec::new(),
+                expansion_anchor: None,
             },
         );
     } else if let Some(first) = segments.first_mut() {
@@ -613,21 +727,49 @@ pub fn process_segment_label(
     }
 }
 
+/// Returns true when a `Process` segment (`seg_idx > 0`) is actively running and should carry
+/// the `RunningLight` sweep highlight (e.g. `正在调用 1 个工具`, `已完成 1 / 2 次工具调用`, or active tail processing).
+pub fn segment_is_running(
+    parts: &[TurnPart],
+    tool_results: &BTreeMap<String, Value>,
+    live: bool,
+    is_last_segment: bool,
+    has_final_text: bool,
+) -> bool {
+    if !live {
+        return false;
+    }
+    let mut has_pending_tool = false;
+    let mut has_any_tool = false;
+    for tp in parts {
+        if let ConversationPart::Tools(ref calls) = tp.part {
+            for call in calls {
+                let res = tool_results.get(&call.id);
+                if !is_standalone_tool(call, res) {
+                    has_any_tool = true;
+                    if res.is_none() {
+                        has_pending_tool = true;
+                    }
+                }
+            }
+        }
+    }
+    if has_pending_tool {
+        return true;
+    }
+    !has_any_tool && is_last_segment && !has_final_text && !parts.is_empty()
+}
+
 pub fn format_duration_zh(ms: u64) -> String {
-    let seconds = ((ms as f64) / 1000.0).round().max(0.0) as u64;
-    if seconds < 1 {
-        return "不足 1 秒".to_owned();
-    }
-    if seconds < 60 {
-        return format!("{seconds} 秒");
-    }
-    let minutes = seconds / 60;
-    let rest = seconds % 60;
-    if rest > 0 {
-        format!("{minutes} 分 {rest} 秒")
-    } else {
-        format!("{minutes} 分钟")
-    }
+    let tenths = ms / 100 + u64::from(ms % 100 >= 50);
+    format!("{}.{:01}s", tenths / 10, tenths % 10)
+}
+
+/// Formats live elapsed turn duration on a whole-second cadence (`1s`, `2s`, ...) so each
+/// tick pairs cleanly with the vertical cross-slide label transition without 10Hz jitter.
+pub fn format_live_duration_zh(ms: u64) -> String {
+    let secs = (ms / 1000).max(1);
+    format!("{secs}s")
 }
 
 /// Segments `text` into extended Unicode grapheme clusters (`RunningLight` `lightGlyphs` parity).
@@ -654,46 +796,86 @@ pub fn glyph_light_strength(index: usize, count: usize, phase: f32) -> f32 {
     weights[step] + (weights[step + 1] - weights[step]) * frac
 }
 
+/// Blends `base` toward `hi` using the 5-glyph `RunningLight` strength curve.
+pub fn glyph_blend_color(base: Hsla, hi: Hsla, index: usize, count: usize, phase: f32) -> Hsla {
+    let strength = glyph_light_strength(index, count, phase);
+    // Strength peaks at 0.48 -> normalize to [0, 1] blend toward primary highlight
+    let t = (strength / 0.48).clamp(0.0, 1.0);
+    Hsla {
+        h: base.h + (hi.h - base.h) * t,
+        s: base.s + (hi.s - base.s) * t,
+        l: base.l + (hi.l - base.l) * t,
+        a: base.a + (hi.a - base.a) * t,
+    }
+}
+
 /// Renders a `RunningLight` per-grapheme sweep label (`2000ms` linear cycle, 5-glyph window).
 /// Immediately stops requesting animation frames (`0 FPS`) when `!active`, window unfocused, minimized, or `reduce_motion`.
 pub fn render_running_light_label(
     text: &str,
-    active: bool,
+    sweep_allowed: bool,
     started_at: Instant,
-    reduce_motion: bool,
     palette: &DesktopPalette,
+    window: &mut Window,
+) -> impl IntoElement {
+    render_running_light_label_with_scale(
+        text,
+        sweep_allowed,
+        started_at,
+        palette.text_secondary,
+        palette.text_primary,
+        scale::BODY,
+        window,
+    )
+}
+
+/// Renders a `RunningLight` per-grapheme sweep label with explicit typography scale and base/highlight colors.
+pub fn render_running_light_label_with_scale(
+    text: &str,
+    sweep_allowed: bool,
+    started_at: Instant,
+    base: Hsla,
+    hi: Hsla,
+    typography: TypographyScale,
     window: &mut Window,
 ) -> impl IntoElement {
     let vp = window.viewport_size();
     let minimized = f32::from(vp.width) <= 1.0 || f32::from(vp.height) <= 1.0;
-    let should_sweep = active && !reduce_motion && window.is_window_active() && !minimized;
+    let should_sweep =
+        sweep_allowed && window.is_window_active() && window.is_visible() && !minimized;
 
     if !should_sweep {
-        return apply_scale(div(), scale::UI)
-            .text_color(palette.text_secondary)
-            .child(SharedString::from(text.to_owned()));
+        return apply_scale(div(), typography)
+            .text_color(base)
+            .child(cjk_inline_label(text.to_owned()));
     }
 
-    window.request_animation_frame();
-    let elapsed_ms = started_at.elapsed().as_millis() as u64;
-    let phase = ((elapsed_ms % 2000) as f32) / 2000.0;
+    let cycle_ms = crate::theme::motion::RUNNING_LIGHT_CYCLE.as_millis();
+    let phase = (started_at.elapsed().as_millis() % cycle_ms) as f32 / cycle_ms as f32;
     let glyphs = light_glyphs(text);
     let count = glyphs.len();
 
-    let base = palette.text_secondary;
-    let hi = palette.text_primary;
-
-    let mut row = apply_scale(div(), scale::UI).flex().items_center();
+    let mut row = apply_scale(div(), typography)
+        .pb(crate::theme::space::MICRO)
+        .relative()
+        .flex()
+        .items_center()
+        .child(
+            gpui_kit::canvas(
+                |bounds, window, _| {
+                    if bounds.intersects(&window.content_mask().bounds) {
+                        #[cfg(feature = "test-support")]
+                        crate::ux_probe::record_running_light_frame();
+                        window.request_animation_frame();
+                    }
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        );
     for (idx, g) in glyphs.into_iter().enumerate() {
-        let strength = glyph_light_strength(idx, count, phase);
-        // Strength peaks at 0.48 -> normalize to [0, 1] blend toward primary highlight
-        let t = (strength / 0.48).clamp(0.0, 1.0);
-        let color = Hsla {
-            h: base.h + (hi.h - base.h) * t,
-            s: base.s + (hi.s - base.s) * t,
-            l: base.l + (hi.l - base.l) * t,
-            a: base.a + (hi.a - base.a) * t,
-        };
+        let color = glyph_blend_color(base, hi, idx, count, phase);
         row = row.child(
             div()
                 .text_color(color)

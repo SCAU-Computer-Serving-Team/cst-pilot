@@ -9,6 +9,10 @@ publish.workspace = true
 name = "cst-server"
 path = "src/bin/cst-server.rs"
 
+[features]
+default = []
+embed-web = []
+
 [dependencies]
 cst-os = { path = "../cst-os" }
 cst-kit = { path = "../cst-kit" }

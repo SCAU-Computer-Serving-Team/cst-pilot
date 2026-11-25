@@ -26,6 +26,7 @@ export type Model = { id: string; provider: string; name: string; reasoning: boo
 export type QueueItem = {
 	id: string;
 	text: string;
+	skill?: string;
 	status: "pending" | "delivering" | "delivered" | "failed" | "cancelled";
 	delivery: "direct" | "queue" | "steer";
 	images: { id: string; mimeType: string }[];
@@ -169,29 +170,29 @@ export function useSessions() {
 }
 
 export function useSessionTree(id: string | undefined) {
-	const activeId = useRef(id);
-	activeId.current = id;
-	const [tree, setTree] = useState<TreeNode[]>();
-	const [leafId, setLeafId] = useState<string | null>(null);
-	const [error, setError] = useState("");
-	const refresh = useCallback(async () => {
-		if (!id) return;
-		try {
-			const state = await apiJson<{ tree: TreeNode[]; leafId: string | null }>(
-				`/api/sessions/${encodeURIComponent(id)}/tree`,
-			);
-			if (activeId.current !== id) return;
-			setTree(state.tree);
-			setLeafId(state.leafId);
-			setError("");
-		} catch (cause) {
-			if (activeId.current !== id) return;
-			setError(cause instanceof Error ? cause.message : "无法读取分支树");
-		}
-	}, [id]);
+	const [data, setData] = useState<{ id: string; tree?: TreeNode[]; leafId: string | null; error: string }>();
+	const refreshRef = useRef<{ id: string; run: () => Promise<void> } | null>(null);
 	useEffect(() => {
-		setTree(undefined);
+		setData(undefined);
 		if (!id) return;
+		let controller: AbortController | undefined;
+		const setError = (error: string) =>
+			setData((current) => ({ id, leafId: null, ...(current?.id === id ? current : undefined), error }));
+		const refresh = async () => {
+			controller?.abort();
+			const request = new AbortController();
+			controller = request;
+			try {
+				const result = await apiJson<{ tree: TreeNode[]; leafId: string | null }>(
+					`/api/sessions/${encodeURIComponent(id)}/tree`,
+					{ signal: request.signal },
+				);
+				if (!request.signal.aborted) setData({ ...result, id, error: "" });
+			} catch (cause) {
+				if (!request.signal.aborted) setError(cause instanceof Error ? cause.message : "无法读取分支树");
+			}
+		};
+		refreshRef.current = { id, run: refresh };
 		void refresh();
 		// message_end、agent_end、session_tree 常同帧到达：尾随去抖合并成一次拉取。
 		let refreshTimer: number | undefined;
@@ -210,7 +211,8 @@ export function useSessionTree(id: string | undefined) {
 			if (name === "session") {
 				try {
 					const change = JSON.parse(data ?? "null");
-					if (["message_end", "agent_end", "session_tree"].includes(change?.type)) scheduleRefresh();
+					if (["message_end", "agent_end", "session_tree", "compaction_end"].includes(change?.type))
+						scheduleRefresh();
 				} catch {
 					scheduleRefresh();
 				}
@@ -229,11 +231,18 @@ export function useSessionTree(id: string | undefined) {
 			}
 		});
 		return () => {
+			refreshRef.current = null;
 			window.clearTimeout(refreshTimer);
+			controller?.abort();
 			sub.close();
 		};
-	}, [id, refresh]);
-	return { tree, leafId, error, refresh };
+	}, [id]);
+	const refresh = useCallback(async () => {
+		const current = refreshRef.current;
+		if (current && current.id === id) await current.run();
+	}, [id]);
+	const current = data?.id === id ? data : undefined;
+	return { tree: current?.tree, leafId: current?.leafId ?? null, error: current?.error ?? "", refresh };
 }
 
 /** 会话标题：从会话列表里查当前会话的名字，找不到用「新对话」。 */

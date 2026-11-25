@@ -6,6 +6,7 @@ pub mod index;
 pub mod interactions;
 pub mod receipts;
 pub mod slot;
+pub mod usage;
 
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::fs;
@@ -17,7 +18,8 @@ use cst_kit::{HostedSessionOptions, KitHost};
 use pi_agent::AgentMessage;
 use pi_ai::{Model, ModelCost, ModelInputModality, ModelThinkingLevel, uuid_v7};
 use pi_runtime::{
-    ModelRuntime, SettingsManager, get_default_session_dir, parse_model_thinking_level_cli,
+    FileSettingsStorage, ModelRuntime, SettingsManager, get_default_session_dir_in,
+    parse_model_thinking_level_cli,
 };
 use pi_session::{
     ExtensionMode, NewSessionOptions, SessionEntry, SessionInfo, SessionManager, SessionStoreError,
@@ -214,7 +216,9 @@ pub async fn require_model_credentials(
 pub struct SessionPool {
     host: KitHost,
     default_cwd: PathBuf,
-    agent_dir: PathBuf,
+    config_dir: PathBuf,
+    sessions_root: PathBuf,
+    locks_dir: PathBuf,
     default_session_dir: PathBuf,
     inbox_root: PathBuf,
     max_idle_sessions: usize,
@@ -247,20 +251,24 @@ impl SessionPool {
             .canonicalize()
             .unwrap_or_else(|_| default_cwd.clone());
         let canonical_cwd = strip_windows_verbatim_prefix(&canonical_cwd);
-        let agent_dir = strip_windows_verbatim_prefix(&host.kit().agent_dir());
-        let default_session_dir = get_default_session_dir(&canonical_cwd, &agent_dir);
-        let inbox_root = agent_dir.join("web-inbox");
+        let config_dir = strip_windows_verbatim_prefix(&host.kit().config_dir());
+        let sessions_root = strip_windows_verbatim_prefix(&host.kit().sessions_dir());
+        let locks_dir = strip_windows_verbatim_prefix(&host.kit().locks_dir());
+        let default_session_dir = get_default_session_dir_in(&canonical_cwd, &sessions_root);
+        let inbox_root = strip_windows_verbatim_prefix(&host.kit().inbox_dir());
         let images = ImageStore::new(inbox_root.join("attachments"));
         let receipts = MutationReceipts::new(inbox_root.join("receipts"));
         let global_events = SessionEvents::new();
         let multiplex_hub = MultiplexHub::new(global_events.clone());
 
-        let index = SessionIndexStore::new(agent_dir.clone(), inbox_root.clone());
+        let index = SessionIndexStore::new(sessions_root.clone(), inbox_root.clone());
 
         Self {
             host,
             default_cwd: canonical_cwd,
-            agent_dir,
+            config_dir,
+            sessions_root,
+            locks_dir,
             default_session_dir,
             inbox_root,
             max_idle_sessions: max_idle_sessions.max(1),
@@ -287,8 +295,12 @@ impl SessionPool {
         &self.default_cwd
     }
 
-    pub fn agent_dir(&self) -> &Path {
-        &self.agent_dir
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    pub fn sessions_root(&self) -> &Path {
+        &self.sessions_root
     }
 
     pub fn inbox_root(&self) -> &Path {
@@ -373,7 +385,14 @@ impl SessionPool {
     }
 
     pub fn settings_manager(&self) -> SettingsManager {
-        SettingsManager::create_with_trust(&self.default_cwd, &self.agent_dir, false)
+        SettingsManager::from_storage(
+            Arc::new(FileSettingsStorage::with_lock_dir(
+                &self.default_cwd,
+                &self.config_dir,
+                &self.locks_dir,
+            )),
+            false,
+        )
     }
 
     pub fn set_scoped_models(&self, models: Vec<pi_runtime::ScopedModel>) {
@@ -423,7 +442,7 @@ impl SessionPool {
             return Err(SessionPoolError::Stopping);
         }
         let session_id = manager.get_session_id().to_owned();
-        let owner_lock = SessionOwnerLock::acquire(&self.agent_dir, &session_id).map_err(|e| {
+        let owner_lock = SessionOwnerLock::acquire(&self.config_dir, &session_id).map_err(|e| {
             if e.starts_with("session_owned:") {
                 SessionPoolError::SessionOwned(
                     e.trim_start_matches("session_owned:").trim().to_owned(),
@@ -457,7 +476,8 @@ impl SessionPool {
 
         let mut session_opts = pi_runtime::CreateAgentSessionOptions {
             cwd: Some(effective_cwd),
-            agent_dir: Some(self.agent_dir.clone()),
+            agent_dir: Some(self.config_dir.clone()),
+            sessions_dir: Some(self.sessions_root.clone()),
             session_manager: Some(manager),
             model: Some(target_model),
             thinking_level: target_thinking,
@@ -789,6 +809,10 @@ impl SessionPool {
             .await
             .map_err(SessionPoolError::InvalidInput)?;
         self.sync_unflushed_metadata(&slot)?;
+        self.global_events.publish(
+            "state",
+            &json!({"type": "usage_changed", "sessionId": session_id}),
+        );
         Ok(())
     }
 

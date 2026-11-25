@@ -92,28 +92,23 @@ impl Catalog {
             "input":["text"],"reasoning":false,"contextWindow":32768,"maxTokens":4096,
             "cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"compat":{"maxTokensField":"max_tokens","supportsReasoningEffort":false}});
         if let Some(model) = known {
+            let serialized = serde_json::to_value(model).map_err(|_| "模型规格编码失败。")?;
+            // Do not copy provider identity, endpoint, credentials/headers, or cost.
             for key in [
+                "name",
                 "input",
                 "inputLimits",
                 "reasoning",
                 "contextWindow",
                 "maxTokens",
+                "thinkingLevelMap",
             ] {
-                if let Some(field) = serde_json::to_value(model)
-                    .ok()
-                    .and_then(|v| v.get(key).cloned())
-                {
-                    value[key] = field;
+                if let Some(field) = serialized.get(key) {
+                    value[key] = field.clone();
                 }
             }
             if model.api == "openai-completions" {
-                let serialized = serde_json::to_value(model).map_err(|_| "模型规格编码失败。")?;
-                for key in [
-                    "thinkingLevelMap",
-                    "compat",
-                    "samplingParams",
-                    "samplingParamsByThinkingLevel",
-                ] {
+                for key in ["compat", "samplingParams", "samplingParamsByThinkingLevel"] {
                     if let Some(field) = serialized.get(key) {
                         value[key] = field.clone();
                     }

@@ -10,16 +10,24 @@ export function BitLockerInput({ id, request, onDone }: { id: string; request: P
 	const [busy, setBusy] = useState(false);
 	const [uncertain, setUncertain] = useState(false);
 	const [error, setError] = useState("");
-	const [now, setNow] = useState(Date.now());
+	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
-		const timer = window.setInterval(() => setNow(Date.now()), 1000);
+		const initial = Date.now();
+		setNow(initial);
+		if (initial >= request.expiresAt) return;
+		const timer = window.setInterval(() => {
+			const tick = Date.now();
+			setNow(tick);
+			if (tick >= request.expiresAt) window.clearInterval(timer);
+		}, 1000);
 		return () => window.clearInterval(timer);
-	}, []);
+	}, [request.expiresAt]);
 	const seconds = Math.max(0, Math.ceil((request.expiresAt - now) / 1000));
 	useEffect(() => {
 		if (!seconds) {
 			setPassword("");
 			setShow(false);
+			setError("");
 		}
 	}, [seconds]);
 	async function reconcile() {
@@ -41,7 +49,8 @@ export function BitLockerInput({ id, request, onDone }: { id: string; request: P
 	}
 	async function submit(cancel = false) {
 		if (busy || uncertain || !seconds) return;
-		if (!cancel && request.kind === "password" && !/^\d{6}(?:-\d{6}){7}$/.test(password.trim())) {
+		const trimmed = password.trim();
+		if (!cancel && request.kind === "password" && !/^\d{6}(?:-\d{6}){7}$/.test(trimmed)) {
 			setError("请输入八组六位数字，用连字符分隔。");
 			return;
 		}
@@ -50,18 +59,23 @@ export function BitLockerInput({ id, request, onDone }: { id: string; request: P
 		const answer = cancel
 			? { cancel: true }
 			: request.kind === "password"
-				? { password: password.trim() }
+				? { password: trimmed }
 				: { confirm: true };
-		setPassword("");
+		// 始终强制回到掩码态；取消立即清空，非 400 字段错或成功时清空，400 字段错保留原输入供就地修正。
 		setShow(false);
+		if (cancel) setPassword("");
 		try {
 			await apiJson(sessionPath(id, `/bitlocker/${request.requestId}`), { method: "POST", body: answer });
+			setPassword("");
 			onDone();
 		} catch (cause) {
-			if (cause instanceof ApiFailure && cause.status === 400) {
+			if (!cancel && cause instanceof ApiFailure && cause.status === 400) {
 				setBusy(false);
+				setShow(false);
 				setError(cause.message);
 			} else {
+				setPassword("");
+				setShow(false);
 				setUncertain(true);
 				await reconcile();
 			}
@@ -92,40 +106,52 @@ export function BitLockerInput({ id, request, onDone }: { id: string; request: P
 							</div>
 						))}
 					</div>
-					<small>仅处理清单内目标。</small>
-					<small>部分失败不自动回滚。</small>
+					<div className="special-tool-notes">
+						<small>仅处理清单内目标。</small>
+						<small>部分失败不自动回滚。</small>
+					</div>
 				</>
 			) : request.kind === "parameter" ? (
 				<p>
 					将使用工具参数中的恢复密码。凭据可能已进入模型上下文并发送给模型服务商，原用户消息也可能留在本地草稿或收件箱。确认后只解锁，不关闭加密。
 				</p>
 			) : (
-				<>
+				<div className="special-tool-input-group">
 					<label htmlFor={`key-${request.requestId}`}>恢复密码（48 位）</label>
-					<div className="special-tool-password">
+					<div
+						className="special-tool-password"
+						data-invalid={error ? "true" : undefined}
+						data-disabled={busy || uncertain || !seconds ? "true" : undefined}
+					>
 						<input
 							id={`key-${request.requestId}`}
 							type={show ? "text" : "password"}
 							autoComplete="off"
 							spellCheck={false}
+							placeholder="••••••-••••••-••••••-••••••-••••••-••••••-••••••-••••••"
 							value={password}
 							disabled={busy || uncertain || !seconds}
 							aria-invalid={!!error}
 							aria-describedby={error ? `error-${request.requestId}` : undefined}
-							onChange={(e) => setPassword(e.target.value)}
+							onCopy={(e) => e.preventDefault()}
+							onCut={(e) => e.preventDefault()}
+							onChange={(e) => {
+								setPassword(e.target.value);
+								if (error) setError("");
+							}}
 						/>
 						<button
 							type="button"
-							className="special-tool-icon-button"
+							className="btn-icon xs-24 special-tool-password-eye"
 							disabled={busy || uncertain || !seconds}
 							aria-label={show ? "隐藏恢复密码" : "显示恢复密码"}
 							aria-pressed={show}
 							onClick={() => setShow(!show)}
 						>
-							{show ? <Eye size={16} /> : <EyeOff size={16} />}
+							{show ? <Eye size={16} aria-hidden="true" /> : <EyeOff size={16} aria-hidden="true" />}
 						</button>
 					</div>
-				</>
+				</div>
 			)}
 			{error && (
 				<p id={`error-${request.requestId}`} className="special-tool-action-error" role="alert">
@@ -138,12 +164,12 @@ export function BitLockerInput({ id, request, onDone }: { id: string; request: P
 				</button>
 			)}
 			<div className="special-tool-actions">
-				<button type="submit" className="special-tool-primary" disabled={busy || uncertain || !seconds}>
+				<button type="submit" className="tier-1-btn-primary" disabled={busy || uncertain || !seconds}>
 					{request.kind === "decrypt" ? "确认关闭加密" : request.kind === "parameter" ? "确认解锁" : "解锁"}
 				</button>
 				<button
 					type="button"
-					className="special-tool-secondary"
+					className="tier-1-btn-outline"
 					disabled={busy || uncertain || !seconds}
 					onClick={() => void submit(true)}
 				>

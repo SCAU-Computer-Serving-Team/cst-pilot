@@ -5,13 +5,16 @@ import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
 import { anyModelConfigured, claimMissingKeyPrompt } from "../auth/model-key-prompt";
 import { EDIT_OUTGOING_EVENT } from "../conversation/outgoing-message";
-import { ApiFailure, apiJson } from "../data/api";
+import { EDIT_QUEUE_ITEM_EVENT, type EditQueueItemDetail } from "../conversation/queue-panel";
+import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
 import { messageOutbox } from "../data/use-message-outbox";
 import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { ConfirmDialog } from "../shell/app-dialogs";
 import { ErrorNotice } from "../shell/error-notice";
+import { hasOpenDismissiblePanel, usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { chipCaretSpace, editorHtml, extractPayload, parseEditor, replaceTrailingFileQuery } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
 import { parseImageHashes } from "./draft-image-references";
@@ -19,6 +22,7 @@ import { addImage, collectDraftImages, type DraftImage, loadImages, releaseImage
 import { draftKey as makeDraftKey, readSavedDrafts, type SavedDraft } from "./drafts";
 import { ModelPicker } from "./model-picker";
 import { scopedModels } from "./scoped-models";
+import { useSessionUsage } from "./use-session-usage";
 
 type Selection = ModelChoice | null;
 export type ComposerConfig = {
@@ -45,14 +49,11 @@ const commandLabels: Record<string, string> = {
 };
 const knownCommands = Object.keys(commandLabels);
 
-type SessionUsage = {
-	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
-	cacheHitRate: number | null;
-};
 export function Composer({
 	home = false,
 	sessionId,
 	running = false,
+	busy = false,
 	queueActive = false,
 	contextUsage,
 	summaryTag,
@@ -61,10 +62,12 @@ export function Composer({
 	onCommand,
 	onFork,
 	onSummary,
+	onSubmittingChange,
 }: {
 	home?: boolean;
 	sessionId?: string;
 	running?: boolean;
+	busy?: boolean;
 	queueActive?: boolean;
 	contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } | null;
 	/** 待填的自定义总结提示词：标记块在输入框内，回车走总结而不是发消息。 */
@@ -74,7 +77,18 @@ export function Composer({
 	onCommand?: (name: "compact", text: string) => Promise<void>;
 	onFork?: () => void;
 	onSummary?: (instructions: string) => Promise<void>;
+	onSubmittingChange?: (submitting: boolean) => void;
 }) {
+	const busyRef = useRef(busy);
+	busyRef.current = busy;
+	const onSubmittingChangeRef = useRef(onSubmittingChange);
+	onSubmittingChangeRef.current = onSubmittingChange;
+	useEffect(
+		() => () => {
+			onSubmittingChangeRef.current?.(false);
+		},
+		[],
+	);
 	const draftKey = makeDraftKey(sessionId);
 	const [text, setText] = useState(() =>
 		typeof window !== "undefined" ? (sessionStorage.getItem(draftKey) ?? "") : "",
@@ -88,19 +102,17 @@ export function Composer({
 	const [dragging, setDragging] = useState(false);
 	const dragDepth = useRef(0);
 	const [pendingEditId, setPendingEditId] = useState<string | null>(null);
+	const [pendingQueueEdit, setPendingQueueEdit] = useState<EditQueueItemDetail | null>(null);
+	const queueEditBusy = useRef(false);
 	const attachmentBusy = useRef(false);
 	const imageGeneration = useRef(0);
 	const imagesRef = useRef(images);
 	imagesRef.current = images;
 	const fileInput = useRef<HTMLInputElement>(null);
+	const composerRef = useRef<HTMLElement>(null);
 	const [models, setModels] = useState<Model[]>([]);
 	const [enabled, setEnabled] = useState<string[] | null>(null);
-	const [loadedContext, setLoadedContext] = useState<{
-		tokens: number | null;
-		contextWindow: number;
-		percent: number | null;
-	} | null>(null);
-	const [usageStats, setUsageStats] = useState<SessionUsage | null>(null);
+	const { payload: sessionUsage, refresh: refreshUsage } = useSessionUsage(sessionId, !!onSend);
 	const [selected, setSelected] = useState<Selection>(null);
 	const manualHomeModel = useRef(false);
 	const initialKeyPrompt = useRef(false);
@@ -118,6 +130,7 @@ export function Composer({
 			return 0;
 		}
 	});
+	const shell = useWorkspaceShell();
 	const [commands, setCommands] = useState<string[]>([]);
 	const [commandIndex, setCommandIndex] = useState(0);
 	const [suggestionsVisible, setSuggestionsVisible] = useState(true);
@@ -427,12 +440,7 @@ export function Composer({
 		if (name !== "state") return;
 		try {
 			const data = JSON.parse(event?.data ?? "null");
-			if (
-				data?.type === "auth_changed" ||
-				data?.type === "models_changed" ||
-				data?.type === "settings_changed" ||
-				(data?.type === "usage_changed" && data.sessionId === sessionId)
-			)
+			if (data?.type === "auth_changed" || data?.type === "models_changed" || data?.type === "settings_changed")
 				setModelRevision((value) => value + 1);
 		} catch {
 			/* 后续重连重新读取。 */
@@ -445,8 +453,6 @@ export function Composer({
 		apiJson<
 			ModelSelectionPayload & {
 				thinkingLevels?: string[];
-				contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
-				usage?: SessionUsage | null;
 			}
 		>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal: controller.signal })
 			.then((data) => {
@@ -489,8 +495,6 @@ export function Composer({
 						);
 						setThinkingLevels(levels);
 					}
-					setLoadedContext(data.contextUsage ?? null);
-					setUsageStats(data.usage ?? null);
 				}
 			})
 			.catch((cause: unknown) => {
@@ -503,8 +507,8 @@ export function Composer({
 		};
 	}, [sessionId, modelRevision]);
 
-	const usage = contextUsage ?? loadedContext;
-	const cacheHitRate = usageStats?.cacheHitRate ?? null;
+	const usage = sessionUsage ? sessionUsage.contextUsage : sessionId ? (contextUsage ?? null) : null;
+	const cacheHitRate = sessionUsage?.usage?.cacheHitRate ?? null;
 	const availableThinking = thinkingLevels.length ? thinkingLevels : ["off"];
 	const scoped = scopedModels(models, enabled);
 	const choices =
@@ -524,6 +528,7 @@ export function Composer({
 			setThinkingLevels(levels);
 			manualHomeModel.current = !sessionId;
 			setSelected(changed);
+			if (sessionId) refreshUsage();
 			setError("");
 			return true;
 		} catch (cause) {
@@ -557,14 +562,17 @@ export function Composer({
 		return model;
 	}
 	async function submit() {
-		if (submitLock.current || sending || attaching || imagesLoading || restoring.current) return;
+		if (busyRef.current || submitLock.current || sending || attaching || imagesLoading || restoring.current) return;
 		// 自定义总结提示词：回车不是发消息，而是带着这段提示词去发起导航与总结。
 		if (summaryTag) {
 			if (!text.trim() || !onSummary) return;
+			submitLock.current = true;
+			onSubmittingChangeRef.current?.(true);
 			setSending(true);
 			setError("");
 			try {
 				if (!(await ensureCredentials())) return;
+				if (busyRef.current) return;
 				await onSummary(text.trim());
 				renderEditor("");
 				setMessageId(crypto.randomUUID());
@@ -573,6 +581,8 @@ export function Composer({
 			} catch (cause) {
 				setError(cause instanceof Error ? cause.message : "分支总结未开始，请重试");
 			} finally {
+				submitLock.current = false;
+				onSubmittingChangeRef.current?.(false);
 				setSending(false);
 			}
 			return;
@@ -595,6 +605,7 @@ export function Composer({
 		}
 		if ((!body.trim() && !images.length && !command) || (!onSend && !onCommand)) return;
 		submitLock.current = true;
+		onSubmittingChangeRef.current?.(true);
 		const revision = editorRevision.current;
 		const submittedImages = [...images];
 		setSending(true);
@@ -609,11 +620,13 @@ export function Composer({
 			} else if (command === "/compact") {
 				if (!onCommand) throw new Error("请先进入会话，再使用此命令。");
 				if (!(await ensureCredentials())) return;
+				if (busyRef.current) return;
 				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
 				const model = selected?.catalogPresent && selected.credentialReady ? selected : await ensureCredentials();
 				if (!model) return;
+				if (busyRef.current) return;
 				if (editorRevision.current !== revision) return;
 				if (body.length > 100_000) throw new Error("消息不能超过 100000 个字符");
 				await onSend(body, {
@@ -645,11 +658,13 @@ export function Composer({
 			else setError(cause instanceof Error ? cause.message : "消息未被接受，请重试");
 		} finally {
 			submitLock.current = false;
+			onSubmittingChangeRef.current?.(false);
 			setSending(false);
 		}
 	}
-	async function replaceDraft(draft: SavedDraft, saveCurrent: boolean) {
-		if (restoring.current || submitLock.current || imagesLoading || attaching) throw new Error("请等待当前操作完成");
+	async function replaceDraft(draft: SavedDraft, saveCurrent: boolean, removeFromQueue?: () => Promise<unknown>) {
+		if (restoring.current || submitLock.current || imagesLoading || attachmentBusy.current)
+			throw new Error("请等待当前操作完成");
 		restoring.current = true;
 		const revision = editorRevision.current;
 		const generation = imageGeneration.current;
@@ -659,7 +674,14 @@ export function Composer({
 			if (loaded.length !== draft.images.length) throw new Error("图片不完整，请保留发送记录并重新添加图片。");
 			if (revision !== editorRevision.current || generation !== imageGeneration.current)
 				throw new Error("草稿已更新，请重新点击编辑。");
+			if (removeFromQueue) await removeFromQueue();
 			const saved = readSavedDrafts(sessionStorage, draftKey);
+			if (removeFromQueue && (revision !== editorRevision.current || generation !== imageGeneration.current)) {
+				saved.push(draft);
+				sessionStorage.setItem(`${draftKey}:saved`, JSON.stringify(saved));
+				if (generation === imageGeneration.current) setSavedCount(saved.length);
+				return;
+			}
 			if (!saveCurrent) saved.pop();
 			const current = { text: readEditor(true), images: imagesRef.current.map((image) => image.hash) };
 			if (current.text || current.images.length) saved.push(current);
@@ -695,6 +717,44 @@ export function Composer({
 			.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法恢复消息"))
 			.finally(() => outbox.endEdit(item.id));
 	}
+	async function performQueueItemEdit(detail: EditQueueItemDetail) {
+		if (!sessionId || detail.sessionId !== sessionId || queueEditBusy.current) return;
+		if (restoring.current || submitLock.current || imagesLoading || attachmentBusy.current) {
+			setError("请等待当前操作完成");
+			return;
+		}
+		queueEditBusy.current = true;
+		const revision = editorRevision.current;
+		const generation = imageGeneration.current;
+		const held: DraftImage[] = [];
+		try {
+			let totalBytes = 0;
+			for (const image of detail.images) {
+				const response = await fetch(sessionPath(sessionId, `/attachments/${encodeURIComponent(image.id)}`));
+				if (!response.ok) throw new Error("无法读取排队消息的附图");
+				const file = new File([await response.blob()], image.id, { type: image.mimeType });
+				held.push(await addImage(file, totalBytes));
+				totalBytes += file.size;
+			}
+			if (revision !== editorRevision.current || generation !== imageGeneration.current) {
+				throw new Error("草稿已更新，请重新点击编辑。");
+			}
+			const serialized = detail.skill ? `/skill:${detail.skill} ${detail.text}` : detail.text;
+			await replaceDraft({ text: serialized, images: held.map((image) => image.hash) }, true, () =>
+				apiJson(sessionPath(detail.sessionId, `/queue/${encodeURIComponent(detail.itemId)}`), {
+					method: "DELETE",
+					body: { version: detail.version },
+				}),
+			);
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : "无法编辑排队消息");
+		} finally {
+			queueEditBusy.current = false;
+			for (const image of held) URL.revokeObjectURL(image.url);
+			if (held.length) void releaseImageHolds(held).catch(() => {});
+			void detail.refresh().catch(() => {});
+		}
+	}
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 事件读写当前会话 DOM 和 refs，不随输入内容重新订阅。
 	useEffect(() => {
 		const edit = (event: Event) => {
@@ -709,13 +769,28 @@ export function Composer({
 			}
 			performOutgoingEdit(item.id);
 		};
+		const editQueue = (event: Event) => {
+			if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") return;
+			const detail = event.detail as EditQueueItemDetail;
+			if (!sessionId || detail.sessionId !== sessionId) return;
+			if (readEditor(true) || imagesRef.current.length) {
+				setPendingQueueEdit(detail);
+				return;
+			}
+			void performQueueItemEdit(detail);
+		};
 		window.addEventListener(EDIT_OUTGOING_EVENT, edit);
-		return () => window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
+		window.addEventListener(EDIT_QUEUE_ITEM_EVENT, editQueue);
+		return () => {
+			window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
+			window.removeEventListener(EDIT_QUEUE_ITEM_EVENT, editQueue);
+		};
 	}, [draftKey, sessionId, imagesLoading, attaching]);
 	function keyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 		if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest(".chip-remove")) return;
 		if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
 			if (event.key === "ArrowUp")
 				setFileIndex((value) => (value - 1 + fileSuggestions.length) % fileSuggestions.length);
@@ -725,6 +800,7 @@ export function Composer({
 			return;
 		}
 		if (suggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
 			if (event.key === "ArrowUp") setCommandIndex((value) => (value - 1 + suggestions.length) % suggestions.length);
 			else if (event.key === "ArrowDown") setCommandIndex((value) => (value + 1) % suggestions.length);
@@ -733,6 +809,7 @@ export function Composer({
 			return;
 		}
 		if (event.key === "Escape" && running) {
+			if (hasOpenDismissiblePanel()) return;
 			event.preventDefault();
 			void onStop?.();
 			return;
@@ -747,6 +824,37 @@ export function Composer({
 		const panel = editorRef.current?.parentElement;
 		panel?.querySelector<HTMLElement>(".command-active")?.scrollIntoView({ block: "nearest" });
 	}, [commandIndex, fileIndex]);
+	// 通道切入软件端待机态时，同步收起补全浮层与原生确认/密钥弹窗，但完整保留输入草稿。
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		setSuggestionsVisible(false);
+		setFilesVisible(false);
+		setMissingKey(null);
+		setPendingEditId(null);
+		setPendingQueueEdit(null);
+	}, [shell?.appActive]);
+	const suggestionsOpen = suggestions.length > 0 || fileSuggestions.length > 0;
+	const suggestionsDismiss = usePanelDismiss(
+		suggestionsOpen,
+		() => {
+			setSuggestionsVisible(false);
+			setFilesVisible(false);
+		},
+		composerRef,
+	);
+	useEffect(() => {
+		if (!suggestionsOpen) return;
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) return;
+			if (editorRef.current?.contains(target)) return;
+			if (target instanceof Element && target.closest(".command-suggestions")) return;
+			setSuggestionsVisible(false);
+			setFilesVisible(false);
+		};
+		window.addEventListener("pointerdown", onPointerDown, true);
+		return () => window.removeEventListener("pointerdown", onPointerDown, true);
+	}, [suggestionsOpen]);
 	const nothingToSend = !text.trim() && !images.length && chipCount === 0;
 
 	return (
@@ -767,10 +875,23 @@ export function Composer({
 					}}
 				/>
 			)}
+			{pendingQueueEdit && (
+				<ConfirmDialog
+					title="继续编辑这条排队消息？"
+					description="当前草稿将保留，可通过「恢复保留草稿」取回。"
+					confirmLabel="继续编辑"
+					onCancel={() => setPendingQueueEdit(null)}
+					onConfirm={() => {
+						const detail = pendingQueueEdit;
+						setPendingQueueEdit(null);
+						void performQueueItemEdit(detail);
+					}}
+				/>
+			)}
 			{savedCount > 0 && (
 				<Button
 					variant="ghost"
-					className="composer-saved-draft"
+					className="btn-ghost composer-saved-draft"
 					onPress={() => {
 						void Promise.resolve()
 							.then(() => {
@@ -806,6 +927,7 @@ export function Composer({
 				</ul>
 			)}
 			<section
+				ref={composerRef}
 				className={`composer ${home ? "composer--home" : "composer--chat"}`}
 				aria-label="消息编辑器"
 				data-dragging={dragging || undefined}
@@ -816,10 +938,18 @@ export function Composer({
 			>
 				{summaryTag && (
 					<div className="composer-command composer-summary-tag">
-						<PencilLine size={16} aria-hidden="true" />
-						<span>{summaryTag.label}</span>
-						<Button variant="ghost" isIconOnly aria-label="取消自定义总结提示词" onPress={summaryTag.onCancel}>
-							<X size={14} aria-hidden="true" />
+						<span className="composer-chip-icon" aria-hidden="true">
+							<PencilLine size={13} />
+						</span>
+						<span className="composer-chip-label">{summaryTag.label}</span>
+						<Button
+							variant="ghost"
+							isIconOnly
+							className="btn-icon xs-24"
+							aria-label="取消自定义总结提示词"
+							onPress={summaryTag.onCancel}
+						>
+							<X size={12} aria-hidden="true" />
 						</Button>
 					</div>
 				)}
@@ -839,7 +969,7 @@ export function Composer({
 							: summaryTag
 								? "写下总结时要保留什么，回车开始总结…"
 								: queueActive
-									? "继续输入以排队后续修改"
+									? "继续输入以追加排队消息…"
 									: "继续提问，或补充这台电脑的情况…"
 					}
 					onInput={syncFromEditor}
@@ -851,7 +981,7 @@ export function Composer({
 					}}
 				/>
 				{!!suggestions.length && (
-					<fieldset className="command-suggestions" aria-label="命令补全">
+					<fieldset className="tier-2-glass command-suggestions" aria-label="命令补全">
 						{([false, true] as const).map((skill) => {
 							const group = suggestions.filter((item) => item.startsWith("/skill:") === skill);
 							return group.length ? (
@@ -860,11 +990,15 @@ export function Composer({
 									{group.map((item) => (
 										<Button
 											key={item}
-											className={suggestions.indexOf(item) === commandIndex ? "command-active" : ""}
+											className={`command-option ${suggestions.indexOf(item) === commandIndex ? "command-active" : ""}`}
 											variant="ghost"
 											onPress={() => selectCommand(item)}
 										>
-											{skill ? <Sparkles size={14} /> : <Command size={14} />}
+											{skill ? (
+												<Sparkles size={14} aria-hidden="true" />
+											) : (
+												<Command size={14} aria-hidden="true" />
+											)}
 											<span>{skill ? item.slice("/skill:".length) : item.slice(1)}</span>
 											<small>{commandLabels[item]}</small>
 										</Button>
@@ -875,17 +1009,17 @@ export function Composer({
 					</fieldset>
 				)}
 				{!!fileSuggestions.length && (
-					<fieldset className="command-suggestions file-suggestions" aria-label="文件引用补全">
+					<fieldset className="tier-2-glass command-suggestions file-suggestions" aria-label="文件引用补全">
 						<div className="command-group">
 							<span className="command-group-title">最近文件</span>
 							{fileSuggestions.map((file, index) => (
 								<Button
 									key={file.path}
-									className={index === fileIndex ? "command-active" : ""}
+									className={`command-option ${index === fileIndex ? "command-active" : ""}`}
 									variant="ghost"
 									onPress={() => selectFile(file.path)}
 								>
-									<FileText size={14} />
+									<FileText size={14} aria-hidden="true" />
 									<span>{file.path.split("/").pop()}</span>
 									<small>{file.dir}</small>
 								</Button>
@@ -910,16 +1044,21 @@ export function Composer({
 					<Button
 						variant="ghost"
 						isIconOnly
-						className="composer-icon"
+						className="btn-icon sm-28 composer-icon"
 						aria-label="添加图片"
-						isDisabled={sending || attaching || imagesLoading}
+						isDisabled={busy || sending || attaching || imagesLoading}
 						onPress={() => fileInput.current?.click()}
 					>
-						<Plus size={20} />
+						<Plus size={16} aria-hidden="true" />
 					</Button>
 					<span className="composer-spacer" />
 					<div className="composer-model-controls">
-						<ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />
+						<ContextMeter
+							usage={usage}
+							cacheHitRate={cacheHitRate}
+							provider={selected?.provider ?? ""}
+							onOpen={sessionId && onSend ? refreshUsage : undefined}
+						/>
 						<ModelPicker
 							selected={selected}
 							models={choices}
@@ -933,16 +1072,22 @@ export function Composer({
 					<Button
 						isIconOnly
 						isDisabled={
+							busy ||
 							sending ||
 							attaching ||
 							imagesLoading ||
 							(summaryTag ? !text.trim() : (nothingToSend && !running) || (!onSend && !onStop && !onCommand))
 						}
-						className="composer-send"
+						className="tier-1-btn-primary composer-send"
+						data-stopping={(running && nothingToSend) || undefined}
 						aria-label={summaryTag ? "开始分支总结" : running && nothingToSend ? "停止生成" : "发送消息"}
 						onPress={() => void submit()}
 					>
-						{running && nothingToSend ? <Square size={12} fill="currentColor" /> : <ArrowUp size={16} />}
+						{running && nothingToSend ? (
+							<Square size={12} fill="currentColor" aria-hidden="true" />
+						) : (
+							<ArrowUp size={14} aria-hidden="true" />
+						)}
 					</Button>
 				</div>
 			</section>

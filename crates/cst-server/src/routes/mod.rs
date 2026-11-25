@@ -7,6 +7,7 @@ pub mod models;
 pub mod sessions;
 pub mod settings;
 pub mod static_files;
+pub mod usage;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -439,7 +440,7 @@ pub async fn handle_http_request(
             query.as_deref(),
             &headers,
             state.static_dir(),
-            &state.kit_root().join("assets").join("fonts"),
+            state.fonts_dir(),
             &state.mode,
         )
         .await);
@@ -574,10 +575,14 @@ async fn dispatch_api_route(
     }
 
     if let Some(resp) = Box::pin(exports::handle_exports_route(
-        state, caller, method, pathname, headers, raw_body,
+        state, caller, method, pathname, query, headers, raw_body,
     ))
     .await?
     {
+        return Ok(Some(resp));
+    }
+
+    if let Some(resp) = Box::pin(usage::handle_usage_route(state, method, pathname)).await? {
         return Ok(Some(resp));
     }
 
@@ -586,6 +591,7 @@ async fn dispatch_api_route(
         caller,
         method,
         pathname,
+        query,
         headers,
         raw_body,
         conn_cancel,

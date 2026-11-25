@@ -62,7 +62,7 @@ fn file(result: &Value) -> PathBuf {
 }
 fn plan_path(fixture: &Fixture, plan: &Value, version: u64) -> PathBuf {
     fixture.path(format!(
-        "agent/home/command-plans/{}/v{version}.json",
+        "data/plans/{}/v{version}.json",
         plan["runbook"]["runbookId"].as_str().unwrap()
     ))
 }
@@ -192,15 +192,31 @@ async fn repeated_delivery_uses_saved_time_and_preserves_manual_edits() {
 }
 
 #[tokio::test]
-async fn legacy_typescript_plan_is_read_and_revised_into_the_modern_directory() {
+async fn existing_plan_in_data_plans_is_read_and_revised_while_legacy_outbox_is_ignored() {
     let fixture = Fixture::new();
     let id = uuid::Uuid::new_v4().to_string();
     let raw = json!({"runbookId":id,"version":7,"day":"2026-11-08","createdAt":"2026-01-01T00:00:00.000Z",
     "timeText":"2026-01-01 08:00","title":"已有方案","level":"low","commands":[
-        {"summary":"保留已有配置，需手动核对。","command":"echo legacy","shell":"cmd"}
+        {"summary":"保留已有配置，需手动核对。","command":"echo existing","shell":"cmd"}
     ]});
+    // Legacy `outbox/.plans` is completely ignored in Stage 9.2 (D92-4).
+    let legacy_id = uuid::Uuid::new_v4().to_string();
+    fixture.put(
+        format!("outbox/.plans/{legacy_id}/v7.json"),
+        serde_json::to_vec(&raw).unwrap(),
+    );
+    assert!(
+        fixture
+            .store()
+            .deliver(
+                decode(json!({"runbookId":legacy_id,"version":7})),
+                CancellationToken::new(),
+            )
+            .await
+            .is_err()
+    );
     let legacy = fixture.put(
-        format!("outbox/.plans/{id}/v7.json"),
+        format!("data/plans/{id}/v7.json"),
         serde_json::to_vec(&raw).unwrap(),
     );
     let delivered = fixture
@@ -678,9 +694,8 @@ async fn cleanup_failure_rolls_back_new_name_while_the_old_file_is_open() {
 #[tokio::test]
 async fn junctions_at_each_writable_boundary_are_rejected_before_any_outside_write() {
     for relative in [
-        "agent",
-        "agent/home",
-        "agent/home/command-plans",
+        "data",
+        "data/plans",
         "artifacts",
         "artifacts/2026-11-08",
         "artifacts/2026-11-08/runbook",
@@ -699,7 +714,7 @@ async fn junctions_at_each_writable_boundary_are_rejected_before_any_outside_wri
             .status()
             .unwrap();
         assert!(status.success());
-        let result = if relative.starts_with("agent") {
+        let result = if relative.starts_with("data") {
             fixture
                 .store()
                 .plan(decode(input()), CancellationToken::new())
@@ -759,12 +774,12 @@ fn lock_child(directory: &Path, ready: &Path) -> ChildGuard {
 }
 #[tokio::test]
 async fn independent_process_locks_cover_both_plan_and_sequence_writers_and_release_on_exit() {
-    for relative in ["agent/home/command-plans", "artifacts/2026-11-08/runbook"] {
+    for relative in ["data/plans", "artifacts/2026-11-08/runbook"] {
         let fixture = Fixture::new();
         let dir = fixture.path(relative);
         fs::create_dir_all(&dir).unwrap();
         let child = lock_child(&dir, &fixture.path("ready"));
-        let result = if relative.starts_with("agent") {
+        let result = if relative.starts_with("data") {
             fixture
                 .store()
                 .plan(decode(input()), CancellationToken::new())

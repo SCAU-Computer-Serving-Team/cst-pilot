@@ -2,24 +2,24 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cst_client::ClientHandle;
-use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
+use cst_client::tool_presenter::{ToolCallInput, ToolResultInput, map_special_tool, map_tool};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    StatefulInteractiveElement, Styled, Task, TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
-use crate::tools::normal_card::render_normal_tool_card;
+use crate::tools::normal_card::render_normal_tool_card_with_args;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::turn_segments::{
-    ConversationPart, build_turn_segments, extract_message_text, group_turns_and_results,
-    split_turn,
+    ConversationPart, extract_message_text, group_turns_and_results, split_turn,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,7 @@ impl ExportDocTheme {
 #[derive(Debug, Clone)]
 pub enum ExportViewEvent {
     BackToChat,
+    ExportCompleted,
     Notice(String),
     ErrorMessage(String),
 }
@@ -83,11 +84,13 @@ pub struct ExportView {
     include_thinking: bool,
     include_tools: bool,
     preview_snapshot: Option<Value>,
-    loading_preview: bool,
-    preview_generation: u64,
-    exporting: bool,
+    preview_failed: bool,
+    preview_task: Option<Task<()>>,
+    export_task: Option<Task<()>>,
+    open_directory_task: Option<Task<()>>,
     last_completed_export_id: Option<String>,
     last_completed_dir: Option<String>,
+    preview_reveal: motion::SurfaceReveal,
 }
 
 impl EventEmitter<ExportViewEvent> for ExportView {}
@@ -107,35 +110,48 @@ impl ExportView {
             include_thinking: true,
             include_tools: true,
             preview_snapshot: None,
-            loading_preview: false,
-            preview_generation: 0,
-            exporting: false,
+            preview_failed: false,
+            preview_task: None,
+            export_task: None,
+            open_directory_task: None,
             last_completed_export_id: None,
             last_completed_dir: None,
+            preview_reveal: motion::SurfaceReveal::default(),
         };
         this.reload_preview(cx);
         this
     }
 
-    pub fn set_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
-        if self.session_id != session_id {
-            self.session_id = session_id;
-            self.preview_snapshot = None;
-            self.last_completed_export_id = None;
-            self.last_completed_dir = None;
-            self.reload_preview(cx);
-        }
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
     }
 
-    /// Fetches `/api/sessions/<id>/exports/preview` while retaining `self.preview_snapshot` until the new snapshot lands.
+    pub fn set_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+        self.stop();
+        self.session_id = session_id;
+        self.reload_preview(cx);
+    }
+
+    pub(crate) fn stop(&mut self) {
+        // Dropping the tasks cancels UI polling and prevents obsolete jobs from opening Explorer.
+        // An export already accepted by the service may still finish writing its files.
+        self.preview_task = None;
+        self.export_task = None;
+        self.open_directory_task = None;
+        self.preview_snapshot = None;
+        self.preview_failed = false;
+        self.last_completed_export_id = None;
+        self.last_completed_dir = None;
+        self.preview_reveal.clear();
+    }
+
+    /// Keep the previous preview mounted until the latest request settles.
     pub fn reload_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview_task = None;
+        cx.notify();
         if self.session_id.is_empty() {
             return;
         }
-        self.preview_generation = self.preview_generation.wrapping_add(1);
-        let req_gen = self.preview_generation;
-        self.loading_preview = true;
-        cx.notify();
 
         let client = self.client.clone();
         let sid = self.session_id.clone();
@@ -144,35 +160,45 @@ impl ExportView {
         let inc_think = self.include_thinking;
         let inc_tools = self.include_tools;
 
-        cx.spawn(async move |weak, cx| {
+        self.preview_task = Some(cx.spawn(async move |weak, cx| {
             let res = client
                 .preview_session_export(sid, fmt, thm, inc_think, inc_tools)
                 .await;
             let _ = weak.update(cx, |this, cx| {
-                if this.preview_generation != req_gen {
-                    return;
-                }
-                this.loading_preview = false;
-                match res {
-                    Ok(snap) => {
-                        this.preview_snapshot = Some(snap);
+                this.preview_task = None;
+                this.preview_failed = false;
+                this.preview_snapshot = match res {
+                    Ok(snapshot) => {
+                        let ready = snapshot
+                            .get("entries")
+                            .and_then(Value::as_array)
+                            .is_some_and(|entries| !entries.is_empty())
+                            .then_some(snapshot);
+                        if ready.is_some() {
+                            this.preview_reveal
+                                .start(Duration::from_millis(180), 4.0, 0.25, cx);
+                        }
+                        ready
                     }
+                    Err(err) if err.code() == "empty_export" => None,
                     Err(err) => {
+                        this.preview_failed = true;
                         cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
+                        None
                     }
-                }
+                };
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn start_generate_and_save(&mut self, cx: &mut Context<Self>) {
-        if self.exporting || self.session_id.is_empty() {
+        if self.export_task.is_some()
+            || self.open_directory_task.is_some()
+            || self.session_id.is_empty()
+        {
             return;
         }
-        self.exporting = true;
-        cx.notify();
 
         let client = self.client.clone();
         let sid = self.session_id.clone();
@@ -181,116 +207,80 @@ impl ExportView {
         let inc_think = self.include_thinking;
         let inc_tools = self.include_tools;
 
-        cx.spawn(async move |weak, cx| {
-            let created = client
-                .create_session_export(sid, fmt, thm, inc_think, inc_tools)
-                .await;
-            let job_id = match created {
-                Ok(val) => val
+        self.export_task = Some(cx.spawn(async move |weak, cx| {
+            let result = async {
+                let created = client
+                    .create_session_export(sid, fmt, thm, inc_think, inc_tools)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                let job_id = created
                     .get("id")
                     .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-
-            if job_id.is_empty() {
-                let _ = weak.update(cx, |this, cx| {
-                    this.exporting = false;
-                    cx.emit(ExportViewEvent::ErrorMessage("导出任务 ID 无效。".into()));
-                    cx.notify();
-                });
-                return;
-            }
-
-            // Poll `GET /api/exports/<exportId>` with 200ms Tokio sleep backoff when still running
-            let poll_client = client.clone();
-            let jid = job_id.clone();
-            let mut resolved_job = poll_client.get_export_job(jid.clone()).await;
-
-            for _ in 0..120 {
-                let status = resolved_job
-                    .as_ref()
-                    .ok()
-                    .and_then(|v| v.get("status"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if matches!(status, "completed" | "failed") {
-                    break;
-                }
-                let _ = client
-                    .spawn_tokio(async {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-                        Ok::<(), cst_client::ClientError>(())
-                    })
-                    .await;
-                let pc = client.clone();
-                let j = jid.clone();
-                resolved_job = pc.get_export_job(j).await;
-            }
-
-            match resolved_job {
-                Ok(job_val) => {
-                    let status = job_val
-                        .get("status")
-                        .and_then(Value::as_str)
-                        .unwrap_or("completed");
-                    if status == "failed" {
-                        let err_msg = job_val
-                            .get("error")
-                            .and_then(|e| e.get("message").or(Some(e)))
-                            .and_then(Value::as_str)
-                            .unwrap_or("导出任务生成失败。")
-                            .to_owned();
-                        let _ = weak.update(cx, |this, cx| {
-                            this.exporting = false;
-                            cx.emit(ExportViewEvent::ErrorMessage(err_msg));
-                            cx.notify();
-                        });
-                        return;
+                    .filter(|id| !id.is_empty())
+                    .ok_or("导出任务 ID 无效。")?;
+                let mut job = created.clone();
+                for _ in 0..120 {
+                    if let Some(dir) = completed_export(&job)? {
+                        return Ok((job_id.to_owned(), dir));
                     }
-
-                    let dir = job_val
-                        .get("directory")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    let open_res = client.open_export_directory(job_id.clone()).await;
-
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        this.last_completed_export_id = Some(job_id);
-                        this.last_completed_dir = dir;
-                        if let Err(err) = open_res {
-                            cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        } else {
-                            cx.emit(ExportViewEvent::Notice(
-                                "导出已完成并在文件管理器中定位。".into(),
-                            ));
-                        }
-                        cx.notify();
-                    });
+                    cx.background_executor()
+                        .timer(Duration::from_millis(200))
+                        .await;
+                    job = client
+                        .get_export_job(job_id.to_owned())
+                        .await
+                        .map_err(|err| err.to_string())?;
                 }
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        cx.notify();
-                    });
-                }
+                completed_export(&job)?
+                    .map(|dir| (job_id.to_owned(), dir))
+                    .ok_or_else(|| "等待导出任务超时。".into())
             }
-        })
-        .detach();
+            .await;
+
+            let _ = weak.update(cx, |this, cx| {
+                this.export_task = None;
+                match result {
+                    Ok((id, dir)) => {
+                        this.last_completed_export_id = Some(id);
+                        this.last_completed_dir = dir;
+                        cx.emit(ExportViewEvent::ExportCompleted);
+                        this.open_export_directory(true, cx);
+                    }
+                    Err(msg) => cx.emit(ExportViewEvent::ErrorMessage(msg)),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn open_export_directory(&mut self, automatic: bool, cx: &mut Context<Self>) {
+        if self.open_directory_task.is_some() || self.export_task.is_some() {
+            return;
+        }
+        let Some(id) = self.last_completed_export_id.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        self.open_directory_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client.open_export_directory(id).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.open_directory_task = None;
+                match res {
+                    Err(err) => cx.emit(ExportViewEvent::ErrorMessage(err.to_string())),
+                    Ok(_) if automatic => cx.emit(ExportViewEvent::Notice(
+                        "导出已完成并在文件管理器中定位。".into(),
+                    )),
+                    Ok(_) => {}
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     fn render_readonly_preview(
-        &self,
+        &mut self,
         mono_family: SharedString,
         ui_palette: &DesktopPalette,
         scale_factor: f32,
@@ -298,6 +288,7 @@ impl ExportView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let doc_palette = self.doc_theme.palette();
+        let (preview_op, preview_dy) = self.preview_reveal.sample(window, cx);
 
         let viewport_el = if let Some(ref snap) = self.preview_snapshot {
             let title = snap
@@ -312,6 +303,9 @@ impl ExportView {
             let (turns, tool_results) = group_turns_and_results(&entries);
 
             let mut doc_col = div()
+                .relative()
+                .top(preview_dy)
+                .opacity(preview_op)
                 .w_full()
                 .max_w(px(760.0))
                 .mx_auto()
@@ -320,21 +314,42 @@ impl ExportView {
                 .gap(space::GROUP)
                 .child(
                     div()
-                        .pb(space::MD)
+                        .pb(space::LG)
                         .border_b_1()
                         .border_color(doc_palette.border_subtle)
                         .flex()
                         .items_center()
                         .justify_between()
+                        .gap(space::SM)
                         .child(
-                            apply_scale(div(), scale::TITLE)
-                                .text_color(doc_palette.text_primary)
-                                .child(SharedString::from(title.to_owned())),
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .child(
+                                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                                        .px(space::SM)
+                                        .py(space::MICRO)
+                                        .rounded(radius::CONTROL)
+                                        .bg(doc_palette.bg_surface)
+                                        .text_color(doc_palette.text_secondary)
+                                        .flex_shrink_0()
+                                        .child("CST Pilot"),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::TITLE)
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(doc_palette.text_primary)
+                                        .child(cjk_inline_label(title.to_owned())),
+                                ),
                         )
-                        .children(self.loading_preview.then(|| {
+                        .children(self.preview_task.is_some().then(|| {
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(doc_palette.text_muted)
-                                .child("正在更新预览…")
+                                .child(cjk_inline_label("正在更新预览…"))
                         })),
                 );
 
@@ -367,23 +382,66 @@ impl ExportView {
 
                 if !turn.assistants.is_empty() {
                     let split = split_turn(&turn.assistants);
-                    let segments = build_turn_segments(split.process);
-                    for seg in segments {
-                        for part in seg.parts {
-                            match part.part {
-                                ConversationPart::Thinking(th)
-                                    if !th.thinking.trim().is_empty() =>
+                    for part in split.process {
+                        match part.part {
+                            ConversationPart::Thinking(th) if !th.thinking.trim().is_empty() => {
+                                turn_box = turn_box.child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .p(space::MD)
+                                        .rounded(radius::ROW)
+                                        .bg(doc_palette.bg_surface)
+                                        .text_color(doc_palette.text_secondary)
+                                        .child(SharedString::from(th.thinking)),
+                                );
+                            }
+                            ConversationPart::Special { call: tc, .. } => {
+                                let res_val = tool_results.get(&tc.id);
+                                let input = ToolCallInput {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    arguments: tc
+                                        .arguments
+                                        .as_object()
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                    execution: None,
+                                };
+                                let parsed = res_val.map(ToolResultInput::from_message_json);
+                                if let Some(special) =
+                                    map_special_tool(&input, parsed.as_ref(), false)
                                 {
-                                    turn_box = turn_box.child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .p(space::MD)
-                                            .rounded(radius::ROW)
-                                            .bg(doc_palette.bg_surface)
-                                            .text_color(doc_palette.text_secondary)
-                                            .child(SharedString::from(th.thinking)),
-                                    );
+                                    turn_box = turn_box.child(render_special_tool_component(
+                                        SpecialToolDispatchProps {
+                                            session_id: &self.session_id,
+                                            entry_id: "export-preview",
+                                            call_id: &tc.id,
+                                            view: &special,
+                                            pending_bitlocker: None,
+                                            secret_input: None,
+                                            details_expanded: true,
+                                            warning_hovered: false,
+                                            transparency_enabled: false,
+                                            scale_factor,
+                                            running_light_allowed: false,
+                                            started_at: None,
+                                            animate_enter: false,
+                                        },
+                                        self.client.clone(),
+                                        mono_family.clone(),
+                                        &doc_palette,
+                                        &|_| false,
+                                        Rc::new(|_, _| {}),
+                                        Rc::new(|_, _, _, _| {}),
+                                        Rc::new(|_, _, _, _| {}),
+                                        |_, _, _| {},
+                                        |_, _| {},
+                                        window,
+                                        cx,
+                                    ));
                                 }
-                                ConversationPart::Special { call: tc, .. } => {
+                            }
+                            ConversationPart::Tools(calls) => {
+                                for tc in calls {
                                     let res_val = tool_results.get(&tc.id);
                                     let input = ToolCallInput {
                                         id: tc.id.clone(),
@@ -393,96 +451,44 @@ impl ExportView {
                                             .as_object()
                                             .cloned()
                                             .unwrap_or_default(),
-                                        execution: Some(ToolExecutionMeta::default()),
+                                        execution: None,
                                     };
                                     let parsed = res_val.map(ToolResultInput::from_message_json);
-                                    if let Some(special) =
-                                        self.client.with_presenter_cache(|cache| {
-                                            cache.get_or_map_special(
-                                                &input,
-                                                parsed.as_ref(),
-                                                1,
-                                                false,
-                                            )
-                                        })
-                                    {
-                                        turn_box = turn_box.child(render_special_tool_component(
-                                            SpecialToolDispatchProps {
-                                                session_id: &self.session_id,
-                                                entry_id: "export-preview",
-                                                call_id: &tc.id,
-                                                has_result: res_val.is_some(),
-                                                view: &special,
-                                                bitlocker_snapshot: None,
-                                                secret_input: None,
-                                                details_expanded: true,
-                                                warning_hovered: false,
-                                                transparency_enabled: false,
-                                                scale_factor,
-                                            },
-                                            self.client.clone(),
-                                            mono_family.clone(),
-                                            &doc_palette,
-                                            &|_| false,
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _, _| {}),
-                                            Rc::new(|_, _, _, _| {}),
-                                            |_, _, _| {},
-                                            |_, _| {},
-                                            window,
-                                            cx,
-                                        ));
-                                    }
+                                    let card_view = parsed.as_ref().map(|p| map_tool(&input, p));
+                                    // Arguments came from the server's sanitized export snapshot.
+                                    turn_box = turn_box.child(render_normal_tool_card_with_args(
+                                        &tc.id,
+                                        &tc.name,
+                                        Some(&tc.arguments),
+                                        None,
+                                        res_val.is_some(),
+                                        parsed.as_ref().is_some_and(|p| p.is_error),
+                                        false,
+                                        false,
+                                        None,
+                                        card_view.as_ref(),
+                                        true,
+                                        false,
+                                        mono_family.clone(),
+                                        &doc_palette,
+                                        &|_| false,
+                                        Rc::new(|_, _, _| {}),
+                                        Rc::new(|_, _, _| {}),
+                                        Rc::new(|_, _, _| {}),
+                                        |_, _, _| {},
+                                        window,
+                                        cx,
+                                    ));
                                 }
-                                ConversationPart::Tools(calls) => {
-                                    for tc in calls {
-                                        let res_val = tool_results.get(&tc.id);
-                                        let input = ToolCallInput {
-                                            id: tc.id.clone(),
-                                            name: tc.name.clone(),
-                                            arguments: tc
-                                                .arguments
-                                                .as_object()
-                                                .cloned()
-                                                .unwrap_or_default(),
-                                            execution: Some(ToolExecutionMeta::default()),
-                                        };
-                                        let parsed = res_val
-                                            .map(ToolResultInput::from_message_json)
-                                            .unwrap_or_default();
-                                        let card_view = self.client.with_presenter_cache(|cache| {
-                                            cache.get_or_map_normal(&input, &parsed, 1)
-                                        });
-                                        turn_box = turn_box.child(render_normal_tool_card(
-                                            &tc.id,
-                                            &tc.name,
-                                            None,
-                                            res_val.is_some(),
-                                            parsed.is_error,
-                                            false,
-                                            &card_view,
-                                            true,
-                                            false,
-                                            mono_family.clone(),
-                                            &doc_palette,
-                                            &|_| false,
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _| {}),
-                                            |_, _, _| {},
-                                            cx,
-                                        ));
-                                    }
-                                }
-                                ConversationPart::Text(txt) if !txt.trim().is_empty() => {
-                                    turn_box = turn_box.child(
-                                        apply_scale(div(), scale::BODY)
-                                            .text_color(doc_palette.text_primary)
-                                            .child(SharedString::from(txt)),
-                                    );
-                                }
-                                _ => {}
                             }
+                            ConversationPart::Text(txt) if !txt.trim().is_empty() => {
+                                turn_box = turn_box.child(
+                                    apply_scale(div(), scale::BODY)
+                                        .text_color(doc_palette.text_primary)
+                                        .child(SharedString::from(txt)),
+                                );
+                            }
+                            _ => {}
                         }
                     }
                     if !split.final_text.trim().is_empty() {
@@ -490,6 +496,44 @@ impl ExportView {
                             apply_scale(div(), scale::BODY)
                                 .text_color(doc_palette.text_primary)
                                 .child(SharedString::from(split.final_text)),
+                        );
+                    }
+                    if let Some(ref err_pres) = split.assistant_error {
+                        let mut err_col = div()
+                            .id(SharedString::from(format!("export-preview-error-{t_idx}")))
+                            .test_support()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::BODY)
+                                    .text_color(doc_palette.text_primary)
+                                    .child(SharedString::from(err_pres.headline.clone())),
+                            );
+                        if let Some(ref raw_detail) = err_pres.raw_detail {
+                            err_col = err_col.child(
+                                div()
+                                    .w_full()
+                                    .p(space::MD)
+                                    .rounded(radius::ROW)
+                                    .bg(doc_palette.bg_surface)
+                                    .border_1()
+                                    .border_color(doc_palette.border_subtle)
+                                    .font_family(mono_family.clone())
+                                    .text_size(scale::CAPTION.font_size)
+                                    .line_height(scale::CAPTION.line_height)
+                                    .text_color(doc_palette.text_secondary)
+                                    .child(SharedString::from(raw_detail.clone())),
+                            );
+                        }
+                        turn_box = turn_box.child(err_col);
+                    }
+                    if split.was_aborted {
+                        turn_box = turn_box.child(
+                            apply_scale(div(), scale::UI)
+                                .text_color(doc_palette.text_muted)
+                                .child("已停止生成"),
                         );
                     }
                 }
@@ -505,7 +549,7 @@ impl ExportView {
                 .p(space::GROUP)
                 .rounded(radius::ROW)
                 .border_1()
-                .border_color(ui_palette.border_hairline)
+                .border_color(ui_palette.border_subtle)
                 .overflow_y_scroll()
                 .bg(doc_palette.bg_workspace)
                 .child(doc_col)
@@ -520,7 +564,7 @@ impl ExportView {
                 .p(space::GROUP)
                 .rounded(radius::ROW)
                 .border_1()
-                .border_color(ui_palette.border_hairline)
+                .border_color(ui_palette.border_subtle)
                 .bg(doc_palette.bg_workspace)
                 .flex()
                 .items_center()
@@ -528,8 +572,10 @@ impl ExportView {
                 .child(
                     apply_scale(div(), scale::UI)
                         .text_color(doc_palette.text_muted)
-                        .child(if self.loading_preview {
+                        .child(if self.preview_task.is_some() {
                             "正在加载导出预览…"
+                        } else if self.preview_failed {
+                            "导出预览加载失败，请重试"
                         } else {
                             "暂无可导出的消息内容"
                         }),
@@ -545,11 +591,29 @@ impl ExportView {
             .flex_col()
             .gap(space::MD)
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(ui_palette.text_primary)
+                apply_scale(div(), scale::UI)
+                    .text_color(ui_palette.text_secondary)
                     .child(cjk_inline_label("预览")),
             )
             .child(viewport_el)
+    }
+}
+
+// Outer Option indicates completion; the completed response may omit its directory hint.
+fn completed_export(job: &Value) -> Result<Option<Option<String>>, String> {
+    match job.get("status").and_then(Value::as_str) {
+        Some("completed") => Ok(Some(
+            job.get("directory")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        )),
+        Some("queued" | "rendering") => Ok(None),
+        Some("failed") => Err(job
+            .get("error")
+            .and_then(|e| e.get("message").unwrap_or(e).as_str())
+            .unwrap_or("导出任务生成失败。")
+            .to_owned()),
+        _ => Err("导出任务状态无效。".into()),
     }
 }
 
@@ -569,7 +633,6 @@ impl Render for ExportView {
             .flex_shrink_0()
             .pl(space::GROUP)
             .pr(space::LG)
-            .bg(palette.bg_workspace)
             .border_b_1()
             .border_color(palette.border_subtle)
             .flex()
@@ -605,13 +668,18 @@ impl Render for ExportView {
             );
 
         // Left `264px` options column `ER02w` (no gray `bg_surface`, no right border)
-        let saved_section_opt = self.last_completed_export_id.as_ref().map(|eid| {
-            let eid_open = eid.clone();
+        let saved_section_opt = self.last_completed_export_id.as_ref().map(|_| {
             let dir_hint = self.last_completed_dir.clone();
             div()
+                .pt(space::LG)
                 .flex()
                 .flex_col()
-                .gap(space::XS)
+                .gap(space::MD)
+                .child(
+                    apply_scale(div(), scale::BODY_MEDIUM)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("已保存 1 个文件")),
+                )
                 .children(dir_hint.map(|d| {
                     apply_scale(div(), scale::CAPTION)
                         .truncate()
@@ -635,18 +703,9 @@ impl Render for ExportView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let c = this.client.clone();
-                            let id = eid_open.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(err) = c.open_export_directory(id).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                        }))
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.open_export_directory(false, cx)),
+                        )
                         .child(cjk_inline_label("打开保存目录")),
                 )
         });
@@ -659,7 +718,7 @@ impl Render for ExportView {
             .flex_shrink_0()
             .flex()
             .flex_col()
-            .gap(space::LG)
+            .gap(space::GROUP)
             .child(
                 apply_scale(div(), scale::BODY_SEMIBOLD)
                     .text_color(palette.text_primary)
@@ -739,12 +798,12 @@ impl Render for ExportView {
                             )),
                     ),
             )
-            // Include checkboxes
+            // Include checkboxes (`ScJjE`: `12px` gap, `24px` rows `Qwhwo`/`zkzeE`)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(space::SM)
+                    .gap(space::MD)
                     .child(export_check_row(
                         "export-include-thinking-chk",
                         "包含思考过程",
@@ -754,6 +813,8 @@ impl Render for ExportView {
                             this.include_thinking = !this.include_thinking;
                             this.reload_preview(cx);
                         }),
+                        window,
+                        cx,
                     ))
                     .child(export_check_row(
                         "export-include-tools-chk",
@@ -764,6 +825,8 @@ impl Render for ExportView {
                             this.include_tools = !this.include_tools;
                             this.reload_preview(cx);
                         }),
+                        window,
+                        cx,
                     )),
             )
             // Primary action button (`32px`, `px: 16px`, `r: 4px`) + completed save area below
@@ -778,7 +841,7 @@ impl Render for ExportView {
                             .test_support()
                             .a11y_button(
                                 "export-save-btn",
-                                if self.exporting {
+                                if self.export_task.is_some() {
                                     "正在生成"
                                 } else {
                                     "生成并保存"
@@ -797,7 +860,7 @@ impl Render for ExportView {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.start_generate_and_save(cx);
                             }))
-                            .child(cjk_inline_label(if self.exporting {
+                            .child(cjk_inline_label(if self.export_task.is_some() {
                                 "正在生成…"
                             } else {
                                 "生成并保存"
@@ -816,7 +879,6 @@ impl Render for ExportView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(top_header)
             .child(
                 div()
@@ -825,7 +887,6 @@ impl Render for ExportView {
                     .w_full()
                     .p(space::GROUP)
                     .gap(space::GROUP)
-                    .bg(palette.bg_workspace)
                     .flex()
                     .flex_row()
                     .items_stretch()
@@ -883,15 +944,19 @@ fn export_check_row<F>(
     checked: bool,
     palette: &DesktopPalette,
     on_click: F,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
 ) -> impl IntoElement
 where
     F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 {
+    let chk_mark =
+        motion::animated_checkbox_mark(id, checked, px(12.0), palette.text_on_accent, window, cx);
     apply_scale(div(), scale::UI)
         .id(id)
         .test_support()
         .a11y_checkbox(id, label, checked)
-        .h(height::CONTROL)
+        .h(height::INLINE)
         .rounded(radius::CONTROL)
         .flex()
         .items_center()
@@ -916,11 +981,7 @@ where
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(checked.then(|| {
-                    Icon::new(IconName::Check)
-                        .size(px(11.0))
-                        .text_color(palette.text_on_accent)
-                })),
+                .children(chk_mark),
         )
         .child(
             div()

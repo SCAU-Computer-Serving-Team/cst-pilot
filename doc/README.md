@@ -8,7 +8,8 @@
 |---|---|
 | [SPEC.md](SPEC.md) | 产品定位、诊断与受控操作需求、软件内升级要求、三端通道与全局约束 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 双进程三端拓扑、八大模块边界、存储状态归属与安全隔离策略 |
-| [TESTING.md](TESTING.md) | 自动化检查命令、隔离原则、诊断公共核查组（B01–B35）与实机验收矩阵 |
+| [test/TESTING.md](test/TESTING.md) | 自动化检查命令、隔离原则、诊断公共核查组（B01–B35）与实机验收矩阵 |
+| [test/desktop-ui-audit.md](test/desktop-ui-audit.md) | 桌面端 `.pen` 节点、`storybook.html` 动效交互与 `DESIGN.md` 规范核验清单及复核流程 |
 | [TASKS.md](TASKS.md) | 主线阶段待办、功能迭代、设计规范重构、分类待决议题与实机生产验收清单 |
 | [ADR.md](ADR.md) | 跨模块架构决策记录（单条高精简，按时间增量维护） |
 | [contract.md](contract.md) | 使用情况遥测的字段定义、匿名身份算法与隐私不采集边界 |
@@ -21,11 +22,11 @@
 |---|---|---|
 | [pi-core](pi-core/SPEC.md) | `crates/pi-{ai,agent,session,runtime}` | [SPEC](pi-core/SPEC.md) · [ARCHITECTURE](pi-core/ARCHITECTURE.md) · [API](pi-core/API.md) |
 | [server](server/SPEC.md) | `crates/cst-server`、`pi-web-rust.cmd` | [SPEC](server/SPEC.md) · [ARCHITECTURE](server/ARCHITECTURE.md) · [API](server/API.md) |
-| [diagnostics](diagnostics/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`agent/home/skills/`、`wiztree/`、`lhm/` | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
+| [diagnostics](diagnostics/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/`（`wiztree/` 仅限冻结的旧版 Node 过渡包） | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) · [工具设计评估与测试规范](diagnostics/test/tools-test-spec.md) |
 | [auth](auth/SPEC.md) | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | [telemetry](telemetry/SPEC.md) | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [web](web/SPEC.md) | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) · [路由广度 E2E](web/test/bsk-e2e.md) · [深度状态机 E2E](web/test/bsk-deep-e2e.md) · [UX 量化 E2E](web/test/ux-e2e.md) |
-| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) |
+| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) · [全功能遍历 E2E](desktop/test/feature-e2e.md) · [UX 与性能 E2E](desktop/test/ux-e2e.md) · [Windows 兼容性与真机验收](desktop/test/windows-compat.md) |
 | [release](release/SPEC.md) | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
 ## Rust 子包设计与路线图
@@ -45,6 +46,8 @@
 | [rust/plan/8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md) | 阶段 9 前置清理：`cst-os`/`cst-updater`/`cst-kit` 包边界收口、`pi-core` 可选编译开关与字体文档解耦设计 |
 | [rust/plan/9.desktop.md](rust/plan/9.desktop.md) | 阶段 9 `crates/cst-client` 与 `crates/cst-desktop` GPUI 桌面端详细设计 |
 | [rust/plan/9.1.desktop-automation.md](rust/plan/9.1.desktop-automation.md) | 阶段 9.1 桌面端外部解耦 CLI（`winapp ui`）自动化操作、无回显凭据投递与截图录屏详细设计 |
+| [rust/plan/9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) | 阶段 9.2 配置目录隔离（`app/` + `data/`）、纯 Rust 打包策略与存量兼容性设计 |
+| [rust/plan/9.3.optimization.md](rust/plan/9.3.optimization.md) | 阶段 9.3 性能优化与工程收敛：纯 Rust MFT / Win32 IOCTL 存储工具重构、其余工具与全栈性能专题 |
 
 ## 同名文件职责
 

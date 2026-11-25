@@ -96,7 +96,9 @@ impl ToolResultInput {
                                 .and_then(Value::as_str)
                                 .unwrap_or("")
                                 .to_owned();
-                            images.push((mime, data));
+                            if !data.trim().is_empty() {
+                                images.push((mime, data));
+                            }
                         }
                         _ => {}
                     }
@@ -507,6 +509,9 @@ fn base_field_title(key: &str) -> Option<&'static str> {
         "topFiles" => "单文件排行",
         "extAgg" => "扩展名汇总",
         "staleFiles" => "旧文件",
+        "denied" => "无权限跳过",
+        "modified" => "修改时间",
+        "childrenTruncated" => "直接子项已截断",
         "Wear" => "磨损",
         "PowerOnHours" => "通电时长",
         "ReadErrorsTotal" => "读取错误",
@@ -1498,18 +1503,23 @@ fn ranking_metrics_of(
             },
         ];
     }
-    let has_size = entry.get("size").is_some_and(|v| !v.is_null());
+    let has_size_key = entry.contains_key("size");
     entry
         .iter()
-        .filter(|(field, _)| {
+        .filter(|(field, value)| {
             let f = field.as_str();
             !NAME_KEYS.contains(&f)
                 && !matches!(f, "type" | "pid" | "engtypes" | "ext")
-                && (f != "bytes" || !has_size)
+                && (f != "bytes" || !has_size_key)
+                && !(f == "pct" && value.is_null())
         })
         .map(|(field, value)| FieldRow {
             label: resolve_label(tool_name, scope, field),
-            value: measure(field, Some(value)),
+            value: if field == "size" && value.is_null() {
+                "大小未知".into()
+            } else {
+                measure(field, Some(value))
+            },
         })
         .collect()
 }
@@ -1614,7 +1624,7 @@ fn push_notices(
         blocks.push(ToolBlock::Notice {
             id: format!("degraded-{at}"),
             text: format!(
-                "WizTree 不可用，已降级为逐文件统计（{}）。数值为下界。",
+                "快速卷索引不可用，已回退为目录遍历统计（{}）。",
                 words(Some(deg))
             ),
             status: NoticeStatus::Warning,
@@ -1771,6 +1781,9 @@ fn special_error_text(val: &Value) -> String {
         return s.to_owned();
     }
     if let Some(obj) = val.as_object() {
+        if obj.is_empty() {
+            return String::new();
+        }
         let source = obj.get("source").and_then(Value::as_str).unwrap_or("");
         let code = obj
             .get("code")
@@ -1790,23 +1803,27 @@ fn special_error_text(val: &Value) -> String {
     words(Some(val))
 }
 
-fn collect_special_errors(values: &[Option<&Value>]) -> Vec<String> {
-    let mut out = Vec::new();
+fn push_special_error(errors: &mut Vec<String>, error: &str) {
+    let error = error.trim();
+    if !error.is_empty() && !errors.iter().any(|existing| existing == error) {
+        errors.push(error.to_owned());
+    }
+}
+
+fn extend_special_errors(errors: &mut Vec<String>, values: &[Option<&Value>]) {
     for val in values.iter().flatten() {
-        if let Some(arr) = val.as_array() {
-            for item in arr {
-                let s = special_error_text(item);
-                if !s.is_empty() {
-                    out.push(s);
-                }
-            }
-        } else {
-            let s = special_error_text(val);
-            if !s.is_empty() {
-                out.push(s);
-            }
+        let items = val
+            .as_array()
+            .map_or(std::slice::from_ref(*val), Vec::as_slice);
+        for item in items {
+            push_special_error(errors, &special_error_text(item));
         }
     }
+}
+
+fn collect_special_errors(values: &[Option<&Value>]) -> Vec<String> {
+    let mut out = Vec::new();
+    extend_special_errors(&mut out, values);
     out
 }
 
@@ -1865,11 +1882,18 @@ pub fn map_special_tool(
                 .and_then(|s| s.get("uptime"))
                 .and_then(Value::as_object);
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
-                source.and_then(|s| s.get("error")),
-                source.and_then(|s| s.get("collectionErrors")),
-                source.and_then(|s| s.get("counterErrors")),
-            ]));
+            let source_error = source.and_then(|s| s.get("error"));
+            let source_errors = collect_special_errors(&[source_error]);
+            for err in &source_errors {
+                push_special_error(&mut errors, err);
+            }
+            extend_special_errors(
+                &mut errors,
+                &[
+                    source.and_then(|s| s.get("collectionErrors")),
+                    source.and_then(|s| s.get("counterErrors")),
+                ],
+            );
 
             let cpu = source
                 .and_then(|s| s.get("cpuTotalPct"))
@@ -1885,14 +1909,7 @@ pub fn map_special_tool(
 
             let status = match result {
                 None => initial,
-                Some(res)
-                    if res.is_error
-                        || source
-                            .and_then(|s| s.get("error"))
-                            .is_some_and(|v| !v.is_null()) =>
-                {
-                    SpecialStatus::Error
-                }
+                Some(res) if res.is_error || !source_errors.is_empty() => SpecialStatus::Error,
                 Some(_)
                     if source.is_none()
                         || source
@@ -2029,7 +2046,7 @@ pub fn map_special_tool(
                 title: "整机概览".into(),
                 summary,
                 raw,
-                fields: if status == SpecialStatus::Error {
+                fields: if status == SpecialStatus::Error || source.is_none() {
                     Vec::new()
                 } else {
                     fields
@@ -2065,18 +2082,21 @@ pub fn map_special_tool(
                         .and_then(Value::as_object)
                 });
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
-                source.and_then(|s| s.get("error"))
-            ]));
+            extend_special_errors(&mut errors, &[source.and_then(|s| s.get("error"))]);
+            let planned =
+                source.and_then(|s| s.get("action")).and_then(Value::as_str) == Some("planned");
+            let file = source
+                .and_then(|s| s.get("file"))
+                .and_then(Value::as_str)
+                .filter(|file| !file.trim().is_empty());
             let status = match result {
                 None => initial,
                 Some(res) if res.is_error || !errors.is_empty() => SpecialStatus::Error,
-                Some(_) if source.is_none() => SpecialStatus::Degraded,
+                Some(_) if !planned && file.is_none() => SpecialStatus::Degraded,
                 Some(_) => SpecialStatus::Success,
             };
-            let delivery = if result.is_some()
-                && status == SpecialStatus::Success
-                && let Some(file) = source.and_then(|s| s.get("file")).and_then(Value::as_str)
+            let delivery = if status == SpecialStatus::Success
+                && let Some(file) = file
             {
                 Some(RunbookDeliveryView {
                     file: file.to_owned(),
@@ -2103,31 +2123,30 @@ pub fn map_special_tool(
             let commands: Vec<CommandItem> = cmd_array
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(Value::as_object)
-                        .map(|item| CommandItem {
-                            shell: item
-                                .get("shell")
-                                .and_then(Value::as_str)
-                                .unwrap_or("环境未知")
-                                .to_owned(),
-                            admin: item.get("admin").and_then(Value::as_bool) == Some(true),
-                            summary: item
-                                .get("summary")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_owned(),
-                            command: item
-                                .get("command")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_owned(),
+                        .filter_map(|item| {
+                            let command = item.get("command")?.as_str()?;
+                            if command.trim().is_empty() {
+                                return None;
+                            }
+                            Some(CommandItem {
+                                shell: item
+                                    .get("shell")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("环境未知")
+                                    .to_owned(),
+                                admin: item.get("admin").and_then(Value::as_bool) == Some(true),
+                                summary: item
+                                    .get("summary")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_owned(),
+                                command: command.to_owned(),
+                            })
                         })
                         .collect()
                 })
                 .unwrap_or_default();
 
-            let planned =
-                source.and_then(|s| s.get("action")).and_then(Value::as_str) == Some("planned");
             let summary = if result.is_none() {
                 base_summary
             } else if status == SpecialStatus::Error {
@@ -2191,9 +2210,11 @@ pub fn map_special_tool(
                 Some(Value::Array(arr)) => arr
                     .iter()
                     .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|q| !q.is_empty())
                     .map(str::to_owned)
                     .collect(),
-                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::String(s)) if !s.trim().is_empty() => vec![s.trim().to_owned()],
                 _ => Vec::new(),
             };
             let successful = details
@@ -2205,27 +2226,22 @@ pub fn map_special_tool(
                 .unwrap_or(queries.len() as i64);
             let partial = successful.is_some_and(|s| s < count);
             let failed = successful == Some(0) && count > 0;
+            let has_top_error = !common_errors.is_empty();
             let mut errors = common_errors;
             if let Some(q_arr) = details
                 .and_then(|d| d.get("queries"))
                 .and_then(Value::as_array)
             {
                 for q in q_arr.iter().filter_map(Value::as_object) {
-                    errors.extend(collect_special_errors(&[q.get("error")]));
+                    extend_special_errors(&mut errors, &[q.get("error")]);
                 }
             }
             let status = match result {
                 None => initial,
-                Some(res)
-                    if res.is_error
-                        || details
-                            .and_then(|d| d.get("error"))
-                            .is_some_and(|v| !v.is_null())
-                        || failed =>
-                {
-                    SpecialStatus::Error
+                Some(res) if res.is_error || has_top_error || failed => SpecialStatus::Error,
+                Some(_) if partial || !errors.is_empty() || details.is_none() => {
+                    SpecialStatus::Degraded
                 }
-                Some(_) if partial || details.is_none() => SpecialStatus::Degraded,
                 Some(_) => SpecialStatus::Success,
             };
             let summary = if result.is_none() {
@@ -2358,15 +2374,16 @@ pub fn map_special_tool(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
-            let top_reason_val = (volumes.is_empty() && !top_reason.is_empty())
-                .then(|| Value::String(top_reason.clone()));
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
-                source.and_then(|s| s.get("collectionErrors")),
-                top_reason_val.as_ref(),
-            ]));
-            for vol in &volumes {
-                errors.extend(vol.errors.iter().cloned());
+            extend_special_errors(
+                &mut errors,
+                &[source.and_then(|s| s.get("collectionErrors"))],
+            );
+            if volumes.is_empty() {
+                push_special_error(&mut errors, &top_reason);
+            }
+            for err in volumes.iter().flat_map(|vol| &vol.errors) {
+                push_special_error(&mut errors, err);
             }
 
             let attempted: Vec<&SpecialVolumeView> = volumes
@@ -2510,7 +2527,11 @@ pub fn map_special_tool(
                         vec![
                             FieldRow {
                                 label: "目标卷".into(),
-                                value: format!("{} · {}", v.drive, v.id),
+                                value: if v.id.trim().is_empty() {
+                                    v.drive.clone()
+                                } else {
+                                    format!("{} · {}", v.drive, v.id)
+                                },
                             },
                             FieldRow {
                                 label: "转换状态".into(),
@@ -2584,6 +2605,150 @@ pub fn map_special_tool(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn special_errors_keep_first_occurrence_and_ignore_blank_values() {
+        let call = ToolCallInput {
+            name: "sys".to_owned(),
+            id: "call".to_owned(),
+            arguments: Default::default(),
+            execution: None,
+        };
+        let result = ToolResultInput {
+            raw_text: " timed out ".to_owned(),
+            details: Some(json!({
+                "error": "timed out",
+                "overview": {
+                    "error": "",
+                    "collectionErrors": [" ", "timed out", "counter unavailable"],
+                    "counterErrors": [null, {}, " counter unavailable "]
+                }
+            })),
+            is_error: true,
+            ..Default::default()
+        };
+        let view = map_special_tool(&call, Some(&result), false).unwrap();
+        assert_eq!(view.errors(), ["timed out", "counter unavailable"]);
+
+        let blank = ToolResultInput {
+            details: Some(json!({
+                "overview": { "error": " ", "cpuTotalPct": 0, "mem": { "usedPct": 0 } }
+            })),
+            ..Default::default()
+        };
+        let view = map_special_tool(&call, Some(&blank), false).unwrap();
+        assert_eq!(view.status(), SpecialStatus::Success);
+        assert!(view.errors().is_empty());
+        assert!(
+            map_special_tool(&call, None, true)
+                .unwrap()
+                .fields()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_runbook_file_is_not_a_successful_delivery() {
+        let call = ToolCallInput {
+            name: "runbook_deliver".to_owned(),
+            id: "call".to_owned(),
+            arguments: Default::default(),
+            execution: None,
+        };
+        let result = ToolResultInput {
+            details: Some(json!({
+                "runbook": { "action": "delivered", "file": " ", "commands": [{}] }
+            })),
+            ..Default::default()
+        };
+        let Some(SpecialToolView::Runbook {
+            status,
+            delivery,
+            commands,
+            ..
+        }) = map_special_tool(&call, Some(&result), false)
+        else {
+            panic!("expected runbook result");
+        };
+        assert_eq!(status, SpecialStatus::Degraded);
+        assert!(delivery.is_none());
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn disk_usage_presenter_distinguishes_clean_walk_fallback_and_legacy_replay() {
+        let call = ToolCallInput {
+            id: "u1".into(),
+            name: "disk".into(),
+            arguments: json!({"scope": "usage", "path": "C:\\Users"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            execution: None,
+        };
+        // Clean native-walk is Success without any WizTree warning
+        let clean = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "native-walk",
+                        "root": "C:\\Users",
+                        "totalGB": 12.5,
+                        "truncated": false,
+                        "topDirs": [{"path": "C:\\Users\\a", "sizeGB": 12.5, "pct": 100.0}],
+                        "notice": "原生并行目录遍历完成"
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert_eq!(clean.status, CardStatus::Success);
+        assert!(!format!("{:?}", clean.blocks).contains("WizTree"));
+
+        // MFT fallback emits generic fast-index warning notice
+        let fallback = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "native-walk",
+                        "root": "C:\\",
+                        "totalGB": 20.0,
+                        "degradedFrom": "native-mft: 权限不足",
+                        "topDirs": [{"path": "C:\\Windows", "sizeGB": 20.0, "pct": 100.0}]
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert!(format!("{:?}", fallback.blocks).contains("快速卷索引不可用"));
+        assert!(!format!("{:?}", fallback.blocks).contains("WizTree"));
+
+        // Legacy session replay (`method: "wiztree"` / `"node-walk"`) still renders cleanly
+        let legacy = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "node-walk",
+                        "root": "C:\\old",
+                        "totalGB": 5.0,
+                        "degradedFrom": "wiztree",
+                        "topDirs": [{"path": "C:\\old\\a", "sizeGB": 5.0, "pct": 100.0}]
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert!(format!("{:?}", legacy.blocks).contains("快速卷索引不可用"));
+    }
+}
+
 /// Revision-keyed presenter cache shared by GUI and TUI views.
 #[derive(Default)]
 pub struct ToolPresenterCache {
@@ -2592,6 +2757,27 @@ pub struct ToolPresenterCache {
 }
 
 impl ToolPresenterCache {
+    pub fn get_cached_normal(
+        &self,
+        call_id: &str,
+        result_revision: u64,
+    ) -> Option<Arc<ToolCardView>> {
+        self.normal
+            .get(&(call_id.to_owned(), result_revision))
+            .map(Arc::clone)
+    }
+
+    pub fn get_cached_special(
+        &self,
+        call_id: &str,
+        result_revision: u64,
+        live: bool,
+    ) -> Option<Arc<SpecialToolView>> {
+        self.special
+            .get(&(call_id.to_owned(), result_revision, live))
+            .map(Arc::clone)
+    }
+
     pub fn get_or_map_normal(
         &mut self,
         call: &ToolCallInput,

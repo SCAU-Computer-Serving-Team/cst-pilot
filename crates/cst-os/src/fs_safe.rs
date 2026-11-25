@@ -245,13 +245,20 @@ impl Storage {
         let Some(opened) = self.open_read(file)? else {
             return Ok(None);
         };
+        let too_large = || {
+            if limit == 256 * 1024 {
+                "方案或清单文件超过 256 KiB，请检查文件。".to_owned()
+            } else {
+                format!("文件超过大小上限（{limit} 字节），请检查文件。")
+            }
+        };
         if opened
             .metadata()
             .map_err(|e| io_error("读取文件信息", e))?
             .len()
             > limit as u64
         {
-            return Err("方案或清单文件超过 256 KiB，请检查文件。".into());
+            return Err(too_large());
         }
         let mut bytes = Vec::new();
         opened
@@ -259,7 +266,7 @@ impl Storage {
             .read_to_end(&mut bytes)
             .map_err(|e| io_error("读取交付文件", e))?;
         if bytes.len() > limit {
-            return Err("方案或清单文件超过 256 KiB，请检查文件。".into());
+            return Err(too_large());
         }
         self.check_parent(file)?;
         Ok(Some(bytes))

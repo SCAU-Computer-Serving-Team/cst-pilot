@@ -34,7 +34,7 @@ use gpui::{
     AppContext as _, Bounds, ContentMask, Point, ScaledPixels, Size, WindowsSurfaceDrawContext,
     WindowsSurfaceRenderer, px,
 };
-use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestQueryExt, TestWindowExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -59,11 +59,12 @@ impl KitTempFixture {
     fn create() -> Self {
         let workspace_fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
         let dir = std::env::temp_dir().join(format!("cst-desktop-step3-{}", Uuid::new_v4()));
-        fs::create_dir_all(dir.join("agent/home")).unwrap();
-        fs::create_dir_all(dir.join("assets/fonts")).unwrap();
+        fs::create_dir_all(dir.join("app/prompts")).unwrap();
+        fs::create_dir_all(dir.join("app/fonts")).unwrap();
+        fs::create_dir_all(dir.join("data/config")).unwrap();
         fs::write(dir.join("VERSION"), "cst-pilot v0.1.0\n").unwrap();
         fs::write(
-            dir.join("agent/home/APPEND_SYSTEM.md"),
+            dir.join("app/prompts/APPEND_SYSTEM.md"),
             "桌面端测试规则。\n",
         )
         .unwrap();
@@ -77,7 +78,7 @@ impl KitTempFixture {
             "runbook",
             "bitlocker",
         ] {
-            let p = dir.join(format!("agent/home/skills/{skill}/SKILL.md"));
+            let p = dir.join(format!("app/skills/{skill}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(p, format!("---\nname: {skill}\n---\n技能说明。\n")).unwrap();
         }
@@ -90,7 +91,7 @@ impl KitTempFixture {
         ] {
             fs::copy(
                 workspace_fonts.join(font_file),
-                dir.join("assets/fonts").join(font_file),
+                dir.join("app/fonts").join(font_file),
             )
             .unwrap();
         }
@@ -357,6 +358,23 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
         );
     }
 
+    // 1b. Semi-transparent login sky fades cleanly over backdrop instead of snapping to 100%
+    h1.clear_split_black_white();
+    D3d11SkySurface {
+        preset: SkyPreset::LoginLight,
+        time_sec: 0.0,
+        opacity: 0.01,
+        corner_radii_phys: [0.0; 4],
+    }
+    .paint(&h1.make_draw_ctx(0.0, 0.0, 256.0, 160.0, D3D_FEATURE_LEVEL_11_0_RAW))
+    .unwrap();
+    let faded_px = h1.readback_bgra();
+    let left_sample = faded_px[80 * 256 + 40];
+    assert!(
+        left_sample[0] <= 12 && left_sample[1] <= 12 && left_sample[2] <= 12,
+        "opacity=0.01 sky over black must stay near-black without flashing opaque: {left_sample:?}"
+    );
+
     // 2. Sharp black/white split + frosted glass overlay -> Gaussian blur across x=128 inside overlay, untouched outside!
     h1.clear_split_black_white();
     let palette = DesktopPalette::light();
@@ -520,6 +538,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
             event_cursor: None,
             leaf_id: None,
             running: true,
+            compacting: false,
             active_turn_started_ms: None,
             messages: Arc::new(Vec::new()),
             entries: Arc::new(Vec::new()),
@@ -527,6 +546,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
             streaming_assistant: None,
             bitlocker: None,
             context_usage: None,
+            usage: None,
             queue: None,
             ui: None,
             estimated_bytes: 0,
@@ -692,7 +712,7 @@ fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
     drop(guard);
 
     // Corrupt SFNT font header -> must fail cleanly without modifying files
-    let mono_path = fixture.root.join("assets/fonts/JetBrainsMono-Regular.ttf");
+    let mono_path = fixture.root.join("app/fonts/JetBrainsMono-Regular.ttf");
     fs::write(&mono_path, b"BAD_FONT_HEADER_BYTES").unwrap();
     let bad_out = Command::new(exe)
         .arg("--health-check")
@@ -708,6 +728,7 @@ fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
 struct MockServerState {
     channel_mode: String,
     sidebar_collapsed: bool,
+    reject_sse: bool,
     running_sessions: bool,
     web_closed_calls: usize,
     exit_calls: usize,
@@ -732,6 +753,7 @@ impl MockDesktopBackend {
         let state = Arc::new(Mutex::new(MockServerState {
             channel_mode: "app_active".to_owned(),
             sidebar_collapsed: false,
+            reject_sse: false,
             running_sessions: true,
             web_closed_calls: 0,
             exit_calls: 0,
@@ -768,6 +790,9 @@ impl MockDesktopBackend {
                         let body_str = req.split("\r\n\r\n").nth(1).unwrap_or("");
 
                         if path.starts_with("/api/app/events") || path.starts_with("/api/events/stream") {
+                            if st.lock().unwrap().reject_sse {
+                                return;
+                            }
                             let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n: connected\n\n";
                             let _ = stream.write_all(hdr.as_bytes()).await;
                             while !st_stop.load(Ordering::Relaxed) {
@@ -895,6 +920,144 @@ impl Drop for MockDesktopBackend {
 }
 
 #[gpui_kit::test]
+async fn narrow_sidebar_manual_override_and_drawer_follow_viewport_transitions(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = MockDesktopBackend::start();
+    backend.state.lock().unwrap().reject_sse = true;
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt.handle(), endpoint, None).unwrap();
+    let (win, _) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+    let resize = |cx: &gpui_kit::TestAppContext, w, h| {
+        cx.simulate_window_resize(win, Size::new(px(w), px(h)));
+    };
+
+    resize(cx, 1119.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("topbar-mklbe").visible());
+        window.click("topbar-recent-drawer-btn", cx);
+        assert!(window.find("recent-sessions-drawer").visible());
+    })
+    .unwrap();
+    // The first resize persists its normal bounds even without a startup geometry event.
+    cx.wait_for(win, Duration::from_secs(2), |_, _| {
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .any(|patch| patch["windowWidth"] == 1119 && patch["windowHeight"] == 700)
+    })
+    .await;
+    assert!(
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .all(|patch| { patch.get("sidebarCollapsed").is_none() })
+    );
+
+    resize(cx, 1120.0, 700.0);
+    // HTTP revisions apply even with no SSE connection. A persisted collapse
+    // must stay collapsed across the breakpoint, unlike an automatic collapse.
+    backend.state.lock().unwrap().sidebar_collapsed = true;
+    backend
+        .rt
+        .block_on(handle.query_desktop_settings())
+        .unwrap();
+    assert!(!handle.snapshot().connected);
+    cx.wait_for(win, Duration::from_secs(2), |window, _| {
+        window.try_find("sidebar-l081m1").is_none()
+    })
+    .await;
+    resize(cx, 1119.0, 700.0);
+    resize(cx, 1120.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-l081m1").is_none());
+    })
+    .unwrap();
+    backend.state.lock().unwrap().sidebar_collapsed = false;
+    backend
+        .rt
+        .block_on(handle.query_desktop_settings())
+        .unwrap();
+    cx.wait_for(win, Duration::from_secs(2), |window, _| {
+        window.try_find("sidebar-l081m1").is_some()
+    })
+    .await;
+
+    resize(cx, 1119.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("recent-sessions-drawer").is_none());
+        window.press("ctrl-b", cx);
+    })
+    .unwrap();
+    cx.executor()
+        .advance_clock(cst_desktop::theme::motion::NORMAL);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sidebar-l081m1").visible());
+    })
+    .unwrap();
+
+    resize(cx, 1.0, 1.0);
+    resize(cx, 1100.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.find("sidebar-l081m1").visible(),
+            "manual expansion is retained within the narrow viewport"
+        );
+    })
+    .unwrap();
+    resize(cx, 1120.0, 700.0);
+    resize(cx, 1119.0, 700.0);
+    resize(cx, 1120.0, 1.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-l081m1").is_none());
+    })
+    .unwrap();
+    resize(cx, 1120.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sidebar-l081m1").visible());
+    })
+    .unwrap();
+    cx.wait_for(win, Duration::from_secs(2), |_, _| {
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .any(|patch| patch["sidebarCollapsed"] == false)
+    })
+    .await;
+}
+
+#[gpui_kit::test]
 async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     cx: &mut gpui_kit::TestAppContext,
 ) {
@@ -951,17 +1114,54 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     })
     .unwrap();
 
-    // 3. Open recent sessions drawer, then press `escape` -> single-layer close + 1-frame focus restore
+    // 3. Reverse the drawer mid-flight, without remounting it at its closed position.
     cx.update_window(win_handle, |_, window, cx| {
         window.click("topbar-recent-drawer-btn", cx);
         assert!(window.find("recent-sessions-drawer").visible());
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(75));
+    let opening_x = cx
+        .update_window(win_handle, |_, window, cx| {
+            window.render_frame(cx);
+            let x = window.find("recent-sessions-drawer").bounds().origin.x;
+            window.press("escape", cx);
+            assert!(window.try_find("recent-sessions-drawer").is_none());
+            x
+        })
+        .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(20));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-recent-drawer-btn", cx);
+        let reopening_x = window.find("recent-sessions-drawer").bounds().origin.x;
+        assert!(reopening_x > gpui_kit::px(-116.0) && reopening_x < opening_x);
 
+        // Escape still removes the interactive surface immediately and restores focus.
         window.press("escape", cx);
         assert!(window.try_find("recent-sessions-drawer").is_none());
         assert_eq!(
             window.find("topbar-recent-drawer-btn").focused(),
             Some(true)
         );
+    })
+    .unwrap();
+
+    // Account menu exits without retaining its interactive surface or losing trigger focus.
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-account-btn", cx);
+        assert!(window.try_find("account-popover-menu").is_some());
+    })
+    .unwrap();
+    cx.executor()
+        .advance_clock(cst_desktop::theme::motion::POPOVER_OPEN);
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("escape", cx);
+        assert!(window.try_find("account-popover-menu").is_none());
+        assert_eq!(window.find("topbar-account-btn").focused(), Some(true));
+        // Reopen during the exit so the lock has a live menu to cancel.
+        window.click("topbar-account-btn", cx);
+        assert!(window.try_find("account-popover-menu").is_some());
     })
     .unwrap();
 
@@ -978,6 +1178,7 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     .await;
 
     cx.update_window(win_handle, |_, window, cx| {
+        assert!(window.try_find("account-popover-menu").is_none());
         window.click("web-active-switch-back-btn", cx);
     })
     .unwrap();
@@ -987,6 +1188,11 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     })
     .await;
     assert_eq!(backend.state.lock().unwrap().web_closed_calls, 1);
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("account-popover-menu").is_none());
+    })
+    .unwrap();
 
     // 5. Close button (`window-btn-close`) with active session -> opens `pFooK` 384px exit dialog,
     //    initial focus on `"取消"`, `escape` dismisses safely without calling `/api/app/exit`!
@@ -1004,6 +1210,10 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
         let card = window.find("exit-dialog-card-pfook");
         assert_eq!(f32::from(card.bounds().size.width), 384.0);
         assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        window.press("tab", cx);
+        assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
+        window.press("tab", cx);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
 
         window.press("escape", cx);
         assert!(window.try_find("exit-dialog-card-pfook").is_none());
@@ -1014,4 +1224,921 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
         assert!(!shell.read(cx).has_exit_dialog());
     });
     assert_eq!(backend.state.lock().unwrap().exit_calls, 0);
+}
+
+#[test]
+fn motion_primitives_timings_easings_banner_hover_pause_and_welcome_stagger_unit() {
+    use cst_desktop::shell::overlays::BannerCountdownState;
+    use cst_desktop::theme::motion;
+
+    assert_eq!(motion::INSTANT, Duration::ZERO);
+    assert_eq!(motion::PRESS, Duration::from_millis(120));
+    assert_eq!(motion::FAST, Duration::from_millis(150));
+    assert_eq!(motion::POPOVER_OPEN, Duration::from_millis(220));
+    assert_eq!(motion::WELCOME_ITEM, Duration::from_millis(220));
+    assert_eq!(motion::MODAL_OPEN, Duration::from_millis(240));
+    assert_eq!(motion::NORMAL, Duration::from_millis(240));
+    assert_eq!(motion::SURFACE_CLOSE, Duration::from_millis(150));
+    assert_eq!(motion::FLIP_ENTER, Duration::from_millis(180));
+    assert_eq!(motion::FLIP_MOVE, Duration::from_millis(250));
+    assert_eq!(motion::RESIZE, Duration::from_millis(300));
+    assert_eq!(motion::WELCOME_MAX_TOTAL, Duration::from_millis(300));
+    assert_eq!(motion::WELCOME_STAGGER_STEP, Duration::from_millis(40));
+    assert_eq!(motion::SLOW, Duration::from_millis(340));
+    assert_eq!(motion::ICON_SWAP_RESTORE, Duration::from_millis(1600));
+    assert_eq!(motion::RUNNING_LIGHT_CYCLE, Duration::from_millis(2000));
+    assert_eq!(motion::BANNER_AUTO_DISMISS, Duration::from_millis(2600));
+    assert_eq!(motion::TOOLTIP_INITIAL_DELAY, Duration::from_millis(400));
+    assert_eq!(motion::TOOLTIP_COOLDOWN, Duration::from_millis(300));
+
+    let eo = motion::ease_out();
+    assert!((eo(0.0) - 0.0).abs() < 1e-4);
+    assert!((eo(1.0) - 1.0).abs() < 1e-4);
+    assert!(eo(0.2) > 0.45, "ease_out should accelerate early");
+
+    let eio = motion::ease_in_out();
+    assert!((eio(0.0) - 0.0).abs() < 1e-4);
+    assert!((eio(0.5) - 0.5).abs() < 0.02);
+    assert!((eio(1.0) - 1.0).abs() < 1e-4);
+
+    let sp = motion::ease_spring();
+    assert!((sp(0.0) - 0.0).abs() < 1e-4);
+    assert!((sp(1.0) - 1.0).abs() < 1e-4);
+    assert!(
+        (1..20).any(|i| sp(i as f32 * 0.05) > 1.0),
+        "ease_spring should produce subtle overshoot"
+    );
+
+    assert_eq!(
+        motion::welcome_stagger_progress(2, Duration::ZERO, true),
+        (1.0, 0.0)
+    );
+    let (op0, y0) = motion::welcome_stagger_progress(0, Duration::from_millis(110), false);
+    let (op2, y2) = motion::welcome_stagger_progress(2, Duration::from_millis(110), false);
+    assert!(op0 > op2 && y0 < y2, "item 2 must lag item 0 by 80ms");
+    assert_eq!(
+        motion::welcome_stagger_progress(2, Duration::from_millis(300), false),
+        (1.0, 0.0)
+    );
+
+    let t0 = Instant::now();
+    let mut countdown = BannerCountdownState::new();
+    let time = |ms| t0 + Duration::from_millis(ms);
+    let first = countdown.start(t0);
+    assert_eq!(first.remaining_at(t0), Duration::from_millis(2600));
+    assert!(!countdown.expire(first, time(1000)));
+    assert!(countdown.set_hovered(true, time(1000)).is_none());
+    assert!(!countdown.expire(first, time(2600)));
+    assert_eq!(countdown.remaining(), Duration::from_millis(1600));
+    let resumed = countdown.set_hovered(false, time(4000)).unwrap();
+    assert_eq!(
+        resumed.remaining_at(time(4000)),
+        Duration::from_millis(1600)
+    );
+    assert!(!countdown.expire(first, time(4000)));
+    assert!(countdown.set_hovered(true, time(4100)).is_none());
+    let resumed_again = countdown.set_hovered(false, time(4500)).unwrap();
+    assert_eq!(
+        resumed_again.remaining_at(time(4500)),
+        Duration::from_millis(1500)
+    );
+    let replacement = countdown.start(time(5000));
+    assert!(!countdown.expire(resumed, time(5600)));
+    assert!(!countdown.expire(resumed_again, time(6000)));
+    assert!(countdown.expire(replacement, time(7600)));
+    assert!(!countdown.expire(replacement, time(7601)));
+    assert!(countdown.set_hovered(true, time(7601)).is_none());
+    assert!(!countdown.is_hovered());
+
+    // Pause/resume at the same clock tick can produce the same absolute
+    // deadline; it still must not revalidate the cancelled timer.
+    let before_pause = countdown.start(time(9000));
+    countdown.set_hovered(true, time(9000));
+    let after_pause = countdown.set_hovered(false, time(9000)).unwrap();
+    assert!(!countdown.expire(before_pause, time(11600)));
+    assert!(countdown.expire(after_pause, time(11600)));
+}
+
+#[gpui_kit::test]
+async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_one_shot_and_banner_hover_pause(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use gpui_kit::base::motion::{Transition, transition};
+    use gpui_kit::{ParentElement as _, Styled as _, div};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    cx.executor().allow_parking();
+
+    // 1. Interruptible GPUI Transition mid-flight reversal + reduce_motion 0ms snap
+    struct ProbeView {
+        target: Rc<Cell<f32>>,
+        last_val: Rc<Cell<f32>>,
+    }
+    impl gpui_kit::Render for ProbeView {
+        fn render(
+            &mut self,
+            window: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            let v = transition(
+                "probe-reversal-id",
+                self.target.get(),
+                Transition::new(cst_desktop::theme::motion::NORMAL)
+                    .ease(cst_desktop::theme::motion::ease_out()),
+                window,
+                cx,
+            );
+            self.last_val.set(v);
+            div().size_full().child(format!("{v:.3}"))
+        }
+    }
+
+    let target = Rc::new(Cell::new(0.0_f32));
+    let sampled = Rc::new(Cell::new(0.0_f32));
+    let probe_handle = cx.add_window(|_, _| ProbeView {
+        target: Rc::clone(&target),
+        last_val: Rc::clone(&sampled),
+    });
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!((sampled.get() - 0.0).abs() < 1e-4);
+
+    // Retarget 0.0 -> 1.0 and advance half duration (120ms / 240ms)
+    target.set(1.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(120));
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let mid = sampled.get();
+    assert!(
+        mid > 0.25 && mid < 0.99,
+        "expected mid-flight value in (0.25, 0.99), got {mid}"
+    );
+
+    // Reverse target back to 0.0 mid-flight — must reverse smoothly from `mid` without snapping to 0 or 1
+    target.set(0.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let at_reverse = sampled.get();
+    assert!(
+        at_reverse > 0.2 && (at_reverse - mid).abs() < 0.1,
+        "reversal must start from current mid-flight value {mid}, got {at_reverse}"
+    );
+    cx.executor().advance_clock(Duration::from_millis(80));
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let reversing = sampled.get();
+    assert!(
+        reversing > 0.0 && reversing < at_reverse,
+        "expected smooth downward progress between 0 and {at_reverse}, got {reversing}"
+    );
+
+    // Enabling reduce_motion must snap immediately (0ms) on target change
+    cx.update(|cx| cx.set_reduce_motion(true));
+    target.set(1.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(
+        (sampled.get() - 1.0).abs() < 1e-4,
+        "reduce_motion must snap transition to 1.0 at 0ms, got {}",
+        sampled.get()
+    );
+    cx.update(|cx| cx.set_reduce_motion(false));
+
+    // 2. Real AppShell: welcomeStagger oneShotPerSession, 0ms Ctrl+K, & 2600ms hover-pause banner
+    let fixture = KitTempFixture::create();
+    let backend = MockDesktopBackend::start();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt.handle(), endpoint, None).unwrap();
+    backend.rt.block_on(handle.refresh_globals()).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        let font_report = cst_desktop::theme::load_bundled_fonts(&fixture.root, cx);
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), Some(font_report), cx).unwrap()
+    });
+
+    // Ctrl+P / Ctrl+O instant (0ms) open, in-place switch, and Escape close
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("ctrl-p", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
+        window.press("ctrl-o", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+    })
+    .unwrap();
+
+    // Bottom-right gear button opens the desktop settings/account popover menu (matching Web),
+    // and clicking "设置" navigates away from Home (marking welcomeStagger as done).
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("sidebar-settings-btn", cx);
+        assert!(window.find("account-popover-menu").visible());
+        assert!(window.find("account-menu-feedback-btn").visible());
+        window.click("account-menu-settings-btn", cx);
+        assert!(window.find("settings-view-vpwaf").visible());
+        window.click("sidebar-new-session-btn", cx);
+        assert!(window.find("workspace-home-view").visible());
+    })
+    .unwrap();
+    cx.update(|cx| {
+        assert!(shell.read(cx).workbench_welcome_stagger_done(cx));
+    });
+
+    // Banner hover pauses 2600ms auto-dismiss and unhover completes countdown
+    shell.update(cx, |this, cx| {
+        this.show_top_notice("已自动保存配置", cx);
+    });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("top-notice-banner").visible());
+        window.hover("top-notice-banner", cx);
+    })
+    .unwrap();
+
+    cx.executor().advance_clock(Duration::from_millis(3200));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("top-notice-banner").is_some(),
+            "hovered banner must pause auto-dismiss"
+        );
+        window.hover("topbar-gels8", cx);
+    })
+    .unwrap();
+
+    cx.executor().advance_clock(Duration::from_millis(2800));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("top-notice-banner").is_none(),
+            "unhovered banner must auto-dismiss after remaining duration"
+        );
+    })
+    .unwrap();
+
+    // A notice unmounted under the pointer does not receive a hover-leave.
+    // It must not get stuck paused when a higher-priority error replaces it.
+    shell.update(cx, |this, cx| this.show_top_notice("后台操作已完成", cx));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover("top-notice-banner", cx);
+    })
+    .unwrap();
+    shell.update(cx, |this, cx| this.show_workspace_error("未能保存设置", cx));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.hover("topbar-gels8", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(2700));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("workspace-top-error-bar").is_none());
+        assert!(window.try_find("top-notice-banner").is_none());
+    })
+    .unwrap();
+
+    // CopyFeedbackTracker 1600ms iconSwap restore check
+    struct CopyProbe {
+        tracker: cst_desktop::workbench::markdown_view::CopyFeedbackTracker,
+    }
+    impl gpui_kit::Render for CopyProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            div().size_full()
+        }
+    }
+    let copy_entity = cx.new(|_| CopyProbe {
+        tracker: Default::default(),
+    });
+    copy_entity.update(cx, |p, cx| {
+        p.tracker
+            .mark_copied("block-1".into(), |v| &mut v.tracker, cx);
+        assert!(p.tracker.is_copied("block-1"));
+    });
+    cx.executor().advance_clock(Duration::from_millis(1500));
+    cx.executor().run_until_parked();
+    cx.read(|cx| {
+        assert!(
+            copy_entity.read(cx).tracker.is_copied("block-1"),
+            "copy icon must stay swapped before 1600ms"
+        );
+    });
+    copy_entity.update(cx, |p, cx| {
+        p.tracker
+            .mark_copied("block-1".into(), |v| &mut v.tracker, cx);
+    });
+    cx.executor().run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.executor().run_until_parked();
+    cx.read(|cx| assert!(copy_entity.read(cx).tracker.is_copied("block-1")));
+    cx.executor().advance_clock(Duration::from_millis(1450));
+    cx.executor().run_until_parked();
+    cx.read(|cx| assert!(!copy_entity.read(cx).tracker.is_copied("block-1")));
+}
+
+#[gpui::test]
+async fn milestone_g_motion_primitives_track_live_layout_and_cancel_stale_state(
+    cx: &mut gpui::TestAppContext,
+) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    use cst_desktop::theme::motion;
+    use gpui_kit::{
+        InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _,
+        TestSupportExt as _, div, px,
+    };
+
+    struct MilestoneGProbe {
+        checked: Rc<Cell<bool>>,
+        collapsed_open: Rc<Cell<bool>>,
+        hover_active: Rc<Cell<bool>>,
+        flip_scope: Rc<Cell<&'static str>>,
+        body_height: Rc<Cell<f32>>,
+        body_focus: gpui::FocusHandle,
+        flip_y_pos: Rc<Cell<f32>>,
+        last_check_some: Rc<Cell<bool>>,
+        last_collapse_some: Rc<Cell<bool>>,
+        last_hover_p: Rc<Cell<f32>>,
+        last_flip_offset: Rc<Cell<f32>>,
+    }
+
+    impl gpui_kit::Render for MilestoneGProbe {
+        fn render(
+            &mut self,
+            window: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            let chk = motion::animated_checkbox_mark(
+                "probe-chk",
+                self.checked.get(),
+                px(12.0),
+                gpui_kit::white(),
+                window,
+                cx,
+            );
+            self.last_check_some.set(chk.is_some());
+
+            let col = motion::animated_collapse(
+                "probe-col",
+                self.collapsed_open.get(),
+                window,
+                cx,
+                |_, _| {
+                    div()
+                        .id("probe-body")
+                        .test_support()
+                        .track_focus(&self.body_focus)
+                        .h(px(self.body_height.get()))
+                        .flex_shrink_0()
+                        .child("detail")
+                        .into_any_element()
+                },
+            );
+            self.last_collapse_some.set(col.is_some());
+
+            let hp =
+                motion::animated_state_progress("probe-hover", self.hover_active.get(), window, cx);
+            self.last_hover_p.set(hp);
+
+            self.last_flip_offset
+                .set(f32::from(motion::flip_row_offset_y(
+                    "probe-list",
+                    "row-a",
+                    &self.flip_scope.get().into(),
+                    px(self.flip_y_pos.get()),
+                    window,
+                    cx,
+                )));
+
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().absolute().children(chk))
+                .children(col)
+                .child(
+                    div()
+                        .id("probe-tail")
+                        .test_support()
+                        .h(px(10.0))
+                        .flex_shrink_0(),
+                )
+        }
+    }
+
+    let checked = Rc::new(Cell::new(false));
+    let collapsed_open = Rc::new(Cell::new(false));
+    let hover_active = Rc::new(Cell::new(false));
+    let flip_scope = Rc::new(Cell::new("initial"));
+    let body_height = Rc::new(Cell::new(80.0));
+    let flip_y_pos = Rc::new(Cell::new(100.0_f32));
+    let last_check_some = Rc::new(Cell::new(false));
+    let last_collapse_some = Rc::new(Cell::new(false));
+    let last_hover_p = Rc::new(Cell::new(0.0_f32));
+    let last_flip_offset = Rc::new(Cell::new(0.0_f32));
+
+    let win = cx.add_window(|_, cx| MilestoneGProbe {
+        checked: Rc::clone(&checked),
+        collapsed_open: Rc::clone(&collapsed_open),
+        hover_active: Rc::clone(&hover_active),
+        flip_scope: Rc::clone(&flip_scope),
+        body_height: Rc::clone(&body_height),
+        body_focus: cx.focus_handle(),
+        flip_y_pos: Rc::clone(&flip_y_pos),
+        last_check_some: Rc::clone(&last_check_some),
+        last_collapse_some: Rc::clone(&last_collapse_some),
+        last_hover_p: Rc::clone(&last_hover_p),
+        last_flip_offset: Rc::clone(&last_flip_offset),
+    });
+
+    // 1. Initial closed / unchecked / idle state
+    cx.update_window(*win, |_, window, cx| {
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(!last_check_some.get());
+    assert!(!last_collapse_some.get());
+    assert!((last_hover_p.get() - 0.0).abs() < 1e-4);
+    assert!((last_flip_offset.get() - 0.0).abs() < 1e-4);
+
+    let sample = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+        })
+        .unwrap();
+        last_flip_offset.get()
+    };
+    // Reordering down starts at the previous visual position, even on the first frame.
+    flip_y_pos.set(160.0);
+    assert_eq!(sample(cx), -60.0);
+    cx.executor().advance_clock(Duration::from_millis(60));
+    let mid = sample(cx);
+    assert!(mid > -60.0 && mid < 0.0);
+    // Reversing mid-flight preserves visual position. A filter/session switch never animates.
+    flip_y_pos.set(100.0);
+    assert!((sample(cx) - (60.0 + mid)).abs() < 0.001);
+    flip_scope.set("filtered");
+    flip_y_pos.set(20.0);
+    assert_eq!(sample(cx), 0.0);
+    flip_y_pos.set(501.0);
+    assert_eq!(sample(cx), 0.0);
+    flip_y_pos.set(21.0);
+    assert_eq!(sample(cx), 480.0);
+    cx.executor().advance_clock(Duration::from_millis(250));
+    assert_eq!(sample(cx), 0.0);
+
+    // 4. checkStroke + animated_collapse + 150ms hover progress
+    checked.set(true);
+    collapsed_open.set(true);
+    hover_active.set(true);
+    cx.update_window(*win, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(75));
+    cx.update_window(*win, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(
+        last_check_some.get(),
+        "checkStroke canvas should be visible while checking"
+    );
+    assert!(
+        last_collapse_some.get(),
+        "animated_collapse should be visible while opening"
+    );
+    let hover_mid = last_hover_p.get();
+    assert!(
+        hover_mid > 0.2 && hover_mid < 0.99,
+        "150ms hover progress should be mid-flight at 75ms, got {hover_mid}"
+    );
+
+    // Growth while still opening must increase the reveal. Once open the body
+    // follows its natural height, and the close starts at that last height.
+    body_height.set(200.0);
+    sample(cx);
+    cx.executor().advance_clock(Duration::from_millis(175));
+    sample(cx);
+    let tail_y = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, _| {
+            window
+                .elements()
+                .into_iter()
+                .find(|el| el.path().last() == Some(&"probe-tail".into()))
+                .unwrap()
+                .bounds()
+                .origin
+                .y
+        })
+        .unwrap()
+    };
+    assert_eq!(tail_y(cx), px(200.0));
+    body_height.set(280.0);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    cx.update_window(*win, |probe, window, cx| {
+        probe
+            .downcast::<MilestoneGProbe>()
+            .unwrap()
+            .read(cx)
+            .body_focus
+            .clone()
+            .focus(window, cx)
+    })
+    .unwrap();
+
+    // Close collapse & uncheck: the height is animated but the subtree is already inert.
+    checked.set(false);
+    collapsed_open.set(false);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    cx.update_window(*win, |probe, window, cx| {
+        assert!(
+            !probe
+                .downcast::<MilestoneGProbe>()
+                .unwrap()
+                .read(cx)
+                .body_focus
+                .is_focused(window)
+        );
+        assert!(
+            !window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&"probe-body".into()))
+        );
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(200));
+    cx.update_window(*win, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(
+        !last_check_some.get(),
+        "checkStroke should unmount after 150ms uncheck"
+    );
+    assert!(
+        !last_collapse_some.get(),
+        "animated_collapse should unmount after 150ms close"
+    );
+
+    // Reduced motion adopts the new layout without a transitional frame.
+    cx.update(|cx| cx.set_reduce_motion(true));
+    collapsed_open.set(true);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    collapsed_open.set(false);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(0.0));
+
+    let mid_col = motion::lerp_hsla(gpui_kit::transparent_black(), gpui_kit::white(), 0.5);
+    assert!((mid_col.a - 0.5).abs() < 0.05);
+}
+
+#[gpui::test]
+async fn desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime(
+    cx: &mut gpui::TestAppContext,
+) {
+    use cst_desktop::theme::motion::{self, DesktopTooltipExt as _, DesktopTooltips};
+    use gpui_kit::{
+        InputEvent as _, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
+        MouseMoveEvent, ParentElement as _, Styled as _, TestSupportExt as _, div, point,
+    };
+
+    struct Probe {
+        mounted: bool,
+        layer: gpui::Entity<DesktopTooltips>,
+    }
+    impl gpui::Render for Probe {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let trigger = |id| {
+                div()
+                    .id(id)
+                    .test_support()
+                    .w(px(40.0))
+                    .h(px(40.0))
+                    .desktop_tooltip(id, id)
+            };
+            div()
+                .size_full()
+                .flex()
+                .pl(px(12.0))
+                .pt(px(12.0))
+                .children(self.mounted.then(|| trigger("tip-a")))
+                .child(trigger("tip-b"))
+                .child(self.layer.clone())
+        }
+    }
+    cx.update(|cx| {
+        gpui_kit::base::TooltipDefaults::new()
+            .with_show_delay(motion::TOOLTIP_INITIAL_DELAY)
+            .with_grace_period(motion::TOOLTIP_COOLDOWN)
+            .install(cx);
+    });
+    let open = |cx: &mut gpui::TestAppContext| {
+        cx.add_window(|window, cx| Probe {
+            mounted: true,
+            layer: DesktopTooltips::install(window, cx),
+        })
+    };
+    let first = open(cx);
+    let second = open(cx);
+    let has = |cx: &mut gpui::TestAppContext, win, id: &str| {
+        cx.update_window(win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+            window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&gpui::SharedString::from(id.to_owned()).into()))
+        })
+        .unwrap()
+    };
+    let hover = |cx: &mut gpui::TestAppContext, win, id: &'static str| {
+        cx.update_window(win, |_, window, cx| window.hover(id, cx))
+            .unwrap();
+    };
+    let tick = |cx: &mut gpui::TestAppContext, ms| {
+        cx.executor().run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(ms));
+        cx.executor().run_until_parked();
+    };
+
+    cx.simulate_window_pointer_state(*first, true, true);
+    hover(cx, *first, "tip-a");
+    tick(cx, 399);
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+    tick(cx, 1);
+    assert!(has(cx, *first, "tooltip-tip-a"));
+    assert!(!has(cx, *second, "tooltip-tip-a"));
+
+    hover(cx, *first, "tip-b");
+    assert!(has(cx, *first, "tooltip-tip-b"));
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+    // A mouse-down outside any tooltip trigger cancels the visible grace period.
+    cx.update_window(*first, |_, window, cx| {
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Right,
+                position: point(px(120.0), px(20.0)),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    assert!(!has(cx, *first, "tooltip-tip-b"));
+
+    hover(cx, *first, "tip-a");
+    tick(cx, 400);
+    assert!(has(cx, *first, "tooltip-tip-a"));
+    first
+        .update(cx, |probe, _, cx| {
+            probe.mounted = false;
+            cx.notify();
+        })
+        .unwrap();
+    // Move away and remove the hovered trigger before its normal leave delay expires.
+    cx.update_window(*first, |_, window, cx| {
+        window.dispatch_event(
+            MouseMoveEvent {
+                position: point(px(120.0), px(20.0)),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    has(cx, *first, "tooltip-tip-a");
+    tick(cx, 0);
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+
+    hover(cx, *first, "tip-b");
+    tick(cx, 400);
+    assert!(has(cx, *first, "tooltip-tip-b"));
+    cx.simulate_window_pointer_state(*first, false, false);
+    cx.simulate_window_pointer_state(*second, true, true);
+    assert!(!has(cx, *first, "tooltip-tip-b"));
+    hover(cx, *second, "tip-a");
+    tick(cx, 399);
+    assert!(!has(cx, *second, "tooltip-tip-a"));
+    tick(cx, 1);
+    assert!(has(cx, *second, "tooltip-tip-a"));
+}
+
+#[gpui::test]
+async fn motion_tuning_collapse_exit_easings_and_frosted_opacity(cx: &mut gpui::TestAppContext) {
+    use cst_desktop::background::FrostedGlassSpec;
+    use cst_desktop::theme::{DesktopPalette, motion};
+    use gpui_kit::{
+        InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _,
+        TestSupportExt as _, div,
+    };
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // 1. FrostedGlassSpec::with_opacity scales & clamps cleanly for D3D11 fade sync.
+    let pal = DesktopPalette::light();
+    let scrim = FrostedGlassSpec::scrim(&pal);
+    let half = scrim.with_opacity(0.5);
+    assert!((half.opacity - scrim.opacity * 0.5).abs() < 1e-5);
+    assert_eq!(scrim.with_opacity(-1.0).opacity, 0.0);
+    assert!((scrim.with_opacity(2.0).opacity - scrim.opacity).abs() < 1e-5);
+
+    // 2. checkStroke spring overshoot & flip ease_in_out symmetry.
+    let spring = motion::ease_spring();
+    let max_spring = (1..=40)
+        .map(|i| spring(i as f32 / 40.0))
+        .fold(0.0_f32, f32::max);
+    assert!(
+        max_spring > 1.001 && max_spring < 1.05,
+        "checkStroke spring curve should have subtle overshoot in (1.001, 1.05), got {max_spring}"
+    );
+    let eio = motion::ease_in_out();
+    assert!((eio(0.5) - 0.5).abs() < 0.02);
+    assert!(eio(0.25) < 0.25 && eio(0.75) > 0.75);
+
+    // 3. animated_collapse_with_exit preserves visual-only exit snapshot while blurring focus
+    //    and unmounting interactive/test nodes on close frame 1, plus animated_press_progress.
+    struct CollapseExitProbe {
+        open: Rc<Cell<bool>>,
+        pressed: Rc<Cell<bool>>,
+        body_focus: gpui::FocusHandle,
+        saw_inert_exit: Rc<Cell<bool>>,
+        press_p: Rc<Cell<f32>>,
+    }
+
+    impl gpui::Render for CollapseExitProbe {
+        fn render(
+            &mut self,
+            window: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            let saw_inert = Rc::clone(&self.saw_inert_exit);
+            let focus = self.body_focus.clone();
+            let col = motion::animated_collapse_with_exit(
+                "exit-probe",
+                self.open.get(),
+                window,
+                cx,
+                |interactive, _, _| {
+                    if interactive {
+                        div()
+                            .id("exit-probe-live-body")
+                            .test_support()
+                            .track_focus(&focus)
+                            .h(px(120.0))
+                            .flex_shrink_0()
+                            .child("live")
+                            .into_any_element()
+                    } else {
+                        saw_inert.set(true);
+                        div()
+                            .h(px(120.0))
+                            .flex_shrink_0()
+                            .child("inert-exit")
+                            .into_any_element()
+                    }
+                },
+            );
+            self.press_p.set(motion::animated_press_progress(
+                "press-probe-btn",
+                self.pressed.get(),
+                window,
+                cx,
+            ));
+            div().size_full().flex().flex_col().children(col)
+        }
+    }
+
+    let open = Rc::new(Cell::new(true));
+    let pressed = Rc::new(Cell::new(false));
+    let saw_inert_exit = Rc::new(Cell::new(false));
+    let press_p = Rc::new(Cell::new(0.0_f32));
+    let win = cx.add_window(|_, cx| CollapseExitProbe {
+        open: Rc::clone(&open),
+        pressed: Rc::clone(&pressed),
+        body_focus: cx.focus_handle(),
+        saw_inert_exit: Rc::clone(&saw_inert_exit),
+        press_p: Rc::clone(&press_p),
+    });
+
+    let frame = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+        })
+        .unwrap();
+    };
+    frame(cx);
+    cx.executor().advance_clock(Duration::from_millis(260));
+    frame(cx);
+    cx.update_window(*win, |probe, window, cx| {
+        probe
+            .downcast::<CollapseExitProbe>()
+            .unwrap()
+            .read(cx)
+            .body_focus
+            .clone()
+            .focus(window, cx);
+    })
+    .unwrap();
+
+    // Trigger close: frame 1 must blur focus, unmount interactive node, and render inert exit.
+    open.set(false);
+    pressed.set(true);
+    frame(cx);
+    cx.executor().advance_clock(Duration::from_millis(60));
+    frame(cx);
+    assert!(
+        saw_inert_exit.get(),
+        "animated_collapse_with_exit should render inert exit content during 150ms close"
+    );
+    assert!(
+        press_p.get() > 0.2 && press_p.get() < 0.99,
+        "120ms press progress should be mid-flight at 60ms, got {}",
+        press_p.get()
+    );
+    cx.update_window(*win, |probe, window, cx| {
+        assert!(
+            !probe
+                .downcast::<CollapseExitProbe>()
+                .unwrap()
+                .read(cx)
+                .body_focus
+                .is_focused(window)
+        );
+        assert!(
+            !window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&"exit-probe-live-body".into()))
+        );
+    })
+    .unwrap();
+
+    // After 150ms close completes, inert exit stops rendering.
+    saw_inert_exit.set(false);
+    cx.executor().advance_clock(Duration::from_millis(120));
+    frame(cx);
+    assert!(
+        !saw_inert_exit.get(),
+        "inert exit should unmount once 150ms close finishes"
+    );
+    assert!(
+        (press_p.get() - 1.0).abs() < 0.01,
+        "120ms press progress should settle at 1.0, got {}",
+        press_p.get()
+    );
 }

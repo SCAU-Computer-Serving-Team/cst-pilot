@@ -285,6 +285,7 @@ pub trait SettingsStorage: Send + Sync {
 pub struct FileSettingsStorage {
     global_path: PathBuf,
     project_path: PathBuf,
+    lock_dir: Option<PathBuf>,
 }
 
 impl FileSettingsStorage {
@@ -292,6 +293,36 @@ impl FileSettingsStorage {
         Self {
             global_path: agent_dir.as_ref().join("settings.json"),
             project_path: cwd.as_ref().join(CONFIG_DIR_NAME).join("settings.json"),
+            lock_dir: None,
+        }
+    }
+
+    pub fn with_lock_dir(
+        cwd: impl AsRef<Path>,
+        config_dir: impl AsRef<Path>,
+        lock_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            global_path: config_dir.as_ref().join("settings.json"),
+            project_path: cwd.as_ref().join(CONFIG_DIR_NAME).join("settings.json"),
+            lock_dir: Some(lock_dir.into()),
+        }
+    }
+
+    fn acquire_lock(&self, path: &Path) -> Result<DedicatedFileLockGuard, String> {
+        if let Some(lock_dir) = &self.lock_dir {
+            use sha2::{Digest, Sha256};
+            let raw = path.to_string_lossy();
+            let normalized = raw
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&raw)
+                .replace('\\', "/")
+                .to_lowercase();
+            let hash = Sha256::digest(normalized.as_bytes());
+            let lock_path = lock_dir.join(format!("settings-{hash:x}.lock"));
+            DedicatedFileLockGuard::acquire_at(&lock_path)
+        } else {
+            DedicatedFileLockGuard::acquire(path)
         }
     }
 }
@@ -312,7 +343,7 @@ impl SettingsStorage for FileSettingsStorage {
 
         // 仅当文件已存在时才先加锁读取；避免只读加载不存在的 settings.json 时在磁盘创建空目录或锁文件
         let mut _lock_guard = if path.exists() {
-            Some(DedicatedFileLockGuard::acquire(path)?)
+            Some(self.acquire_lock(path)?)
         } else {
             None
         };
@@ -330,7 +361,7 @@ impl SettingsStorage for FileSettingsStorage {
         let next = f(current_content.as_deref())?;
         if let Some(next_text) = next {
             if _lock_guard.is_none() {
-                _lock_guard = Some(DedicatedFileLockGuard::acquire(path)?);
+                _lock_guard = Some(self.acquire_lock(path)?);
                 // 获取锁后若发现其他进程刚刚创建了该文件，重读一次再执行回调以防丢写
                 if path.exists() && current_content.is_none() {
                     let mut raw = String::new();

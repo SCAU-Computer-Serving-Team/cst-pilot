@@ -1,14 +1,15 @@
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
+import { readDurationMs, readEasing } from "./motion-tokens";
 
 const targets =
-	".home-center, .home-footnote, .home-backdrop, .chat-composer-area, .conversation > *, .chat-header > *, .settings-content, .tree-toolbar > *, .tree-list";
+	".home-center, .home-footnote, .home-backdrop, .chat-composer-area, .conversation > *, .chat-header > *, .export-toolbar > *, .settings-content, .session-list-content, .tree-toolbar > *, .tree-list";
 
 /** 布局只更新一次，随后以合成层位移衔接，避免侧栏每帧改宽触发全页重排。 */
 export function useSidebarMotion(collapsed: boolean) {
 	const root = useRef<HTMLDivElement>(null);
 	const positions = useRef(new Map<HTMLElement, DOMRect>());
 	const animations = useRef<Animation[]>([]);
-	function capture() {
+	const capture = useCallback(() => {
 		positions.current = new Map(
 			[...(root.current?.querySelectorAll<HTMLElement>(targets) ?? [])].map((element) => [
 				element,
@@ -18,16 +19,17 @@ export function useSidebarMotion(collapsed: boolean) {
 		for (const animation of animations.current) animation.cancel();
 		animations.current = [];
 		root.current?.removeAttribute("data-sidebar-reveal");
-	}
+	}, []);
 	useLayoutEffect(() => {
 		const previous = positions.current;
 		positions.current = new Map();
 		if (!previous.size || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-		const tokens = getComputedStyle(document.documentElement);
-		const time = tokens.getPropertyValue(collapsed ? "--duration-medium" : "--duration-slow").trim();
-		// 构建器可将 350ms 压缩成 .35s，WAAPI 的 duration 始终使用毫秒。
-		const duration = Number.parseFloat(time) * (time.endsWith("ms") ? 1 : 1000);
-		const easing = tokens.getPropertyValue("--ease-smooth-out").trim();
+		const duration = readDurationMs(
+			document.documentElement,
+			collapsed ? "--fast" : "--normal",
+			collapsed ? 150 : 240,
+		);
+		const easing = readEasing(document.documentElement);
 		const measurements = [...previous]
 			.filter(([element]) => element.isConnected)
 			.map(([element, before]) => {

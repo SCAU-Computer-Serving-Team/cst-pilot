@@ -16,6 +16,7 @@ struct CliArgs {
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
+    static_dir: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
@@ -33,6 +34,7 @@ where
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
+    let mut static_dir = None;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
@@ -53,6 +55,10 @@ where
                 let val = iter.next().ok_or("`--cwd` 缺少路径参数")?;
                 cwd = Some(PathBuf::from(val));
             }
+            "--static-dir" => {
+                let val = iter.next().ok_or("`--static-dir` 缺少路径参数")?;
+                static_dir = Some(PathBuf::from(val));
+            }
             other => return Err(format!("未知的命令行参数：{other}")),
         }
     }
@@ -69,6 +75,7 @@ where
         port,
         kit_root,
         cwd,
+        static_dir,
     })
 }
 
@@ -159,8 +166,8 @@ fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String
         std::env::set_var("PATHEXT", ".COM;.EXE;.BAT;.CMD");
         std::env::set_var("TEMP", &tmp_dir);
         std::env::set_var("TMP", &tmp_dir);
-        std::env::set_var("PI_CODING_AGENT_DIR", clean_root.join("agent").join("home"));
-        std::env::set_var("PI_OFFLINE", "1");
+        std::env::set_var("CST_PILOT_ROOT", &clean_root);
+        std::env::set_var("CST_OFFLINE", "1");
     }
     let _ = std::env::set_current_dir(&clean_root);
     Ok(())
@@ -233,6 +240,10 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(msg) = kit.ensure_default_configs() {
+        eprintln!("{msg}");
+        return ExitCode::FAILURE;
+    }
 
     let oa_client = match OaClient::official() {
         Ok(c) => c,
@@ -269,6 +280,7 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     config.mode_config.standalone_web = args.standalone_web;
     config.port = args.port;
     config.cwd = args.cwd.or_else(|| std::env::current_dir().ok());
+    config.static_dir = args.static_dir;
 
     let server = match RunningServer::start(host, config).await {
         Ok(s) => s,

@@ -162,6 +162,25 @@ export class MessageOutbox {
 	claimEntrance(id: string): boolean {
 		return this.fresh.delete(id);
 	}
+	/** 在执行不可逆的会话树回退前预检发件箱存储可写性，按完整待入箱记录尺寸校验，避免服务端已回退但前端无法落盘。 */
+	verifyWritable(preview?: Omit<OutgoingMessage, "state" | "attempted" | "createdAt" | "fromHome">): void {
+		if (this.recoveryError) throw new Error(this.recoveryError);
+		const probePayload = preview
+			? [
+					...this.records,
+					{
+						...preview,
+						images: [...preview.images],
+						fromHome: !preview.sessionId,
+						createdAt: Date.now(),
+						state: "waiting" as const,
+						attempted: false,
+					} satisfies OutgoingMessage,
+				]
+			: this.records;
+		this.storage.setItem(OUTBOX_KEY, JSON.stringify(probePayload));
+		if (preview) this.storage.setItem(OUTBOX_KEY, JSON.stringify(this.records));
+	}
 	enqueue(input: Omit<OutgoingMessage, "state" | "attempted" | "createdAt" | "fromHome">) {
 		if (this.recoveryError) throw new Error(this.recoveryError);
 		if (this.find(input.id)) throw new Error("这条消息已经提交，请在消息下方核对状态。");

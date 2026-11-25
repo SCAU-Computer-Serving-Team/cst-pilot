@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::runbook::storage::{Storage, StorageAtomicExt};
+use crate::runbook::storage::StorageAtomicExt;
 
 /// Local secret has no Debug/Serialize implementation and never enters records.
 #[derive(Clone)]
@@ -24,11 +24,11 @@ pub struct Installation {
 impl Installation {
     /// No ephemeral identity on read-only media or damage. Existing bytes stay unchanged.
     pub fn load(root: &Path) -> Option<Self> {
-        let storage = Storage::new(root).ok()?;
-        let _paths = storage
-            .pin_directory(Path::new("agent/home/telemetry"), true)
-            .ok()?;
-        let path = storage.root.join("agent/home/telemetry/identity.json");
+        let layout = cst_os::KitLayout::new(root).ok()?;
+        let (storage, data_rel) = crate::kit::open_data_storage(&layout, true).ok()?;
+        let tel_rel = data_rel.join("telemetry");
+        let _paths = storage.pin_directory(&tel_rel, true).ok()?;
+        let path = storage.root.join(&tel_rel).join("identity.json");
         match storage.read_limited(&path, 4096) {
             Ok(Some(bytes)) => return Self::parse(&bytes),
             Ok(None) => (),
@@ -37,7 +37,7 @@ impl Installation {
         let owner = super::owner::Owner::global().ok()?;
         let cancel = CancellationToken::new();
         let _transaction =
-            super::file_lock::FileLock::acquire(&storage.root, &path, &owner.proof(), &cancel)
+            super::file_lock::FileLock::acquire(layout.root(), &path, &owner.proof(), &cancel)
                 .ok()?;
         match storage.read_limited(&path, 4096) {
             Ok(Some(bytes)) => return Self::parse(&bytes),

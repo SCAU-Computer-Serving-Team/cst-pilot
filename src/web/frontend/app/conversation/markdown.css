@@ -1,3 +1,5 @@
-.markdown :is(.hljs-keyword, .hljs-built_in, .hljs-title, .hljs-type) { color: var(--chat-tool); }
-.markdown :is(.hljs-string, .hljs-number, .hljs-literal, .hljs-attr) { color: var(--chat-success); }
-.markdown :is(.hljs-comment, .hljs-quote) { color: var(--chat-muted); }
+/* 00H Markdown 代码块 3 色语义高亮（对齐 HmEJM / storybook.html） */
+.markdown :is(.hljs-keyword, .hljs-built_in, .hljs-title, .hljs-type, .hljs-meta) { color: var(--accent-ink); }
+.markdown :is(.hljs-string, .hljs-number, .hljs-literal, .hljs-attr, .hljs-symbol) { color: var(--status-success); }
+.markdown :is(.hljs-comment, .hljs-quote) { color: var(--text-secondary); }
+.markdown :is(.hljs-operator, .hljs-punctuation) { color: var(--text-secondary); }

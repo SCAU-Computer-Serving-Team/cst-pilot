@@ -150,7 +150,9 @@ pub async fn handle_models_route(
             None
         };
 
-        let stats = slot.as_ref().map(|s| s.session().get_session_stats());
+        let usage = slot
+            .as_ref()
+            .map(|s| crate::session::usage::build_session_usage_payload(&s.id, s.session()));
         let (def_prov, def_mid) = default_model_reference(&settings);
         let default_model = explicit_model(runtime, &def_prov, &def_mid);
         let selected_model = slot
@@ -172,31 +174,52 @@ pub async fn handle_models_route(
             .map(|m| m.provider.clone())
             .collect();
 
-        let web_settings = state.web_settings.read().await.map_err(ApiError::from)?;
-        let patterns = settings.get_enabled_models().unwrap_or_default();
+        // Both inputs form one logical scope; do not read them mid-write.
+        let (patterns, empty_model_scope) = {
+            let _guard = state.locks.lock("model-scoped").await;
+            let web_settings = state.web_settings.read().await.map_err(ApiError::from)?;
+            (
+                settings.get_enabled_models().unwrap_or_default(),
+                web_settings.empty_model_scope,
+            )
+        };
         let mut enabled: Option<Vec<String>> = None;
         let mut unavailable_enabled: Vec<String> = Vec::new();
-        if patterns.is_empty() && web_settings.empty_model_scope {
+        let mut scope_rules = Vec::new();
+        if patterns.is_empty() && empty_model_scope {
             enabled = Some(Vec::new());
         } else if !patterns.is_empty() {
-            let scope = resolve_model_scope_from_models(&patterns, &catalog);
             let available_ids: HashSet<String> = available
                 .iter()
                 .map(|m| format!("{}/{}", m.provider, m.id))
                 .collect();
             let mut en = Vec::new();
-            for scoped in scope.scoped_models {
-                let id = format!("{}/{}", scoped.model.provider, scoped.model.id);
-                if available_ids.contains(&id) {
-                    en.push(id);
-                } else {
-                    unavailable_enabled.push(id);
+            let mut seen = HashSet::new();
+            for pattern in &patterns {
+                let scope =
+                    resolve_model_scope_from_models(std::slice::from_ref(pattern), &catalog);
+                let mut matches = Vec::with_capacity(scope.scoped_models.len());
+                for scoped in scope.scoped_models {
+                    let id = format!("{}/{}", scoped.model.provider, scoped.model.id);
+                    let exact = match scoped.thinking_level {
+                        Some(level) => format!("{id}:{}", level.as_str()),
+                        None => id.clone(),
+                    };
+                    // Keep overlaps per rule so the editor can remove a model
+                    // from all rules that match it, even when only one row is visible.
+                    matches.push(json!({"id": id, "pattern": exact}));
+                    if seen.insert(id.clone()) {
+                        if available_ids.contains(&id) {
+                            en.push(id);
+                        } else {
+                            unavailable_enabled.push(id);
+                        }
+                    }
                 }
-            }
-            for diag in scope.diagnostics {
-                if diag.code == "no-match" {
-                    unavailable_enabled.push(diag.pattern);
+                if scope.diagnostics.iter().any(|d| d.code == "no-match") {
+                    unavailable_enabled.push(pattern.clone());
                 }
+                scope_rules.push(json!({"pattern": pattern, "matches": matches}));
             }
             enabled = Some(en);
         }
@@ -219,25 +242,6 @@ pub async fn handle_models_route(
             );
         }
 
-        let usage_json = stats.as_ref().map(|st| {
-            let denom = st.input_tokens + st.cache_read_tokens;
-            let hit_rate = if denom > 0 {
-                Some((st.cache_read_tokens as f64) / (denom as f64))
-            } else {
-                None
-            };
-            json!({
-                "tokens": {
-                    "input": st.input_tokens,
-                    "output": st.output_tokens,
-                    "cacheRead": st.cache_read_tokens,
-                    "cacheWrite": st.cache_write_tokens,
-                    "total": st.total_tokens,
-                },
-                "cacheHitRate": hit_rate,
-            })
-        });
-
         let models_json: Vec<Value> = available
             .iter()
             .map(|m| describe_model(m, runtime, &ready_providers))
@@ -255,9 +259,10 @@ pub async fn handle_models_route(
                 "defaultModel": describe_model(&default_model, runtime, &ready_providers),
                 "enabled": enabled,
                 "unavailableEnabled": unavailable_enabled,
+                "scopeRules": enabled.as_ref().map(|_| &scope_rules),
                 "thinkingLevels": selected_levels,
-                "contextUsage": stats.and_then(|s| s.context_usage),
-                "usage": usage_json,
+                "contextUsage": usage.as_ref().and_then(|u| u.context_usage.as_ref()),
+                "usage": usage.as_ref().map(|u| &u.usage),
                 "selected": selected_desc,
             }),
             method,
@@ -523,7 +528,7 @@ pub async fn handle_models_route(
                 "请求的模型范围无效",
             ));
         };
-        if patterns_arr.len() > 100 {
+        if patterns_arr.len() > 4096 {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
@@ -532,7 +537,7 @@ pub async fn handle_models_route(
         }
         let mut patterns = Vec::with_capacity(patterns_arr.len());
         for p in patterns_arr {
-            let Some(s) = p.as_str().filter(|s| s.len() <= 200) else {
+            let Some(s) = p.as_str().filter(|s| s.len() <= 512) else {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
@@ -544,6 +549,17 @@ pub async fn handle_models_route(
         let empty_flag = match obj.get("empty") {
             None => false,
             Some(Value::Bool(b)) => *b,
+            _ => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "请求的模型范围无效",
+                ));
+            }
+        };
+        let preserve_explicit = match obj.get("preserveExplicit") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
             _ => {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
@@ -573,7 +589,12 @@ pub async fn handle_models_route(
                     let runtime = state.host.auth().runtime();
                     let all_models = runtime.get_all_models();
                     let scope = resolve_model_scope_from_models(&patterns, &all_models);
-                    if !scope.diagnostics.is_empty() {
+                    let existing = settings.get_enabled_models().unwrap_or_default();
+                    if scope
+                        .diagnostics
+                        .iter()
+                        .any(|diag| !existing.contains(&diag.pattern))
+                    {
                         return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_request",
@@ -586,32 +607,52 @@ pub async fn handle_models_route(
                         .into_iter()
                         .map(|m| format!("{}/{}", m.provider, m.id))
                         .collect();
-                    let covers_all = !patterns.is_empty()
-                        && patterns.len() == available_ids.len()
-                        && patterns.iter().all(|id| available_ids.contains(id));
+                    // Only collapse the implicit default order. A permutation of
+                    // every available model is still an explicit scope.
+                    let default_order = all_models
+                        .iter()
+                        .map(|m| format!("{}/{}", m.provider, m.id))
+                        .filter(|id| available_ids.contains(id));
+                    let covers_all = !preserve_explicit
+                        && !patterns.is_empty()
+                        && patterns.iter().cloned().eq(default_order);
 
-                    let save_res = if covers_all || patterns.is_empty() {
-                        settings.set_enabled_models(None, SettingsScope::Global)
-                    } else {
-                        settings.set_enabled_models(Some(patterns.clone()), SettingsScope::Global)
-                    };
-                    save_res.map_err(|msg| {
-                        ApiError::new(
+                    let old_empty = state
+                        .web_settings
+                        .read()
+                        .await
+                        .map_err(ApiError::from)?
+                        .empty_model_scope;
+                    if old_empty != empty_flag {
+                        state
+                            .web_settings
+                            .save_empty_model_scope(empty_flag)
+                            .await
+                            .map_err(ApiError::from)?;
+                    }
+                    let enabled = (!covers_all && !patterns.is_empty()).then(|| patterns.clone());
+                    if let Err(mut msg) =
+                        settings.set_enabled_models(enabled, SettingsScope::Global)
+                    {
+                        // Keep the prior scope if the second write fails. In-memory
+                        // sessions must also continue using the prior scope.
+                        if old_empty != empty_flag
+                            && let Err(err) =
+                                state.web_settings.save_empty_model_scope(old_empty).await
+                        {
+                            msg.push_str(&format!("；恢复空范围设置失败：{err}"));
+                        }
+                        return Err(ApiError::new(
                             StatusCode::SERVICE_UNAVAILABLE,
                             "configuration_unavailable",
                             msg,
-                        )
-                    })?;
+                        ));
+                    }
                     state.pool.set_scoped_models(if covers_all {
                         Vec::new()
                     } else {
                         scope.scoped_models
                     });
-                    state
-                        .web_settings
-                        .save_empty_model_scope(empty_flag)
-                        .await
-                        .map_err(ApiError::from)?;
                     state.pool.global_events.publish(
                         "state",
                         &json!({

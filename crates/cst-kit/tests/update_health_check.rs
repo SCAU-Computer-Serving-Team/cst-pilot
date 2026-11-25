@@ -39,26 +39,22 @@ impl Fixture {
         let f = Self { root };
         for (name, bytes) in [
             ("VERSION", b"cst-pilot v0.6.0\n".as_slice()),
-            ("BUILD-INFO.json", br#"{"version":"v0.6.0"}"#),
+            ("app/BUILD-INFO.json", br#"{"version":"v0.6.0"}"#),
             ("cst-pilot.exe", b"old main"),
-            ("cst-server.exe", b"old server"),
-            ("cst-updater.exe", b"old updater"),
-            ("assets/old-only.txt", b"obsolete resource"),
+            ("app/cst-server.exe", b"old server"),
+            ("app/cst-updater.exe", b"old updater"),
+            ("app/old-only.txt", b"obsolete resource"),
             (
-                "agent/home/settings.json",
+                "data/config/settings.json",
                 br#"{"existing":false,"theme":"dark"}"#,
             ),
             (
-                "agent/home/auth.json",
+                "data/config/auth.json",
                 br#"{"cstoa":{"type":"api_key","key":"synthetic-local-secret"}}"#,
             ),
-            (
-                "agent/home/sessions/session.jsonl",
-                b"synthetic session data\n",
-            ),
+            ("data/sessions/session.jsonl", b"synthetic session data\n"),
             ("artifacts/2026-11-09/runbook/01.txt", b"user command text"),
-            ("wiztree/tmp/old.csv", b"scan cache"),
-            ("wiztree/WizTree3.ini", b"user settings"),
+            (".state/tmp/wiztree/old.csv", b"scan cache"),
             ("user-note.txt", b"unrelated user file"),
         ] {
             f.write(name, bytes)
@@ -78,11 +74,10 @@ impl Fixture {
 
     fn users(&self) -> BTreeMap<String, Vec<u8>> {
         [
-            "agent/home/auth.json",
-            "agent/home/sessions/session.jsonl",
+            "data/config/auth.json",
+            "data/sessions/session.jsonl",
             "artifacts/2026-11-09/runbook/01.txt",
-            "wiztree/tmp/old.csv",
-            "wiztree/WizTree3.ini",
+            ".state/tmp/wiztree/old.csv",
             "user-note.txt",
         ]
         .into_iter()
@@ -93,12 +88,12 @@ impl Fixture {
     fn old_program(&self) -> BTreeMap<String, Vec<u8>> {
         [
             "VERSION",
-            "BUILD-INFO.json",
+            "app/BUILD-INFO.json",
             "cst-pilot.exe",
-            "cst-server.exe",
-            "cst-updater.exe",
-            "assets/old-only.txt",
-            "agent/home/settings.json",
+            "app/cst-server.exe",
+            "app/cst-updater.exe",
+            "app/old-only.txt",
+            "data/config/settings.json",
         ]
         .into_iter()
         .map(|n| (n.into(), self.read(n)))
@@ -151,50 +146,54 @@ fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
 fn files() -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::from([
         ("cst-pilot.exe".into(), b"new main".to_vec()),
-        ("cst-server.exe".into(), b"new server".to_vec()),
-        ("cst-updater.exe".into(), b"new updater".to_vec()),
+        ("app/cst-server.exe".into(), b"new server".to_vec()),
+        ("app/cst-updater.exe".into(), b"new updater".to_vec()),
         ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
         (
-            "BUILD-INFO.json".into(),
+            "app/BUILD-INFO.json".into(),
             br#"{"version":"v0.7.0"}"#.to_vec(),
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"license notices".to_vec()),
-        ("licenses/mock.txt".into(), b"mock third party".to_vec()),
-        ("assets/new-only.txt".into(), b"new resource".to_vec()),
+        ("app/licenses/mock.txt".into(), b"mock third party".to_vec()),
+        ("app/new-only.txt".into(), b"new resource".to_vec()),
         (
-            "assets/fonts/SourceHanSansCN-VF.otf".into(),
+            "app/fonts/SourceHanSansCN-VF.otf".into(),
             mock_sfnt(b"OTTO"),
         ),
-        ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+        ("app/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
         (
-            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            "app/fonts/JetBrainsMono-Regular.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+            "app/fonts/JetBrainsMono-Medium.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-OFL.txt".into(),
+            "app/fonts/JetBrainsMono-OFL.txt".into(),
             b"SIL OFL 1.1".to_vec(),
         ),
         (
-            "agent/home/APPEND_SYSTEM.md".into(),
+            "app/prompts/APPEND_SYSTEM.md".into(),
             b"synthetic prompt".to_vec(),
         ),
         (
-            "agent/home/extensions/telemetry/timserver_1.crt".into(),
+            "app/telemetry/timserver_1.crt".into(),
             b"synthetic public cert".to_vec(),
         ),
+        ("app/telemetry/currency.json".into(), b"{}".to_vec()),
         (
-            "agent/home/settings.json".into(),
+            "app/defaults/settings.json".into(),
             br#"{"existing":true,"newOption":1}"#.to_vec(),
         ),
+        ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+        ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+        ("app/defaults/web-search.json".into(), b"{}".to_vec()),
     ]);
     for skill in cst_kit::SKILL_NAMES {
         files.insert(
-            format!("agent/home/skills/{skill}/SKILL.md"),
+            format!("app/skills/{skill}/SKILL.md"),
             format!("---\nname: {skill}\ndescription: synthetic fixture\n---\nInstructions")
                 .into_bytes(),
         );
@@ -217,7 +216,7 @@ fn bundle(files: BTreeMap<String, Vec<u8>>) -> (Vec<u8>, Vec<u8>) {
             .unwrap();
         zip.write_all(bytes).unwrap();
     }
-    zip.start_file("cst-pilot/SHA256SUMS", SimpleFileOptions::default())
+    zip.start_file("cst-pilot/app/SHA256SUMS", SimpleFileOptions::default())
         .unwrap();
     zip.write_all(sums.as_bytes()).unwrap();
     let zip = zip.finish().unwrap().into_inner();
@@ -308,9 +307,9 @@ async fn commented_local_settings_and_models_pass_merge_and_public_health_check(
         // Local model config supports comments.
         "providers": {}
     }"#;
-    f.write("agent/home/models.json", models);
+    f.write("data/config/models.json", models);
     f.write(
-        "agent/home/settings.json",
+        "data/config/settings.json",
         br#"{
         /* Existing settings remain effective. */
         "theme":"dark", "existing":false
@@ -324,12 +323,12 @@ async fn commented_local_settings_and_models_pass_merge_and_public_health_check(
             .unwrap(),
         ApplyOutcome::Updated { restarted: true }
     );
-    let settings: Value = serde_json::from_slice(&f.read("agent/home/settings.json")).unwrap();
+    let settings: Value = serde_json::from_slice(&f.read("data/config/settings.json")).unwrap();
     assert_eq!(
         settings,
         json!({"theme":"dark","existing":false,"newOption":1})
     );
-    assert_eq!(f.read("agent/home/models.json"), models);
+    assert_eq!(f.read("data/config/models.json"), models);
     handoff::health_check(&f.root).unwrap();
 }
 
@@ -340,11 +339,11 @@ async fn health_check_accepts_comments_without_writing_local_settings() {
         f.write(&name, &bytes);
     }
     let settings = b"{ // local comment\n \"theme\":\"dark\" }";
-    f.write("agent/home/settings.json", settings);
+    f.write("data/config/settings.json", settings);
     handoff::health_check(&f.root).unwrap();
-    assert_eq!(f.read("agent/home/settings.json"), settings);
+    assert_eq!(f.read("data/config/settings.json"), settings);
     f.write(
-        "agent/home/settings.json",
+        "data/config/settings.json",
         b"{ // duplicate\n \"a\":1,\"a\":2 }",
     );
     assert!(handoff::health_check(&f.root).is_err());
@@ -353,7 +352,7 @@ async fn health_check_accepts_comments_without_writing_local_settings() {
 #[tokio::test]
 async fn public_health_check_failure_rolls_back_without_overwriting_invalid_user_config() {
     let f = Fixture::new();
-    f.write("agent/home/auth.json", b"invalid user config");
+    f.write("data/config/auth.json", b"invalid user config");
     let old = f.old_program();
     let users = f.users();
     let package = f.package().await;
@@ -381,11 +380,11 @@ async fn local_health_check_has_no_telemetry_credentials_or_network_side_effects
     let users = f.users();
     handoff::health_check(&f.root).unwrap();
     assert_eq!(users, f.users());
-    assert!(!f.root.join("agent/home/telemetry/identity.json").exists());
-    assert!(!f.root.join("agent/home/device.json").exists());
-    f.write("agent/home/auth.json", b"invalid config");
+    assert!(!f.root.join("data/telemetry/identity.json").exists());
+    assert!(!f.root.join("data/config/device.json").exists());
+    f.write("data/config/auth.json", b"invalid config");
     assert!(handoff::health_check(&f.root).is_err());
-    assert_eq!(f.read("agent/home/auth.json"), b"invalid config");
+    assert_eq!(f.read("data/config/auth.json"), b"invalid config");
 }
 
 #[test]

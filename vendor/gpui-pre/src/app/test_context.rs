@@ -467,6 +467,19 @@ impl TestAppContext {
         self.test_window(window_handle).simulate_resize(size);
     }
 
+    /// Simulates native window activation and cursor ownership notifications.
+    pub fn simulate_window_pointer_state(
+        &mut self,
+        window: AnyWindowHandle,
+        active: bool,
+        hovered: bool,
+    ) {
+        self.update_window(window, |_, window, cx| {
+            window.set_test_pointer_state(active, hovered, cx);
+        })
+        .unwrap();
+    }
+
     /// Simulates a change in whether the platform is presenting the window.
     pub fn simulate_window_visibility_change(
         &self,

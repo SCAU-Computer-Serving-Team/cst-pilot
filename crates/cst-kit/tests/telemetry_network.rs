@@ -50,7 +50,7 @@ impl Fixture {
         Diagnostics::new(&self.0, Owner::global().unwrap()).unwrap()
     }
     fn status(&self) -> Value {
-        serde_json::from_slice(&fs::read(self.0.join("agent/home/telemetry/status.json")).unwrap())
+        serde_json::from_slice(&fs::read(self.0.join("data/telemetry/status.json")).unwrap())
             .unwrap()
     }
 }
@@ -462,15 +462,12 @@ async fn partial_ack_retains_unconfirmed_and_oversized_head_is_quarantined() {
         outbox.read_all(Some(&ep.url)).unwrap(),
         vec![record("b", 1)]
     );
-    assert!(
-        fs::read_dir(f.0.join("agent/home/telemetry"))
-            .unwrap()
-            .any(|e| e
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .contains(".oversize-"))
-    );
+    assert!(fs::read_dir(f.0.join("data/telemetry")).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".oversize-")
+    }));
     let state = f.status();
     let status = state["endpoints"]
         .as_object()
@@ -560,7 +557,7 @@ async fn slow_heartbeat_coalesces_latest_close_and_does_not_touch_queues() {
     assert_eq!(calls[1]["heartbeat"]["status"], "closed");
     assert_eq!(calls[1]["heartbeat"]["sequence"], 3);
     assert_eq!(calls[1]["heartbeat"]["snapshots"][0]["revision"], 7);
-    assert!(!f.0.join("agent/home/telemetry/pending.jsonl").exists());
+    assert!(!f.0.join("data/telemetry/pending.jsonl").exists());
     assert_eq!(
         f.status()["endpoints"]
             .as_object()

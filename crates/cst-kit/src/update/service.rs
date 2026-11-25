@@ -749,19 +749,31 @@ fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
         .ok_or("当前构建未启用在线更新。")?;
     let source = cst_updater::manifest::validate_release_url(raw_url)?;
     let key = super::manifest::ReleaseKey::compiled()?;
-    let storage = Storage::new(root)?;
-    let _home = storage.pin_directory(Path::new("agent/home"), false)?;
-    let allow_tun = storage
-        .read_limited(&storage.root.join("agent/home/web-search.json"), 64 * 1024)?
-        .and_then(|bytes| parse_strict_json(&bytes).ok())
-        .and_then(|value| {
-            value
-                .get("ssrf")?
-                .get("allowRanges")?
-                .as_array()
-                .map(|ranges| ranges.iter().any(|v| v == "198.18.0.0/15"))
-        })
-        .unwrap_or(false);
+    let kit_layout = cst_os::KitLayout::new(root)?;
+    let allow_tun = if kit_layout.config_dir().exists() {
+        let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
+            (Storage::new(kit_layout.root())?, r.join("config"))
+        } else {
+            (
+                Storage::new(kit_layout.data_dir())?,
+                PathBuf::from("config"),
+            )
+        };
+        let _cfg = storage.pin_directory(&rel, false)?;
+        storage
+            .read_limited(&storage.root.join(&rel).join("web-search.json"), 64 * 1024)?
+            .and_then(|bytes| parse_strict_json(&bytes).ok())
+            .and_then(|value| {
+                value
+                    .get("ssrf")?
+                    .get("allowRanges")?
+                    .as_array()
+                    .map(|ranges| ranges.iter().any(|v| v == "198.18.0.0/15"))
+            })
+            .unwrap_or(false)
+    } else {
+        false
+    };
     UpdateClient::with_fetcher(
         source.as_str(),
         key,

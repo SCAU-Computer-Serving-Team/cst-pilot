@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { readDurationMs, readEasing } from "../shell/motion-tokens";
 
 /** 仅在条目数量或展开状态变化时衔接高度，完成后恢复内容自适应。 */
 export function useAnimatedHeight(revision: string | number) {
@@ -26,9 +27,7 @@ export function useAnimatedHeight(revision: string | number) {
 		const to = node.getBoundingClientRect().height;
 		height.current = to;
 		if (from === null || Math.abs(from - to) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-		const style = getComputedStyle(node);
-		const time = style.getPropertyValue("--duration-fast").trim();
-		const duration = Number.parseFloat(time) * (time.endsWith("ms") ? 1 : 1000);
+		const duration = readDurationMs(node, "--duration-fast", 240);
 		const next = node.animate(
 			[
 				{ height: `${from}px`, overflow: "clip" },
@@ -36,7 +35,7 @@ export function useAnimatedHeight(revision: string | number) {
 			],
 			{
 				duration,
-				easing: style.getPropertyValue("--ease-smooth-out").trim(),
+				easing: readEasing(node),
 			},
 		);
 		animation.current = next;

@@ -60,7 +60,7 @@ pub fn browser_json_string(value: &Value) -> String {
 pub struct HistoryRecord {
     pub sequence: u64,
     pub event_name: &'static str,
-    pub data_json: String,
+    pub data_json: Arc<str>,
     pub single_frame: Bytes,
 }
 
@@ -251,7 +251,7 @@ impl Drop for SseStreamBody {
     }
 }
 
-type MultiplexForwarder = Arc<dyn Fn(&str, u64, &'static str, &str) + Send + Sync>;
+type MultiplexForwarder = Arc<dyn Fn(&SessionEvents, u64, &'static str, &str) + Send + Sync>;
 
 struct SessionEventsInner {
     sequence: u64,
@@ -343,8 +343,8 @@ impl SessionEvents {
     /// Publishes an event (`"state"`, `"session"`, or `"queue"`), sanitizing its JSON payload once
     /// and storing the immutable `Bytes` frame in the 256-entry ring buffer.
     pub fn publish(&self, event_name: &'static str, value: &Value) -> u64 {
-        let data_json = browser_json_string(value);
-        let (seq, subscribers, forwarders) = {
+        let data_json: Arc<str> = browser_json_string(value).into();
+        let (seq, subs, forwarders) = {
             let mut guard = self.inner.lock().expect("events lock");
             guard.sequence += 1;
             let seq = guard.sequence;
@@ -361,20 +361,42 @@ impl SessionEvents {
                 data_json: data_json.clone(),
                 single_frame: single_frame.clone(),
             });
+            // Enqueue single-stream frames inside the events lock (`events -> subscriber`) so
+            // concurrent publishers cannot deliver out-of-order sequences to single-stream readers.
             let subs: Vec<Arc<SseSubscriber>> = guard.subscribers.values().cloned().collect();
+            for sub in &subs {
+                let _ = sub.enqueue_deferred(single_frame.clone());
+            }
             let fwds: Vec<MultiplexForwarder> =
                 guard.multiplex_forwarders.values().cloned().collect();
-            (seq, (subs, single_frame), fwds)
+            (seq, subs, fwds)
         };
 
-        let (subs, single_frame) = subscribers;
         for sub in subs {
-            sub.enqueue(single_frame.clone());
+            sub.finish_overflow();
         }
         for fwd in forwarders {
-            fwd(&self.epoch, seq, event_name, &data_json);
+            fwd(self, seq, event_name, &data_json);
         }
         seq
+    }
+
+    fn replay_range(
+        &self,
+        epoch: &str,
+        from_seq_inclusive: u64,
+        to_seq_inclusive: u64,
+    ) -> Vec<HistoryRecord> {
+        if self.epoch != epoch || from_seq_inclusive > to_seq_inclusive {
+            return Vec::new();
+        }
+        let guard = self.inner.lock().expect("events lock");
+        guard
+            .history
+            .iter()
+            .filter(|r| r.sequence >= from_seq_inclusive && r.sequence <= to_seq_inclusive)
+            .cloned()
+            .collect()
     }
 
     /// Subscribes a single-stream SSE client (`/api/events`, `/api/app/events`, or `/api/sessions/:id/events`).
@@ -463,27 +485,29 @@ impl SessionEvents {
         )
     }
 
-    pub fn replay_for_multiplex(
+    fn replay_for_multiplex(
         &self,
         last_cursor: Option<(&str, u64)>,
-    ) -> Option<Vec<HistoryRecord>> {
-        let (epoch, seq) = last_cursor?;
+    ) -> (u64, Option<Vec<HistoryRecord>>) {
         let guard = self.inner.lock().expect("events lock");
-        let oldest = guard
-            .history
-            .front()
-            .map_or(guard.sequence + 1, |r| r.sequence);
-        if epoch != self.epoch || seq < oldest.saturating_sub(1) || seq > guard.sequence {
-            return None;
-        }
-        Some(
-            guard
+        let records = last_cursor.and_then(|(epoch, seq)| {
+            let oldest = guard
                 .history
-                .iter()
-                .filter(|r| r.sequence > seq)
-                .cloned()
-                .collect(),
-        )
+                .front()
+                .map_or(guard.sequence + 1, |r| r.sequence);
+            if epoch != self.epoch || seq < oldest.saturating_sub(1) || seq > guard.sequence {
+                return None;
+            }
+            Some(
+                guard
+                    .history
+                    .iter()
+                    .filter(|r| r.sequence > seq)
+                    .cloned()
+                    .collect(),
+            )
+        });
+        (guard.sequence, records)
     }
 
     /// Force-closes and cancels all SSE connections established with a Web identity.
@@ -624,7 +648,7 @@ impl MultiplexHub {
 
         let weak_slots = Arc::downgrade(&hub.slots);
         let fwd_id = global_events.register_multiplex_forwarder(Arc::new(
-            move |epoch, seq, event_name, data_json| {
+            move |events, seq, event_name, data_json| {
                 let Some(slots_arc) = weak_slots.upgrade() else {
                     return;
                 };
@@ -633,7 +657,7 @@ impl MultiplexHub {
                     map.values().cloned().collect()
                 };
                 for slot in slot_list {
-                    Self::emit_to_slot(&slot, "global", epoch, seq, event_name, data_json);
+                    Self::emit_to_slot(&slot, "global", events, seq, event_name, data_json);
                 }
             },
         ));
@@ -686,30 +710,94 @@ impl MultiplexHub {
     fn emit_to_slot(
         slot: &Arc<Mutex<MultiplexSlotState>>,
         source_key: &str,
-        epoch: &str,
+        source_events: &SessionEvents,
         seq: u64,
         event_name: &'static str,
         raw_data_json: &str,
     ) {
-        let (sub, frame) = {
+        let epoch = source_events.epoch();
+        let sub = {
             let mut guard = slot.lock().expect("slot lock");
-            if source_key != "global" && !guard.subscribed_sessions.contains(source_key) {
+            if source_key != "global"
+                && !guard
+                    .attachments
+                    .get(source_key)
+                    .is_some_and(|attachment| attachment.events.epoch() == epoch)
+            {
                 return;
             }
             let Some(sub) = guard.active_subscriber.clone() else {
                 return;
             };
-            guard
-                .emitted_cursors
-                .insert(source_key.to_owned(), (epoch.to_owned(), seq));
-            let cursor_id = Self::format_vector_cursor(&guard.emitted_cursors);
-            let wrapped_data = Self::wrap_multiplex_payload(source_key, event_name, raw_data_json);
-            let frame = Bytes::from(format!(
-                "id: {cursor_id}\nevent: {event_name}\ndata: {wrapped_data}\n\n"
-            ));
-            (sub, frame)
+            // Enforce strict per-source monotonic delivery: drop stale/duplicate frames arriving
+            // out of order from concurrent publishers or replay, and backfill any gap from the
+            // source ring buffer before emitting `seq` (`slot -> events -> subscriber`).
+            if let Some((prev_epoch, prev_seq)) = guard.emitted_cursors.get(source_key).cloned()
+                && prev_epoch == epoch
+            {
+                if seq <= prev_seq {
+                    return;
+                }
+                if seq > prev_seq + 1 {
+                    let missing = source_events.replay_range(epoch, prev_seq + 1, seq - 1);
+                    if missing.len() as u64 != seq - prev_seq - 1 {
+                        // The gap has already fallen out of the ring. Recover from a snapshot
+                        // instead of acknowledging a partial replay past undelivered events.
+                        Self::enqueue_reset(&sub, source_key);
+                    } else {
+                        for rec in missing {
+                            Self::enqueue_record(
+                                &mut guard,
+                                &sub,
+                                source_key,
+                                epoch,
+                                rec.sequence,
+                                rec.event_name,
+                                &rec.data_json,
+                            );
+                        }
+                    }
+                }
+            }
+            Self::enqueue_record(
+                &mut guard,
+                &sub,
+                source_key,
+                epoch,
+                seq,
+                event_name,
+                raw_data_json,
+            );
+            sub
         };
-        sub.enqueue(frame);
+        sub.finish_overflow();
+    }
+
+    fn enqueue_record(
+        slot: &mut MultiplexSlotState,
+        sub: &SseSubscriber,
+        source: &str,
+        epoch: &str,
+        seq: u64,
+        event_name: &'static str,
+        raw_data_json: &str,
+    ) {
+        slot.emitted_cursors
+            .insert(source.to_owned(), (epoch.to_owned(), seq));
+        let id = Self::format_vector_cursor(&slot.emitted_cursors);
+        let data = Self::wrap_multiplex_payload(source, event_name, raw_data_json);
+        sub.enqueue_deferred(Bytes::from(format!(
+            "id: {id}\nevent: {event_name}\ndata: {data}\n\n"
+        )));
+    }
+
+    fn enqueue_reset(sub: &SseSubscriber, source: &str) {
+        let data = if source == "global" {
+            json!({"scope": "global"})
+        } else {
+            json!({"scope": "session", "sessionId": source})
+        };
+        sub.enqueue_deferred(Bytes::from(format!("event: reset\ndata: {data}\n\n")));
     }
 
     fn wrap_multiplex_payload(
@@ -739,29 +827,28 @@ impl MultiplexHub {
         conn_cancel: CancellationToken,
     ) -> SseStreamBody {
         let key = SlotOwnerKey::new(caller, client_id);
-        let slot = {
-            let mut map = self.slots.lock().expect("multiplex slots");
-            map.entry(key.clone())
-                .or_insert_with(|| {
-                    let mut cursors = BTreeMap::new();
-                    cursors.insert(
-                        "global".to_owned(),
-                        (
-                            self.global_events.epoch().to_owned(),
-                            self.global_events.current_sequence(),
-                        ),
-                    );
-                    Arc::new(Mutex::new(MultiplexSlotState {
-                        caller,
-                        subscribed_sessions: BTreeSet::new(),
-                        attachments: HashMap::new(),
-                        emitted_cursors: cursors,
-                        active_subscriber: None,
-                        expiry_task: None,
-                    }))
-                })
-                .clone()
-        };
+        let mut map = self.slots.lock().expect("multiplex slots");
+        let slot = map
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let mut cursors = BTreeMap::new();
+                cursors.insert(
+                    "global".to_owned(),
+                    (
+                        self.global_events.epoch().to_owned(),
+                        self.global_events.current_sequence(),
+                    ),
+                );
+                Arc::new(Mutex::new(MultiplexSlotState {
+                    caller,
+                    subscribed_sessions: BTreeSet::new(),
+                    attachments: HashMap::new(),
+                    emitted_cursors: cursors,
+                    active_subscriber: None,
+                    expiry_task: None,
+                }))
+            })
+            .clone();
 
         let sub_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let subscriber = SseSubscriber::new(sub_id, caller, conn_cancel, self.max_queued_bytes);
@@ -774,96 +861,51 @@ impl MultiplexHub {
 
         let old_subscriber = {
             let mut guard = slot.lock().expect("slot lock");
+            drop(map);
             if let Some(timer) = guard.expiry_task.take() {
                 timer.abort();
             }
             let previous = guard.active_subscriber.replace(subscriber.clone());
 
-            // Replay or reset based on Last-Event-ID vector cursor
+            // Seed every source from the client vector before emitting any replay frame.
+            // The previous connection may have queued events the client never received.
             if let Some(raw_vector) = last_event_id {
                 let parsed = Self::parse_vector_cursor(raw_vector);
-                // 1. Check global source
-                let global_cursor = parsed.get("global").map(|(e, s)| (e.as_str(), *s));
-                match self.global_events.replay_for_multiplex(global_cursor) {
-                    Some(records) => {
-                        if let Some((e, s)) = global_cursor {
-                            guard
-                                .emitted_cursors
-                                .insert("global".to_owned(), (e.to_owned(), s));
-                        }
-                        for rec in records {
-                            guard.emitted_cursors.insert(
-                                "global".to_owned(),
-                                (self.global_events.epoch().to_owned(), rec.sequence),
-                            );
-                            let cid = Self::format_vector_cursor(&guard.emitted_cursors);
-                            let frame = Bytes::from(format!(
-                                "id: {cid}\nevent: {}\ndata: {}\n\n",
-                                rec.event_name, rec.data_json
-                            ));
-                            let _ = subscriber.enqueue_deferred(frame);
-                        }
-                    }
-                    None => {
-                        guard.emitted_cursors.insert(
-                            "global".to_owned(),
-                            (
-                                self.global_events.epoch().to_owned(),
-                                self.global_events.current_sequence(),
-                            ),
-                        );
-                        let _ = subscriber.enqueue_deferred(Bytes::from_static(
-                            b"event: reset\ndata: {\"scope\":\"global\"}\n\n",
-                        ));
+                guard.emitted_cursors.clear();
+                let sources = std::iter::once(("global".to_owned(), self.global_events.clone()))
+                    .chain(guard.subscribed_sessions.iter().filter_map(|sid| {
+                        guard
+                            .attachments
+                            .get(sid)
+                            .map(|a| (sid.clone(), a.events.clone()))
+                    }))
+                    .collect::<Vec<_>>();
+                let mut replays = Vec::new();
+                for (source, events) in sources {
+                    let epoch = events.epoch().to_owned();
+                    let cursor = parsed.get(&source).map(|(e, s)| (e.as_str(), *s));
+                    let (current_seq, records) = events.replay_for_multiplex(cursor);
+                    if let (Some((_, from_seq)), Some(records)) = (cursor, records) {
+                        guard
+                            .emitted_cursors
+                            .insert(source.clone(), (epoch.clone(), from_seq));
+                        replays.push((source, epoch, records));
+                    } else {
+                        Self::enqueue_reset(&subscriber, &source);
+                        guard.emitted_cursors.insert(source, (epoch, current_seq));
                     }
                 }
-
-                // 2. Check each currently subscribed session in deterministic order
-                let sessions: Vec<String> = guard.subscribed_sessions.iter().cloned().collect();
-                for sid in sessions {
-                    let sess_events = guard.attachments.get(&sid).map(|a| a.events.clone());
-                    let sess_cursor = parsed.get(&sid).map(|(e, s)| (e.as_str(), *s));
-                    match sess_events.map(|ev| {
-                        let epoch = ev.epoch().to_owned();
-                        let cur_seq = ev.current_sequence();
-                        (epoch, cur_seq, ev.replay_for_multiplex(sess_cursor))
-                    }) {
-                        Some((epoch, _cur_seq, Some(records))) => {
-                            if let Some((e, s)) = sess_cursor {
-                                guard.emitted_cursors.insert(sid.clone(), (e.to_owned(), s));
-                            }
-                            for rec in records {
-                                guard
-                                    .emitted_cursors
-                                    .insert(sid.clone(), (epoch.clone(), rec.sequence));
-                                let cid = Self::format_vector_cursor(&guard.emitted_cursors);
-                                let wrapped = Self::wrap_multiplex_payload(
-                                    &sid,
-                                    rec.event_name,
-                                    &rec.data_json,
-                                );
-                                let frame = Bytes::from(format!(
-                                    "id: {cid}\nevent: {}\ndata: {wrapped}\n\n",
-                                    rec.event_name
-                                ));
-                                let _ = subscriber.enqueue_deferred(frame);
-                            }
-                        }
-                        Some((epoch, cur_seq, None)) => {
-                            guard.emitted_cursors.insert(sid.clone(), (epoch, cur_seq));
-                            let reset_data =
-                                json!({"scope": "session", "sessionId": sid}).to_string();
-                            let _ = subscriber.enqueue_deferred(Bytes::from(format!(
-                                "event: reset\ndata: {reset_data}\n\n"
-                            )));
-                        }
-                        None => {
-                            let reset_data =
-                                json!({"scope": "session", "sessionId": sid}).to_string();
-                            let _ = subscriber.enqueue_deferred(Bytes::from(format!(
-                                "event: reset\ndata: {reset_data}\n\n"
-                            )));
-                        }
+                for (source, epoch, records) in replays {
+                    for rec in records {
+                        Self::enqueue_record(
+                            &mut guard,
+                            &subscriber,
+                            &source,
+                            &epoch,
+                            rec.sequence,
+                            rec.event_name,
+                            &rec.data_json,
+                        );
                     }
                 }
             } else {
@@ -928,23 +970,34 @@ impl MultiplexHub {
         if let Some(timer) = guard.expiry_task.take() {
             timer.abort();
         }
+        self.schedule_expiry(key, &mut guard);
+    }
+
+    fn schedule_expiry(&self, key: &SlotOwnerKey, slot: &mut MultiplexSlotState) {
         let timeout = self.retention_timeout;
         let hub = self.clone();
-        let key_clone = key.clone();
-        guard.expiry_task = Some(tokio::spawn(async move {
+        let key = key.clone();
+        slot.expiry_task = Some(tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
-            hub.expire_disconnected_slot(&key_clone);
+            hub.expire_disconnected_slot(&key, tokio::task::id());
         }));
     }
 
-    fn expire_disconnected_slot(&self, key: &SlotOwnerKey) {
+    fn expire_disconnected_slot(&self, key: &SlotOwnerKey, timer_id: tokio::task::Id) {
         let removed = {
             let mut map = self.slots.lock().expect("multiplex slots");
             let Some(slot) = map.get(key) else {
                 return;
             };
-            let is_inactive = slot.lock().expect("slot lock").active_subscriber.is_none();
-            if is_inactive { map.remove(key) } else { None }
+            let expired = {
+                let guard = slot.lock().expect("slot lock");
+                guard.active_subscriber.is_none()
+                    && guard
+                        .expiry_task
+                        .as_ref()
+                        .is_some_and(|task| task.id() == timer_id)
+            };
+            if expired { map.remove(key) } else { None }
         };
         if let Some(slot) = removed {
             Self::destroy_slot(&slot);
@@ -980,31 +1033,35 @@ impl MultiplexHub {
         }
 
         let key = SlotOwnerKey::new(caller, client_id);
-        let slot = {
-            let mut map = self.slots.lock().expect("multiplex slots");
-            map.entry(key.clone())
-                .or_insert_with(|| {
-                    let mut cursors = BTreeMap::new();
-                    cursors.insert(
-                        "global".to_owned(),
-                        (
-                            self.global_events.epoch().to_owned(),
-                            self.global_events.current_sequence(),
-                        ),
-                    );
-                    Arc::new(Mutex::new(MultiplexSlotState {
-                        caller,
-                        subscribed_sessions: BTreeSet::new(),
-                        attachments: HashMap::new(),
-                        emitted_cursors: cursors,
-                        active_subscriber: None,
-                        expiry_task: None,
-                    }))
-                })
-                .clone()
-        };
+        let mut map = self.slots.lock().expect("multiplex slots");
+        let slot = map
+            .entry(key.clone())
+            .or_insert_with(|| {
+                let mut cursors = BTreeMap::new();
+                cursors.insert(
+                    "global".to_owned(),
+                    (
+                        self.global_events.epoch().to_owned(),
+                        self.global_events.current_sequence(),
+                    ),
+                );
+                Arc::new(Mutex::new(MultiplexSlotState {
+                    caller,
+                    subscribed_sessions: BTreeSet::new(),
+                    attachments: HashMap::new(),
+                    emitted_cursors: cursors,
+                    active_subscriber: None,
+                    expiry_task: None,
+                }))
+            })
+            .clone();
 
         let mut guard = slot.lock().expect("slot lock");
+        drop(map);
+        // Even a rejected first subscription must not keep a disconnected slot forever.
+        if guard.active_subscriber.is_none() && guard.expiry_task.is_none() {
+            self.schedule_expiry(&key, &mut guard);
+        }
         let removed: Vec<String> = guard
             .subscribed_sessions
             .difference(&desired)
@@ -1033,12 +1090,12 @@ impl MultiplexHub {
             let weak_slot = Arc::downgrade(&slot);
             let sid_for_fwd = sid.clone();
             let fwd_id = sess_events.register_multiplex_forwarder(Arc::new(
-                move |epoch, seq, event_name, data_json| {
+                move |events, seq, event_name, data_json| {
                     if let Some(slot_arc) = weak_slot.upgrade() {
                         Self::emit_to_slot(
                             &slot_arc,
                             &sid_for_fwd,
-                            epoch,
+                            events,
                             seq,
                             event_name,
                             data_json,
@@ -1061,42 +1118,29 @@ impl MultiplexHub {
                     let cursor = last_id
                         .split_once(':')
                         .and_then(|(e, s)| s.parse::<u64>().ok().map(|seq| (e, seq)));
-                    match sess_events.replay_for_multiplex(cursor) {
+                    let (current_seq, records) = sess_events.replay_for_multiplex(cursor);
+                    match records {
                         Some(records) => {
                             if let Some((e, s)) = cursor {
                                 guard.emitted_cursors.insert(sid.clone(), (e.to_owned(), s));
                             }
                             for rec in records {
-                                guard.emitted_cursors.insert(
-                                    sid.clone(),
-                                    (sess_events.epoch().to_owned(), rec.sequence),
-                                );
-                                let cid = Self::format_vector_cursor(&guard.emitted_cursors);
-                                let wrapped = Self::wrap_multiplex_payload(
+                                Self::enqueue_record(
+                                    &mut guard,
+                                    &sub,
                                     &sid,
+                                    sess_events.epoch(),
+                                    rec.sequence,
                                     rec.event_name,
                                     &rec.data_json,
                                 );
-                                let frame = Bytes::from(format!(
-                                    "id: {cid}\nevent: {}\ndata: {wrapped}\n\n",
-                                    rec.event_name
-                                ));
-                                let _ = sub.enqueue_deferred(frame);
                             }
                         }
                         None => {
-                            guard.emitted_cursors.insert(
-                                sid.clone(),
-                                (
-                                    sess_events.epoch().to_owned(),
-                                    sess_events.current_sequence(),
-                                ),
-                            );
-                            let reset_data =
-                                json!({"scope": "session", "sessionId": sid}).to_string();
-                            let _ = sub.enqueue_deferred(Bytes::from(format!(
-                                "event: reset\ndata: {reset_data}\n\n"
-                            )));
+                            guard
+                                .emitted_cursors
+                                .insert(sid.clone(), (sess_events.epoch().to_owned(), current_seq));
+                            Self::enqueue_reset(&sub, &sid);
                         }
                     }
                 } else {
@@ -1125,13 +1169,7 @@ impl MultiplexHub {
             if let Some(timer) = guard.expiry_task.take() {
                 timer.abort();
             }
-            let timeout = self.retention_timeout;
-            let hub = self.clone();
-            let key_clone = key.clone();
-            guard.expiry_task = Some(tokio::spawn(async move {
-                tokio::time::sleep(timeout).await;
-                hub.expire_disconnected_slot(&key_clone);
-            }));
+            self.schedule_expiry(&key, &mut guard);
         }
         drop(guard);
         if let Some(subscriber) = subscriber {
@@ -1191,5 +1229,94 @@ impl MultiplexHub {
         if let Some(s) = sub {
             s.close_and_cancel_connection();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::BodyExt;
+
+    use super::*;
+
+    async fn frame_text(body: &mut SseStreamBody) -> String {
+        let frame = tokio::time::timeout(Duration::from_secs(1), body.frame())
+            .await
+            .expect("SSE frame timed out")
+            .unwrap()
+            .unwrap()
+            .into_data()
+            .unwrap();
+        String::from_utf8(frame.to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn reconnect_never_advertises_unreplayed_cursors_from_previous_connection() {
+        let global = SessionEvents::new();
+        let session = SessionEvents::new();
+        let hub = MultiplexHub::new(global.clone());
+        let caller = CallerIdentity::App;
+        let source = session.clone();
+        let resolver: SessionEventsResolver = Arc::new(move |_| Some(source.clone()));
+        hub.update_subscriptions(
+            caller,
+            "client",
+            MultiplexSubscriptionUpdate {
+                sessions: vec!["session-a".into()],
+                ..Default::default()
+            },
+            &resolver,
+        )
+        .unwrap();
+        let mut first = hub.connect(caller, "client", None, CancellationToken::new());
+        let initial = frame_text(&mut first).await;
+        let last = initial
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("id: ")
+            .unwrap();
+        global.publish("state", &json!({"type": "settings_changed"}));
+        session.publish("session", &json!({"type": "agent_end"}));
+        drop(first); // Neither frame reached the client.
+
+        let mut second = hub.connect(caller, "client", Some(last), CancellationToken::new());
+        let replayed = frame_text(&mut second).await;
+        let last = replayed
+            .lines()
+            .next()
+            .unwrap()
+            .strip_prefix("id: ")
+            .unwrap();
+        let cursors = MultiplexHub::parse_vector_cursor(last);
+        assert_eq!(cursors["global"].1, 1);
+        assert_eq!(cursors["session-a"].1, 0);
+        drop(second); // Drop again before receiving the session frame.
+
+        let mut third = hub.connect(caller, "client", Some(last), CancellationToken::new());
+        let replayed = frame_text(&mut third).await;
+        assert!(replayed.contains("\"sessionId\":\"session-a\""));
+        assert!(replayed.contains("\"type\":\"agent_end\""));
+    }
+
+    #[tokio::test]
+    async fn live_gap_that_has_left_the_ring_sends_reset_before_advancing() {
+        let source = SessionEvents::new();
+        let hub = MultiplexHub::new(source.clone());
+        let caller = CallerIdentity::App;
+        let mut body = hub.connect(caller, "test", None, CancellationToken::new());
+        assert!(frame_text(&mut body).await.contains("stream_ready"));
+        source.unregister_multiplex_forwarder(hub.global_forwarder_id.load(Ordering::SeqCst));
+        let mut latest = 0;
+        for _ in 0..=RING_BUFFER_CAPACITY {
+            latest = source.publish("state", &json!({}));
+        }
+        let slot = hub.slots.lock().unwrap()[&SlotOwnerKey::new(caller, "test")].clone();
+        MultiplexHub::emit_to_slot(&slot, "global", &source, latest, "state", "{}");
+        assert_eq!(
+            frame_text(&mut body).await,
+            "event: reset\ndata: {\"scope\":\"global\"}\n\n"
+        );
+        let live = frame_text(&mut body).await;
+        assert!(live.starts_with(&format!("id: global:{}:{latest}\n", source.epoch())));
     }
 }

@@ -1,3 +1,5 @@
+mod delivery;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -36,9 +38,13 @@ use crate::state::{
 use crate::tool_presenter::ToolPresenterCache;
 use crate::workspace::{ComposerDraft, DraftKey, WorkspaceState};
 
+use self::delivery::{execute_retry_outbox, execute_send_draft, reconcile_uncertain_items};
+
 pub const MAX_MULTIPLEX_SUBSCRIPTIONS: usize = 32;
 const SUBSCRIPTION_DEBOUNCE_MS: u64 = 40;
 const STATE_REFRESH_COALESCE_MS: u64 = 25;
+const USAGE_REFRESH_COALESCE_MS: u64 = 60;
+const STARTUP_DESKTOP_SETTINGS_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct ClientRuntimeOptions {
@@ -93,6 +99,13 @@ enum WorkerCommand {
         session_id: Option<String>,
         reply: oneshot::Sender<Result<Option<Arc<SessionViewSnapshot>>, ClientError>>,
     },
+    ReloadSession {
+        session_id: String,
+        reply: oneshot::Sender<Result<Option<Arc<SessionViewSnapshot>>, ClientError>>,
+    },
+    RefreshSessionUsage {
+        session_id: String,
+    },
     RefreshGlobals {
         op_revision: u64,
         reply: oneshot::Sender<Result<OpReceipt<()>, ClientError>>,
@@ -108,6 +121,11 @@ enum WorkerCommand {
     },
     SendDraft {
         target: DraftKey,
+        draft: ComposerDraft,
+        reply: oneshot::Sender<Result<SendSubmissionOutcome, ClientError>>,
+    },
+    SendDirect {
+        session_id: String,
         draft: ComposerDraft,
         reply: oneshot::Sender<Result<SendSubmissionOutcome, ClientError>>,
     },
@@ -143,7 +161,10 @@ pub struct SendSubmissionOutcome {
 
 #[derive(Default)]
 struct OpWatermarks {
-    globals_op_rev: u64,
+    state_op_rev: u64,
+    auth_op_rev: u64,
+    account_op_rev: u64,
+    update_op_rev: u64,
     models_op_rev: u64,
     desktop_settings_op_rev: u64,
 }
@@ -158,6 +179,7 @@ struct SharedClientCore {
     snapshot: Mutex<Arc<ClientSnapshot>>,
     workspace: Mutex<WorkspaceState>,
     outbox: Mutex<SessionOutbox>,
+    send_tails: Mutex<BTreeMap<String, watch::Receiver<()>>>,
     presenter_cache: Mutex<ToolPresenterCache>,
     revision_tx: watch::Sender<u64>,
     revision_rx: watch::Receiver<u64>,
@@ -167,8 +189,33 @@ struct SharedClientCore {
 }
 
 impl SharedClientCore {
+    pub(super) fn enqueue_send_tail(
+        &self,
+        session_id: &str,
+    ) -> (watch::Sender<()>, Option<watch::Receiver<()>>) {
+        let mut tails = self.send_tails.lock().expect("send_tails lock");
+        tails.retain(|_, tail| tail.has_changed().is_ok());
+        let (tx, rx) = watch::channel(());
+        let previous = tails.insert(session_id.to_owned(), rx);
+        (tx, previous)
+    }
+
     fn alloc_op_revision(&self) -> u64 {
         self.next_op_revision.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn publish(&self, mutator: impl FnOnce(&mut ClientSnapshot)) -> u64 {
+        let next_rev = {
+            let mut guard = self.snapshot.lock().expect("snapshot lock");
+            let mut next = (**guard).clone();
+            mutator(&mut next);
+            next.revision = next.revision.wrapping_add(1);
+            let rev = next.revision;
+            *guard = Arc::new(next);
+            rev
+        };
+        notify_revision(&self.revision_tx, next_rev);
+        next_rev
     }
 }
 
@@ -221,12 +268,15 @@ impl CstClient {
             .map_err(|e| ClientError::BootstrapFailed(format!("无法创建客户端异步运行时：{e}")))?;
 
         let endpoint = runtime.block_on(ensure_server_running(kit_root, &options))?;
-        let wakeup_rx = instance_guard.subscribe_wakeup();
+        // Give saved bounds a chance to reach the first window without inheriting the
+        // normal settings request's timeout. The reducer refreshes settings on connect.
+        let initial_snapshot = runtime.block_on(load_startup_desktop_settings(&endpoint.http));
         let handle = spawn_client_workers(
             runtime.handle(),
             endpoint,
-            wakeup_rx,
+            instance_guard.subscribe_wakeup(),
             ClientRuntimeOptions::default(),
+            initial_snapshot,
         )?;
 
         Ok(ClientBootstrapResult::Started(Self {
@@ -260,7 +310,13 @@ impl CstClient {
             let (_tx, rx) = watch::channel(0u64);
             rx
         });
-        spawn_client_workers(runtime_handle, endpoint, rx, options)
+        spawn_client_workers(
+            runtime_handle,
+            endpoint,
+            rx,
+            options,
+            ClientSnapshot::default(),
+        )
     }
 
     pub fn handle(&self) -> &ClientHandle {
@@ -329,6 +385,31 @@ impl ClientHandle {
         f(&guard)
     }
 
+    /// Retains recovered content in the local outbox when the destination draft changed.
+    pub fn retain_recovered_payload(
+        &self,
+        session_id: &str,
+        draft: &ComposerDraft,
+    ) -> Result<(), ClientError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() as u64);
+        let item = OutboxItem::from_draft(Some(session_id.to_owned()), draft, now)?;
+        let id = item.client_message_id.clone();
+        let mut outbox = self.core.outbox.lock().expect("outbox lock");
+        outbox.enqueue_session(session_id, item);
+        // enqueue_session normalizes non-sending states.
+        outbox.mark_session_error(
+            session_id,
+            &id,
+            &ClientError::Conflict {
+                code: "draft_changed".into(),
+                message: "草稿已更新，请从此处恢复编辑。".into(),
+            },
+        );
+        Ok(())
+    }
+
     pub fn with_presenter_cache<R>(&self, f: impl FnOnce(&mut ToolPresenterCache) -> R) -> R {
         let mut guard = self
             .core
@@ -365,16 +446,52 @@ impl ClientHandle {
         &self,
         session_id: Option<String>,
     ) -> Result<Option<Arc<SessionViewSnapshot>>, ClientError> {
+        self.begin_activate_session(session_id).await
+    }
+
+    /// Forces an unconditional snapshot reload (`GET /api/sessions/<id>`) while keeping the previous
+    /// snapshot visible in `SessionStore` until the fresh snapshot installs.
+    pub async fn reload_session(
+        &self,
+        session_id: String,
+    ) -> Result<Option<Arc<SessionViewSnapshot>>, ClientError> {
         let (tx, rx) = oneshot::channel();
         self.core
             .cmd_tx
-            .send(WorkerCommand::ActivateSession {
+            .send(WorkerCommand::ReloadSession {
                 session_id,
                 reply: tx,
             })
             .map_err(|_| ClientError::Disconnected("客户端后台线程已退出。".into()))?;
         rx.await
             .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+    }
+
+    /// Changes the selected session immediately and returns its asynchronous load.
+    pub fn begin_activate_session(
+        &self,
+        session_id: Option<String>,
+    ) -> impl Future<Output = Result<Option<Arc<SessionViewSnapshot>>, ClientError>> + use<> {
+        let (tx, rx) = oneshot::channel();
+        let sent = {
+            let mut workspace = self.core.workspace.lock().expect("workspace lock");
+            let sent = self.core.cmd_tx.send(WorkerCommand::ActivateSession {
+                session_id: session_id.clone(),
+                reply: tx,
+            });
+            if sent.is_ok() {
+                workspace.set_active_session(session_id);
+            }
+            sent
+        };
+        if sent.is_ok() {
+            self.core.publish(|_| {});
+        }
+        async move {
+            sent.map_err(|_| ClientError::Disconnected("客户端后台线程已退出。".into()))?;
+            rx.await
+                .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+        }
     }
 
     pub async fn refresh_globals(&self) -> Result<OpReceipt<()>, ClientError> {
@@ -432,6 +549,53 @@ impl ClientHandle {
         &self,
         target: DraftKey,
     ) -> Result<SendSubmissionOutcome, ClientError> {
+        self.begin_submit_draft(target).await
+    }
+
+    /// Takes the draft and enqueues the send synchronously so an interactive
+    /// caller can clear its editor before accepting any further input.
+    pub fn begin_submit_draft(
+        &self,
+        target: DraftKey,
+    ) -> impl Future<Output = Result<SendSubmissionOutcome, ClientError>> + use<> {
+        let reply = self.enqueue_draft(target);
+        async move {
+            reply?
+                .await
+                .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+        }
+    }
+
+    /// Submits an explicit payload directly into `SessionOutbox` for `session_id` without reading or
+    /// mutating `WorkspaceState` composer drafts (used by in-place turn regeneration).
+    pub async fn submit_direct_payload(
+        &self,
+        session_id: String,
+        draft: ComposerDraft,
+    ) -> Result<SendSubmissionOutcome, ClientError> {
+        if draft.is_empty() {
+            return Err(ClientError::BadRequest {
+                code: "empty_message".into(),
+                message: "请输入消息内容或添加图片。".into(),
+            });
+        }
+        let (tx, rx) = oneshot::channel();
+        self.core
+            .cmd_tx
+            .send(WorkerCommand::SendDirect {
+                session_id,
+                draft,
+                reply: tx,
+            })
+            .map_err(|_| ClientError::Disconnected("客户端后台线程已退出。".into()))?;
+        rx.await
+            .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+    }
+
+    fn enqueue_draft(
+        &self,
+        target: DraftKey,
+    ) -> Result<oneshot::Receiver<Result<SendSubmissionOutcome, ClientError>>, ClientError> {
         let draft = self.with_workspace_mut(|ws| ws.take_draft(&target));
         if draft.is_empty() {
             return Err(ClientError::BadRequest {
@@ -455,8 +619,7 @@ impl ClientHandle {
             });
             return Err(ClientError::Disconnected("客户端后台线程已退出。".into()));
         }
-        rx.await
-            .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+        Ok(rx)
     }
 
     /// Retries a failed, storage-paused, or uncertain outbox item (`None` = Home item, `Some(sid)` = Session item).
@@ -632,6 +795,20 @@ impl ClientHandle {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.fork_session(&session_id, &entry_id).await })
             .await
+    }
+
+    pub async fn get_session_tree(&self, session_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_session_tree(&session_id).await })
+            .await
+    }
+
+    /// Actively triggers a `GET /api/sessions/:id/usage` refresh for the given session.
+    pub fn refresh_session_usage(&self, session_id: String) {
+        let _ = self
+            .core
+            .cmd_tx
+            .send(WorkerCommand::RefreshSessionUsage { session_id });
     }
 
     pub async fn navigate_session_tree(
@@ -878,6 +1055,15 @@ impl ClientHandle {
             .await
     }
 
+    pub async fn list_recent_exports(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::state::RecentExportSummary>, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.list_recent_exports(limit).await })
+            .await
+    }
+
     pub async fn open_export_directory(&self, export_id: String) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.open_export_directory(&export_id).await })
@@ -910,15 +1096,32 @@ impl ClientHandle {
             .await
     }
 
+    /// Saves an explicit scope even when it currently matches the implicit default order.
+    pub async fn set_explicit_model_scope(
+        &self,
+        patterns: Vec<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.save_model_scope(&patterns, patterns.is_empty(), true)
+                .await
+        })
+        .await
+    }
+
     pub async fn get_custom_provider(&self, provider_id: String) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.get_custom_provider(&provider_id).await })
             .await
     }
 
-    pub async fn save_custom_provider(&self, payload: Value) -> Result<Value, ClientError> {
+    pub async fn save_custom_provider(
+        &self,
+        payload: serde_json::Map<String, Value>,
+        key: Option<zeroize::Zeroizing<String>>,
+    ) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
-        self.spawn_tokio(async move { http.save_custom_provider(&payload).await })
+        self.spawn_tokio(async move { http.save_custom_provider(&payload, key).await })
             .await
     }
 
@@ -1007,9 +1210,19 @@ impl ClientHandle {
     }
 
     pub async fn refresh_account(&self) -> Result<AccountStatusDto, ClientError> {
+        let op_rev = self.core.alloc_op_revision();
         let http = self.core.http.clone();
-        self.spawn_tokio(async move { http.get_account(true).await })
-            .await
+        let account = self
+            .spawn_tokio(async move { http.get_account(true).await })
+            .await?;
+        let mut wm = self.core.op_watermarks.lock().expect("op_watermarks lock");
+        if op_rev >= wm.account_op_rev {
+            wm.account_op_rev = op_rev;
+            self.core.publish(|snap| {
+                snap.account = Some(Arc::new(account.clone()));
+            });
+        }
+        Ok(account)
     }
 
     pub async fn claim_missing_key_prompt(&self) -> Result<MissingKeyClaimDto, ClientError> {
@@ -1083,11 +1296,29 @@ impl ClientHandle {
     }
 }
 
+async fn load_startup_desktop_settings(http: &AppHttpClient) -> ClientSnapshot {
+    let mut snapshot = ClientSnapshot::default();
+    match tokio::time::timeout(
+        STARTUP_DESKTOP_SETTINGS_TIMEOUT,
+        http.get_desktop_settings(),
+    )
+    .await
+    {
+        Ok(Ok(settings)) => snapshot.desktop_settings = settings,
+        Ok(Err(ClientError::ConfigurationUnavailable(_))) => {
+            snapshot.desktop_settings_corrupt = true;
+        }
+        _ => {}
+    }
+    snapshot
+}
+
 fn spawn_client_workers(
     rt_handle: &tokio::runtime::Handle,
     endpoint: VerifiedServerEndpoint,
     wakeup_rx: watch::Receiver<u64>,
     options: ClientRuntimeOptions,
+    startup_snapshot: ClientSnapshot,
 ) -> Result<ClientHandle, ClientError> {
     let app_identity = ProcessIdentity::current().map_err(ClientError::BootstrapFailed)?;
     let initial_snapshot = Arc::new(ClientSnapshot {
@@ -1096,7 +1327,7 @@ fn spawn_client_workers(
         reconnecting: false,
         channel_mode: ChannelModeDto::AppActive,
         version: endpoint.version.clone(),
-        ..ClientSnapshot::default()
+        ..startup_snapshot
     });
     let (revision_tx, revision_rx) = watch::channel(1u64);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -1112,6 +1343,7 @@ fn spawn_client_workers(
         snapshot: Mutex::new(initial_snapshot),
         workspace: Mutex::new(WorkspaceState::default()),
         outbox: Mutex::new(SessionOutbox::default()),
+        send_tails: Mutex::new(BTreeMap::new()),
         presenter_cache: Mutex::new(ToolPresenterCache::default()),
         revision_tx: revision_tx.clone(),
         revision_rx,
@@ -1187,6 +1419,16 @@ enum InternalAsyncCompletion {
         generation: u64,
         result: Result<Value, ClientError>,
         waiters: Vec<SessionLoadReply>,
+    },
+    RetrySessionSnapshot {
+        session_id: String,
+        generation: u64,
+    },
+    SessionUsageFetched {
+        session_id: String,
+        seq: u64,
+        generation: u64,
+        result: Result<Value, ClientError>,
     },
     ReconciledUncertain {
         result: Result<ReconcileReport, ClientError>,
@@ -1266,7 +1508,8 @@ async fn run_state_reducer_loop(
 
     let mut mux_cancel: Option<CancellationToken> = None;
     let mut active_mux_generation = 0u64;
-    let mut send_tails: BTreeMap<String, watch::Receiver<()>> = BTreeMap::new();
+    let mut usage_fetches = UsageFetches::default();
+    let mut pending_usage_sessions: BTreeSet<String> = BTreeSet::new();
 
     let publish = |core: &Arc<SharedClientCore>,
                    revision_tx: &watch::Sender<u64>,
@@ -1327,11 +1570,21 @@ async fn run_state_reducer_loop(
         &core.stop,
     );
 
+    const STREAM_PUBLISH_COALESCE_MS: u64 = 16;
     let sub_sleep = tokio::time::sleep(Duration::from_secs(3600));
     tokio::pin!(sub_sleep);
     let refresh_sleep = tokio::time::sleep(Duration::from_millis(1));
     tokio::pin!(refresh_sleep);
     let mut refresh_timer_armed = true;
+    let usage_refresh_sleep = tokio::time::sleep(Duration::from_secs(3600));
+    tokio::pin!(usage_refresh_sleep);
+    let mut usage_timer_armed = false;
+    let stream_publish_sleep = tokio::time::sleep(Duration::from_secs(3600));
+    tokio::pin!(stream_publish_sleep);
+    let mut stream_publish_dirty = false;
+    let mut last_stream_publish = tokio::time::Instant::now()
+        .checked_sub(Duration::from_millis(STREAM_PUBLISH_COALESCE_MS))
+        .unwrap_or_else(tokio::time::Instant::now);
 
     loop {
         tokio::select! {
@@ -1365,6 +1618,16 @@ async fn run_state_reducer_loop(
                                     reply: None,
                                 });
                             });
+                            if let Some(active_sid) = core
+                                .workspace
+                                .lock()
+                                .expect("workspace lock")
+                                .active_session_id()
+                                .map(str::to_owned)
+                                && session_store.has_ready(&active_sid)
+                            {
+                                usage_fetches.start(&core, &done_tx, &session_store, active_sid);
+                            }
                         }
                     }
                     KeepaliveSignal::Disconnected => {
@@ -1379,9 +1642,19 @@ async fn run_state_reducer_loop(
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
                             refresh_timer_armed = true;
                         }
+                        if let Some(active_sid) = core
+                            .workspace
+                            .lock()
+                            .expect("workspace lock")
+                            .active_session_id()
+                            .map(str::to_owned)
+                            && session_store.has_ready(&active_sid)
+                        {
+                            usage_fetches.start(&core, &done_tx, &session_store, active_sid);
+                        }
                     }
                     KeepaliveSignal::StateEvent { payload, .. } => {
-                        handle_global_state_payload(
+                        if let Some(usage_sid) = handle_global_state_payload(
                             &core,
                             &revision_tx,
                             &payload,
@@ -1391,7 +1664,17 @@ async fn run_state_reducer_loop(
                             &mut confirmed_subs,
                             &client_id,
                             &mux_tx,
-                        );
+                        ) && session_store.has_ready(&usage_sid)
+                        {
+                            pending_usage_sessions.insert(usage_sid);
+                            if !usage_timer_armed {
+                                usage_refresh_sleep.as_mut().reset(
+                                    tokio::time::Instant::now()
+                                        + Duration::from_millis(USAGE_REFRESH_COALESCE_MS),
+                                );
+                                usage_timer_armed = true;
+                            }
+                        }
                         if dirty.any() && !refresh_timer_armed {
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
                             refresh_timer_armed = true;
@@ -1399,129 +1682,224 @@ async fn run_state_reducer_loop(
                     }
                 }
             }
-            Some(envelope) = mux_rx.recv() => {
-                if envelope.mux_generation != active_mux_generation {
-                    continue;
+            Some(first_envelope) = mux_rx.recv() => {
+                let mut batch = Vec::with_capacity(8);
+                batch.push(first_envelope);
+                for _ in 0..64 {
+                    let Some(next) = mux_rx.try_recv() else {
+                        break;
+                    };
+                    batch.push(next);
                 }
-                for (source, cur) in &envelope.vector_cursors {
-                    if source != "global" {
-                        update_monotonic_session_cursor(&mut session_cursors, source, cur);
+
+                let mut session_dirty = false;
+                let mut needs_immediate_publish = false;
+                let mut reload_sessions = BTreeSet::new();
+                let mut immediate_usage_sessions = BTreeSet::new();
+                let mut coalesce_usage_sessions = BTreeSet::new();
+                for envelope in batch {
+                    if envelope.mux_generation != active_mux_generation {
+                        continue;
                     }
-                }
-                match envelope.signal {
-                    MultiplexSignal::StreamReady { subscribed_sessions } => {
-                        confirmed_subs = subscribed_sessions.into_iter().collect();
-                        let current_desired = compute_desired_subscriptions(&core);
-                        if confirmed_subs.len() != current_desired.len()
-                            || current_desired.iter().any(|id| !confirmed_subs.contains(id))
-                        {
-                            desired_subs = current_desired;
-                            sub_debounce_pending = true;
-                            sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(5));
+                    for (source, cur) in &envelope.vector_cursors {
+                        if source != "global" {
+                            update_monotonic_session_cursor(&mut session_cursors, source, cur);
                         }
                     }
-                    // The independent app stream is the sole source of global state.
-                    MultiplexSignal::StateEvent { .. } => {}
-                    MultiplexSignal::SessionEvent {
-                        session_cursor,
-                        session_id,
-                        event,
-                        approx_bytes,
-                    } => {
-                        if let Some(ref cur) = session_cursor {
-                            update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
-                        }
-                        if let Some(cmid) = event
-                            .get("message")
-                            .and_then(|m| m.get("clientMessageId"))
-                            .and_then(Value::as_str)
-                        {
-                            core.outbox
+                    match envelope.signal {
+                        MultiplexSignal::StreamReady { subscribed_sessions } => {
+                            confirmed_subs = subscribed_sessions.into_iter().collect();
+                            if let Some(active_sid) = core
+                                .workspace
                                 .lock()
-                                .expect("outbox lock")
-                                .mark_accepted(&session_id, cmid);
-                        }
-                        if session_store.apply_session_event(&session_id, session_cursor, event, approx_bytes) {
-                            let map = Arc::new(session_store.export_ready_map());
-                            publish(&core, &revision_tx, &mut |snap| {
-                                snap.loaded_sessions = Arc::clone(&map);
-                            });
-                        }
-                    }
-                    MultiplexSignal::QueueEvent {
-                        session_cursor,
-                        session_id,
-                        queue,
-                        approx_bytes,
-                    } => {
-                        if let Some(ref cur) = session_cursor {
-                            update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
-                        }
-                        let ids: Vec<String> = queue
-                            .get("items")
-                            .and_then(Value::as_array)
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|i| i.get("id").and_then(Value::as_str).map(str::to_owned))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        if !ids.is_empty() {
-                            core.outbox
-                                .lock()
-                                .expect("outbox lock")
-                                .reconcile_server_inbox_ids(&session_id, &ids);
-                        }
-                        if session_store.apply_queue_snapshot(&session_id, session_cursor, queue, approx_bytes) {
-                            let map = Arc::new(session_store.export_ready_map());
-                            publish(&core, &revision_tx, &mut |snap| {
-                                snap.loaded_sessions = Arc::clone(&map);
-                            });
-                        }
-                    }
-                    MultiplexSignal::ResetGlobal => {
-                        dirty.mark_all();
-                        if !refresh_timer_armed {
-                            refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
-                            refresh_timer_armed = true;
-                        }
-                    }
-                    MultiplexSignal::ResetSession { session_id } => {
-                        if !session_store.has_ready(&session_id) && !session_store.is_loading(&session_id) {
-                            continue;
-                        }
-                        let generation = session_store.reset_to_loading(&session_id);
-                        spawn_session_snapshot_fetch(
-                            core.http.clone(),
-                            done_tx.clone(),
-                            session_id,
-                            generation,
-                            Vec::new(),
-                        );
-                    }
-                    MultiplexSignal::QueueOverflow => {
-                        // Bounded multiplex channel hit byte cap: perform targeted reload of tracked subscribed sessions + globals.
-                        dirty.mark_all();
-                        if !refresh_timer_armed {
-                            refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(5));
-                            refresh_timer_armed = true;
-                        }
-                        let tracked = session_store.tracked_session_ids();
-                        for sid in tracked {
-                            if desired_subs.contains(&sid) || confirmed_subs.contains(&sid) {
-                                let generation = session_store.reset_to_loading(&sid);
-                                spawn_session_snapshot_fetch(
-                                    core.http.clone(),
-                                    done_tx.clone(),
-                                    sid,
-                                    generation,
-                                    Vec::new(),
-                                );
+                                .expect("workspace lock")
+                                .active_session_id()
+                                .map(str::to_owned)
+                                && session_store.has_ready(&active_sid)
+                            {
+                                immediate_usage_sessions.insert(active_sid);
+                            }
+                            let current_desired = compute_desired_subscriptions(&core);
+                            if confirmed_subs.len() != current_desired.len()
+                                || current_desired.iter().any(|id| !confirmed_subs.contains(id))
+                            {
+                                desired_subs = current_desired;
+                                sub_debounce_pending = true;
+                                sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(5));
                             }
                         }
+                        // The independent app stream is the sole source of global state.
+                        MultiplexSignal::StateEvent { .. } => {}
+                        MultiplexSignal::SessionEvent {
+                            session_cursor,
+                            session_id,
+                            event,
+                            approx_bytes,
+                        } => {
+                            if let Some(ref cur) = session_cursor {
+                                update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
+                            }
+                            let ev_type = event.get("type").and_then(Value::as_str);
+                            let committed_message = match ev_type {
+                                Some("message_end") => event.get("message"),
+                                Some("entry_appended") => event.get("entry").and_then(|e| e.get("message")),
+                                _ => None,
+                            };
+                            if let Some(cmid) = committed_message
+                                .and_then(|m| m.get("clientMessageId"))
+                                .and_then(Value::as_str)
+                                && core.outbox.lock().expect("outbox lock").mark_accepted(&session_id, cmid)
+                            {
+                                session_dirty = true;
+                                needs_immediate_publish = true;
+                            }
+                            let is_high_freq_delta = matches!(
+                                ev_type,
+                                Some("message_update" | "tool_execution_update")
+                            );
+                            let is_assistant_reply_finished = (ev_type == Some("message_end")
+                                && event
+                                    .get("message")
+                                    .and_then(|m| m.get("role"))
+                                    .and_then(Value::as_str)
+                                    == Some("assistant"))
+                                || matches!(ev_type, Some("turn_end" | "agent_end"));
+                            let needs_snapshot_reload = matches!(
+                                ev_type,
+                                Some("session_tree" | "compaction_end")
+                            ) || (ev_type == Some("entry_appended")
+                                && matches!(
+                                    event
+                                        .get("entry")
+                                        .and_then(|e| e.get("type"))
+                                        .and_then(Value::as_str),
+                                    Some("compaction" | "branch_summary")
+                                ));
+                            if session_store.apply_session_event(&session_id, session_cursor, event, approx_bytes) {
+                                session_dirty = true;
+                                if !is_high_freq_delta {
+                                    needs_immediate_publish = true;
+                                }
+                            }
+                            if needs_snapshot_reload
+                                && (session_store.has_ready(&session_id)
+                                    || session_store.is_loading(&session_id))
+                            {
+                                reload_sessions.insert(session_id);
+                            } else if is_assistant_reply_finished
+                                && (session_store.has_ready(&session_id)
+                                    || session_store.is_loading(&session_id))
+                            {
+                                coalesce_usage_sessions.insert(session_id);
+                            }
+                        }
+                        MultiplexSignal::QueueEvent {
+                            session_cursor,
+                            session_id,
+                            queue,
+                            approx_bytes,
+                        } => {
+                            if let Some(ref cur) = session_cursor {
+                                update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
+                            }
+                            let ids: Vec<String> = queue
+                                .get("items")
+                                .and_then(Value::as_array)
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|i| i.get("id").and_then(Value::as_str).map(str::to_owned))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if !ids.is_empty() {
+                                core.outbox
+                                    .lock()
+                                    .expect("outbox lock")
+                                    .reconcile_server_inbox_ids(&session_id, &ids);
+                            }
+                            if session_store.apply_queue_snapshot(&session_id, session_cursor, queue, approx_bytes) {
+                                session_dirty = true;
+                                needs_immediate_publish = true;
+                            }
+                        }
+                        MultiplexSignal::ResetGlobal => {
+                            dirty.mark_all();
+                            if !refresh_timer_armed {
+                                refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
+                                refresh_timer_armed = true;
+                            }
+                        }
+                        MultiplexSignal::ResetSession { session_id } => {
+                            if !session_store.has_ready(&session_id) && !session_store.is_loading(&session_id) {
+                                continue;
+                            }
+                            let generation = session_store.reset_to_loading(&session_id);
+                            spawn_session_snapshot_fetch(
+                                core.http.clone(),
+                                done_tx.clone(),
+                                session_id,
+                                generation,
+                                Vec::new(),
+                            );
+                        }
+                        MultiplexSignal::QueueOverflow => {
+                            // Bounded multiplex channel hit byte cap: perform targeted reload of tracked subscribed sessions + globals.
+                            dirty.mark_all();
+                            if !refresh_timer_armed {
+                                refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(5));
+                                refresh_timer_armed = true;
+                            }
+                            let tracked = session_store.tracked_session_ids();
+                            for sid in tracked {
+                                if desired_subs.contains(&sid) || confirmed_subs.contains(&sid) {
+                                    let generation = session_store.reset_to_loading(&sid);
+                                    spawn_session_snapshot_fetch(
+                                        core.http.clone(),
+                                        done_tx.clone(),
+                                        sid,
+                                        generation,
+                                        Vec::new(),
+                                    );
+                                }
+                            }
+                        }
+                        MultiplexSignal::Disconnected => {
+                            confirmed_subs.clear();
+                        }
                     }
-                    MultiplexSignal::Disconnected => {
-                        confirmed_subs.clear();
+                }
+
+                for session_id in reload_sessions {
+                    let generation = session_store.reset_to_loading(&session_id);
+                    spawn_session_snapshot_fetch(core.http.clone(), done_tx.clone(), session_id, generation, Vec::new());
+                }
+                for session_id in immediate_usage_sessions {
+                    pending_usage_sessions.remove(&session_id);
+                    usage_fetches.start(&core, &done_tx, &session_store, session_id);
+                }
+                if !coalesce_usage_sessions.is_empty() {
+                    pending_usage_sessions.extend(coalesce_usage_sessions);
+                    if !usage_timer_armed {
+                        usage_refresh_sleep.as_mut().reset(
+                            tokio::time::Instant::now()
+                                + Duration::from_millis(USAGE_REFRESH_COALESCE_MS),
+                        );
+                        usage_timer_armed = true;
+                    }
+                }
+                if session_dirty {
+                    let now = tokio::time::Instant::now();
+                    let min_gap = Duration::from_millis(STREAM_PUBLISH_COALESCE_MS);
+                    if needs_immediate_publish || now.saturating_duration_since(last_stream_publish) >= min_gap {
+                        stream_publish_dirty = false;
+                        last_stream_publish = now;
+                        let map = Arc::new(session_store.export_ready_map());
+                        publish(&core, &revision_tx, &mut |snap| {
+                            snap.loaded_sessions = Arc::clone(&map);
+                        });
+                    } else if !stream_publish_dirty {
+                        stream_publish_dirty = true;
+                        stream_publish_sleep.as_mut().reset(last_stream_publish + min_gap);
                     }
                 }
             }
@@ -1543,79 +1921,100 @@ async fn run_state_reducer_loop(
                             refresh_in_flight = false;
                         }
 
-                        let (apply_globals, apply_models, apply_ds) = {
-                            let mut wm = core.op_watermarks.lock().expect("op_watermarks lock");
-                            let ag = if state_val.is_some() || auth.is_some() || account.is_some() || update_state.is_some() {
-                                if op_revision >= wm.globals_op_rev {
-                                    wm.globals_op_rev = op_revision;
-                                    true
-                                } else {
-                                    false
-                                }
+                        // Keep validation and publication atomic with refresh_account.
+                        let mut wm = core.op_watermarks.lock().expect("op_watermarks lock");
+                        let (
+                            apply_state,
+                            apply_auth,
+                            apply_account,
+                            apply_update,
+                            apply_models,
+                            apply_ds,
+                        ) = {
+                            let a_state = if state_val.is_some() && op_revision >= wm.state_op_rev {
+                                wm.state_op_rev = op_revision;
+                                true
                             } else {
                                 false
                             };
-                            let am = if models.is_some() {
-                                if op_revision >= wm.models_op_rev {
-                                    wm.models_op_rev = op_revision;
-                                    true
-                                } else {
-                                    false
-                                }
+                            let a_auth = if auth.is_some() && op_revision >= wm.auth_op_rev {
+                                wm.auth_op_rev = op_revision;
+                                true
                             } else {
                                 false
                             };
-                            let ads = if desktop_settings.is_some() {
-                                if op_revision >= wm.desktop_settings_op_rev {
-                                    wm.desktop_settings_op_rev = op_revision;
+                            let a_account =
+                                if account.is_some() && op_revision >= wm.account_op_rev {
+                                    wm.account_op_rev = op_revision;
                                     true
                                 } else {
                                     false
-                                }
+                                };
+                            let a_update =
+                                if update_state.is_some() && op_revision >= wm.update_op_rev {
+                                    wm.update_op_rev = op_revision;
+                                    true
+                                } else {
+                                    false
+                                };
+                            let am = if models.is_some() && op_revision >= wm.models_op_rev {
+                                wm.models_op_rev = op_revision;
+                                true
                             } else {
                                 false
                             };
-                            (ag, am, ads)
+                            let ads = if desktop_settings.is_some()
+                                && op_revision >= wm.desktop_settings_op_rev
+                            {
+                                wm.desktop_settings_op_rev = op_revision;
+                                true
+                            } else {
+                                false
+                            };
+                            (a_state, a_auth, a_account, a_update, am, ads)
                         };
 
-                        let applied_any = apply_globals || apply_models || apply_ds;
+                        let applied_any = apply_state
+                            || apply_auth
+                            || apply_account
+                            || apply_update
+                            || apply_models
+                            || apply_ds;
                         let snap_rev = if applied_any {
                             publish(&core, &revision_tx, &mut |snap| {
-                                if apply_globals {
-                                    if let Some(ref st) = state_val {
-                                        if let Some(v) = st.get("version").and_then(Value::as_str) {
-                                            snap.version = v.to_owned();
-                                        }
-                                        if let Some(cm) = st.get("channelMode").and_then(Value::as_str) {
-                                            snap.channel_mode = if cm == "web_active" {
-                                                ChannelModeDto::WebActive
-                                            } else {
-                                                ChannelModeDto::AppActive
-                                            };
-                                        }
-                                        if let Some(cmds) = st.get("commands").and_then(Value::as_array) {
-                                            snap.commands = Arc::new(
-                                                cmds.iter()
-                                                    .filter_map(Value::as_str)
-                                                    .map(str::to_owned)
-                                                    .collect(),
-                                            );
-                                        }
-                                        if let Some(sess_arr) = st.get("sessions").and_then(Value::as_array)
-                                            && let Ok(parsed) = serde_json::from_value::<Vec<SessionSummary>>(Value::Array(sess_arr.clone()))
-                                        {
-                                            snap.sessions = Arc::new(parsed);
-                                        }
+                                if apply_state && let Some(ref st) = state_val {
+                                    if let Some(v) = st.get("version").and_then(Value::as_str) {
+                                        snap.version = v.to_owned();
                                     }
-                                    if let Some(a) = auth.clone() {
-                                        snap.auth_providers = Some(Arc::new(a));
+                                    if let Some(cm) = st.get("channelMode").and_then(Value::as_str) {
+                                        snap.channel_mode = if cm == "web_active" {
+                                            ChannelModeDto::WebActive
+                                        } else {
+                                            ChannelModeDto::AppActive
+                                        };
                                     }
-                                    if let Some(acc) = account.clone() {
-                                        snap.account = Some(Arc::new(acc));
+                                    if let Some(cmds) = st.get("commands").and_then(Value::as_array) {
+                                        snap.commands = Arc::new(
+                                            cmds.iter()
+                                                .filter_map(Value::as_str)
+                                                .map(str::to_owned)
+                                                .collect(),
+                                        );
                                     }
-                                    if let Some(us) = update_state.clone() {
-                                        snap.update_state = Some(Arc::new(us));
+                                    if let Some(sess_arr) = st.get("sessions").and_then(Value::as_array)
+                                        && let Ok(parsed) = serde_json::from_value::<Vec<SessionSummary>>(Value::Array(sess_arr.clone()))
+                                    {
+                                        snap.sessions = Arc::new(parsed);
                                     }
+                                }
+                                if apply_auth && let Some(a) = auth.clone() {
+                                    snap.auth_providers = Some(Arc::new(a));
+                                }
+                                if apply_account && let Some(acc) = account.clone() {
+                                    snap.account = Some(Arc::new(acc));
+                                }
+                                if apply_update && let Some(us) = update_state.clone() {
+                                    snap.update_state = Some(Arc::new(us));
                                 }
                                 if apply_models && let Some(m) = models.clone() {
                                     snap.models = Some(Arc::new(m));
@@ -1637,6 +2036,7 @@ async fn run_state_reducer_loop(
                             core.snapshot.lock().expect("snapshot lock").revision
                         };
 
+                        drop(wm);
                         if let Some((reply_tx, maybe_err)) = reply {
                             let _ = reply_tx.send(match maybe_err {
                                 Some(e) => Err(e),
@@ -1666,6 +2066,32 @@ async fn run_state_reducer_loop(
                             sub_debounce_pending = true;
                             sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                         }
+                        // Background preload the 10 most recent sessions so switching conversations opens instantly.
+                        if cur_mode == ChannelModeDto::AppActive {
+                            let recent_ids: Vec<String> = {
+                                let guard = core.snapshot.lock().expect("snapshot lock");
+                                guard
+                                    .sessions
+                                    .iter()
+                                    .take(10)
+                                    .map(|s| s.id.clone())
+                                    .collect()
+                            };
+                            for sid in recent_ids {
+                                if !session_store.has_ready(&sid)
+                                    && !session_store.is_loading(&sid)
+                                    && let Some(generation) = session_store.begin_loading_if_absent(&sid)
+                                {
+                                    spawn_session_snapshot_fetch(
+                                        core.http.clone(),
+                                        done_tx.clone(),
+                                        sid,
+                                        generation,
+                                        Vec::new(),
+                                    );
+                                }
+                            }
+                        }
                         if dirty.any() && !refresh_timer_armed {
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
                             refresh_timer_armed = true;
@@ -1677,81 +2103,20 @@ async fn run_state_reducer_loop(
                         result,
                         mut waiters,
                     } => {
-                        match result {
-                            Ok(payload) => {
-                                match session_store.finish_loading_snapshot(&session_id, generation, payload) {
-                                    FinishLoadingOutcome::StaleGeneration => {
-                                        // Newer reload is in flight (or already completed): re-attach waiters without clobbering.
-                                        if session_store.is_loading(&session_id) {
-                                            pending_session_waiters.entry(session_id).or_default().extend(waiters);
-                                        } else {
-                                            let existing = session_store.export_ready_map().get(&session_id).cloned();
-                                            for waiter in waiters {
-                                                let _ = waiter.send(Ok(existing.clone()));
-                                            }
-                                        }
-                                    }
-                                    FinishLoadingOutcome::BufferOverflowNeedsReload => {
-                                        if let Some(extra) = pending_session_waiters.remove(&session_id) {
-                                            waiters.extend(extra);
-                                        }
-                                        let next_gen = session_store.reset_to_loading(&session_id);
-                                        spawn_session_snapshot_fetch(
-                                            core.http.clone(),
-                                            done_tx.clone(),
-                                            session_id,
-                                            next_gen,
-                                            waiters,
-                                        );
-                                    }
-                                    FinishLoadingOutcome::InvalidPayload => {
-                                        if let Some(extra) = pending_session_waiters.remove(&session_id) {
-                                            waiters.extend(extra);
-                                        }
-                                        session_store.cancel_loading(&session_id);
-                                        for waiter in waiters {
-                                            let _ = waiter.send(Err(ClientError::Server {
-                                                status: 200,
-                                                code: "invalid_response".into(),
-                                                message: "后台返回的会话快照不匹配。".into(),
-                                            }));
-                                        }
-                                    }
-                                    FinishLoadingOutcome::Installed(loaded) => {
-                                        if let Some(extra) = pending_session_waiters.remove(&session_id) {
-                                            waiters.extend(extra);
-                                        }
-                                        if let Some(ref cur) = loaded.event_cursor {
-                                            update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
-                                        }
-                                        let inbox_ids = loaded.server_inbox_ids();
-                                        if !inbox_ids.is_empty() {
-                                            core.outbox
-                                                .lock()
-                                                .expect("outbox lock")
-                                                .reconcile_server_inbox_ids(&session_id, &inbox_ids);
-                                        }
-                                        let pinned = collect_pinned_sessions(&core);
-                                        session_store.evict_lru(&pinned);
-                                        let map = Arc::new(session_store.export_ready_map());
-                                        publish(&core, &revision_tx, &mut |snap| {
-                                            snap.loaded_sessions = Arc::clone(&map);
-                                        });
-                                        for waiter in waiters {
-                                            let _ = waiter.send(Ok(Some(loaded.clone())));
-                                        }
-                                    }
-                                }
+                        let result = result.and_then(|payload| {
+                            match session_store.finish_loading_snapshot(&session_id, generation, payload) {
+                                FinishLoadingOutcome::InvalidPayload => Err(ClientError::Server {
+                                    status: 200,
+                                    code: "invalid_response".into(),
+                                    message: "后台返回的会话快照不匹配。".into(),
+                                }),
+                                outcome => Ok(outcome),
                             }
-                            Err(err) => {
-                                if session_store.cancel_loading_if_generation(&session_id, generation) {
-                                    if let Some(extra) = pending_session_waiters.remove(&session_id) {
-                                        waiters.extend(extra);
-                                    }
-                                    for waiter in waiters {
-                                        let _ = waiter.send(Err(err.clone()));
-                                    }
-                                } else if session_store.is_loading(&session_id) {
+                        });
+                        match result {
+                            Ok(FinishLoadingOutcome::StaleGeneration)
+                            | Err(_) if session_store.loading_generation(&session_id) != Some(generation) => {
+                                if session_store.is_loading(&session_id) {
                                     pending_session_waiters.entry(session_id).or_default().extend(waiters);
                                 } else {
                                     let existing = session_store.export_ready_map().get(&session_id).cloned();
@@ -1760,6 +2125,107 @@ async fn run_state_reducer_loop(
                                     }
                                 }
                             }
+                            Ok(FinishLoadingOutcome::BufferOverflowNeedsReload) => {
+                                if let Some(extra) = pending_session_waiters.remove(&session_id) {
+                                    waiters.extend(extra);
+                                }
+                                let next_gen = session_store.reset_to_loading(&session_id);
+                                spawn_session_snapshot_fetch(core.http.clone(), done_tx.clone(), session_id, next_gen, waiters);
+                            }
+                            Ok(FinishLoadingOutcome::Installed(loaded)) => {
+                                if let Some(extra) = pending_session_waiters.remove(&session_id) {
+                                    waiters.extend(extra);
+                                }
+                                if let Some(ref cur) = loaded.event_cursor {
+                                    update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
+                                }
+                                let inbox_ids = loaded.server_inbox_ids();
+                                if !inbox_ids.is_empty() {
+                                    core.outbox.lock().expect("outbox lock").reconcile_server_inbox_ids(&session_id, &inbox_ids);
+                                }
+                                let pinned = collect_pinned_sessions(&core);
+                                session_store.evict_lru(&pinned);
+                                let map = Arc::new(session_store.export_ready_map());
+                                publish(&core, &revision_tx, &mut |snap| {
+                                    snap.loaded_sessions = Arc::clone(&map);
+                                });
+                                let active = core.workspace.lock().expect("workspace lock").active_session_id() == Some(session_id.as_str());
+                                if active {
+                                    pending_usage_sessions.remove(&session_id);
+                                    usage_fetches.start(&core, &done_tx, &session_store, session_id);
+                                }
+                                for waiter in waiters {
+                                    let _ = waiter.send(Ok(Some(loaded.clone())));
+                                }
+                            }
+                            Err(err) => {
+                                if let Some(extra) = pending_session_waiters.remove(&session_id) {
+                                    waiters.extend(extra);
+                                }
+                                for waiter in waiters {
+                                    let _ = waiter.send(Err(err.clone()));
+                                }
+                                if session_store.has_reload_fallback(&session_id)
+                                    && !matches!(err, ClientError::NotFound { .. })
+                                {
+                                    let done_tx = done_tx.clone();
+                                    let stop = core.stop.clone();
+                                    tokio::spawn(async move {
+                                        tokio::select! {
+                                            () = stop.cancelled() => {}
+                                            () = tokio::time::sleep(Duration::from_secs(1)) => {
+                                                let _ = done_tx.send(InternalAsyncCompletion::RetrySessionSnapshot { session_id, generation });
+                                            }
+                                        }
+                                    });
+                                } else {
+                                    session_store.cancel_loading_if_generation(&session_id, generation);
+                                }
+                            }
+                            Ok(FinishLoadingOutcome::StaleGeneration | FinishLoadingOutcome::InvalidPayload) => {
+                                unreachable!("completion was classified above");
+                            }
+                        }
+                    }
+                    InternalAsyncCompletion::RetrySessionSnapshot { session_id, generation } => {
+                        if session_store.loading_generation(&session_id) != Some(generation) {
+                            continue;
+                        }
+                        if compute_desired_subscriptions(&core).contains(&session_id) {
+                            spawn_session_snapshot_fetch(core.http.clone(), done_tx.clone(), session_id, generation, Vec::new());
+                        } else {
+                            session_store.cancel_loading_if_generation(&session_id, generation);
+                            if let Some(waiters) = pending_session_waiters.remove(&session_id) {
+                                let existing = session_store.export_ready_map().get(&session_id).cloned();
+                                for waiter in waiters {
+                                    let _ = waiter.send(Ok(existing.clone()));
+                                }
+                            }
+                        }
+                    }
+                    InternalAsyncCompletion::SessionUsageFetched {
+                        session_id,
+                        seq,
+                        generation,
+                        result,
+                    } => {
+                        if !usage_fetches.finish(&session_id, seq) {
+                            continue;
+                        }
+                        if let Ok(payload) = result
+                            && payload["sessionId"].as_str() == Some(session_id.as_str())
+                            && let (Some(context), Some(usage)) = (payload.get("contextUsage"), payload.get("usage"))
+                            && session_store.apply_session_usage(
+                                &session_id,
+                                generation,
+                                (!context.is_null()).then(|| context.clone()),
+                                (!usage.is_null()).then(|| usage.clone()),
+                            )
+                        {
+                            let map = Arc::new(session_store.export_ready_map());
+                            publish(&core, &revision_tx, &mut |snap| {
+                                snap.loaded_sessions = Arc::clone(&map);
+                            });
                         }
                     }
                     InternalAsyncCompletion::ReconciledUncertain { result, reply } => {
@@ -1784,11 +2250,6 @@ async fn run_state_reducer_loop(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     WorkerCommand::ActivateSession { session_id, reply } => {
-                        core.workspace
-                            .lock()
-                            .expect("workspace lock")
-                            .set_active_session(session_id.clone());
-
                         let Some(sid) = session_id else {
                             desired_subs = compute_desired_subscriptions(&core);
                             sub_debounce_pending = true;
@@ -1828,6 +2289,7 @@ async fn run_state_reducer_loop(
                                     sub_debounce_pending = true;
                                     sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                                 }
+                                usage_fetches.start(&core, &done_tx, &session_store, sid);
                                 let _ = reply.send(Ok(existing));
                                 continue;
                             }
@@ -1835,7 +2297,9 @@ async fn run_state_reducer_loop(
                             session_store.remove(&sid);
                         }
 
-                        if session_store.is_loading(&sid) {
+                        let is_app_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::AppActive;
+                        let already_loading = session_store.is_loading(&sid);
+                        if already_loading && (!is_app_active || confirmed_subs.contains(&sid)) {
                             pending_session_waiters.entry(sid).or_default().push(reply);
                             continue;
                         }
@@ -1844,12 +2308,9 @@ async fn run_state_reducer_loop(
                         // 1. Mark session as `Loading(generation)` to buffer incoming SSE frames
                         // 2. Submit `PUT /subscriptions` FIRST (in AppActive)
                         // 3. Fetch `GET /api/sessions/<sid>` and merge buffered frames past `eventCursor`
-                        let generation = session_store
-                            .begin_loading_if_absent(&sid)
-                            .unwrap_or_else(|| session_store.reset_to_loading(&sid));
+                        let generation = session_store.begin_loading_if_absent(&sid);
                         desired_subs = compute_desired_subscriptions(&core);
                         sub_debounce_pending = false;
-                        let is_app_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::AppActive;
                         if is_app_active {
                             let last_ids = build_subscription_last_event_ids(
                                 &desired_subs,
@@ -1865,12 +2326,19 @@ async fn run_state_reducer_loop(
                                     confirmed_subs = parse_subscribed_set(&subscribed, &desired_subs);
                                 }
                                 Err(error) => {
-                                    session_store.cancel_loading_if_generation(&sid, generation);
+                                    if let Some(generation) = generation {
+                                        session_store.cancel_loading_if_generation(&sid, generation);
+                                    }
+                                    sub_debounce_pending = true;
+                                    sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                                     let _ = reply.send(Err(error));
                                     continue;
                                 }
                             }
                         }
+                        // A speculative GET may have captured its snapshot before the subscription
+                        // existed. Supersede it after subscribing so no intervening frame is lost.
+                        let generation = generation.unwrap_or_else(|| session_store.reset_to_loading(&sid));
                         spawn_session_snapshot_fetch(
                             core.http.clone(),
                             done_tx.clone(),
@@ -1879,13 +2347,34 @@ async fn run_state_reducer_loop(
                             vec![reply],
                         );
                     }
+                    WorkerCommand::ReloadSession { session_id, reply } => {
+                        let generation = session_store.reset_to_loading(&session_id);
+                        pending_session_waiters.entry(session_id.clone()).or_default().push(reply);
+                        spawn_session_snapshot_fetch(
+                            core.http.clone(),
+                            done_tx.clone(),
+                            session_id,
+                            generation,
+                            Vec::new(),
+                        );
+                    }
+                    WorkerCommand::RefreshSessionUsage { session_id } => {
+                        pending_usage_sessions.remove(&session_id);
+                        usage_fetches.start(&core, &done_tx, &session_store, session_id);
+                    }
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {
                         let http = core.http.clone();
                         let done_tx_clone = done_tx.clone();
+                        let active_sid = core
+                            .workspace
+                            .lock()
+                            .expect("workspace lock")
+                            .active_session_id()
+                            .map(str::to_owned);
                         tokio::spawn(async move {
                             let (state_res, models_res, auth_res, acc_res, ds_res, upd_res) = tokio::join!(
                                 http.state(),
-                                http.get_models(None),
+                                http.get_models(active_sid.as_deref()),
                                 http.get_auth_providers(),
                                 http.get_account(false),
                                 http.get_desktop_settings(),
@@ -2011,17 +2500,39 @@ async fn run_state_reducer_loop(
                         });
                     }
                     WorkerCommand::SendDraft { target, draft, reply } => {
-                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
                         let (tail, previous) = if let DraftKey::Session(sid) = &target {
-                            let (tx, rx) = watch::channel(());
-                            (Some(tx), send_tails.insert(sid.clone(), rx))
+                            let (tx, prev) = core.enqueue_send_tail(sid);
+                            (Some(tx), prev)
                         } else {
                             (None, None)
                         };
                         let core_clone = Arc::clone(&core);
                         let rev_tx = revision_tx.clone();
                         tokio::spawn(async move {
-                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft, previous).await;
+                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft, previous, false).await;
+                            let _ = reply.send(res);
+                            drop(tail);
+                        });
+                    }
+                    WorkerCommand::SendDirect {
+                        session_id,
+                        draft,
+                        reply,
+                    } => {
+                        let (tx, previous) = core.enqueue_send_tail(&session_id);
+                        let tail = Some(tx);
+                        let core_clone = Arc::clone(&core);
+                        let rev_tx = revision_tx.clone();
+                        tokio::spawn(async move {
+                            let res = execute_send_draft(
+                                &core_clone,
+                                &rev_tx,
+                                DraftKey::Session(session_id),
+                                &draft,
+                                previous,
+                                true,
+                            )
+                            .await;
                             let _ = reply.send(res);
                             drop(tail);
                         });
@@ -2031,10 +2542,9 @@ async fn run_state_reducer_loop(
                         client_message_id,
                         reply,
                     } => {
-                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
                         let (tail, previous) = if let Some(ref sid) = session_id {
-                            let (tx, rx) = watch::channel(());
-                            (Some(tx), send_tails.insert(sid.clone(), rx))
+                            let (tx, prev) = core.enqueue_send_tail(sid);
+                            (Some(tx), prev)
                         } else {
                             (None, None)
                         };
@@ -2143,6 +2653,8 @@ async fn run_state_reducer_loop(
                                 &core.stop,
                             );
                             dirty.sessions_and_state = true;
+                            dirty.auth = true;
+                            dirty.models = true;
                             let active = core.workspace.lock().expect("workspace lock").active_session_id().map(str::to_owned);
                             if let Some(active_sid) = active {
                                 let generation = session_store.reset_to_loading(&active_sid);
@@ -2187,6 +2699,21 @@ async fn run_state_reducer_loop(
                     }
                 }
             }
+            () = &mut stream_publish_sleep, if stream_publish_dirty => {
+                stream_publish_dirty = false;
+                last_stream_publish = tokio::time::Instant::now();
+                let map = Arc::new(session_store.export_ready_map());
+                publish(&core, &revision_tx, &mut |snap| {
+                    snap.loaded_sessions = Arc::clone(&map);
+                });
+            }
+            () = &mut usage_refresh_sleep, if usage_timer_armed => {
+                usage_timer_armed = false;
+                let batch = std::mem::take(&mut pending_usage_sessions);
+                for sid in batch {
+                    usage_fetches.start(&core, &done_tx, &session_store, sid);
+                }
+            }
             () = &mut sub_sleep, if sub_debounce_pending => {
                 sub_debounce_pending = false;
                 let cur_mode = core.snapshot.lock().expect("snapshot lock").channel_mode;
@@ -2223,6 +2750,12 @@ async fn run_state_reducer_loop(
                 let http = core.http.clone();
                 let done_tx_clone = done_tx.clone();
                 let is_web_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::WebActive;
+                let active_sid = core
+                    .workspace
+                    .lock()
+                    .expect("workspace lock")
+                    .active_session_id()
+                    .map(str::to_owned);
                 tokio::spawn(async move {
                     let state_fut = async {
                         if flags.sessions_and_state {
@@ -2250,7 +2783,7 @@ async fn run_state_reducer_loop(
                     };
                     let models_fut = async {
                         if flags.models {
-                            http.get_models(None).await.ok()
+                            http.get_models(active_sid.as_deref()).await.ok()
                         } else {
                             None
                         }
@@ -2315,16 +2848,22 @@ fn handle_global_state_payload(
     confirmed_subs: &mut BTreeSet<String>,
     client_id: &str,
     mux_tx: &BoundedMultiplexSender,
-) {
-    let Some(ev_type) = payload.get("type").and_then(Value::as_str) else {
-        return;
-    };
+) -> Option<String> {
+    let ev_type = payload.get("type").and_then(Value::as_str)?;
+    let mut usage_session_id = None;
     match ev_type {
         "sessions_changed" => {
             dirty.sessions_and_state = true;
         }
         "models_changed" => {
             dirty.models = true;
+        }
+        "usage_changed" => {
+            usage_session_id = payload
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned);
         }
         "quota_changed" => dirty.auth = true,
         "auth_changed" => {
@@ -2426,6 +2965,7 @@ fn handle_global_state_payload(
         }
         _ => {}
     }
+    usage_session_id
 }
 
 fn compute_desired_subscriptions(core: &Arc<SharedClientCore>) -> Vec<String> {
@@ -2473,6 +3013,72 @@ fn collect_pinned_sessions(core: &Arc<SharedClientCore>) -> BTreeSet<String> {
     set
 }
 
+#[derive(Default)]
+struct UsageFetches {
+    sequence: u64,
+    in_flight: BTreeMap<String, (u64, tokio::task::AbortHandle)>,
+}
+
+impl UsageFetches {
+    fn start(
+        &mut self,
+        core: &SharedClientCore,
+        done_tx: &mpsc::UnboundedSender<InternalAsyncCompletion>,
+        sessions: &SessionStore,
+        session_id: String,
+    ) {
+        if core.snapshot.lock().expect("snapshot lock").channel_mode != ChannelModeDto::AppActive {
+            return;
+        }
+        let http = &core.http;
+        // Snapshot and usage reads overlap on the server. Refresh after loading
+        // instead of letting one generation's response overwrite another's snapshot.
+        let Some(generation) = sessions.ready_generation(&session_id) else {
+            return;
+        };
+        if let Some((_, previous)) = self.in_flight.remove(&session_id) {
+            previous.abort();
+        }
+        self.sequence = self.sequence.wrapping_add(1);
+        let seq = self.sequence;
+        let id = session_id.clone();
+        let http = http.clone();
+        let done_tx = done_tx.clone();
+        let task = tokio::spawn(async move {
+            let result = http.get_session_usage(&id).await;
+            let _ = done_tx.send(InternalAsyncCompletion::SessionUsageFetched {
+                session_id: id,
+                seq,
+                generation,
+                result,
+            });
+        });
+        self.in_flight
+            .insert(session_id, (seq, task.abort_handle()));
+    }
+
+    fn finish(&mut self, session_id: &str, seq: u64) -> bool {
+        if self
+            .in_flight
+            .get(session_id)
+            .is_some_and(|(current, _)| *current == seq)
+        {
+            self.in_flight.remove(session_id);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for UsageFetches {
+    fn drop(&mut self) {
+        for (_, task) in self.in_flight.values() {
+            task.abort();
+        }
+    }
+}
+
 fn spawn_session_snapshot_fetch(
     http: AppHttpClient,
     done_tx: mpsc::UnboundedSender<InternalAsyncCompletion>,
@@ -2489,453 +3095,6 @@ fn spawn_session_snapshot_fetch(
             waiters,
         });
     });
-}
-
-fn build_message_post_body(item: &OutboxItem) -> Value {
-    let mut msg_body = serde_json::Map::new();
-    msg_body.insert("id".into(), Value::String(item.client_message_id.clone()));
-    msg_body.insert("text".into(), Value::String(item.text.clone()));
-    msg_body.insert(
-        "delivery".into(),
-        Value::String(item.send_mode.as_api_delivery().to_owned()),
-    );
-    if let Some(ref skill) = item.skill {
-        msg_body.insert("skill".into(), Value::String(skill.clone()));
-    }
-    if !item.images.is_empty() {
-        let imgs: Vec<Value> = item.images.iter().map(|h| h.to_base64_payload()).collect();
-        msg_body.insert("images".into(), Value::Array(imgs));
-    }
-    Value::Object(msg_body)
-}
-
-async fn execute_send_draft(
-    core: &Arc<SharedClientCore>,
-    revision_tx: &watch::Sender<u64>,
-    target: DraftKey,
-    draft: &ComposerDraft,
-    previous: Option<watch::Receiver<()>>,
-) -> Result<SendSubmissionOutcome, ClientError> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
-    let initial_session_id = match &target {
-        DraftKey::Session(sid) => Some(sid.clone()),
-        DraftKey::NewSession => None,
-    };
-    let item = OutboxItem::from_draft(initial_session_id.clone(), draft, now_ms)?;
-    let client_message_id = item.client_message_id.clone();
-
-    let (session_id, bound_item) = match initial_session_id {
-        Some(sid) => {
-            core.outbox
-                .lock()
-                .expect("outbox lock")
-                .enqueue_session(&sid, item.clone());
-            bump_revision(core, revision_tx);
-            if let Some(mut previous) = previous {
-                let _ = previous.changed().await;
-            }
-            if core
-                .outbox
-                .lock()
-                .expect("outbox lock")
-                .is_session_paused(&sid)
-            {
-                return Err(ClientError::StorageFull(
-                    "本机磁盘空间已满，当前会话后续消息已暂停发送。".into(),
-                ));
-            }
-            (sid, item)
-        }
-        None => {
-            let req_key = item
-                .creation_request_key
-                .clone()
-                .expect("home item has creation_request_key");
-            if let Err(err) = core
-                .outbox
-                .lock()
-                .expect("outbox lock")
-                .enqueue_home(item.clone())
-            {
-                let _ = core
-                    .workspace
-                    .lock()
-                    .expect("workspace lock")
-                    .restore_draft_if_empty(DraftKey::NewSession, draft.clone());
-                return Err(err);
-            }
-            bump_revision(core, revision_tx);
-
-            match core
-                .http
-                .create_session(
-                    &req_key,
-                    draft.selected_provider.as_deref(),
-                    draft.selected_model_id.as_deref(),
-                    draft.selected_thinking_level.as_deref(),
-                )
-                .await
-            {
-                Ok(created_sid) => {
-                    let bound = core
-                        .outbox
-                        .lock()
-                        .expect("outbox lock")
-                        .bind_home_to_session(&created_sid)
-                        .unwrap_or(item);
-                    core.workspace
-                        .lock()
-                        .expect("workspace lock")
-                        .set_active_session(Some(created_sid.clone()));
-                    bump_revision(core, revision_tx);
-                    (created_sid, bound)
-                }
-                Err(err) if err.is_disconnected() => {
-                    core.outbox
-                        .lock()
-                        .expect("outbox lock")
-                        .mark_home_uncertain(err.to_string());
-                    bump_revision(core, revision_tx);
-                    return Err(err);
-                }
-                Err(err) => {
-                    // Restore to NewSession composer ONLY if the user hasn't started typing new content;
-                    // otherwise retain the failed item in `home_pending` so neither draft is lost!
-                    let restored = core
-                        .workspace
-                        .lock()
-                        .expect("workspace lock")
-                        .restore_draft_if_empty(DraftKey::NewSession, draft.clone());
-                    {
-                        let mut ob = core.outbox.lock().expect("outbox lock");
-                        if restored {
-                            ob.clear_home();
-                        } else {
-                            ob.mark_home_failed(&err);
-                        }
-                    }
-                    bump_revision(core, revision_tx);
-                    return Err(err);
-                }
-            }
-        }
-    };
-
-    let msg_body = build_message_post_body(&bound_item);
-    match core
-        .http
-        .post_session_message(&session_id, &client_message_id, &msg_body)
-        .await
-    {
-        Ok(_) => {
-            core.outbox
-                .lock()
-                .expect("outbox lock")
-                .mark_accepted(&session_id, &client_message_id);
-            bump_revision(core, revision_tx);
-            Ok(SendSubmissionOutcome {
-                session_id,
-                client_message_id,
-            })
-        }
-        Err(err) => {
-            if err.is_credentials_required() {
-                let target_for_restore = match &target {
-                    DraftKey::NewSession => DraftKey::Session(session_id.clone()),
-                    other => other.clone(),
-                };
-                let restored = core
-                    .workspace
-                    .lock()
-                    .expect("workspace lock")
-                    .restore_draft_if_empty(target_for_restore, draft.clone());
-                let mut ob = core.outbox.lock().expect("outbox lock");
-                if restored {
-                    ob.remove_item(&session_id, &client_message_id);
-                } else {
-                    ob.mark_session_error(&session_id, &client_message_id, &err);
-                }
-            } else {
-                core.outbox.lock().expect("outbox lock").mark_session_error(
-                    &session_id,
-                    &client_message_id,
-                    &err,
-                );
-            }
-            bump_revision(core, revision_tx);
-            Err(err)
-        }
-    }
-}
-
-async fn execute_retry_outbox(
-    core: &Arc<SharedClientCore>,
-    revision_tx: &watch::Sender<u64>,
-    session_id: Option<String>,
-    client_message_id: &str,
-    previous: Option<watch::Receiver<()>>,
-) -> Result<SendSubmissionOutcome, ClientError> {
-    let (target_sid, item, check_receipt_first) = match session_id {
-        None => {
-            let (home_item, was_uncertain) = core
-                .outbox
-                .lock()
-                .expect("outbox lock")
-                .prepare_home_retry(client_message_id)?;
-            bump_revision(core, revision_tx);
-            let req_key = home_item
-                .creation_request_key
-                .clone()
-                .expect("home retry has request_key");
-
-            let created_sid = if was_uncertain {
-                match core.http.check_session_creation(&req_key).await {
-                    Ok((status, Some(sid))) if status == "done" => Some(sid),
-                    Ok((status, _)) if status == "started" => {
-                        core.outbox
-                            .lock()
-                            .expect("outbox lock")
-                            .mark_home_uncertain("会话仍在创建中，请稍后重试。".into());
-                        bump_revision(core, revision_tx);
-                        return Err(ClientError::Conflict {
-                            code: "session_creation_in_progress".into(),
-                            message: "会话仍在创建中，请稍后重试。".into(),
-                        });
-                    }
-                    Ok(_) => None,
-                    Err(err) => {
-                        if err.is_disconnected() {
-                            core.outbox
-                                .lock()
-                                .expect("outbox lock")
-                                .mark_home_uncertain(err.to_string());
-                        } else {
-                            core.outbox
-                                .lock()
-                                .expect("outbox lock")
-                                .mark_home_failed(&err);
-                        }
-                        bump_revision(core, revision_tx);
-                        return Err(err);
-                    }
-                }
-            } else {
-                None
-            };
-
-            let sid = match created_sid {
-                Some(sid) => sid,
-                None => match core
-                    .http
-                    .create_session(
-                        &req_key,
-                        home_item.provider.as_deref(),
-                        home_item.model_id.as_deref(),
-                        home_item.thinking_level.as_deref(),
-                    )
-                    .await
-                {
-                    Ok(sid) => sid,
-                    Err(err) if err.is_disconnected() => {
-                        core.outbox
-                            .lock()
-                            .expect("outbox lock")
-                            .mark_home_uncertain(err.to_string());
-                        bump_revision(core, revision_tx);
-                        return Err(err);
-                    }
-                    Err(err) => {
-                        core.outbox
-                            .lock()
-                            .expect("outbox lock")
-                            .mark_home_failed(&err);
-                        bump_revision(core, revision_tx);
-                        return Err(err);
-                    }
-                },
-            };
-
-            let bound = core
-                .outbox
-                .lock()
-                .expect("outbox lock")
-                .bind_home_to_session(&sid)
-                .unwrap_or(home_item);
-            {
-                let mut ws = core.workspace.lock().expect("workspace lock");
-                if ws.active_session_id().is_none()
-                    && !ws
-                        .draft(&DraftKey::NewSession)
-                        .is_some_and(ComposerDraft::has_unsent_content)
-                {
-                    ws.set_active_session(Some(sid.clone()));
-                }
-            }
-            bump_revision(core, revision_tx);
-            (sid, bound, was_uncertain)
-        }
-        Some(sid) => {
-            let (sess_item, was_uncertain) = core
-                .outbox
-                .lock()
-                .expect("outbox lock")
-                .prepare_session_retry(&sid, client_message_id)?;
-            bump_revision(core, revision_tx);
-            if let Some(mut previous) = previous {
-                let _ = previous.changed().await;
-            }
-            (sid, sess_item, was_uncertain)
-        }
-    };
-
-    if check_receipt_first
-        && let Ok(Some(_)) = core
-            .http
-            .check_message_receipt(&target_sid, &item.client_message_id)
-            .await
-    {
-        core.outbox
-            .lock()
-            .expect("outbox lock")
-            .mark_accepted(&target_sid, &item.client_message_id);
-        bump_revision(core, revision_tx);
-        return Ok(SendSubmissionOutcome {
-            session_id: target_sid,
-            client_message_id: item.client_message_id,
-        });
-    }
-
-    let msg_body = build_message_post_body(&item);
-    match core
-        .http
-        .post_session_message(&target_sid, &item.client_message_id, &msg_body)
-        .await
-    {
-        Ok(_) => {
-            core.outbox
-                .lock()
-                .expect("outbox lock")
-                .mark_accepted(&target_sid, &item.client_message_id);
-            bump_revision(core, revision_tx);
-            Ok(SendSubmissionOutcome {
-                session_id: target_sid,
-                client_message_id: item.client_message_id,
-            })
-        }
-        Err(err) => {
-            core.outbox.lock().expect("outbox lock").mark_session_error(
-                &target_sid,
-                &item.client_message_id,
-                &err,
-            );
-            bump_revision(core, revision_tx);
-            Err(err)
-        }
-    }
-}
-
-/// Read-only receipt reconciliation after a disconnect (`GET /api/sessions/creation/<key>`
-/// and `GET /api/sessions/<id>/messages/<msgId>`). Never auto-resends unaccepted payloads!
-async fn reconcile_uncertain_items(
-    core: &Arc<SharedClientCore>,
-) -> Result<ReconcileReport, ClientError> {
-    let items = core.outbox.lock().expect("outbox lock").uncertain_items();
-    let mut report = ReconcileReport::default();
-
-    for (maybe_sid, item) in items {
-        match maybe_sid {
-            None => {
-                if let Some(req_key) = &item.creation_request_key {
-                    let (status, created_sid) = core.http.check_session_creation(req_key).await?;
-                    if status == "done"
-                        && let Some(sid) = created_sid
-                    {
-                        let already_accepted = core
-                            .http
-                            .check_message_receipt(&sid, &item.client_message_id)
-                            .await?
-                            .is_some();
-                        {
-                            let mut ob = core.outbox.lock().expect("outbox lock");
-                            ob.bind_home_to_session(&sid);
-                            if already_accepted {
-                                ob.mark_accepted(&sid, &item.client_message_id);
-                            } else {
-                                ob.mark_session_error(
-                                    &sid,
-                                    &item.client_message_id,
-                                    &ClientError::NotFound {
-                                        code: "message_not_delivered".into(),
-                                        message: "会话已创建，首条消息未送达，请点击重试。".into(),
-                                    },
-                                );
-                            }
-                        }
-                        {
-                            let mut ws = core.workspace.lock().expect("workspace lock");
-                            if ws.active_session_id().is_none()
-                                && !ws
-                                    .draft(&DraftKey::NewSession)
-                                    .is_some_and(ComposerDraft::has_unsent_content)
-                            {
-                                ws.set_active_session(Some(sid.clone()));
-                            }
-                        }
-                        report.recovered_home_session_id = Some(sid);
-                        report.resolved_count += 1;
-                    } else if status == "missing" {
-                        let restored = core
-                            .workspace
-                            .lock()
-                            .expect("workspace lock")
-                            .restore_draft_if_empty(DraftKey::NewSession, item.to_composer_draft());
-                        {
-                            let mut ob = core.outbox.lock().expect("outbox lock");
-                            if restored {
-                                ob.clear_home();
-                                report.restored_home_draft = true;
-                            } else {
-                                ob.mark_home_failed(&ClientError::NotFound {
-                                    code: "session_not_created".into(),
-                                    message: "连接中断前会话尚未创建，可重试或移除。".into(),
-                                });
-                            }
-                        }
-                        report.resolved_count += 1;
-                    }
-                }
-            }
-            Some(sid) => {
-                if let Some(_server_item) = core
-                    .http
-                    .check_message_receipt(&sid, &item.client_message_id)
-                    .await?
-                {
-                    core.outbox
-                        .lock()
-                        .expect("outbox lock")
-                        .mark_accepted(&sid, &item.client_message_id);
-                    report.resolved_count += 1;
-                } else {
-                    core.outbox.lock().expect("outbox lock").mark_session_error(
-                        &sid,
-                        &item.client_message_id,
-                        &ClientError::NotFound {
-                            code: "message_not_received".into(),
-                            message: "网络中断前服务端未收到该消息，可手动重试或编辑。".into(),
-                        },
-                    );
-                    report.resolved_count += 1;
-                }
-            }
-        }
-    }
-
-    Ok(report)
 }
 
 fn bump_revision(core: &Arc<SharedClientCore>, revision_tx: &watch::Sender<u64>) {

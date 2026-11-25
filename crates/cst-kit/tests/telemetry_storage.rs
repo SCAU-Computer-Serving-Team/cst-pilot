@@ -27,7 +27,7 @@ impl Fixture {
         Self(root.canonicalize().unwrap())
     }
     fn path(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home/telemetry").join(name)
+        self.0.join("data/telemetry").join(name)
     }
     fn put(&self, name: &str, value: &Value) {
         let path = self.path(name);
@@ -137,13 +137,16 @@ fn live_transaction_blocks_but_cancel_is_prompt_and_stale_proof_ignores_pid() {
     let dead = Owner::start().unwrap();
     let proof = dead.proof();
     drop(dead);
-    f.put(
-        "test.json.lock/owner.json",
-        &json!({"pid":std::process::id(),"proof":proof}),
-    );
+    let lock_dir = FileLock::lock_path_for(&f.0, &path).unwrap();
+    fs::create_dir_all(&lock_dir).unwrap();
+    fs::write(
+        lock_dir.join("owner.json"),
+        serde_json::to_vec(&json!({"pid":std::process::id(),"proof":proof})).unwrap(),
+    )
+    .unwrap();
     let held = FileLock::acquire(&f.0, &path, &owner.proof(), &CancellationToken::new()).unwrap();
     drop(held);
-    assert!(!f.path("test.json.lock").exists());
+    assert!(!lock_dir.exists());
 }
 #[test]
 fn stale_lock_cleanup_preserves_unknown_contents_and_damaged_owner() {
@@ -151,35 +154,41 @@ fn stale_lock_cleanup_preserves_unknown_contents_and_damaged_owner() {
     let dead = Owner::start().unwrap();
     let proof = dead.proof();
     drop(dead);
-    f.put("test.json.lock/owner.json", &json!({"proof":proof}));
-    fs::write(f.path("test.json.lock/important.txt"), b"keep").unwrap();
+    let test_target = f.path("test.json");
+    let test_lock = FileLock::lock_path_for(&f.0, &test_target).unwrap();
+    fs::create_dir_all(&test_lock).unwrap();
+    fs::write(
+        test_lock.join("owner.json"),
+        serde_json::to_vec(&json!({"proof":proof})).unwrap(),
+    )
+    .unwrap();
+    fs::write(test_lock.join("important.txt"), b"keep").unwrap();
     let owner = Owner::global().unwrap();
     drop(
         FileLock::acquire(
             &f.0,
-            &f.path("test.json"),
+            &test_target,
             &owner.proof(),
             &CancellationToken::new(),
         )
         .unwrap(),
     );
-    let stale = fs::read_dir(f.path(""))
+    let stale = fs::read_dir(test_lock.parent().unwrap())
         .unwrap()
         .filter_map(Result::ok)
         .find(|entry| entry.file_name().to_string_lossy().contains(".stale-"))
         .unwrap()
         .path();
     assert_eq!(fs::read(stale.join("important.txt")).unwrap(), b"keep");
-    f.put(
-        "blocked.json.lock/owner.json",
-        &json!({"pid":std::process::id()}),
-    );
-    fs::write(f.path("blocked.json.lock/owner.json"), b"{broken").unwrap();
+    let blocked_target = f.path("blocked.json");
+    let blocked_lock = FileLock::lock_path_for(&f.0, &blocked_target).unwrap();
+    fs::create_dir_all(&blocked_lock).unwrap();
+    fs::write(blocked_lock.join("owner.json"), b"{broken").unwrap();
     let cancel = CancellationToken::new();
     cancel.cancel();
-    assert!(FileLock::acquire(&f.0, &f.path("blocked.json"), &owner.proof(), &cancel).is_err());
+    assert!(FileLock::acquire(&f.0, &blocked_target, &owner.proof(), &cancel).is_err());
     assert_eq!(
-        fs::read(f.path("blocked.json.lock/owner.json")).unwrap(),
+        fs::read(blocked_lock.join("owner.json")).unwrap(),
         b"{broken"
     );
 }
@@ -648,7 +657,7 @@ async fn recovered_billing_is_aggregated_without_request_ids_and_sealed_before_e
 fn linked_telemetry_parent_cannot_write_or_clean_outside_the_kit() {
     let f = Fixture::new();
     let outside = Fixture::new();
-    fs::create_dir_all(f.0.join("agent/home")).unwrap();
+    fs::create_dir_all(f.0.join("data")).unwrap();
     fs::write(outside.0.join("important"), b"keep").unwrap();
     let result = Command::new("cmd.exe")
         .args(["/d", "/c", "mklink", "/J"])
@@ -675,9 +684,11 @@ fn releasing_a_lock_retries_a_short_external_directory_probe() {
     use std::os::windows::fs::OpenOptionsExt;
     let f = Fixture::new();
     let owner = Owner::global().unwrap();
+    let probe_target = f.path("probe.json");
+    let probe_lock = FileLock::lock_path_for(&f.0, &probe_target).unwrap();
     let lock = FileLock::acquire(
         &f.0,
-        &f.path("probe.json"),
+        &probe_target,
         &owner.proof(),
         &CancellationToken::new(),
     )
@@ -686,7 +697,7 @@ fn releasing_a_lock_retries_a_short_external_directory_probe() {
         .access_mode(0)
         .share_mode(3)
         .custom_flags(0x0200_0000 | 0x0020_0000)
-        .open(f.path("probe.json.lock"))
+        .open(&probe_lock)
         .unwrap();
     let release = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(50));
@@ -694,7 +705,7 @@ fn releasing_a_lock_retries_a_short_external_directory_probe() {
     });
     drop(lock);
     release.join().unwrap();
-    assert!(!f.path("probe.json.lock").exists());
+    assert!(!probe_lock.exists());
 }
 
 struct ChildGuard(Child);
@@ -734,19 +745,24 @@ fn process_death_releases_owner_and_copied_pid_does_not_block_recovery_lock() {
     child.0.wait().unwrap();
     assert!(!proof.alive());
     let owner = Owner::global().unwrap();
-    f.put(
-        "child.json.lock/owner.json",
-        &json!({"pid":std::process::id(),"proof":proof}),
-    );
+    let child_target = f.path("child.json");
+    let child_lock = FileLock::lock_path_for(&f.0, &child_target).unwrap();
+    fs::create_dir_all(&child_lock).unwrap();
+    fs::write(
+        child_lock.join("owner.json"),
+        serde_json::to_vec(&json!({"pid":std::process::id(),"proof":proof})).unwrap(),
+    )
+    .unwrap();
     drop(
         FileLock::acquire(
             &f.0,
-            &f.path("child.json"),
+            &child_target,
             &owner.proof(),
             &CancellationToken::new(),
         )
         .unwrap(),
     );
+    assert!(!child_lock.exists());
 }
 #[test]
 #[ignore = "cross-process test helper, launched by the parent test"]
@@ -761,7 +777,7 @@ fn telemetry_owner_child() {
         println!("IDENTITY:{}", id.installation_id);
         return;
     }
-    let target = root.join("agent/home/telemetry/child.json");
+    let target = root.join("data/telemetry/child.json");
     let _lock =
         FileLock::acquire(&root, &target, &owner.proof(), &CancellationToken::new()).unwrap();
     println!("OWNER:{}", serde_json::to_string(&owner.proof()).unwrap());

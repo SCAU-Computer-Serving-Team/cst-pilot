@@ -44,7 +44,7 @@ Rust 主线（`crates/`）对齐上游 Pi `1.5.0` 工程规范并遵循 Rust 社
 | 工具与文档约束 | `node --test src/test/*.test.mjs` | 诊断工具、凭据边界、画布颜色与节点完整性、本地文档链接 |
 | 前端构建 | `npm run build --prefix src/web/frontend` | 产物写入 `agent/home/extensions/web/static/` |
 | 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后校验共享可变字体的哈希、OpenType 表和许可证，确认 Web 静态目录没有字体副本 |
-| 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[测试规范](doc/TESTING.md#web-端到端核心链路) |
+| 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[测试规范](doc/test/TESTING.md#web-端到端核心链路) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。
 
@@ -54,7 +54,7 @@ Rust 主线（`crates/`）对齐上游 Pi `1.5.0` 工程规范并遵循 Rust 社
 
 提交前运行与改动相关的检查。修改后端运行后端检查与测试；修改前端或画布运行前端格式、类型、测试、设计约束和构建。
 
-日常 CI 保留静态检查与轻量回归。浏览器 E2E、字体构建、Web 后端和跨端完整验收通过 `gh workflow run ci.yml -f full=true` 手动运行，范围见[测试规范](doc/TESTING.md#ci-执行范围)与[工作流](.github/workflows/ci.yml)。
+日常 CI 保留静态检查与轻量回归。浏览器 E2E、字体构建、Web 后端和跨端完整验收通过 `gh workflow run ci.yml -f full=true` 手动运行，范围见[测试规范](doc/test/TESTING.md#ci-执行范围)与[工作流](.github/workflows/ci.yml)。
 
 ## 提交
 

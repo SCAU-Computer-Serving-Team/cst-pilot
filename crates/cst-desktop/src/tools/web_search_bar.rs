@@ -1,16 +1,20 @@
 use std::rc::Rc;
+use std::time::Instant;
 
 use cst_client::tool_presenter::{FieldRow, SpecialStatus};
+use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
-    Styled, TestSupportExt, div, px,
+    App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, TestSupportExt, Window, div, px,
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::motion::DesktopTooltipExt as _;
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 
 pub struct WebSearchBarProps<'a> {
     pub call_id: &'a str,
@@ -23,48 +27,72 @@ pub struct WebSearchBarProps<'a> {
     pub errors: &'a [String],
     pub expanded: bool,
     pub warning_hovered: bool,
+    pub running_light_allowed: bool,
+    pub started_at: Option<Instant>,
 }
 
 /// Renders the standalone Web Search persistent bar (`web_search`, `cst-pilot-desktop.pen` `JQMQZ`).
+#[allow(clippy::too_many_arguments)]
 pub fn render_web_search_bar(
     props: WebSearchBarProps<'_>,
     palette: &DesktopPalette,
-    transparency_enabled: bool,
-    scale_factor: f32,
-    on_toggle_expand: crate::tools::ToggleKeyFn,
+    _transparency_enabled: bool,
+    _scale_factor: f32,
+    on_toggle_expand: crate::tools::ToggleDetailsFn,
     on_hover_warning: crate::tools::HoverWarningFn,
+    window: &mut Window,
+    cx: &mut App,
 ) -> gpui_kit::AnyElement {
     let is_running = matches!(
         props.status,
         SpecialStatus::Pending | SpecialStatus::Running
     );
-    let has_partial_warning = !props.errors.is_empty()
-        || matches!(props.status, SpecialStatus::Degraded | SpecialStatus::Error);
+    let is_error = props.status == SpecialStatus::Error;
+    let has_hover_issue = !is_running
+        && (is_error || !props.errors.is_empty() || props.status == SpecialStatus::Degraded);
+    let has_details = !props.queries.is_empty() || !props.fields.is_empty();
+    let expanded = has_details && props.expanded;
 
-    let expand_key = format!("web-search-expand-{}", props.call_id);
     let warn_key = format!("web-search-warn-{}", props.call_id);
-    let ek_click = expand_key;
 
+    let has_summary_count =
+        props.queries.is_empty() && !is_running && !props.summary.trim().is_empty();
     let count_text = if !props.queries.is_empty() {
         format!("{} 个关键词", props.queries.len())
     } else if is_running {
         "正在检索…".to_owned()
-    } else if !props.summary.trim().is_empty() {
-        props.summary.to_owned()
+    } else if has_summary_count {
+        props.summary.replace(['\r', '\n'], " ")
     } else if let Some(ok_cnt) = props.successful {
         format!("{ok_cnt} 个关键词")
     } else {
         "0 个关键词".to_owned()
     };
 
-    let display_title = if props.title.trim().is_empty() || props.title == "联网检索" {
-        if is_running {
-            "正在联网检索"
-        } else {
-            "已联网检索"
-        }
+    let display_title = match props.title.trim() {
+        "" | "联网检索" if is_running => "正在联网检索",
+        "" | "联网检索" if props.status == SpecialStatus::Success => "已联网检索",
+        "" => "联网检索",
+        title => title,
+    };
+
+    let title_el = if is_running && props.running_light_allowed {
+        crate::workbench::turn_segments::render_running_light_label_with_scale(
+            display_title,
+            true,
+            props.started_at.unwrap_or_else(Instant::now),
+            palette.text_secondary,
+            palette.text_primary,
+            scale::BODY_MEDIUM,
+            window,
+        )
+        .into_any_element()
     } else {
-        props.title
+        apply_scale(div(), scale::BODY_MEDIUM)
+            .truncate()
+            .text_color(palette.text_primary)
+            .child(cjk_inline_label(display_title))
+            .into_any_element()
     };
 
     let mut left_row = div()
@@ -77,44 +105,65 @@ pub fn render_web_search_bar(
                 .size(px(14.0))
                 .text_color(palette.accent_ink),
         )
-        .child(
-            apply_scale(div(), scale::BODY_MEDIUM)
-                .truncate()
-                .text_color(palette.text_primary)
-                .child(cjk_inline_label(display_title)),
-        );
+        .child(title_el);
+
+    let warn_reason_text = if has_hover_issue {
+        Some(if props.errors.is_empty() {
+            if is_error {
+                "联网检索失败。".to_owned()
+            } else {
+                "部分检索词未能返回完整网页摘要。".to_owned()
+            }
+        } else {
+            props.errors.join("；")
+        })
+    } else {
+        None
+    };
+    let has_shared_tooltip_overlay = motion::window_tooltip_overlay(window, cx).is_some();
 
     if is_running {
-        left_row = left_row.child(
-            Icon::new(IconName::LoaderCircle)
-                .size(px(14.0))
-                .text_color(palette.accent_ink),
-        );
-    } else if has_partial_warning {
+        left_row = left_row.child(motion::animated_spinner(
+            format!("web-search-spin-{}", props.call_id),
+            px(14.0),
+            palette.accent_ink,
+            props.running_light_allowed,
+            window,
+            cx,
+        ));
+    } else if has_hover_issue {
         let wk_hover = warn_key;
         let hover_cb = Rc::clone(&on_hover_warning);
-        left_row = left_row.child(
-            div()
-                .id(SharedString::from(format!(
-                    "web-search-warn-icon-{}",
-                    props.call_id
-                )))
-                .test_support()
-                .w(px(16.0))
-                .h(px(16.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_hover(move |hovered, w, cx| {
-                    (hover_cb)(wk_hover.clone(), *hovered, w, cx);
-                })
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(15.0))
-                        .text_color(palette.status_warning),
-                ),
-        );
-    } else {
+        let (badge_icon, badge_color) = if is_error {
+            (IconName::CircleAlert, palette.status_danger)
+        } else {
+            (IconName::TriangleAlert, palette.status_warning)
+        };
+        let tooltip_elem_id =
+            SharedString::from(format!("web-search-warn-tooltip-{}", props.call_id));
+        let tooltip_text = SharedString::from(warn_reason_text.clone().unwrap_or_default());
+        let warn_icon = div()
+            .id(SharedString::from(format!(
+                "web-search-warn-icon-{}",
+                props.call_id
+            )))
+            .test_support()
+            .w(px(16.0))
+            .h(px(16.0))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(Icon::new(badge_icon).size(px(15.0)).text_color(badge_color));
+        let warn_icon = if has_shared_tooltip_overlay {
+            warn_icon.desktop_tooltip_with_hover(tooltip_elem_id, tooltip_text, true, None)
+        } else {
+            warn_icon.on_hover(move |hovered, w, cx| {
+                (hover_cb)(wk_hover.clone(), *hovered, w, cx);
+            })
+        };
+        left_row = left_row.child(warn_icon);
+    } else if props.status == SpecialStatus::Success {
         left_row = left_row.child(
             Icon::new(IconName::CircleCheck)
                 .size(px(16.0))
@@ -122,36 +171,48 @@ pub fn render_web_search_bar(
         );
     }
 
-    left_row = left_row.child(
-        Icon::new(if props.expanded {
-            IconName::ChevronDown
-        } else {
-            IconName::ChevronRight
-        })
-        .size(px(12.0))
-        .text_color(palette.text_secondary),
-    );
+    if has_details {
+        left_row = left_row.child(motion::animated_chevron(
+            format!("web-search-{}", props.call_id),
+            expanded,
+            false,
+            px(12.0),
+            palette.text_secondary,
+            window,
+            cx,
+        ));
+    }
 
     let hdr_id = SharedString::from(format!("web-search-bar-hdr-{}", props.call_id));
     let hdr_label = SharedString::from(format!("{display_title}（{count_text}）"));
+    let count_label = apply_scale(div(), scale::CAPTION)
+        .min_w_0()
+        .truncate()
+        .text_color(palette.text_secondary)
+        .child(SharedString::from(count_text));
+    let count_label = if has_summary_count {
+        count_label
+    } else {
+        count_label.flex_shrink_0()
+    };
     let header_bar = div()
         .id(hdr_id.clone())
         .test_support()
-        .a11y_toggle_button(hdr_id, hdr_label, props.expanded)
         .w_full()
         .h(height::COMPACT)
         .flex()
         .items_center()
         .justify_between()
         .gap(space::MD)
-        .on_click(move |_, w, cx| (on_toggle_expand)(ek_click.clone(), w, cx))
         .child(left_row)
-        .child(
-            apply_scale(div(), scale::CAPTION)
-                .flex_shrink_0()
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(count_text)),
-        );
+        .child(count_label);
+    let header_bar = if has_details {
+        header_bar
+            .a11y_toggle_button(hdr_id, hdr_label, expanded)
+            .on_click(move |_, w, cx| (on_toggle_expand)(w, cx))
+    } else {
+        header_bar.a11y_region(hdr_id, hdr_label)
+    };
 
     let mut card = div()
         .id(SharedString::from(format!(
@@ -171,86 +232,104 @@ pub fn render_web_search_bar(
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_special)
-        .shadow(palette.craft_lift_shadows())
+        .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
         .gap(space::MD)
         .child(header_bar);
 
-    if props.expanded {
-        let mut details = div()
-            .w_full()
-            .pt(space::XS)
-            .flex()
-            .flex_col()
-            .gap(space::SM);
-
-        for q in props.queries {
-            details = details.child(
-                apply_scale(div(), scale::CAPTION)
+    if has_details
+        && let Some(animated_details) = motion::animated_collapse_with_exit(
+            format!("web-search-details-{}", props.call_id),
+            expanded,
+            window,
+            cx,
+            |_interactive, _, _| {
+                let mut details = div()
                     .w_full()
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(q.clone())),
-            );
-        }
-
-        for row in props.fields {
-            details = details.child(
-                div()
+                    .pt(space::XS)
                     .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap(space::MD)
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_secondary)
-                            .child(SharedString::from(row.label.clone())),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(row.value.clone())),
-                    ),
-            );
-        }
+                    .flex_col()
+                    .gap(space::SM);
 
-        card = card.child(details);
+                for q in props.queries {
+                    details = details.child(
+                        apply_scale(div(), scale::CAPTION)
+                            .w_full()
+                            .text_color(palette.text_primary)
+                            .child(SharedString::from(q.clone())),
+                    );
+                }
+
+                for row in props.fields {
+                    details = details.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap(space::MD)
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(palette.text_secondary)
+                                    .child(SharedString::from(row.label.clone())),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(row.value.clone())),
+                            ),
+                    );
+                }
+
+                details.into_any_element()
+            },
+        )
+    {
+        card = card.child(animated_details);
     }
 
-    if has_partial_warning && props.warning_hovered {
-        let reason_text = if props.errors.is_empty() {
-            "部分检索词未能返回完整网页摘要。".to_owned()
-        } else {
-            props.errors.join("；")
-        };
+    if has_hover_issue && props.warning_hovered && !has_shared_tooltip_overlay {
+        let reason_text = warn_reason_text.unwrap_or_default();
         card = card.child(
             div()
                 .absolute()
-                .right(space::MD)
+                .left(space::LG)
                 .bottom_full()
                 .pb(space::XS)
                 .child(
-                    render_frosted_surface(
-                        format!("web-search-warn-tooltip-{}", props.call_id),
-                        FrostedGlassSpec::popover_h2p2z(palette),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .test_support()
-                    .max_w(px(320.0))
-                    .p(space::SM)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .relative()
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(reason_text)),
-                    ),
+                    div()
+                        .id(SharedString::from(format!(
+                            "web-search-warn-tooltip-{}",
+                            props.call_id
+                        )))
+                        .test_support()
+                        .max_w(px(320.0))
+                        .px(space::SM)
+                        .py(space::XS)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.bg_elevated)
+                        .border_1()
+                        .border_color(palette.border_subtle)
+                        .shadow(palette.flat_popover_shadows())
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .relative()
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(reason_text)),
+                        )
+                        .with_animation(
+                            SharedString::from(format!(
+                                "web-search-warn-tooltip-anim-{}",
+                                props.call_id
+                            )),
+                            Animation::new(motion::FAST).with_easing(motion::ease_out()),
+                            |el, d| {
+                                let t = d.clamp(0.0, 1.0);
+                                el.opacity(0.01 + 0.99 * t).mt(px(4.0 * (1.0 - t)))
+                            },
+                        ),
                 ),
         );
     }

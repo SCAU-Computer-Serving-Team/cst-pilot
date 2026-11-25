@@ -3,17 +3,18 @@ pub mod driver;
 pub mod eventlog;
 pub mod hardware;
 pub mod ls;
+pub mod mft;
 pub mod native_job;
 pub mod result;
 pub mod scan;
 pub mod startup;
-mod storage_tools;
+pub mod storage_tools;
 pub mod sys;
 pub mod sys_load;
 pub mod volume;
+pub mod volume_index;
 pub mod walk;
 pub mod win_native;
-pub mod wz_index;
 
 use pi_session::ToolDefinition;
 use schemars::JsonSchema;
@@ -119,7 +120,7 @@ where
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             worker.check()?;
-            let value = run(source.as_ref(), input, &worker)?;
+            let value = win_native::with_wmi_scope(|| run(source.as_ref(), input, &worker))?;
             worker.check()?;
             Ok(value)
         })

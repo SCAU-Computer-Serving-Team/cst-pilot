@@ -190,6 +190,30 @@ async fn run(source: Arc<Source>, input: Input, yes: bool) -> Value {
     result
 }
 #[tokio::test]
+async fn status_drive_preserves_native_collection_errors_without_passwords() {
+    let source = Source::new(vec![]);
+    source
+        .live
+        .lock()
+        .unwrap()
+        .collection_errors
+        .push(failure("Win32_EncryptableVolume", Some(5)));
+    let error = Executor::new(source.clone())
+        .execute(
+            "status",
+            input(Scope::Status, Some("D:"), false),
+            &Vault::default(),
+            Arc::new(NoOpUiContext::new()),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("Win32_EncryptableVolume") && error.contains("\"code\":5"));
+    assert!(!error.contains(PASSWORD));
+    assert!(source.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn status_is_readonly_with_partial_errors_and_null_fields() {
     let source = Source::new(vec![volume("D:", true)]);
     source.live.lock().unwrap().volumes[0]

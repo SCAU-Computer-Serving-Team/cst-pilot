@@ -33,6 +33,14 @@ pub enum ThemeModeDto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum KeyboardFocusStyleDto {
+    #[default]
+    Brackets,
+    Rail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum DefaultViewDto {
     #[default]
     Gui,
@@ -44,6 +52,8 @@ pub enum DefaultViewDto {
 pub struct DesktopSettingsDto {
     #[serde(default)]
     pub theme: ThemeModeDto,
+    #[serde(default)]
+    pub keyboard_focus_style: KeyboardFocusStyleDto,
     #[serde(default)]
     pub default_view: DefaultViewDto,
     #[serde(default)]
@@ -68,6 +78,7 @@ impl Default for DesktopSettingsDto {
     fn default() -> Self {
         Self {
             theme: ThemeModeDto::Light,
+            keyboard_focus_style: KeyboardFocusStyleDto::Brackets,
             default_view: DefaultViewDto::Gui,
             sidebar_collapsed: false,
             display_hint: None,
@@ -86,6 +97,8 @@ impl Default for DesktopSettingsDto {
 pub struct DesktopSettingsPatchDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemeModeDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyboard_focus_style: Option<KeyboardFocusStyleDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_view: Option<DefaultViewDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,6 +160,18 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelScopeMatchDto {
+    pub id: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelScopeRuleDto {
+    pub pattern: String,
+    pub matches: Vec<ModelScopeMatchDto>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsSnapshot {
@@ -158,6 +183,8 @@ pub struct ModelsSnapshot {
     pub enabled: Option<Vec<String>>,
     #[serde(default)]
     pub unavailable_enabled: Vec<String>,
+    #[serde(default)]
+    pub scope_rules: Option<Vec<ModelScopeRuleDto>>,
     #[serde(default)]
     pub selected: Option<ModelChoiceDto>,
     #[serde(default)]
@@ -325,6 +352,50 @@ pub struct MissingKeyClaimDto {
 pub struct WebOpenDto {
     pub url: String,
     pub mode: ChannelModeDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentExportFileDto {
+    pub name: String,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentExportSummary {
+    pub id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub captured_at: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub options: Value,
+    #[serde(default)]
+    pub files: Vec<RecentExportFileDto>,
+}
+
+impl RecentExportSummary {
+    pub fn format(&self) -> &str {
+        self.options
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("html")
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.files.iter().map(|f| f.bytes).sum()
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.files.len()
+    }
 }
 
 /// Immutable, `Arc`-shared client state snapshot published by the background Tokio reducer.

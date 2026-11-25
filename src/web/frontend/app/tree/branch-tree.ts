@@ -164,6 +164,23 @@ export type TreeRow = {
 	subtreeEnd: number;
 };
 
+/** Keep the cursor on the same entry, or on its closest visible ancestor after folding. */
+export function visibleTreeCursor(
+	allRows: readonly TreeRow[],
+	rows: readonly TreeRow[],
+	entryId: string | null,
+): number {
+	if (entryId === null) return -1;
+	let row = allRows.find((candidate) => candidate.node.entry.id === entryId);
+	while (row) {
+		const id = row.node.entry.id;
+		const index = rows.findIndex((candidate) => candidate.node.entry.id === id);
+		if (index >= 0) return index;
+		row = allRows[row.parentIndex];
+	}
+	return -1;
+}
+
 const byTimestamp = (a: TreeNode, b: TreeNode) =>
 	new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime();
 

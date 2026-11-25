@@ -256,6 +256,16 @@ impl SecretInput {
         }
 
         self.zeroize_all();
+        if trimmed.bytes().all(|b| b.is_ascii_digit()) {
+            for b in trimmed.bytes() {
+                if !self.push_ascii_byte(b, cx) {
+                    break;
+                }
+            }
+            self.error_message = None;
+            cx.notify();
+            return true;
+        }
         for (idx, b) in trimmed.bytes().enumerate() {
             self.buf[idx] = b;
             self.is_hyphen[idx] = b == b'-';
@@ -383,6 +393,9 @@ impl EntityInputHandler for SecretInput {
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 
     fn paste(&mut self, item: ClipboardItem, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         if let Some(raw) = item.text() {
             let guarded = Zeroizing::new(raw);
             let _ = self.try_paste_str(guarded.as_str(), cx);
@@ -396,6 +409,9 @@ impl EntityInputHandler for SecretInput {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.disabled {
+            return;
+        }
         let guarded = Zeroizing::new(text.to_owned());
         if guarded.len() == 1 {
             if let Some(b) = guarded.bytes().next() {

@@ -222,7 +222,7 @@ export function mapTool(call: Call, result: Message): CardView {
 	const notice = (id: string, text: string, status: NoticeStatus) => push({ kind: "notice", id, text, status });
 
 	// 提示条：直接用工具返回的原文，不加键名前缀。
-	const degradedText = (value: unknown) => `WizTree 不可用，已降级为逐文件统计（${words(value)}）。数值为下界。`;
+	const degradedText = (value: unknown) => `快速卷索引不可用，已回退为目录遍历统计（${words(value)}）。`;
 	const errorText = (key: string, value: unknown) => {
 		const list = Array.isArray(value) ? value : [value];
 		return list.map((item) => {
@@ -291,15 +291,20 @@ export function mapTool(call: Call, result: Message): CardView {
 				{ label: "序号", value: words(entry.rank) },
 				{ label: "取得正文", value: measure("fetched", entry.fetched ?? false) },
 			];
+		const hasSizeKey = "size" in entry;
 		return Object.entries(entry)
 			.filter(
-				([field]) =>
+				([field, value]) =>
 					!nameKeys.includes(field) &&
 					!metricSkips.has(field) &&
 					field !== "ext" &&
-					(field !== "bytes" || entry.size == null),
+					(field !== "bytes" || !hasSizeKey) &&
+					!(field === "pct" && value == null),
 			)
-			.map(([field, value]) => ({ label: label(field), value: measure(field, value) }));
+			.map(([field, value]) => ({
+				label: label(field),
+				value: field === "size" && value == null ? "大小未知" : measure(field, value),
+			}));
 	};
 	const nameOf = (key: string, entry: Record<string, unknown>, index: number) => {
 		if (key === "counts") return `${words(entry.provider ?? "未知来源")} / ${words(entry.id ?? "-")}`;

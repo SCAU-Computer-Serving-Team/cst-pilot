@@ -1,7 +1,9 @@
 import { X } from "lucide-react";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocusTrap } from "../shell/dialog-focus";
+import { readDurationMs, readEasing } from "../shell/motion-tokens";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 /** 所有本地图片共用预览入口；仅在打开时挂载模态与动效监听。 */
 export function PreviewableImage({
@@ -17,12 +19,26 @@ export function PreviewableImage({
 	buttonClassName?: string;
 	label?: string;
 }) {
+	const trigger = useRef<HTMLButtonElement>(null);
 	const image = useRef<HTMLImageElement>(null);
 	const [opened, setOpened] = useState(false);
-	const close = useCallback(() => setOpened(false), []);
+	const shell = useWorkspaceShell();
+	const appActiveRef = useRef(Boolean(shell?.appActive));
+	appActiveRef.current = Boolean(shell?.appActive);
+	const close = useCallback(() => {
+		setOpened(false);
+		if (!appActiveRef.current) {
+			requestAnimationFrame(() => {
+				if (trigger.current?.isConnected && !trigger.current.closest("[inert]")) {
+					trigger.current.focus({ preventScroll: true });
+				}
+			});
+		}
+	}, []);
 	return (
 		<>
 			<button
+				ref={trigger}
 				type="button"
 				className={buttonClassName}
 				aria-label={label}
@@ -43,8 +59,12 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 	const dialog = useRef<HTMLDialogElement>(null);
 	const zoom = useRef<HTMLButtonElement>(null);
 	const scrim = useRef<HTMLDivElement>(null);
-	const requestClose = useRef(() => {});
+	const requestClose = useRef<(immediate?: boolean) => void>(() => {});
+	const shell = useWorkspaceShell();
 	useDialogFocusTrap(dialog);
+	useEffect(() => {
+		if (shell?.appActive) requestClose.current(true);
+	}, [shell?.appActive]);
 	useLayoutEffect(() => {
 		const modal = dialog.current;
 		const content = zoom.current;
@@ -56,40 +76,36 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 		let animation: Animation | undefined;
 		let fade: Animation | undefined;
 		let closing = false;
-		const duration = (token: string) => {
-			const value = getComputedStyle(modal).getPropertyValue(token).trim();
-			return Number.parseFloat(value) * (value.endsWith("ms") ? 1 : 1000);
-		};
 		const transform = () => {
 			const source = image.getBoundingClientRect();
 			const target = content.getBoundingClientRect();
 			if (!image.isConnected || !source.width || !source.height || !target.width || !target.height) return "none";
 			return `translate(${source.left + source.width / 2 - target.left - target.width / 2}px, ${source.top + source.height / 2 - target.top - target.height / 2}px) scale(${source.width / target.width}, ${source.height / target.height})`;
 		};
-		const options = (token: string) => ({
-			duration: duration(token),
-			easing: getComputedStyle(modal).getPropertyValue("--ease-smooth-out").trim(),
+		const options = (token: string, fallbackMs: number) => ({
+			duration: readDurationMs(modal, token, fallbackMs),
+			easing: readEasing(modal),
 		});
 		modal.showModal();
 		document.documentElement.style.overflow = "hidden";
 		if (!motion.matches) {
-			animation = content.animate([{ transform: transform() }, { transform: "none" }], options("--duration-medium"));
-			fade = background.animate([{ opacity: 0 }, { opacity: 1 }], options("--duration-medium"));
+			animation = content.animate([{ transform: transform() }, { transform: "none" }], options("--normal", 240));
+			fade = background.animate([{ opacity: 0 }, { opacity: 1 }], options("--normal", 240));
 		}
 		image.style.visibility = "hidden";
-		const close = () => {
-			if (closing) return;
+		const close = (immediate = false) => {
+			if (closing && !immediate) return;
 			closing = true;
 			const current = getComputedStyle(content).transform;
 			const opacity = getComputedStyle(background).opacity;
 			animation?.cancel();
 			fade?.cancel();
-			if (motion.matches) {
-				modal.close();
+			if (immediate || motion.matches) {
+				if (modal.open) modal.close();
 				return;
 			}
-			animation = content.animate([{ transform: current }, { transform: transform() }], options("--duration-fast"));
-			fade = background.animate([{ opacity }, { opacity: 0 }], options("--duration-fast"));
+			animation = content.animate([{ transform: current }, { transform: transform() }], options("--fast", 150));
+			fade = background.animate([{ opacity }, { opacity: 0 }], options("--fast", 150));
 			void animation.finished.then(() => modal.close()).catch(() => {});
 		};
 		requestClose.current = close;
@@ -97,15 +113,16 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 			if (!motion.matches) return;
 			animation?.cancel();
 			fade?.cancel();
-			if (closing) modal.close();
+			if (closing && modal.open) modal.close();
 		};
 		// 视口改变时收回预览，避免原图坐标与放大图布局错位。
-		window.addEventListener("resize", close);
+		const onResize = () => close(false);
+		window.addEventListener("resize", onResize);
 		motion.addEventListener("change", reduceMotion);
 		return () => {
 			animation?.cancel();
 			fade?.cancel();
-			window.removeEventListener("resize", close);
+			window.removeEventListener("resize", onResize);
 			motion.removeEventListener("change", reduceMotion);
 			image.style.visibility = visibility;
 			document.documentElement.style.overflow = overflow;
@@ -121,19 +138,19 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 			onClose={onClose}
 			onCancel={(event) => {
 				event.preventDefault();
-				requestClose.current();
+				requestClose.current(false);
 			}}
 			onClick={(event) => {
 				event.stopPropagation();
-				if (event.target === event.currentTarget) requestClose.current();
+				if (event.target === event.currentTarget) requestClose.current(false);
 			}}
 		>
-			<div ref={scrim} className="image-preview-scrim" aria-hidden="true" />
+			<div ref={scrim} className="tier-3-scrim image-preview-scrim" aria-hidden="true" />
 			<button
 				type="button"
 				className="image-preview-close"
 				aria-label="关闭图片预览"
-				onClick={() => requestClose.current()}
+				onClick={() => requestClose.current(false)}
 			>
 				<X size={22} aria-hidden="true" />
 			</button>
@@ -142,7 +159,7 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 				type="button"
 				className="image-preview-zoom"
 				aria-label="收起图片"
-				onClick={() => requestClose.current()}
+				onClick={() => requestClose.current(false)}
 			>
 				<img
 					src={image.currentSrc || image.src}

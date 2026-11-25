@@ -137,30 +137,89 @@ struct AuthHooks {
 
 #[derive(Clone)]
 pub struct Kit {
-    root: PathBuf,
+    layout: KitLayout,
     guard: PathGuard,
     root_state: Arc<KitRootState>,
+}
+
+pub(crate) fn open_data_storage(
+    layout: &KitLayout,
+    create: bool,
+) -> Result<(crate::runbook::storage::Storage, PathBuf), String> {
+    if let Ok(rel) = layout.data_dir().strip_prefix(layout.root()) {
+        let storage = crate::runbook::storage::Storage::new(layout.root())?;
+        if create && !rel.as_os_str().is_empty() {
+            let _ = storage.pin_directory(rel, true)?;
+        }
+        Ok((storage, rel.to_path_buf()))
+    } else {
+        if create {
+            std::fs::create_dir_all(layout.data_dir())
+                .map_err(|_| "用户数据目录无法创建。".to_owned())?;
+        }
+        let storage = crate::runbook::storage::Storage::new(layout.data_dir())?;
+        Ok((storage, PathBuf::new()))
+    }
 }
 
 impl Kit {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, String> {
         let layout = KitLayout::new(root.as_ref())?;
-        let root = layout.root().to_path_buf();
-        let guard = PathGuard::new(&root)?;
-        let root_state = root_state_for(&root)?;
+        let guard = PathGuard::from_layout(layout.clone());
+        let root_state = root_state_for(layout.root())?;
         Ok(Self {
-            root,
+            layout,
             guard,
             root_state,
         })
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
+    pub fn layout(&self) -> &KitLayout {
+        &self.layout
     }
 
-    pub fn agent_dir(&self) -> PathBuf {
-        self.root.join("agent/home")
+    pub fn root(&self) -> &Path {
+        self.layout.root()
+    }
+
+    pub fn app_dir(&self) -> PathBuf {
+        self.layout.app_dir()
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        self.layout.data_dir()
+    }
+
+    pub fn config_dir(&self) -> PathBuf {
+        self.layout.config_dir()
+    }
+
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.layout.sessions_dir()
+    }
+
+    pub fn inbox_dir(&self) -> PathBuf {
+        self.layout.inbox_dir()
+    }
+
+    pub fn exports_dir(&self) -> PathBuf {
+        self.layout.exports_dir()
+    }
+
+    pub fn plans_dir(&self) -> PathBuf {
+        self.layout.plans_dir()
+    }
+
+    pub fn telemetry_data_dir(&self) -> PathBuf {
+        self.layout.telemetry_data_dir()
+    }
+
+    pub fn locks_dir(&self) -> PathBuf {
+        self.layout.locks_dir()
+    }
+
+    pub fn fonts_dir(&self) -> PathBuf {
+        self.layout.fonts_dir()
     }
 
     pub fn path_guard(&self) -> &PathGuard {
@@ -171,6 +230,48 @@ impl Kit {
         &self.root_state.gate
     }
 
+    /// Initializes missing user config files in `data/config/` from read-only `app/defaults/`.
+    /// Never overwrites existing user configuration files.
+    pub fn ensure_default_configs(&self) -> Result<(), String> {
+        use crate::runbook::storage::StorageAtomicExt;
+        let defaults_dir = self.layout.defaults_dir();
+        if !defaults_dir.is_dir() {
+            return Ok(());
+        }
+        let app_storage = crate::runbook::storage::Storage::new(self.layout.root())?;
+        let _defaults_pin = app_storage.pin_directory(Path::new("app/defaults"), false)?;
+        let mut missing = Vec::new();
+        for name in [
+            "settings.json",
+            "models-store.json",
+            "telemetry.json",
+            "web-search.json",
+        ] {
+            let target = self.config_dir().join(name);
+            let source = defaults_dir.join(name);
+            if !target.exists() && source.is_file() {
+                missing.push((name, source));
+            }
+        }
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let (data_storage, data_rel) = open_data_storage(&self.layout, true)?;
+        let cfg_rel = data_rel.join("config");
+        let _cfg_pin = data_storage.pin_directory(&cfg_rel, true)?;
+        let cancel = CancellationToken::new();
+        for (name, source) in missing {
+            let target = data_storage.root.join(&cfg_rel).join(name);
+            if target.exists() {
+                continue;
+            }
+            if let Some(bytes) = app_storage.read_limited(&source, 8 * 1024 * 1024)? {
+                let _ = data_storage.atomic(&target, &bytes, false, &cancel);
+            }
+        }
+        Ok(())
+    }
+
     /// Keep model/UI/session options; replace all resource and tool policy overrides.
     /// Only implemented business tools are activated. No built-in ls fallback is exposed.
     pub fn session_options(
@@ -178,6 +279,7 @@ impl Kit {
         options: CreateAgentSessionOptions,
     ) -> Result<CreateAgentSessionOptions, String> {
         crate::update::service::startup_check(self.root())?;
+        self.ensure_default_configs()?;
         self.session_options_with_auth(options, None, None, None, None, None)
     }
 
@@ -187,8 +289,8 @@ impl Kit {
         for name in SKILL_NAMES {
             self.resource(&format!("skills/{name}/SKILL.md"))?;
         }
-        self.resource("APPEND_SYSTEM.md")?;
-        WebAccess::from_config(&self.agent_dir().join("web-search.json"))?;
+        self.resource("prompts/APPEND_SYSTEM.md")?;
+        WebAccess::from_config(&self.config_dir().join("web-search.json"))?;
         Ok(())
     }
 
@@ -205,14 +307,16 @@ impl Kit {
         let cwd_canonical = options
             .cwd
             .clone()
-            .unwrap_or_else(|| self.root.clone())
+            .unwrap_or_else(|| self.root().to_path_buf())
             .canonicalize()
             .map_err(|_| "工作目录无法读取。")?;
         let cwd = strip_windows_verbatim_prefix(&cwd_canonical);
-        let agent_dir = strip_windows_verbatim_prefix(&self.agent_dir());
+        let config_dir = strip_windows_verbatim_prefix(&self.config_dir());
+        let sessions_dir = strip_windows_verbatim_prefix(&self.sessions_dir());
+        let locks_dir = strip_windows_verbatim_prefix(&self.locks_dir());
         let settings = SettingsManager::from_storage(
             Arc::new(KitSettingsStorage(
-                FileSettingsStorage::new(&cwd, &agent_dir),
+                FileSettingsStorage::with_lock_dir(&cwd, &config_dir, &locks_dir),
                 self.activity_gate().clone(),
             )),
             false,
@@ -230,10 +334,10 @@ impl Kit {
         for name in SKILL_NAMES {
             skill_paths.push(self.resource(&format!("skills/{name}/SKILL.md"))?);
         }
-        let prompt = self.resource("APPEND_SYSTEM.md")?;
+        let prompt = self.resource("prompts/APPEND_SYSTEM.md")?;
         let resources = DefaultResourceLoader::new(DefaultResourceLoaderOptions {
             cwd: cwd.clone(),
-            agent_dir: agent_dir.clone(),
+            agent_dir: config_dir.clone(),
             settings_manager: Some(settings.clone()),
             extension_factories: vec![factory],
             no_context_files: true,
@@ -250,7 +354,8 @@ impl Kit {
             privacy: crate::bitlocker::credentials::PrivacyPolicy,
         }));
         options.cwd = Some(cwd);
-        options.agent_dir = Some(agent_dir);
+        options.agent_dir = Some(config_dir);
+        options.sessions_dir = Some(sessions_dir);
         options.project_trusted = Some(false);
         options.settings_manager = Some(settings);
         options.resource_loader = Some(Arc::new(resources));
@@ -269,6 +374,7 @@ impl Kit {
         channel: Channel,
     ) -> Result<KitSession, String> {
         crate::update::service::startup_check(self.root())?;
+        self.ensure_default_configs()?;
         let _activity = self.activity_gate().enter()?;
         let auth = AuthRuntime::create(self.root(), channel, OaClient::official()?).await?;
         self.create_session_with_auth(options, auth).await
@@ -304,8 +410,9 @@ impl Kit {
         update_options: UpdateOptions,
     ) -> Result<KitSession, String> {
         crate::update::service::startup_check(self.root())?;
+        self.ensure_default_configs()?;
         let _activity = self.activity_gate().enter()?;
-        if auth.files.path("") != self.agent_dir() {
+        if auth.files.path("") != self.config_dir() {
             return Err("会话与认证目录不一致。".into());
         }
         let updates = UpdateService::new(
@@ -368,15 +475,15 @@ impl Kit {
     }
 
     fn resource(&self, relative: &str) -> Result<PathBuf, String> {
-        let home = self
-            .agent_dir()
+        let app = self
+            .app_dir()
             .canonicalize()
-            .map_err(|_| "工具包资源目录无法读取。")?;
-        let path = home
+            .map_err(|_| "工具包程序资源目录无法读取。")?;
+        let path = app
             .join(relative)
             .canonicalize()
             .map_err(|_| format!("工具包缺少资源：{relative}"))?;
-        if !path.starts_with(&home) || !path.is_file() {
+        if !path.starts_with(&app) || !path.is_file() {
             return Err(format!("工具包资源越界或不是文件：{relative}"));
         }
         Ok(path)
@@ -578,7 +685,8 @@ impl KitHost {
         update_options: UpdateOptions,
     ) -> Result<Self, String> {
         crate::update::service::startup_check(kit.root())?;
-        if auth.files.path("") != kit.agent_dir() {
+        kit.ensure_default_configs()?;
+        if auth.files.path("") != kit.config_dir() {
             return Err("会话与认证目录不一致。".into());
         }
         let updates = UpdateService::new(
@@ -806,9 +914,9 @@ impl CstPilotExtension {
         bitlocker_executor: Option<crate::bitlocker::core::Executor>,
         bitlocker_host: Option<Arc<dyn crate::bitlocker::BitLockerHostChannel>>,
     ) -> Result<Self, String> {
-        let web = WebAccess::from_config(&kit.agent_dir().join("web-search.json"))?;
+        let web = WebAccess::from_config(&kit.config_dir().join("web-search.json"))?;
         let mut read = create_read_tool_definition(
-            kit.root.to_string_lossy(),
+            kit.root().to_string_lossy(),
             Some(ReadToolOptions {
                 operations: Some(Arc::new(GuardedReadOperations(kit.guard.clone()))),
                 ..Default::default()
@@ -931,7 +1039,7 @@ mod tests {
     #[test]
     fn open_tool_names_and_skill_names_match_contracts() {
         let root = std::env::temp_dir().join(format!("cst-kit-tools-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join("agent/home")).unwrap();
+        std::fs::create_dir_all(root.join("app/prompts")).unwrap();
         let kit = Kit::new(&root).unwrap();
         let ext = CstPilotExtension::new(&kit).unwrap();
         let actual: BTreeSet<String> = ext.tool_names().into_iter().collect();
@@ -945,11 +1053,11 @@ mod tests {
     fn same_root_shares_single_activity_gate_and_distinct_roots_are_isolated() {
         let root_a = std::env::temp_dir().join(format!("cst-kit-gate-a-{}", uuid::Uuid::new_v4()));
         let root_b = std::env::temp_dir().join(format!("cst-kit-gate-b-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root_a.join("agent/home")).unwrap();
-        std::fs::create_dir_all(root_b.join("agent/home")).unwrap();
+        std::fs::create_dir_all(root_a.join("app")).unwrap();
+        std::fs::create_dir_all(root_b.join("app")).unwrap();
 
         let kit_a1 = Kit::new(&root_a).unwrap();
-        let kit_a2 = Kit::new(root_a.join("agent/..")).unwrap();
+        let kit_a2 = Kit::new(root_a.join("app/..")).unwrap();
         let kit_b = Kit::new(&root_b).unwrap();
 
         assert!(Arc::ptr_eq(kit_a1.activity_gate(), kit_a2.activity_gate()));

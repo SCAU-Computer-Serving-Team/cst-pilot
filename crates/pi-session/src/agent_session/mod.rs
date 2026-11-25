@@ -18,8 +18,8 @@ use pi_ai::{
     ModelThinkingLevel, Models, RetryPolicy, SimpleStreamOptions, StopReason, SystemContent,
     SystemMessage, TextContent, ToolCall, ToolResultMessage, TranscriptContext, Usage, UserContent,
     UserContentBlock, UserMessage, clamp_thinking_level, is_context_overflow,
-    is_recoverable_length, is_retryable_assistant_error, is_thinking_level_supported, now_ms,
-    retry_delay_ms,
+    is_recoverable_length, is_retryable_assistant_error, is_thinking_level_supported,
+    merge_client_identity, now_ms, retry_delay_ms,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -529,6 +529,13 @@ impl AgentSession {
         let stream_fn = options
             .stream_fn
             .unwrap_or_else(|| models_stream_fn(options.models.clone()));
+        // Chat, branch summaries, and both compaction paths share this stream.
+        let default_identity = pi_ai::ClientIdentity::with_pi_attribution();
+        let stream_fn: AgentStreamFn = Arc::new(move |model, transcript, mut opts| {
+            opts.base.identity =
+                merge_client_identity([Some(&default_identity), opts.base.identity.as_ref()]);
+            stream_fn(model, transcript, opts)
+        });
 
         let projection = options.session_manager.build_session_projection();
         // Model selection (including authenticated history fallback) belongs to the SDK policy.

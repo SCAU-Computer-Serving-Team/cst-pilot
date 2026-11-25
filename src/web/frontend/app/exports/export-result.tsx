@@ -1,3 +1,4 @@
+import { FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiJson } from "../data/api";
 import type { SessionExport } from "../data/types";
@@ -39,15 +40,19 @@ export function ExportResult({ result }: { result: SessionExport }) {
 			<button
 				ref={trigger}
 				type="button"
-				className="export-open-directory"
-				aria-label="在文件管理器中打开保存目录"
-				title="在文件管理器中打开保存目录"
+				className="tier-1-btn-outline export-open-directory"
+				aria-label={`在文件管理器中打开保存目录：${result.directory}`}
+				title={result.directory}
 				aria-busy={opening || undefined}
 				disabled={opening}
 				onClick={() => void openDirectory()}
 			>
-				{result.directory}
+				<FolderOpen size={16} aria-hidden="true" />
+				打开保存目录
 			</button>
+			<p className="export-result-path" title={result.directory}>
+				{result.directory}
+			</p>
 			{error && <ErrorNotice message={error} onRetry={() => void openDirectory()} />}
 		</section>
 	);

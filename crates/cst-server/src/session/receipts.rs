@@ -210,6 +210,8 @@ impl MutationReceipts {
             drop(acceptance);
             loop {
                 let notified = inflight.notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
                 let maybe_outcome = inflight.outcome.lock().expect("inflight outcome").clone();
                 if let Some(outcome) = maybe_outcome {
                     let value = outcome?;

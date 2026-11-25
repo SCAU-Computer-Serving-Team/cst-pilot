@@ -4,12 +4,16 @@
 
 1. 若从未阅读过项目文档，按以下顺序阅读：
    1. 基本情况：`doc\SPEC.md`、`README.md`、`doc\README.md`。
-   2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\rust\CRATES.md`、`doc\TASKS.md`、`doc\TESTING.md`。
+   2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\rust\CRATES.md`、`doc\TASKS.md`、`doc\test\TESTING.md`、`doc\test\desktop-ui-audit.md`。
    3. 按任务阅读对应模块目录（`pi-core`、`server`、`diagnostics`、`auth`、`telemetry`、`web`、`desktop`、`release`）及 `doc\rust\` 下的子包设计文档。
 2. 了解 `earendil-works/pi`。本项目 Rust 核心对齐上游 Pi `1.5.0`，遵循 Pi 工程规范。
 3. 遵循 Rust 社区与大型工作区工程实践。
 4. 优先使用 `pi-context` 提供的工具标注 checkpoint。仅在明确切换任务且上下文超过 400K 时执行 compact。(如果有)
-5. 执行前端与设计任务时，遵循三项设计核心文件：[storybook.html](design/storybook.html)（动效、令牌与交互行为参考最高规范）、`design\*.pen` 画布（静态设计、Shader 与整体设计最高规范，以 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 为主流基准）及 [DESIGN.md](DESIGN.md)（文本最高规范）。[storybook.html](design/storybook.html) 的静态组件与静态基础变量严格对应各 `.pen` 设计稿，`.pen` 内容优先级更高；`storybook.html` 不得出现 `.pen` 未定义的静态组件和静态基础变量；交互瞬态与动效归属交互侧，不属于 `.pen` 静态范围。
+5. 执行前端与设计任务时，遵循三项设计核心文件：
+	1. [storybook.html](design/storybook.html)（动效、令牌与交互行为参考最高规范）
+	2. `design\*.pen` 画布（静态设计、Shader 与整体设计最高规范，以 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 为主流基准）
+	3. [DESIGN.md](DESIGN.md)（文本最高规范）。
+	4. [storybook.html](design/storybook.html) 的静态组件与静态基础变量严格对应各 `.pen` 设计稿，`.pen` 内容优先级更高；`storybook.html` 不得出现 `.pen` 未定义的静态组件和静态基础变量；交互瞬态与动效归属交互侧，不属于 `.pen` 静态范围。
 6. 执行 `Pen.dev` 等前端设计任务前，阅读 `emil` 系与 `gpui` 系 SKILLS，并通过 MCP 获取 `pen.dev` 操作方式。
 
 ## 文档规范
@@ -38,6 +42,18 @@
 
 ## 运行与调试
 
+本地执行任何 Cargo 编译、检查与测试（含触发编译的启动脚本）前，**必须**先设置当前 PowerShell 进程的 CPU 亲和性，预留 2 个逻辑核心给系统（16 核对应 `0x3FFF`，上限 87.5%）。**禁止**未设置 CPU 亲和性直接运行 `cargo`。`cargo` 与 `rustc` 等子进程自动继承该硬性限制：
+
+```powershell
+$keep = [Math]::Min(62, [Math]::Max(1, [Environment]::ProcessorCount - 2))
+(Get-Process -Id $PID).ProcessorAffinity = [IntPtr](([int64]1 -shl $keep) - 1)
+# 可选：调低进程优先级
+# (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+cargo check --workspace --all-targets --locked
+```
+
+每次完成规模较大的阶段性任务时**必须**进行编译，以更新便于用户查看。
+
 项目内直接启动 Rust 桌面端（`--release` 编译并启动优化版，`--build` 增量重编开发版）：
 
 ```powershell
@@ -59,12 +75,11 @@ npm run build --prefix src/web/frontend
 .\pi-web.cmd
 ```
 
-PowerShell 隔离配置目录调试（`cst-server` 校验上两级目录下存在 `agent\home`）：
+PowerShell 隔离配置目录调试（使用阶段 9.2 专用变量 `CST_PILOT_ROOT` / `CST_PILOT_DATA_DIR` / `CST_OFFLINE=1`；开发仓库内运行默认使用根目录 `data/` 存放用户数据，与发行版一致）：
 
 ```powershell
-New-Item -ItemType Directory -Force 'E:\tmp\<YYYY-MM-DD>\kit\agent\home' | Out-Null
-$env:PI_CODING_AGENT_DIR = 'E:\tmp\<YYYY-MM-DD>\kit\agent\home'
-$env:PI_OFFLINE = '1'
+$env:CST_PILOT_ROOT = 'E:\tmp\<YYYY-MM-DD>\kit'
+$env:CST_OFFLINE = '1'
 ```
 
 桌面端 CLI 自动化、无回显填密与截图录屏（完整用法与选择器见 [winapp-cli.md](doc/desktop/test/winapp-cli.md)）：

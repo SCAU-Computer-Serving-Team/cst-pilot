@@ -13,27 +13,37 @@ pub type ExportDirectoryOpenerFn =
     Arc<dyn Fn(PathBuf) -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
 pub fn default_export_directory_opener() -> ExportDirectoryOpenerFn {
-    Arc::new(|directory: PathBuf| {
+    Arc::new(|target: PathBuf| {
         Box::pin(async move {
             #[cfg(windows)]
             {
                 let explorer = cst_os::windows_directory()?.join("explorer.exe");
-                tokio::process::Command::new(explorer)
-                    .arg(&directory)
-                    .spawn()
+                let mut cmd = tokio::process::Command::new(explorer);
+                if target.is_file() {
+                    let target_str = target
+                        .to_str()
+                        .ok_or_else(|| "导出路径包含不支持的字符".to_owned())?;
+                    if target_str.contains('"') || target_str.chars().any(char::is_control) {
+                        return Err("导出路径包含不支持的字符".to_owned());
+                    }
+                    cmd.raw_arg(format!("/select,\"{target_str}\""));
+                } else {
+                    cmd.arg(&target);
+                }
+                cmd.spawn()
                     .map(|_| ())
                     .map_err(|_| "无法启动文件管理器".to_owned())
             }
             #[cfg(not(windows))]
             {
-                let _ = directory;
+                let _ = target;
                 Err("当前系统不支持本地目录打开".to_owned())
             }
         })
     })
 }
 
-fn is_reparse_or_symlink(meta: &fs::Metadata) -> bool {
+pub(crate) fn is_reparse_or_symlink(meta: &fs::Metadata) -> bool {
     if meta.file_type().is_symlink() {
         return true;
     }

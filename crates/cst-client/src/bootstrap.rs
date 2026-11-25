@@ -63,13 +63,13 @@ impl BootstrapOptions {
     pub fn server_exe_for(&self, canonical_kit_root: &Path) -> PathBuf {
         self.expected_server_exe
             .clone()
-            .unwrap_or_else(|| canonical_kit_root.join("cst-server.exe"))
+            .unwrap_or_else(|| canonical_kit_root.join("app").join("cst-server.exe"))
     }
 
     pub fn updater_exe_for(&self, canonical_kit_root: &Path) -> PathBuf {
         self.expected_updater_exe
             .clone()
-            .unwrap_or_else(|| canonical_kit_root.join("cst-updater.exe"))
+            .unwrap_or_else(|| canonical_kit_root.join("app").join("cst-updater.exe"))
     }
 }
 
@@ -645,11 +645,11 @@ async fn probe_existing_server(
     })
 }
 
-/// Applies the strict portable environment whitelist to `cst-server.exe` / `cst-updater.exe`:
+/// Applies the strict portable environment whitelist to `app/cst-server.exe` / `app/cst-updater.exe`:
 /// - `SystemRoot` / `WINDIR` / `ComSpec` resolved via trusted Win32 APIs (`GetWindowsDirectoryW` / `GetSystemDirectoryW`)
 /// - `TEMP` / `TMP` redirected to `<kit_root>/.state/tmp`
-/// - `PI_CODING_AGENT_DIR` = `<kit_root>/agent/home`, `PI_OFFLINE` = `1`
-/// - Strips untrusted `PATH`, `*_API_KEY`, `HTTP_PROXY`, `CST_EXPORT_BROWSER`, `CHROME_PATH`, etc.
+/// - `CST_PILOT_ROOT` = `<kit_root>`, `CST_OFFLINE` = `1`
+/// - Strips untrusted `PATH`, `PI_*`, `*_API_KEY`, `HTTP_PROXY`, `CST_EXPORT_BROWSER`, `CHROME_PATH`, etc.
 pub fn apply_portable_sanitized_env(
     cmd: &mut Command,
     canonical_kit_root: &Path,
@@ -666,19 +666,18 @@ pub fn apply_portable_sanitized_env(
     let win_dir = windows_directory().map_err(ClientError::BootstrapFailed)?;
     let sys_dir = system_directory().map_err(ClientError::BootstrapFailed)?;
 
-    let mut path_entries = Vec::new();
-    let kit_pwsh = clean_root.join("pwsh");
-    if kit_pwsh.is_dir() {
-        path_entries.push(kit_pwsh);
+    let mut path_entries = Vec::with_capacity(6);
+    for bundled in [clean_root.join("pwsh"), clean_root.join("bin")] {
+        if bundled.is_dir() {
+            path_entries.push(bundled);
+        }
     }
-    let kit_bin = clean_root.join("bin");
-    if kit_bin.is_dir() {
-        path_entries.push(kit_bin);
-    }
-    path_entries.push(sys_dir.clone());
-    path_entries.push(win_dir.clone());
-    path_entries.push(sys_dir.join("Wbem"));
-    path_entries.push(sys_dir.join("WindowsPowerShell").join("v1.0"));
+    path_entries.extend([
+        sys_dir.clone(),
+        win_dir.clone(),
+        sys_dir.join("Wbem"),
+        sys_dir.join("WindowsPowerShell").join("v1.0"),
+    ]);
     let joined_path = std::env::join_paths(path_entries)
         .map_err(|e| ClientError::BootstrapFailed(format!("组装安全 PATH 失败：{e}")))?;
 
@@ -690,8 +689,8 @@ pub fn apply_portable_sanitized_env(
     cmd.env("PATHEXT", ".COM;.EXE;.BAT;.CMD");
     cmd.env("TEMP", &tmp_dir);
     cmd.env("TMP", &tmp_dir);
-    cmd.env("PI_CODING_AGENT_DIR", clean_root.join("agent").join("home"));
-    cmd.env("PI_OFFLINE", "1");
+    cmd.env("CST_PILOT_ROOT", &clean_root);
+    cmd.env("CST_OFFLINE", "1");
 
     for passthrough in [
         "SYSTEMDRIVE",

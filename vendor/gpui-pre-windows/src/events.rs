@@ -98,8 +98,10 @@ impl WindowsWindowInner {
             WM_MOVE => self.handle_move_msg(handle, lparam),
             WM_SIZE => self.handle_size_msg(wparam, lparam),
             WM_GETMINMAXINFO => self.handle_get_min_max_info_msg(lparam),
-            WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => self.handle_size_move_loop(handle),
-            WM_EXITSIZEMOVE | WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle),
+            WM_ENTERSIZEMOVE => self.handle_size_move_loop(handle, true),
+            WM_ENTERMENULOOP => self.handle_size_move_loop(handle, false),
+            WM_EXITSIZEMOVE => self.handle_size_move_loop_exit(handle, true),
+            WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle, false),
             WM_TIMER => self.handle_timer_msg(handle, wparam),
             WM_NCCALCSIZE => self.handle_calc_client_size(handle, wparam, lparam),
             WM_DPICHANGED => self.handle_dpi_changed_msg(handle, wparam, lparam),
@@ -151,6 +153,7 @@ impl WindowsWindowInner {
             WM_CHAR => self.handle_char_msg(wparam),
             WM_IME_STARTCOMPOSITION => self.handle_ime_position(handle),
             WM_IME_COMPOSITION => self.handle_ime_composition(handle, lparam),
+            WM_IME_ENDCOMPOSITION => self.handle_ime_end_composition(),
             WM_SETCURSOR => self.handle_set_cursor(handle, lparam),
             WM_SETTINGCHANGE => self.handle_system_settings_changed(handle, wparam, lparam),
             WM_INPUTLANGCHANGE => self.handle_input_language_changed(),
@@ -196,7 +199,9 @@ impl WindowsWindowInner {
                 )?);
             }
         }
-        if let Some(mut callback) = self.state.callbacks.moved.take() {
+        if self.state.in_size_move_loop.get() {
+            self.state.pending_move_notify.set(true);
+        } else if let Some(mut callback) = self.state.callbacks.moved.take() {
             callback();
             self.state.callbacks.moved.set(Some(callback));
         }
@@ -219,6 +224,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_msg(self: &Rc<Self>, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if self.state.in_size_move_loop.get() {
+            self.state.resizing_in_loop.set(true);
+        }
         // Minimizing and restoring both arrive as `WM_SIZE`; the deferred report
         // reads `IsIconic` at delivery, so one call covers both directions.
         self.report_visibility();
@@ -274,7 +282,12 @@ impl WindowsWindowInner {
         }
     }
 
-    fn handle_size_move_loop(&self, handle: HWND) -> Option<isize> {
+    fn handle_size_move_loop(&self, handle: HWND, is_size_move: bool) -> Option<isize> {
+        if is_size_move {
+            self.state.in_size_move_loop.set(true);
+            self.state.resizing_in_loop.set(false);
+            self.state.pending_move_notify.set(false);
+        }
         unsafe {
             let ret = SetTimer(
                 Some(handle),
@@ -292,9 +305,22 @@ impl WindowsWindowInner {
         None
     }
 
-    fn handle_size_move_loop_exit(&self, handle: HWND) -> Option<isize> {
+    fn handle_size_move_loop_exit(&self, handle: HWND, is_size_move: bool) -> Option<isize> {
         unsafe {
             KillTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID).log_err();
+        }
+        if is_size_move {
+            let was_pure_move =
+                self.state.pending_move_notify.take() && !self.state.resizing_in_loop.get();
+            self.state.in_size_move_loop.set(false);
+            self.state.resizing_in_loop.set(false);
+            if was_pure_move {
+                if let Some(mut callback) = self.state.callbacks.moved.take() {
+                    callback();
+                    self.state.callbacks.moved.set(Some(callback));
+                }
+                let _ = self.handle_paint_msg(handle);
+            }
         }
         None
     }
@@ -305,6 +331,15 @@ impl WindowsWindowInner {
             while let Some(Ok(runnable)) = runnables.next() {
                 WindowsDispatcher::execute_runnable(runnable);
             }
+            // During a pure window drag (moving without resizing), DWM translates the existing
+            // swapchain smoothly on the GPU. Skipping synchronous D3D11 redraws inside the modal
+            // drag loop avoids stalling mouse message delivery.
+            if self.state.in_size_move_loop.get()
+                && !self.state.resizing_in_loop.get()
+                && self.state.pending_move_notify.get()
+            {
+                return Some(0);
+            }
             self.handle_paint_msg(handle)
         } else {
             None
@@ -312,6 +347,17 @@ impl WindowsWindowInner {
     }
 
     fn handle_paint_msg(&self, handle: HWND) -> Option<isize> {
+        // During a pure window drag (moving without resizing or DPI change), DWM translates
+        // the existing swapchain smoothly on the GPU. Validate the region instead of running
+        // synchronous GPUI layout + D3D11 Present on every VSync invalidation so the modal
+        // drag loop stays responsive.
+        if self.state.in_size_move_loop.get()
+            && !self.state.resizing_in_loop.get()
+            && self.state.pending_move_notify.get()
+        {
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
+        }
         self.draw_window(handle, false)
     }
 
@@ -721,6 +767,55 @@ impl WindowsWindowInner {
         }
     }
 
+    pub(crate) fn finish_ime_composition(&self, handle: HWND) -> Option<String> {
+        if unsafe { GetFocus() } != handle {
+            return None;
+        }
+        let ctx = ImeContext::get(handle)?;
+        // ImmNotifyIME can dispatch WM_IME_COMPOSITION synchronously, while GPUI
+        // still has the window/app borrowed by the send button's click handler.
+        self.state.ime_completion.replace(Some(String::new()));
+        let completed = unsafe { ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_COMPLETE, 0) };
+        let text = self
+            .state
+            .ime_completion
+            .take()
+            .filter(|text| !text.is_empty());
+        if !completed.as_bool() || text.is_none() {
+            self.cancel_ime_composition(handle);
+        }
+        text
+    }
+
+    pub(crate) fn cancel_ime_composition(&self, handle: HWND) {
+        unsafe {
+            if GetFocus() == handle
+                && let Some(ctx) = ImeContext::get(handle)
+            {
+                let prev = self.state.ime_completion.replace(Some(String::new()));
+                ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_CANCEL, 0)
+                    .ok()
+                    .log_err();
+                self.state.ime_completion.replace(prev);
+            }
+        }
+    }
+
+    fn clear_ime_preedit(&self) -> Option<()> {
+        self.with_input_handler(|input_handler| {
+            if let Some(marked) = input_handler.marked_text_range() {
+                input_handler.replace_text_in_range(Some(marked), "");
+            }
+        })
+    }
+
+    fn handle_ime_end_composition(&self) -> Option<isize> {
+        if self.state.ime_completion.borrow().is_none() {
+            self.clear_ime_preedit();
+        }
+        None
+    }
+
     fn handle_ime_composition(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let ctx = ImeContext::get(handle)?;
         self.handle_ime_composition_inner(*ctx, lparam)
@@ -728,12 +823,18 @@ impl WindowsWindowInner {
 
     fn handle_ime_composition_inner(&self, ctx: HIMC, lparam: LPARAM) -> Option<isize> {
         let lparam = lparam.0 as u32;
+        if let Some(text) = self.state.ime_completion.borrow_mut().as_mut() {
+            if lparam & GCS_RESULTSTR.0 != 0
+                && let Some(result) = parse_ime_composition_string(ctx, GCS_RESULTSTR)
+            {
+                text.push_str(&String::from_utf16_lossy(&result));
+            }
+            return Some(0);
+        }
         if lparam == 0 {
             // Japanese IME may send this message with lparam = 0, which indicates that
             // there is no composition string.
-            self.with_input_handler(|input_handler| {
-                input_handler.replace_text_in_range(None, "");
-            })?;
+            self.clear_ime_preedit()?;
             Some(0)
         } else {
             if lparam & GCS_RESULTSTR.0 > 0 {
@@ -745,23 +846,28 @@ impl WindowsWindowInner {
             }
             if lparam & GCS_COMPSTR.0 > 0 {
                 let comp_string = parse_ime_composition_string(ctx, GCS_COMPSTR)?;
-                let caret_pos =
-                    (!comp_string.is_empty() && lparam & GCS_CURSORPOS.0 > 0).then(|| {
+                if comp_string.is_empty() {
+                    self.clear_ime_preedit()?;
+                } else {
+                    let caret_pos = (lparam & GCS_CURSORPOS.0 > 0).then(|| {
                         let cursor_pos = retrieve_composition_cursor_position(ctx);
-                        let pos = if should_use_ime_cursor_position(ctx, cursor_pos) {
+                        let pos = if cursor_pos <= comp_string.len()
+                            && should_use_ime_cursor_position(ctx, cursor_pos)
+                        {
                             cursor_pos
                         } else {
                             comp_string.len()
                         };
                         pos..pos
                     });
-                self.with_input_handler(|input_handler| {
-                    input_handler.replace_and_mark_text_in_range(
-                        None,
-                        &String::from_utf16_lossy(&comp_string),
-                        caret_pos,
-                    );
-                })?;
+                    self.with_input_handler(|input_handler| {
+                        input_handler.replace_and_mark_text_in_range(
+                            None,
+                            &String::from_utf16_lossy(&comp_string),
+                            caret_pos,
+                        );
+                    })?;
+                }
             }
             if lparam & (GCS_RESULTSTR.0 | GCS_COMPSTR.0) > 0 {
                 return Some(0);
@@ -876,6 +982,9 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<isize> {
+        if self.state.in_size_move_loop.get() {
+            self.state.resizing_in_loop.set(true);
+        }
         let new_dpi = wparam.loword() as f32;
 
         let is_maximized = self.state.is_maximized();
@@ -1719,25 +1828,26 @@ fn process_key(vkey: VIRTUAL_KEY, scan_code: u16) -> (Option<String>, bool) {
 }
 
 fn parse_ime_composition_string(ctx: HIMC, comp_type: IME_COMPOSITION_STRING) -> Option<Vec<u16>> {
-    unsafe {
-        let string_len = ImmGetCompositionStringW(ctx, comp_type, None, 0);
-        if string_len >= 0 {
-            let mut buffer = vec![0u8; string_len as usize + 2];
+    let byte_len = unsafe { ImmGetCompositionStringW(ctx, comp_type, None, 0) };
+    if byte_len < 0 || byte_len % 2 != 0 {
+        return None;
+    }
+    let mut buffer = vec![0u16; byte_len as usize / 2];
+    if byte_len != 0 {
+        let written = unsafe {
             ImmGetCompositionStringW(
                 ctx,
                 comp_type,
-                Some(buffer.as_mut_ptr() as _),
-                string_len as _,
-            );
-            let wstring = std::slice::from_raw_parts::<u16>(
-                buffer.as_mut_ptr().cast::<u16>(),
-                string_len as usize / 2,
-            );
-            Some(wstring.to_vec())
-        } else {
-            None
+                Some(buffer.as_mut_ptr().cast()),
+                byte_len as u32,
+            )
+        };
+        if written < 0 || written > byte_len || written % 2 != 0 {
+            return None;
         }
+        buffer.truncate(written as usize / 2);
     }
+    Some(buffer)
 }
 
 #[inline]
@@ -1746,12 +1856,12 @@ fn retrieve_composition_cursor_position(ctx: HIMC) -> usize {
 }
 
 fn should_use_ime_cursor_position(ctx: HIMC, cursor_pos: usize) -> bool {
-    let attrs_size = unsafe { ImmGetCompositionStringW(ctx, GCS_COMPATTR, None, 0) } as usize;
-    if attrs_size == 0 {
+    let attrs_size = unsafe { ImmGetCompositionStringW(ctx, GCS_COMPATTR, None, 0) };
+    if attrs_size <= 0 {
         return false;
     }
 
-    let mut attrs = vec![0u8; attrs_size];
+    let mut attrs = vec![0u8; attrs_size as usize];
     let result = unsafe {
         ImmGetCompositionStringW(
             ctx,
@@ -1760,9 +1870,10 @@ fn should_use_ime_cursor_position(ctx: HIMC, cursor_pos: usize) -> bool {
             attrs_size as u32,
         )
     };
-    if result <= 0 {
+    if result <= 0 || result > attrs_size {
         return false;
     }
+    attrs.truncate(result as usize);
 
     // Keep the cursor adjacent to the inserted text by only using the suggested position
     // if it's adjacent to unconverted text.

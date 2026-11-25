@@ -74,7 +74,8 @@ impl Fetcher for NativeFetcher {
                     let client = reqwest::Client::builder()
                         .no_proxy()
                         .redirect(reqwest::redirect::Policy::none())
-                        .timeout(Duration::from_secs(10))
+                        .connect_timeout(Duration::from_secs(10))
+                        .read_timeout(Duration::from_secs(30))
                         .resolve_to_addrs(url.host_str().ok_or("升级地址无效。")?, &addresses)
                         .build()
                         .map_err(|_| "升级网络客户端无法初始化。")?;

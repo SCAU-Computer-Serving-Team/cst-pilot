@@ -138,8 +138,22 @@ pub fn gpu(
         )
     });
     control.check()?;
-    if counters.errors.iter().any(|e| e.source == "engine") {
-        counters = batch(hardware, CounterSet::Gpu, control);
+    if counters.errors.iter().any(|e| e.source == "engine")
+        && !counters.samples.iter().any(|s| s.counter == "engine")
+    {
+        let retry = hardware
+            .gpu_engine(control)
+            .unwrap_or_else(|message| CounterBatch {
+                samples: vec![],
+                errors: vec![error("engine", &message)],
+            });
+        counters.errors.retain(|e| e.source != "engine");
+        counters
+            .errors
+            .extend(retry.errors.into_iter().filter(|e| e.source == "engine"));
+        counters
+            .samples
+            .extend(retry.samples.into_iter().filter(|s| s.counter == "engine"));
     }
     let mut errors = Vec::new();
     let adapters = collect(

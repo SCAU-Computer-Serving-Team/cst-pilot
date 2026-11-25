@@ -38,6 +38,23 @@ pub fn is_codex_model(model: &Model) -> bool {
         || model.base_url.contains("chatgpt.com/backend-api")
 }
 
+// Codex uses the same first 64 Unicode characters for the payload and SSE headers.
+fn codex_cache_key(session_id: Option<&str>) -> Option<String> {
+    Some(session_id?.chars().take(64).collect())
+}
+
+fn is_loopback_endpoint(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| {
+        url.host_str().is_some_and(|host| {
+            host == "localhost"
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        })
+    })
+}
+
 pub fn extract_chatgpt_account_id(jwt_token: &str) -> Option<String> {
     use base64::Engine;
     let payload_b64 = jwt_token.split('.').nth(1)?;
@@ -62,7 +79,7 @@ fn detect_session_affinity_format(model: &Model) -> SessionAffinityFormat {
     {
         return fmt;
     }
-    if model.provider == "openrouter" || model.base_url.contains("openrouter.ai") {
+    if super::is_openrouter_target(&model.provider, &model.base_url) {
         SessionAffinityFormat::OpenRouter
     } else {
         SessionAffinityFormat::OpenAi
@@ -463,11 +480,16 @@ pub fn build_responses_params(
         params.insert("tool_choice".to_owned(), Value::String("auto".to_owned()));
     }
 
-    if cache_retention != CacheRetention::None
-        && let Some(key) =
-            clamp_openai_prompt_cache_key(options.and_then(|o| o.session_id.as_deref()))
-    {
-        params.insert("prompt_cache_key".to_owned(), Value::String(key));
+    if cache_retention != CacheRetention::None {
+        let session_id = options.and_then(|o| o.session_id.as_deref());
+        let key = if is_codex {
+            codex_cache_key(session_id)
+        } else {
+            clamp_openai_prompt_cache_key(session_id)
+        };
+        if let Some(key) = key {
+            params.insert("prompt_cache_key".to_owned(), Value::String(key));
+        }
     }
 
     if !omit_unsupported {
@@ -1269,7 +1291,8 @@ pub fn stream(
                 .as_ref()
                 .and_then(|o| o.headers.clone())
                 .unwrap_or_default();
-            if let Some(sid) = cache_session_id {
+            let is_codex = is_codex_model(&model);
+            if !is_codex && let Some(sid) = cache_session_id {
                 match detect_session_affinity_format(&model) {
                     SessionAffinityFormat::OpenRouter => {
                         opt_headers
@@ -1292,33 +1315,49 @@ pub fn stream(
                 }
             }
 
-            if is_codex_model(&model)
-                && !opt_headers
-                    .keys()
-                    .any(|k| k.eq_ignore_ascii_case("chatgpt-account-id"))
-                && let Some(account_id) = extract_chatgpt_account_id(&api_key)
-            {
-                opt_headers.insert("ChatGPT-Account-Id".to_owned(), Some(account_id));
-            }
             inject_copilot_dynamic_headers(&model, context.messages(), &mut opt_headers);
 
             let auth_val = format!("Bearer {api_key}");
+            let mut defaults = vec![
+                ("authorization", auth_val.as_str()),
+                ("content-type", "application/json"),
+                ("accept", "text/event-stream"),
+            ];
+            let mut codex_session_id = None;
+            let mut account_id = None;
+            if is_codex {
+                defaults.extend([("originator", "pi"), ("OpenAI-Beta", "responses=experimental")]);
+                codex_session_id = codex_cache_key(cache_session_id);
+                account_id = extract_chatgpt_account_id(&api_key);
+            }
+            if let Some(sid) = codex_session_id.as_deref().filter(|id| !id.is_empty()) {
+                defaults.extend([("session-id", sid), ("x-client-request-id", sid)]);
+            }
+            if let Some(account_id) = account_id.as_deref() {
+                defaults.push(("ChatGPT-Account-Id", account_id));
+            }
+
             let headers = build_header_map(
+                (&model.provider, &model.base_url),
                 options.as_ref().and_then(|o| o.identity.as_ref()),
-                &[
-                    ("authorization", &auth_val),
-                    ("content-type", "application/json"),
-                    ("accept", "text/event-stream"),
-                ],
+                options.as_ref().and_then(|o| o.session_id.as_deref()),
+                &defaults,
                 model.headers.as_ref(),
                 Some(&opt_headers),
             );
 
             let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
+            let url = resolve_responses_endpoint_url(&model);
+            // Allow loopback mocks with a plain fake token and no account metadata.
+            if is_codex
+                && !headers.get("chatgpt-account-id").is_some_and(|id| !id.as_bytes().is_empty())
+                && !is_loopback_endpoint(&url)
+            {
+                return Err("OpenAI Codex requires ChatGPT-Account-Id; no account ID in credentials or request headers".to_owned());
+            }
 
             let raw_payload = build_responses_params(&model, &context, options.as_ref());
             let payload = invoke_on_payload(options.as_ref(), raw_payload, &model).await?;
-            let url = resolve_responses_endpoint_url(&model);
             let client = reqwest::Client::new();
 
             let resp = send_with_retry(

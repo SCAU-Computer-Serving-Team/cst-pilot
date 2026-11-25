@@ -9,7 +9,7 @@
 | 核心文件 | 权威范围 | 查阅内容 |
 |---|---|---|
 | [storybook.html](design/storybook.html) | **动效、令牌与交互行为参考最高规范** | 交互瞬态色（Hover / Active / Focus）、动效时长/缓动/缩放与渲染适配变量；母版实时交互、控件九态、焦点栈与减少动态降级 |
-| [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 等 `.pen` 画布 | **静态设计、Shader 与整体设计最高规范** | 整体窗口骨架、页面流、静态组件与静态基础变量（颜色、圆角、间距、盒高、字号）；`00A–00F` 母版几何；`00F` 与 [design/asset/](design/asset/) 着色器绑定参数 |
+| [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 等 `.pen` 画布 | **静态设计、Shader 与整体设计最高规范** | 整体窗口骨架、页面流、静态组件与静态基础变量（颜色、圆角、间距、盒高、字号）；`00A–00H` 母版几何；`00F` 与 [design/asset/](design/asset/) 着色器绑定参数 |
 | [DESIGN.md](DESIGN.md) | **文本最高规范** | 视觉定调、三端通道边界、字体分发与回退、运行期硬件保护、跨端异常分流、界面文案术语及设计红线 |
 
 静态与交互边界：
@@ -21,8 +21,8 @@
 
 | 画布路径 | 角色与状态 |
 |---|---|
-| [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) | 桌面端与内置 TUI 主流基准画布，收录「设计规范」板、`00A–00F` 母版与 `01–07` 业务主区 |
-| [cst-pilot-web.pen](design/cst-pilot-web.pen) / [cst-pilot-tools.pen](design/cst-pilot-tools.pen) | Web 端页面与工具卡画布，列入[设计规范重构待办](doc/TASKS.md#文档与设计规范待办)按主流基准对齐 |
+| [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) | 桌面端与内置 TUI 主流基准画布，收录「设计规范」板、`00A–00H` 母版与 `01–07` 业务主区 |
+| [cst-pilot-web.pen](design/cst-pilot-web.pen) | Web 端单文件画布（已合并原工具画布并对齐 50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 主区，保留 Web `0px` 满幅工作区、`44px` 收起态页头、响应式断点与通道状态；前端核心规范已对齐，余项见[待办](doc/TASKS.md#文档与设计规范待办)） |
 | [cst-pilot-colors.pen](design/cst-pilot-colors.pen) / [heroui-colors.pen](design/heroui-colors.pen) | 底层色阶与外部组件库参考画布，正式界面直接消费 [storybook.html](design/storybook.html) 语义令牌 |
 
 ## 视觉定调与三端边界
@@ -33,14 +33,14 @@
 |---|---|---|
 | GPUI 桌面端 | 执行全部语义令牌、整体版式、三档材质、着色器背景与系统箭头光标 | 主流基准 |
 | 窗口内置 TUI | 共用窗口外壳与顶栏，复用语义色阶、报错句式、焦点法则与草稿状态 | 主流基准 |
-| 本机 Web 端 | 共享设计语言、动效与报错分流；增加窄视口断点（`≤960px` 收窄留白，`≤760px` 侧栏抽屉化）与静态着色回退 | 待对齐主流规范 |
+| 本机 Web 端 | 共享设计语言、动效与报错分流；增加窄视口断点（`≤960px` 聊天侧栏抽屉化，`≤760px` 设置侧栏抽屉化，`390px` 单列）与静态着色回退 | 画布与前端核心规范已对齐，余项持续收敛 |
 
 ## 令牌、用色与字体约束
 
 静态基础变量（颜色、圆角、间距、固定盒高、字号）的定义以 `.pen` 设计稿为更高优先级，[storybook.html](design/storybook.html) 严格对应 `.pen` 变量与母版并不得新增 `.pen` 未定义的静态变量。交互瞬态色、动效参数与 CSS 渲染适配变量归属交互侧，以 [storybook.html](design/storybook.html) 为参考最高规范并与静态变量分域管理。
 
 1. **用色硬约束**：正文与交互控件前背景对比度满足 WCAG AA（`≥ 4.5:1`）。成功、警告、危险语义色仅赋给状态图标或浅底徽标，边框与底面保持中性。同一局部视图内最多存在一个 `$accent-solid` 实心主操作。
-2. **字体与编码回退**：界面正文与常规西文统一使用思源黑体（`Source Han Sans CN`），命令行、路径与耗时使用 `JetBrains Mono`。发行包按 SIL OFL 1.1 随包分发单文件原版可变字体 `assets/fonts/SourceHanSansCN-VF.otf`（桌面端与本机 Web 端共用，覆盖 30,926 个 Unicode 码位与 `250–900` 字重，见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)）。
+2. **字体与编码回退**：除代码、命令行、路径与注释使用 `JetBrains Mono` 外，其余全部界面与正文（含快捷键标签、时间、指标数值与表格常规容量列，配合 `tabular-nums`）统一使用思源黑体（`Source Han Sans CN`）。发行包按 SIL OFL 1.1 随包分发单文件原版可变字体 `assets/fonts/SourceHanSansCN-VF.otf`（桌面端与本机 Web 端共用，覆盖 30,926 个 Unicode 码位与 `250–900` 字重，见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)）。
 3. **缺字回退与等宽数字**：超出字库范围的罕见扩展汉字与彩色 Emoji 交由系统字体回退链渲染，保留可复制文本。字体损坏或缺失时回退系统默认字体并弹出非阻塞提示。倒计时、计时秒数、百分比与页码固定启用 `tabular-nums`。
 4. **汉字光学对齐与嵌套圆角**：与图标同行水平居中的中文按钮及导航文字底部增加 `2px` 光学偏移，展开箭头紧随标题右侧 `8px`（[cst-pilot-desktop.pen](design/cst-pilot-desktop.pen)「设计规范」区域 `np3Ew`）。嵌套容器圆角按 `max(4px, 外层圆角 - 内边距)` 递进，分组内连续列表行与表格内部单元格取 `0px`。
 
@@ -52,13 +52,29 @@
 2. **动态背景与毛玻璃**：主页与登录页背景对应 [blue-hour.glsl](design/asset/blue-hour.glsl)、[blue-sky.glsl](design/asset/blue-sky.glsl) 与 [night-sky.glsl](design/asset/night-sky.glsl)（配套调色板见 [design/asset/](design/asset/)），浮层毛玻璃对应 [frosted-glass.glsl](design/asset/frosted-glass.glsl)。常规聊天工作台、会话管理与设置页保持静态底面。
 3. **硬件诊断停帧与静态回退**：激活期间按显示器刷新率（60–240 Hz）垂直同步并保留 ClearType 亚像素锐度。离开动态页、窗口失焦或最小化、覆盖 `WebActive` 锁定层，以及执行 `sys(gpu)` / `sys(sensor)` 硬件采样期间立即冻结时间轴（`0 FPS`）。系统开启减少动态、处于远程桌面或使用软光栅及低特性级驱动时，回退单帧静态画面或 [blue-hour.css](design/asset/blue-hour.css) 与半透明实底浮层。
 
+## Markdown 富文本排版
+
+对话流中的 Assistant 富文本回复遵循 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) `00H · Markdown 富文本`（区域 `MzGTw`，定稿母版 `HmEJM`）与 [storybook.html](design/storybook.html)「Markdown 富文本」条目，桌面端与本机 Web 端采用统一视觉规格。
+
+除代码、命令行、文件路径与注释使用 `JetBrains Mono` 外，正文、标题、常规西文与非代码数值统一使用思源黑体（`Source Han Sans CN`）。
+
+| 元素 | 视觉与排版规格 |
+|---|---|
+| 正文与段落 | `Source Han Sans CN` `16/26`（`line-height: 1.625`），`$text-primary`，段间距 `16px`（`$space-section`） |
+| 标题阶梯 | 均使用 `Source Han Sans CN` 字重 `600`：`H1` `24/32` 配底部 `1px` `$border-subtle` 细线（下内边距 `10px`）；`H2` `20/28`；`H3` `17/25`；`H4–H5` `15/24`；`H6` `14/22` 且降为 `$text-secondary` |
+| 行内样式 | 行内代码使用 `JetBrains Mono` `13px`、`$bg-surface` 底色、`1px` `$border-subtle` 描边、`4px` 圆角（`$radius-control`）、内边距 `1px 5px`；加粗 `700`、斜体常规倾斜、删除线退为 `$text-secondary`；外部链接使用 `$accent-ink` 配底部 `1px` 细线与手型光标 |
+| 列表与任务项 | 列表项间距 `6px`（`$space-detail`），标记列宽 `22px` 右对齐且使用 `$text-muted`（无序 `•` / `◦`，有序 `1.` / `A.` / `a.`）；任务复选框对齐系统 `16×16px` 规格（`4px` 圆角、已选铺 `$accent-solid` 配 `$text-on-accent` 对勾，已完成项文字退为 `$text-secondary`） |
+| 引用块与分割线 | 引用块左侧 `3px` `$border-strong` 竖线，铺 `$bg-surface` 浅底，右侧 `4px` 圆角，内边距 `10px 14px`，正文 `15/24` `$text-secondary`；水平分割线 `1px` `$border-subtle` |
+| 表格 | 外框 `8px` 圆角（`$radius-row`）配 `1px` `$border-subtle` 描边，**去掉单元格内部竖线**仅保留行间 `1px` 横线；表头 `$bg-surface` 配 `13px` `$text-secondary`（字重 `500`）；路径列使用 `JetBrains Mono 13px`，其余普通与容量数值单元格使用思源黑体并启用 `tabular-nums`，数据行启用悬停高亮，宽表横向可滚动 |
+| 代码块 | `8px` 圆角（`$radius-row`）配 `1px` `$border-subtle` 描边与 `$bg-surface` 底面，`JetBrains Mono` `13/21`；右上角并排显示语言名（`12px` `$text-muted`）与 `28×28px` 复制钮（点击切换 `$status-success` 勾选 `1.6s`）；语法高亮采用 3 色克制方案：注释 `$text-muted`、关键字与命令 `$accent-ink`、参数/字符串/数值 `$status-success`，普通文本保持 `$text-primary` |
+
 ## 动效与跨端交互契约
 
 动效时长、缓动曲线、控件九态及单组件交互逻辑以 [storybook.html](design/storybook.html) 为最高规范。常规切页禁止使用 `ease-in` 入场曲线与高斯模糊（`blur()`），局部元素位移不超过 `40px`。
 
 | 触发频率 | 典型场景 | 策略边界 |
 |---|---|---|
-| 百次级 | `Ctrl+K` 快捷面板、方向键移动、快捷键切档 | `0ms` 瞬时响应 |
+| 百次级 | `Ctrl+P` / `Ctrl+O` 快捷面板、方向键移动、快捷键切档 | `0ms` 瞬时响应 |
 | 十次级 | 按钮按压、下拉菜单、折叠展开、相邻 Tooltip | 短过渡与微反馈；相邻悬停跳过初始延迟 |
 | 低频级 | 模态弹窗、侧栏收展、分类切页、大图放大 | 快关慢开；关闭过程无回弹且零延迟 |
 | 一次性 | 冷启动或从终端首次拉起主页欢迎屏 | 允许错位入场，总延迟上限 `300ms`，站内返回不重播 |
@@ -95,7 +111,7 @@
 | 模型服务 | 供应商 / 渠道 / 后端平台 | 设置页模型网关配置 |
 | 思考强度 | 推理深度 / 思考预算 / Reasoning | 模型级联菜单第二项，最高档固定为 `Max` |
 | 额度点 | 积分 / Token 余额 / 点数 | `cstoa` 专属计量单位 |
-| 分支树 / 派生会话 | 历史图谱 / 克隆对话 | `/tree` 与 `/fork` 对应界面 |
+| 分支树 / 分支会话 | 历史图谱 / 克隆对话 | `/tree` 与 `/fork` 对应功能 |
 | 恢复密码 | 解锁码 / BitLocker 密钥串 | BitLocker 48 位数字输入字段 |
 
 4. **三级报错标准句式**：凭据彼此独立，报错必须点明出问题的具体服务名，采用「`{服务名} {故障现象}，{处理指引}。`」：
@@ -121,5 +137,5 @@
 
 1. 顶层声明 `mode: [light, dark]` 主题轴并绑定语义变量，不手抄裸色值。
 2. 左上角放置紧凑「设计规范」样张板（如 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen)「设计规范」区域 `LKIQI`），规则正文统一沉淀在本文。
-3. 主区上方（`y < 0`）建立 `00A–00F` 可复用母版，业务帧通过 `ref` 实例引用。
+3. 主区上方（`y < 0`）建立 `00A–00H` 可复用母版，业务帧通过 `ref` 实例引用。
 4. 业务主区沿 `y = 0` 单行横向顺延，全图保持零节点裁切溢出。

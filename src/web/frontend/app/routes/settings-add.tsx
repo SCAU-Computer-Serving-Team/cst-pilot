@@ -36,7 +36,7 @@ export default function AddModelService() {
 										<span className="settings-service-name">连接兼容接口</span>
 										<span className="settings-description">填写服务地址、接口协议、API key 和模型信息</span>
 									</div>
-									<SettingsLink to="/settings/custom" className="settings-action">
+									<SettingsLink to="/settings/custom" className="tier-1-btn-outline settings-action">
 										<SlidersHorizontal size={14} aria-hidden="true" /> 配置
 									</SettingsLink>
 								</div>
@@ -62,7 +62,7 @@ export default function AddModelService() {
 										}}
 									>
 										{expanded || query.trim() ? "收起服务列表" : "查看全部服务"}（{listed.total}）
-										<ChevronRight size={14} aria-hidden="true" />
+										<ChevronRight size={14} className="settings-provider-chevron" aria-hidden="true" />
 									</button>
 								)}
 							</div>

@@ -81,11 +81,11 @@ function escapeHtml(value: string): string {
 function chipHtml(segment: Extract<EditorSegment, { kind: "chip" }>): string {
 	const icon =
 		segment.icon === "command"
-			? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.64 3.64-6.6 16.72a.5.5 0 0 1-.94.03l-3.1-6.72-6.72-3.1a.5.5 0 0 1 .03-.94L21.67 2.7a.5.5 0 0 1 .71.94Z"/><path d="m14 8 6 6"/></svg>'
-			: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
+			? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.64 3.64-6.6 16.72a.5.5 0 0 1-.94.03l-3.1-6.72-6.72-3.1a.5.5 0 0 1 .03-.94L21.67 2.7a.5.5 0 0 1 .71.94Z"/><path d="m14 8 6 6"/></svg>'
+			: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
 	// 纯拉丁标签的主体（x-height）在 em 盒内偏下，加光学修正；含 CJK 的标签本身居中，不动。
 	const latin = /^[\u0000-\u00ff]+$/u.test(segment.label);
-	return `<span class="composer-chip${latin ? " chip-latin" : ""}" contenteditable="false" title="${escapeHtml(segment.token)}" data-token="${escapeHtml(segment.token)}">${icon}<span class="composer-chip-label">${escapeHtml(segment.label)}</span><button type="button" class="chip-remove" aria-label="移除标记"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"/></svg></button></span>`;
+	return `<span class="composer-chip${latin ? " chip-latin" : ""}" contenteditable="false" title="${escapeHtml(segment.token)}" data-token="${escapeHtml(segment.token)}"><span class="composer-chip-icon" aria-hidden="true">${icon}</span><span class="composer-chip-label">${escapeHtml(segment.label)}</span><button type="button" class="chip-remove" aria-label="移除标记"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"/></svg></button></span>`;
 }
 
 /** 段列表 → 编辑器 HTML（草稿恢复、插入标记时用）。文本里的换行落成 <br>。 */

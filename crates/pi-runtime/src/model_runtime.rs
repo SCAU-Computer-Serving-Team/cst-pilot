@@ -96,6 +96,8 @@ pub struct ModelRuntime {
     models_store: Arc<dyn ModelsStore>,
     resolver: ConfigValueResolver,
     default_builtins: Arc<BTreeMap<String, Provider>>,
+    registered_providers: Arc<RwLock<BTreeMap<String, Provider>>>,
+    catalog_lifecycle: Arc<Mutex<()>>,
     config: Arc<RwLock<ModelConfig>>,
     models_path: Option<PathBuf>,
     composition_errors: Arc<RwLock<BTreeMap<String, String>>>,
@@ -174,6 +176,8 @@ impl ModelRuntime {
             models_store,
             resolver,
             default_builtins: Arc::new(builtins_map),
+            registered_providers: Arc::new(RwLock::new(BTreeMap::new())),
+            catalog_lifecycle: Arc::new(Mutex::new(())),
             config: Arc::new(RwLock::new(config)),
             models_path: options.models_path,
             composition_errors: Arc::new(RwLock::new(BTreeMap::new())),
@@ -223,6 +227,10 @@ impl ModelRuntime {
             models_store: Some(self.models_store.clone()),
             identity: None,
         })));
+        let _lifecycle = self
+            .catalog_lifecycle
+            .lock()
+            .expect("catalog lifecycle lock");
         let view = Self {
             models: isolated_models,
             credentials: self.credentials.clone(),
@@ -231,6 +239,13 @@ impl ModelRuntime {
             models_store: self.models_store.clone(),
             resolver: self.resolver.clone(),
             default_builtins: self.default_builtins.clone(),
+            registered_providers: Arc::new(RwLock::new(
+                self.registered_providers
+                    .read()
+                    .expect("registered providers lock")
+                    .clone(),
+            )),
+            catalog_lifecycle: Arc::new(Mutex::new(())),
             config: self.config.clone(),
             models_path: self.models_path.clone(),
             composition_errors: Arc::new(RwLock::new(BTreeMap::new())),
@@ -281,8 +296,13 @@ impl ModelRuntime {
 
     /// 绑定会话的 `ExtensionRunner`（共享同一个 `Arc<Models>`，并在目录变更锁释放后同步快照）。
     pub fn bind_extension_runner(&self, runner: &ExtensionRunner) {
+        let _lifecycle = self
+            .catalog_lifecycle
+            .lock()
+            .expect("catalog lifecycle lock");
         if let Some(prev) = self.bound_runner.write().expect("runner lock").take() {
             prev.set_on_catalog_changed(None);
+            prev.detach_models();
         }
         // The observer uses snapshot inputs only; retaining bound_runner here would
         // create a runner -> observer -> runtime -> runner ownership cycle.
@@ -308,9 +328,17 @@ impl ModelRuntime {
     }
 
     pub fn register_provider(&self, provider: Provider) {
+        let _lifecycle = self
+            .catalog_lifecycle
+            .lock()
+            .expect("catalog lifecycle lock");
         if let Some(runner) = self.bound_runner.read().expect("runner lock").as_ref() {
             let _ = runner.runtime().register_provider(provider);
         } else {
+            self.registered_providers
+                .write()
+                .expect("registered providers lock")
+                .insert(provider.id().to_owned(), provider.clone());
             self.models.set_provider(provider);
             self.refresh_generation.fetch_add(1, Ordering::SeqCst);
             self.refresh_snapshot_sync();
@@ -324,10 +352,22 @@ impl ModelRuntime {
     }
 
     pub fn rebuild_baseline_providers(&self) {
+        let _lifecycle = self
+            .catalog_lifecycle
+            .lock()
+            .expect("catalog lifecycle lock");
         let cfg = self.config.read().expect("config lock").clone();
+        let registered = self
+            .registered_providers
+            .read()
+            .expect("registered providers lock")
+            .clone();
         let mut errors = BTreeMap::new();
 
         let mut all_ids: BTreeSet<String> = self.default_builtins.keys().cloned().collect();
+        for id in registered.keys() {
+            all_ids.insert(id.clone());
+        }
         for id in cfg.get_provider_ids() {
             all_ids.insert(id);
         }
@@ -343,7 +383,9 @@ impl ModelRuntime {
         }
         *baseline_ids = all_ids.clone();
         for pid in all_ids {
-            let base = self.default_builtins.get(&pid);
+            let base = registered
+                .get(&pid)
+                .or_else(|| self.default_builtins.get(&pid));
             let prov_cfg = cfg.get_provider(&pid);
             match compose_provider_with_model_config(&pid, base, prov_cfg, &self.resolver) {
                 Ok(Some(composed)) => {

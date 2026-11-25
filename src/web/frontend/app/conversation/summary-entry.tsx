@@ -1,10 +1,10 @@
-import { GitBranch } from "lucide-react";
+import { GitBranch, Minimize2 } from "lucide-react";
 import { memo, useState } from "react";
 import { CodeBlock } from "../shell/code-block";
 import type { TurnEntry } from "./conversation-parts";
 import { TranscriptDisclosure, type TranscriptFormat } from "./transcript-disclosure";
 
-/** 分支总结与聊天、导出共用标题、时间和原文布局。 */
+/** 分支总结与上下文压缩消息共用折叠标题、时间和摘要布局。 */
 export const SummaryEntry = memo(function SummaryEntry({
 	entry,
 	format,
@@ -13,6 +13,12 @@ export const SummaryEntry = memo(function SummaryEntry({
 	format?: TranscriptFormat;
 }) {
 	const [open, setOpen] = useState(format === "png");
+	const isCompaction = entry.message.role === "compactionSummary";
+	const tokensBefore = entry.message.tokensBefore ?? 0;
+	const tokensText =
+		isCompaction && tokensBefore > 0
+			? ` · 压缩前 ${tokensBefore >= 1000 ? `${Math.round(tokensBefore / 1000)}k` : tokensBefore} tokens`
+			: "";
 	return (
 		<article className="assistant-block summary-block">
 			<TranscriptDisclosure
@@ -22,8 +28,12 @@ export const SummaryEntry = memo(function SummaryEntry({
 				triggerClassName="summary-head"
 				heading={
 					<>
-						<GitBranch size={18} aria-hidden="true" />
-						<span className="summary-title">分支已总结</span>
+						{isCompaction ? (
+							<Minimize2 size={18} aria-hidden="true" />
+						) : (
+							<GitBranch size={18} aria-hidden="true" />
+						)}
+						<span className="summary-title">{isCompaction ? `上下文已压缩${tokensText}` : "分支已总结"}</span>
 					</>
 				}
 				suffix={

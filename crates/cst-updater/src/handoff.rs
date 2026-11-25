@@ -82,14 +82,16 @@ impl Handoff {
         let expected = package
             .release
             .sums
-            .get("cst-updater.exe")
+            .get(layout::UPDATER_EXE_PATH)
             .ok_or("升级包缺少更新器。")?;
         let _update = storage.pin_directory(Path::new(".state/update"), true)?;
-        let _stage =
-            storage.pin_directory(Path::new(&request.stage).join("program").as_path(), false)?;
+        let _stage = storage.pin_directory(
+            Path::new(&request.stage).join("program/app").as_path(),
+            false,
+        )?;
         copy_updater(
             &storage,
-            &package.directory().join("cst-updater.exe"),
+            &package.directory().join(layout::UPDATER_EXE_PATH),
             &updater,
             expected,
             cancel,
@@ -131,8 +133,14 @@ impl Handoff {
             .package
             .release
             .sums
-            .get("cst-updater.exe")
+            .get(layout::UPDATER_EXE_PATH)
             .ok_or("更新器哈希缺失。")?;
+        // On Windows, the read handle denies write/delete sharing. Hold it until the image
+        // has been opened by CreateProcess so verification and launch use the same executable.
+        let image = self
+            .storage
+            .open_read(&self.updater)?
+            .ok_or("独立更新器已消失。")?;
         io::same(&self.storage, &self.updater, Some(expected), &cancel)?;
         let pid = process::launch(
             &self.updater,
@@ -144,6 +152,7 @@ impl Handoff {
             ],
             &self.storage.root,
         )?;
+        drop(image);
         self.package.stage.retain = true;
         self.launched = true;
         Ok(LaunchReceipt {
@@ -238,7 +247,9 @@ pub fn run_request(root: &Path, id: &str, key: ReleaseKey) -> Result<ApplyOutcom
         .map_err(|_| "更新器路径无法核验。")?;
     let expected_path = storage
         .root
-        .join(format!(".state/update/cst-updater-{id}.exe"));
+        .join(format!(".state/update/cst-updater-{id}.exe"))
+        .canonicalize()
+        .map_err(|_| "更新器未从已校验的独立路径启动。")?;
     if own != expected_path {
         return Err("更新器未从已校验的独立路径启动。".into());
     }
@@ -246,7 +257,10 @@ pub fn run_request(root: &Path, id: &str, key: ReleaseKey) -> Result<ApplyOutcom
     io::same(
         &storage,
         &own,
-        release.sums.get("cst-updater.exe").map(String::as_str),
+        release
+            .sums
+            .get(layout::UPDATER_EXE_PATH)
+            .map(String::as_str),
         &cancel,
     )?;
     process::wait_for_parents(&request.parents, Duration::from_secs(60), &cancel)?;

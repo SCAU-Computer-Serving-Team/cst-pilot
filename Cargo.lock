@@ -1556,6 +1556,7 @@ dependencies = [
  "globset",
  "hmac",
  "ignore",
+ "ntfs-ng",
  "pi-agent",
  "pi-ai",
  "pi-runtime",
@@ -4904,6 +4905,12 @@ checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
 ]
+
+[[package]]
+name = "ntfs-ng"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589e5d40de9109afe5efcfa5321c4c9aadeb0a30fda80a7f029a8c380a06e86d"
 
 [[package]]
 name = "num"
@@ -9587,6 +9594,19 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cst-os",
+ "cst-updater",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "zip",
+]
 
 [[package]]
 name = "y4m"

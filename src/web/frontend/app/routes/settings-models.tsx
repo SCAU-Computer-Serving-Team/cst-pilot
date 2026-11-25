@@ -1,6 +1,6 @@
-import { Button, Checkbox, ListBox, Select } from "@heroui/react";
-import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Checkbox, ListBox, Select } from "@heroui/react";
+import { Check, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiJson } from "../data/api";
 import type { ModelChoice, ModelSelectionPayload } from "../data/model-selection";
 import type { Model } from "../data/web-state";
@@ -11,6 +11,8 @@ import { SettingsHeading, SettingsLoadState, SettingsSection, useSettingsFeedbac
 import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 type ModelsPayload = ModelSelectionPayload;
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
@@ -19,6 +21,13 @@ export default function ModelPreferences() {
 	const feedback = useSettingsFeedback();
 	const [query, setQuery] = useState("");
 	const [provider, setProvider] = useState("all");
+	const [providerOpen, setProviderOpen] = useState(false);
+	const providerTriggerRef = useRef<HTMLButtonElement>(null);
+	const shell = useWorkspaceShell();
+	usePanelDismiss(providerOpen, () => setProviderOpen(false), undefined, providerTriggerRef);
+	useEffect(() => {
+		if (shell?.appActive) setProviderOpen(false);
+	}, [shell?.appActive]);
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);
@@ -112,23 +121,33 @@ export default function ModelPreferences() {
 						<Select
 							aria-label="按服务筛选模型"
 							className="settings-provider-select"
+							isOpen={providerOpen}
+							onOpenChange={setProviderOpen}
 							selectedKey={provider}
 							onSelectionChange={(key) => setProvider(String(key ?? "all"))}
 						>
-							<Select.Trigger>
-								<Select.Value /> <ChevronDown size={14} aria-hidden="true" />
+							<Select.Trigger ref={providerTriggerRef}>
+								<Select.Value>{provider === "all" ? "全部" : provider}</Select.Value>{" "}
+								<ChevronDown size={14} aria-hidden="true" />
 							</Select.Trigger>
 							<Select.Popover
-								className="login-provider-popover settings-provider-popover"
+								className="tier-2-glass tier-2-menu settings-provider-popover"
 								placement="bottom end"
+								offset={6}
 							>
-								<ListBox aria-label="模型服务">
-									<ListBox.Item id="all" textValue="全部">
-										全部
+								<ListBox aria-label="模型服务" className="tier-2-menu-list">
+									<ListBox.Item id="all" textValue="全部" className="menu-row settings-select-option">
+										<span>全部</span>
+										{provider === "all" && (
+											<Check size={14} className="settings-select-check" aria-hidden="true" />
+										)}
 									</ListBox.Item>
 									{providers.map((id) => (
-										<ListBox.Item id={id} key={id} textValue={id}>
-											{id}
+										<ListBox.Item id={id} key={id} textValue={id} className="menu-row settings-select-option">
+											<span>{id}</span>
+											{provider === id && (
+												<Check size={14} className="settings-select-check" aria-hidden="true" />
+											)}
 										</ListBox.Item>
 									))}
 								</ListBox>
@@ -137,23 +156,21 @@ export default function ModelPreferences() {
 					</div>
 					<SettingsSection title="启用模型" summary={`${enabledCount} 个已启用`}>
 						<div className="settings-model-bulk">
-							<Button
-								size="sm"
-								variant="ghost"
-								isDisabled={state.working || !visible.length || selection === null}
-								onPress={() =>
+							<button
+								type="button"
+								className="btn-ghost"
+								disabled={state.working || !visible.length || selection === null}
+								onClick={() =>
 									void save(normalizeScope([...new Set([...(selection ?? allIds), ...visible])], allIds))
 								}
 							>
 								全选
-							</Button>
-							<Button
-								size="sm"
-								variant="ghost"
-								isDisabled={
-									state.working || !visible.some((id) => selection === null || selection.includes(id))
-								}
-								onPress={() =>
+							</button>
+							<button
+								type="button"
+								className="btn-ghost"
+								disabled={state.working || !visible.some((id) => selection === null || selection.includes(id))}
+								onClick={() =>
 									void save(
 										normalizeScope(
 											(selection ?? allIds).filter((id) => !visible.includes(id)),
@@ -163,21 +180,21 @@ export default function ModelPreferences() {
 								}
 							>
 								清空
-							</Button>
-							<Button
-								size="sm"
-								variant="ghost"
-								isDisabled={state.working || state.loading}
-								onPress={() => void state.refresh()}
+							</button>
+							<button
+								type="button"
+								className="btn-ghost"
+								disabled={state.working || state.loading}
+								onClick={() => void state.refresh()}
 							>
 								刷新
-							</Button>
+							</button>
 							{state.working && <output>正在保存…</output>}
 						</div>
 						<div
 							className="settings-card settings-model-card"
 							ref={list}
-							data-expanded={expanded}
+							data-expanded={expanded || !!needle}
 							aria-busy={state.working}
 						>
 							<ul className="settings-models" id="enabled-model-list" ref={listRoot}>
@@ -294,7 +311,7 @@ export default function ModelPreferences() {
 									}}
 								>
 									{expanded || needle ? "收起模型列表" : "查看全部模型"}（{listed.total}）
-									<ChevronRight size={14} aria-hidden="true" />
+									<ChevronRight size={14} className="settings-provider-chevron" aria-hidden="true" />
 								</button>
 							)}
 						</div>

@@ -35,7 +35,7 @@ export function ProviderServices({
 							</span>
 						</div>
 						<SettingsLink
-							className="settings-action"
+							className="tier-1-btn-outline settings-action"
 							to={
 								provider.custom
 									? `/settings/custom?provider=${encodeURIComponent(provider.id)}`

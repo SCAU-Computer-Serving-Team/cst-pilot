@@ -971,6 +971,48 @@ impl SessionExportStore {
         .await
     }
 
+    pub async fn list_recent(&self, limit: usize) -> Result<Vec<ExportJobRecord>, ServiceError> {
+        let store = self.clone();
+        let clamped = limit.clamp(1, 50);
+        Self::run_blocking(move || {
+            store.initialize_work_dir_sync()?;
+            let entries = match fs::read_dir(&store.metadata) {
+                Ok(rd) => rd,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(_) => {
+                    return Err(ServiceError::new(
+                        ServiceErrorKind::Unavailable,
+                        "export_record_unavailable",
+                        "导出记录无法读取，请检查工具包所在介质",
+                    ));
+                }
+            };
+
+            let mut results = Vec::new();
+            for entry in entries.filter_map(Result::ok) {
+                let file_name = entry.file_name();
+                let Some(name_str) = file_name.to_str() else {
+                    continue;
+                };
+                let Some(id_part) = name_str.strip_suffix(".json") else {
+                    continue;
+                };
+                if !is_valid_export_id(id_part) {
+                    continue;
+                }
+                if let Ok(rec) = store.read_record_sync(id_part)
+                    && rec.result.status == "completed"
+                {
+                    results.push(rec.result);
+                }
+            }
+            results.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+            results.truncate(clamped);
+            Ok(results)
+        })
+        .await
+    }
+
     pub async fn directory(&self, id: &str) -> Result<PathBuf, ServiceError> {
         let store = self.clone();
         let id = id.to_owned();
@@ -990,6 +1032,83 @@ impl SessionExportStore {
                 .and_then(Value::as_str)
                 .unwrap_or("");
             existing_artifact_sessions_dir(&store.root, date_str)
+        })
+        .await
+    }
+
+    /// Resolves and validates the first exported file inside `artifacts/<date>/sessions/` so
+    /// Windows Explorer can open the directory with that file highlighted via `/select`.
+    pub async fn open_target(&self, id: &str) -> Result<PathBuf, ServiceError> {
+        let store = self.clone();
+        let id = id.to_owned();
+        Self::run_blocking(move || {
+            let record = store.read_record_sync(&id)?;
+            if record.result.status != "completed" {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Conflict,
+                    "export_not_completed",
+                    "导出尚未保存完成，请完成后打开目录",
+                ));
+            }
+            let date_str = record
+                .result
+                .options
+                .get("date")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let directory = existing_artifact_sessions_dir(&store.root, date_str)?;
+            let Some(stored_entry) = record.stored.first() else {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件不存在，请重新导出",
+                ));
+            };
+            let is_single_filename = Path::new(&stored_entry.name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                == Some(stored_entry.name.as_str())
+                && !stored_entry.name.contains('/')
+                && !stored_entry.name.contains('\\');
+            if !is_single_filename {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件已移走或无法读取，请重新导出",
+                ));
+            }
+            let candidate = directory.join(&stored_entry.name);
+            let meta = fs::symlink_metadata(&candidate).map_err(|_| {
+                ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件已移走或无法读取，请重新导出",
+                )
+            })?;
+            if crate::exports::open::is_reparse_or_symlink(&meta) || !meta.is_file() {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件已移走或无法读取，请重新导出",
+                ));
+            }
+            let target = fs::canonicalize(&candidate)
+                .map(|p| strip_windows_verbatim_prefix(&p))
+                .map_err(|_| {
+                    ServiceError::new(
+                        ServiceErrorKind::NotFound,
+                        "export_file_missing",
+                        "导出文件已移走或无法读取，请重新导出",
+                    )
+                })?;
+            if !target.starts_with(&directory) || target == directory {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件已移走或无法读取，请重新导出",
+                ));
+            }
+            Ok(target)
         })
         .await
     }
@@ -1111,6 +1230,8 @@ impl SessionExportStore {
 
         while self.creating_count.load(Ordering::SeqCst) > 0 {
             let notified = self.creating_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if self.creating_count.load(Ordering::SeqCst) == 0 {
                 break;
             }

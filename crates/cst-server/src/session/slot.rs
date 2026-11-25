@@ -155,6 +155,26 @@ struct SlotInboxExecutor {
     invalid_auth: Arc<Mutex<BTreeSet<String>>>,
 }
 
+struct AttemptListener(Option<Box<dyn FnOnce() + Send + Sync>>);
+
+impl Drop for AttemptListener {
+    fn drop(&mut self) {
+        if let Some(unsubscribe) = self.0.take() {
+            unsubscribe();
+        }
+    }
+}
+
+fn record_attempt_error(error: &mut Option<String>, message: &AgentMessage) {
+    if let AgentMessage::Assistant(assistant) = message {
+        *error = if assistant.stop_reason == StopReason::Error {
+            assistant.error_message.clone()
+        } else {
+            None
+        };
+    }
+}
+
 impl SlotInboxExecutor {
     async fn load_images(&self, refs: &[ImageRef]) -> Result<Vec<ImageContent>, String> {
         let mut out = Vec::with_capacity(refs.len());
@@ -190,20 +210,8 @@ impl SlotInboxExecutor {
             || lower.contains("authentication_failed")
     }
 
-    fn check_and_mark_auth_error(&self, error_text: Option<&str>) {
-        let session = self.hosted.session();
-        let provider = session.model().provider;
-        let last_assistant_err = session.state().messages.iter().rev().find_map(|m| match m {
-            AgentMessage::Assistant(a) if a.stop_reason == StopReason::Error => {
-                a.error_message.clone()
-            }
-            _ => None,
-        });
-        let combined = error_text
-            .map(str::to_owned)
-            .or(last_assistant_err)
-            .unwrap_or_default();
-        if !combined.is_empty() && Self::is_auth_failure_message(&combined) {
+    fn check_and_mark_auth_error(&self, provider: String, error_text: Option<&str>) {
+        if error_text.is_some_and(Self::is_auth_failure_message) {
             self.invalid_auth
                 .lock()
                 .expect("invalid_auth lock")
@@ -263,6 +271,16 @@ impl InboxExecutor for SlotInboxExecutor {
             let has_skill = skill.is_some();
             let session_clone = session.clone();
             let msg_id_for_dec = message_id.clone();
+            let attempt_error = Arc::new(Mutex::new(None));
+            let seen_error = attempt_error.clone();
+            let listener = AttemptListener(Some(session.subscribe(Arc::new(move |event| {
+                if let AgentSessionEvent::MessageEnd { message } = event {
+                    record_attempt_error(
+                        &mut seen_error.lock().expect("attempt error lock"),
+                        &message,
+                    );
+                }
+            }))));
             let res = accepted_inputs
                 .track(&message_id, false, || async move {
                     decorators
@@ -284,13 +302,17 @@ impl InboxExecutor for SlotInboxExecutor {
                 })
                 .await;
 
+            drop(listener);
+            let attempt_error = attempt_error.lock().expect("attempt error lock");
+            exec.check_and_mark_auth_error(
+                selected.provider,
+                attempt_error
+                    .as_deref()
+                    .or_else(|| res.as_ref().err().map(String::as_str)),
+            );
             match res {
-                Ok(()) => {
-                    exec.check_and_mark_auth_error(None);
-                    Ok(())
-                }
+                Ok(()) => Ok(()),
                 Err(err) => {
-                    exec.check_and_mark_auth_error(Some(&err));
                     // If the user message was already persisted into the session, treat model error as `delivered`.
                     if accepted_inputs.contains(&message_id) {
                         Ok(())
@@ -517,7 +539,15 @@ impl SessionSlot {
                 _ => {}
             }
 
-            if matches!(event, AgentSessionEvent::AgentEnd { .. }) {
+            if matches!(
+                event,
+                AgentSessionEvent::AgentEnd { .. } | AgentSessionEvent::CompactionEnd { .. }
+            ) || matches!(
+                &event,
+                AgentSessionEvent::EntryAppended {
+                    entry: SessionEntry::ContextEdit(_)
+                }
+            ) {
                 global_for_session.publish(
                     "state",
                     &json!({
@@ -525,6 +555,8 @@ impl SessionSlot {
                         "sessionId": id_for_session,
                     }),
                 );
+            }
+            if matches!(event, AgentSessionEvent::AgentEnd { .. }) {
                 let provider = hosted_for_session.session().model().provider;
                 if hosted_for_session
                     .auth
@@ -665,7 +697,11 @@ impl SessionSlot {
             ));
         }
         match session.compact(instructions).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                self.events
+                    .publish("session", &json!({ "type": "session_tree" }));
+                Ok(())
+            }
             Err(err) if err.contains("Already compacted") => {
                 Err(CompactSessionError::AlreadyCompacted(
                     "会话已压缩，继续对话后可再次压缩".to_owned(),
@@ -691,7 +727,11 @@ impl SessionSlot {
             .map(|msg| self.decorators.decorate_message_for_snapshot(msg))
             .collect();
 
-        let branch_entries = session.with_session_manager(|sm| sm.get_branch(None));
+        let (branch_entries, leaf_id, context_usage) =
+            session.with_context_branch(|leaf, branch, context| {
+                (branch, leaf.map(str::to_owned), context)
+            });
+        let usage = crate::session::usage::compute_branch_usage(&branch_entries);
         let mut entries_json = Vec::new();
         for entry in branch_entries {
             match entry {
@@ -709,6 +749,7 @@ impl SessionSlot {
                     let ts = parse_iso_timestamp_ms(&bs.timestamp).unwrap_or(0);
                     entries_json.push(json!({
                         "id": bs.id,
+                        "parentId": bs.parent_id,
                         "message": {
                             "role": "branchSummary",
                             "parentId": bs.parent_id,
@@ -718,20 +759,36 @@ impl SessionSlot {
                         }
                     }));
                 }
+                SessionEntry::Compaction(c) => {
+                    let ts = parse_iso_timestamp_ms(&c.timestamp).unwrap_or(0);
+                    entries_json.push(json!({
+                        "id": c.id,
+                        "parentId": c.parent_id,
+                        "message": {
+                            "role": "compactionSummary",
+                            "summary": c.summary,
+                            "tokensBefore": c.tokens_before,
+                            "firstKeptEntryId": c.first_kept_entry_id,
+                            "timestamp": ts,
+                        }
+                    }));
+                }
                 _ => {}
             }
         }
 
-        let context_usage = session.get_context_usage();
         let queue = self.inbox.snapshot().await?;
         let raw = json!({
             "id": self.id,
             "eventCursor": event_cursor,
+            "leafId": leaf_id,
             "bitlocker": self.bitlocker.snapshot(),
             "messages": messages,
             "entries": entries_json,
             "running": session.is_streaming(),
+            "compacting": session.is_compacting(),
             "contextUsage": context_usage,
+            "usage": usage,
             "queue": queue,
             "ui": self.ui.snapshot(),
         });
@@ -752,5 +809,52 @@ impl SessionSlot {
         self.bitlocker.close();
         self.events.close_all();
         let _ = self.hosted.shutdown().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SlotInboxExecutor, record_attempt_error};
+    use pi_agent::AgentMessage;
+    use pi_ai::{AssistantMessage, StopReason};
+    use serde_json::json;
+
+    fn make_assistant(stop_reason: StopReason, error_message: Option<&str>) -> AgentMessage {
+        let mut msg: AssistantMessage = serde_json::from_value(json!({
+            "role": "assistant",
+            "content": [{"type": "text", "text": "ok"}],
+            "api": "openai-completions",
+            "provider": "deepseek",
+            "model": "deepseek-flash",
+            "usage": {
+                "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0,
+                "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0}
+            },
+            "stopReason": "stop",
+            "timestamp": 1
+        }))
+        .expect("assistant message fixture");
+        msg.stop_reason = stop_reason;
+        msg.error_message = error_message.map(str::to_owned);
+        AgentMessage::Assistant(msg)
+    }
+
+    #[test]
+    fn auth_failure_does_not_cross_attempts() {
+        let mut previous = None;
+        record_attempt_error(
+            &mut previous,
+            &make_assistant(StopReason::Error, Some("401 Unauthorized")),
+        );
+        assert!(
+            previous
+                .as_deref()
+                .is_some_and(SlotInboxExecutor::is_auth_failure_message)
+        );
+
+        let mut current = None;
+        assert_eq!(current, None); // No assistant event in the new attempt.
+        record_attempt_error(&mut current, &make_assistant(StopReason::Stop, None));
+        assert_eq!(current, None);
     }
 }

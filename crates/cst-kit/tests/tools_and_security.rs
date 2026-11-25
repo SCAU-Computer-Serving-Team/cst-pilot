@@ -32,11 +32,11 @@ impl Fixture {
         let fixture = Self(root.canonicalize().unwrap());
         for name in SKILL_NAMES {
             fixture.write(
-                &format!("agent/home/skills/{name}/SKILL.md"),
+                &format!("app/skills/{name}/SKILL.md"),
                 &format!("---\nname: {name}\ndescription: {name} 工具指南\n---\n维护指南。"),
             );
         }
-        fixture.write("agent/home/APPEND_SYSTEM.md", "CST Pilot 固定诊断规则。");
+        fixture.write("app/prompts/APPEND_SYSTEM.md", "CST Pilot 固定诊断规则。");
         fixture
     }
     fn path(&self, path: &str) -> PathBuf {
@@ -111,11 +111,11 @@ fn every_credential_and_state_path_is_blocked_but_normal_documents_work() {
     let fixture = Fixture::new();
     let guard = fixture.guard();
     for path in [
-        "agent/home/auth.json",
-        "agent/home/models.json",
-        "agent/home/mcp-auth.json",
-        "agent/home/web-search.json",
-        "agent/home/telemetry/identity.json",
+        "data/config/auth.json",
+        "data/config/models.json",
+        "data/config/mcp-auth.json",
+        "data/config/web-search.json",
+        "data/telemetry/identity.json",
         ".state/secret.txt",
     ] {
         fixture.write(path, "synthetic-test-secret");
@@ -139,10 +139,10 @@ fn every_credential_and_state_path_is_blocked_but_normal_documents_work() {
 #[test]
 fn traversal_and_hard_link_aliases_cannot_read_credentials() {
     let fixture = Fixture::new();
-    fixture.write("agent/home/auth.json", "synthetic-test-secret");
+    fixture.write("data/config/auth.json", "synthetic-test-secret");
     fixture.write("normal.txt", "normal");
     std::fs::hard_link(
-        fixture.path("agent/home/auth.json"),
+        fixture.path("data/config/auth.json"),
         fixture.path("innocent.txt"),
     )
     .unwrap();
@@ -150,7 +150,7 @@ fn traversal_and_hard_link_aliases_cannot_read_credentials() {
     assert!(
         fixture
             .guard()
-            .open(fixture.path("agent/home/skills/../auth.json"))
+            .open(fixture.path("data/config/../config/auth.json"))
             .is_err()
     );
     #[cfg(windows)]
@@ -158,19 +158,19 @@ fn traversal_and_hard_link_aliases_cannot_read_credentials() {
         assert!(
             fixture
                 .guard()
-                .check(fixture.path("AGENT/HOME/AUTH.JSON"))
+                .check(fixture.path("DATA/CONFIG/AUTH.JSON"))
                 .is_err()
         );
         assert!(
             fixture
                 .guard()
-                .check(fixture.path("agent/home/auth.json::$DATA"))
+                .check(fixture.path("data/config/auth.json::$DATA"))
                 .is_err()
         );
         assert!(
             fixture
                 .guard()
-                .check(fixture.path("agent/home/auth.json."))
+                .check(fixture.path("data/config/auth.json."))
                 .is_err()
         );
     }
@@ -226,10 +226,10 @@ fn state_hard_links_are_hidden_from_read_and_both_search_modes() {
 #[test]
 fn symbolic_links_to_credentials_and_state_are_blocked() {
     let fixture = Fixture::new();
-    fixture.write("agent/home/auth.json", "secret");
+    fixture.write("data/config/auth.json", "secret");
     fixture.write(".state/task.txt", "state");
     std::os::unix::fs::symlink(
-        fixture.path("agent/home/auth.json"),
+        fixture.path("data/config/auth.json"),
         fixture.path("alias.txt"),
     )
     .unwrap();
@@ -250,7 +250,7 @@ fn native_search_honors_ignores_filters_context_and_secret_exclusion() {
     fixture.write("ignored/private.txt", "needle");
     fixture.write("src/power_status.rs", "before\nneedle\nafter\n");
     fixture.write("src/other.rs", "other\n");
-    fixture.write("agent/home/auth.json", "needle-secret");
+    fixture.write("data/config/auth.json", "needle-secret");
     fixture.write(".state/log.txt", "needle-state");
     let guard = fixture.guard();
     let cancel = CancellationToken::new();
@@ -564,7 +564,7 @@ async fn errors_and_invalid_requests_do_not_leak_provider_response_bodies() {
         .is_err()
     );
     let fixture = Fixture::new();
-    fixture.write("agent/home/web-search.json", "{invalid-sensitive-config");
+    fixture.write("data/config/web-search.json", "{invalid-sensitive-config");
     assert!(
         !CstPilotExtension::new(&Kit::new(&fixture.0).unwrap())
             .err()
@@ -587,11 +587,11 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
         r#"{"defaultProvider":"hostile","defaultTools":["bash"],"defaultProjectTrust":"always"}"#,
     );
     fixture.write(
-        "agent/home/settings.json",
+        "data/config/settings.json",
         r#"{"defaultProjectTrust":"always"}"#,
     );
     fixture.write("host/normal.txt", "可公开的文件内容");
-    fixture.write("agent/home/auth.json", "SYNTHETIC_AUTH_SECRET");
+    fixture.write("data/config/auth.json", "SYNTHETIC_AUTH_SECRET");
     let faux = create_faux_provider();
     let runtime = ModelRuntime::create(CreateModelRuntimeOptions {
         include_builtins: Some(false),
@@ -685,7 +685,7 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
     let read = tools.iter().find(|tool| tool.name == "read").unwrap();
     let error = (read.execute)(
         "denied".into(),
-        json!({"path":"../agent/home/auth.json"}),
+        json!({"path":"../data/config/auth.json"}),
         None,
         None,
     )

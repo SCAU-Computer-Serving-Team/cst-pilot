@@ -12,7 +12,8 @@ pub fn render_shortcuts_tab(
     palette: &DesktopPalette,
 ) -> impl IntoElement {
     let global_shortcuts = [
-        ("Ctrl + K", "打开全局快捷命令与历史会话面板"),
+        ("Ctrl + P", "打开命令面板与常见导航操作"),
+        ("Ctrl + O", "快速打开指定会话与近期导出"),
         ("Ctrl + N", "新建对话并返回欢迎主页"),
         ("Ctrl + B", "展开或收起左侧会话导航栏"),
         ("Ctrl + ,", "打开设置页面"),
@@ -27,11 +28,7 @@ pub fn render_shortcuts_tab(
         ("Esc", "逐级关闭悬浮面板（候选态下仅取消拼音）"),
     ];
 
-    let tree_pref_shortcuts = [
-        ("Ctrl + O", "在分支树视图中正向切换五档过滤"),
-        ("Ctrl + Shift + O", "在分支树视图中反向切换五档过滤"),
-        ("Alt + ↑ / ↓", "在模型偏好中上下移动已启用模型顺序"),
-    ];
+    let pref_shortcuts = [("Alt + ↑ / ↓", "在模型偏好中上下移动已启用模型顺序")];
 
     div()
         .id("settings-shortcuts-tab")
@@ -59,8 +56,8 @@ pub fn render_shortcuts_tab(
             palette,
         ))
         .child(shortcut_group_card(
-            "分支树与模型偏好",
-            &tree_pref_shortcuts,
+            "模型偏好",
+            &pref_shortcuts,
             mono_family,
             palette,
         ))

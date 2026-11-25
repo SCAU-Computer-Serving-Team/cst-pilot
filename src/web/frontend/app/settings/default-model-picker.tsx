@@ -1,8 +1,10 @@
 import { Button, ListBox, Popover } from "@heroui/react";
 import { Check, ChevronDown, KeyRound } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ModelKeyDialog } from "../auth/model-key-dialog";
 import type { ModelChoice } from "../data/model-selection";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { SettingsSection } from "./settings-frame";
 import { SettingsSearch } from "./settings-search";
 
@@ -21,6 +23,18 @@ export function DefaultModelPicker({
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [missingKey, setMissingKey] = useState<ModelChoice | null>(null);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const shell = useWorkspaceShell();
+	const closePopover = useCallback(() => {
+		setOpen(false);
+		setQuery("");
+	}, []);
+	usePanelDismiss(open, closePopover, undefined, triggerRef);
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		closePopover();
+		setMissingKey(null);
+	}, [shell?.appActive, closePopover]);
 	const needle = query.trim().toLocaleLowerCase();
 	const ordered = [
 		model,
@@ -34,7 +48,7 @@ export function DefaultModelPicker({
 	async function select(key: string) {
 		const selected = models.find((item) => fullId(item) === key);
 		if (!selected || busy) return;
-		setOpen(false);
+		closePopover();
 		if (await onSelect(selected)) {
 			if (!selected.credentialReady) setMissingKey(selected);
 		}
@@ -50,17 +64,22 @@ export function DefaultModelPicker({
 					<Popover
 						isOpen={open}
 						onOpenChange={(next) => {
-							setOpen(next);
-							if (!next) setQuery("");
+							if (next) setOpen(true);
+							else closePopover();
 						}}
 					>
-						<Button className="settings-default-trigger" aria-label="选择新会话默认模型" isDisabled={busy}>
+						<Button
+							ref={triggerRef}
+							className="settings-default-trigger"
+							aria-label="选择新会话默认模型"
+							isDisabled={busy}
+						>
 							<span>
 								<strong>{model.name}</strong>
 							</span>
 							<ChevronDown size={14} aria-hidden="true" />
 						</Button>
-						<Popover.Content className="login-provider-popover settings-default-popover" placement="bottom end">
+						<Popover.Content className="tier-2-glass settings-default-popover" placement="bottom end" offset={6}>
 							<Popover.Dialog aria-label="选择新会话默认模型">
 								<SettingsSearch label="搜索默认模型" value={query} onChange={setQuery} />
 								<ListBox
@@ -87,7 +106,9 @@ export function DefaultModelPicker({
 													{item.providerName ?? item.provider} · {item.id}
 												</small>
 											</span>
-											{fullId(model) === fullId(item) && <Check size={16} aria-hidden="true" />}
+											{fullId(model) === fullId(item) && (
+												<Check size={14} className="settings-select-check" aria-hidden="true" />
+											)}
 										</ListBox.Item>
 									))}
 								</ListBox>
@@ -103,9 +124,13 @@ export function DefaultModelPicker({
 							<KeyRound size={16} aria-hidden="true" />
 							尚未配置 {model.providerName ?? model.provider} 密钥
 						</span>
-						<Button className="settings-action" size="sm" variant="ghost" onPress={() => setMissingKey(model)}>
+						<button
+							type="button"
+							className="tier-1-btn-outline settings-action"
+							onClick={() => setMissingKey(model)}
+						>
 							配置密钥
-						</Button>
+						</button>
 					</div>
 				)}
 			</div>

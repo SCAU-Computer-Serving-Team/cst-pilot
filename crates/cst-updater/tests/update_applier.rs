@@ -38,26 +38,22 @@ impl Fixture {
         let f = Self { root };
         for (name, bytes) in [
             ("VERSION", b"cst-pilot v0.6.0\n".as_slice()),
-            ("BUILD-INFO.json", br#"{"version":"v0.6.0"}"#),
+            ("app/BUILD-INFO.json", br#"{"version":"v0.6.0"}"#),
             ("cst-pilot.exe", b"old main"),
-            ("cst-server.exe", b"old server"),
-            ("cst-updater.exe", b"old updater"),
-            ("assets/old-only.txt", b"obsolete resource"),
+            ("app/cst-server.exe", b"old server"),
+            ("app/cst-updater.exe", b"old updater"),
+            ("app/old-only.txt", b"obsolete resource"),
             (
-                "agent/home/settings.json",
+                "data/config/settings.json",
                 br#"{"existing":false,"theme":"dark"}"#,
             ),
             (
-                "agent/home/auth.json",
+                "data/config/auth.json",
                 br#"{"cstoa":{"type":"api_key","key":"synthetic-local-secret"}}"#,
             ),
-            (
-                "agent/home/sessions/session.jsonl",
-                b"synthetic session data\n",
-            ),
+            ("data/sessions/session.jsonl", b"synthetic session data\n"),
             ("artifacts/2026-11-09/runbook/01.txt", b"user command text"),
-            ("wiztree/tmp/old.csv", b"scan cache"),
-            ("wiztree/WizTree3.ini", b"user settings"),
+            (".state/tmp/wiztree/old.csv", b"scan cache"),
             ("user-note.txt", b"unrelated user file"),
         ] {
             f.write(name, bytes)
@@ -77,11 +73,10 @@ impl Fixture {
 
     fn users(&self) -> BTreeMap<String, Vec<u8>> {
         [
-            "agent/home/auth.json",
-            "agent/home/sessions/session.jsonl",
+            "data/config/auth.json",
+            "data/sessions/session.jsonl",
             "artifacts/2026-11-09/runbook/01.txt",
-            "wiztree/tmp/old.csv",
-            "wiztree/WizTree3.ini",
+            ".state/tmp/wiztree/old.csv",
             "user-note.txt",
         ]
         .into_iter()
@@ -92,12 +87,12 @@ impl Fixture {
     fn old_program(&self) -> BTreeMap<String, Vec<u8>> {
         [
             "VERSION",
-            "BUILD-INFO.json",
+            "app/BUILD-INFO.json",
             "cst-pilot.exe",
-            "cst-server.exe",
-            "cst-updater.exe",
-            "assets/old-only.txt",
-            "agent/home/settings.json",
+            "app/cst-server.exe",
+            "app/cst-updater.exe",
+            "app/old-only.txt",
+            "data/config/settings.json",
         ]
         .into_iter()
         .map(|n| (n.into(), self.read(n)))
@@ -150,50 +145,54 @@ fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
 fn files() -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::from([
         ("cst-pilot.exe".into(), b"new main".to_vec()),
-        ("cst-server.exe".into(), b"new server".to_vec()),
-        ("cst-updater.exe".into(), b"new updater".to_vec()),
+        ("app/cst-server.exe".into(), b"new server".to_vec()),
+        ("app/cst-updater.exe".into(), b"new updater".to_vec()),
         ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
         (
-            "BUILD-INFO.json".into(),
+            "app/BUILD-INFO.json".into(),
             br#"{"version":"v0.7.0"}"#.to_vec(),
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"license notices".to_vec()),
-        ("licenses/mock.txt".into(), b"mock third party".to_vec()),
-        ("assets/new-only.txt".into(), b"new resource".to_vec()),
+        ("app/licenses/mock.txt".into(), b"mock third party".to_vec()),
+        ("app/new-only.txt".into(), b"new resource".to_vec()),
         (
-            "assets/fonts/SourceHanSansCN-VF.otf".into(),
+            "app/fonts/SourceHanSansCN-VF.otf".into(),
             mock_sfnt(b"OTTO"),
         ),
-        ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+        ("app/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
         (
-            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            "app/fonts/JetBrainsMono-Regular.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+            "app/fonts/JetBrainsMono-Medium.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-OFL.txt".into(),
+            "app/fonts/JetBrainsMono-OFL.txt".into(),
             b"SIL OFL 1.1".to_vec(),
         ),
         (
-            "agent/home/APPEND_SYSTEM.md".into(),
+            "app/prompts/APPEND_SYSTEM.md".into(),
             b"synthetic prompt".to_vec(),
         ),
         (
-            "agent/home/extensions/telemetry/timserver_1.crt".into(),
+            "app/telemetry/timserver_1.crt".into(),
             b"synthetic public cert".to_vec(),
         ),
+        ("app/telemetry/currency.json".into(), b"{}".to_vec()),
         (
-            "agent/home/settings.json".into(),
+            "app/defaults/settings.json".into(),
             br#"{"existing":true,"newOption":1}"#.to_vec(),
         ),
+        ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+        ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+        ("app/defaults/web-search.json".into(), b"{}".to_vec()),
     ]);
     for skill in REQUIRED_SKILL_NAMES {
         files.insert(
-            format!("agent/home/skills/{skill}/SKILL.md"),
+            format!("app/skills/{skill}/SKILL.md"),
             format!("---\nname: {skill}\ndescription: synthetic fixture\n---\nInstructions")
                 .into_bytes(),
         );
@@ -216,7 +215,7 @@ fn bundle(files: BTreeMap<String, Vec<u8>>) -> (Vec<u8>, Vec<u8>) {
             .unwrap();
         zip.write_all(bytes).unwrap();
     }
-    zip.start_file("cst-pilot/SHA256SUMS", SimpleFileOptions::default())
+    zip.start_file("cst-pilot/app/SHA256SUMS", SimpleFileOptions::default())
         .unwrap();
     zip.write_all(sums.as_bytes()).unwrap();
     let zip = zip.finish().unwrap().into_inner();
@@ -318,9 +317,9 @@ fn replaces_program_merges_defaults_preserves_users_and_removes_obsolete_resourc
     assert_eq!(host.checks.load(Ordering::SeqCst), 1);
     assert_eq!(host.restarts.load(Ordering::SeqCst), 1);
     assert_eq!(f.read("cst-pilot.exe"), b"new main");
-    assert!(!f.root.join("assets/old-only.txt").exists());
+    assert!(!f.root.join("app/old-only.txt").exists());
     assert_eq!(users, f.users());
-    let settings: Value = serde_json::from_slice(&f.read("agent/home/settings.json")).unwrap();
+    let settings: Value = serde_json::from_slice(&f.read("data/config/settings.json")).unwrap();
     assert_eq!(
         settings,
         json!({"existing":false,"theme":"dark","newOption":1})
@@ -551,14 +550,14 @@ fn invalid_journal_or_changed_stage_is_rejected_without_program_mutation() {
 fn corrupted_merge_config_and_hard_links_stop_before_journal_publication() {
     let f = Fixture::new();
     let package = f.package();
-    f.write("agent/home/settings.json", b"{invalid");
+    f.write("data/config/settings.json", b"{invalid");
     assert!(
         Applier::new(&f.root, key())
             .unwrap()
             .apply(package, &Host::default(), &CancellationToken::new())
             .is_err()
     );
-    assert_eq!(f.read("agent/home/settings.json"), b"{invalid");
+    assert_eq!(f.read("data/config/settings.json"), b"{invalid");
     assert!(!f.root.join(".state/update/transaction.json").exists());
     let f = Fixture::new();
     let package = f.package();
@@ -740,7 +739,7 @@ fn real_native_health_process_and_ui_restart_succeed_inside_the_isolated_kit() {
     let f = Fixture::new();
     let mut next = files();
     let host_bytes = fs::read(native_test_host()).unwrap();
-    next.insert("cst-server.exe".into(), host_bytes.clone());
+    next.insert("app/cst-server.exe".into(), host_bytes.clone());
     next.insert("cst-pilot.exe".into(), host_bytes);
     let package = f.package_with(next);
     let host = process::NativeHost { ui: RestartUi::Web };
@@ -772,7 +771,7 @@ fn real_health_failure_version_mismatch_and_shared_fifteen_second_budget_all_rol
         f.write(".state/health-mode", mode.as_bytes());
         let mut next = files();
         let host_bytes = fs::read(native_test_host()).unwrap();
-        next.insert("cst-server.exe".into(), host_bytes.clone());
+        next.insert("app/cst-server.exe".into(), host_bytes.clone());
         next.insert("cst-pilot.exe".into(), host_bytes);
         let package = f.package_with(next);
         let start = std::time::Instant::now();
@@ -858,7 +857,7 @@ fn transient_windows_file_occupancy_is_retried_without_losing_the_old_program() 
             .apply_observed(
                 &mut package,
                 &Host::default(),
-                &Hold(f.root.join("BUILD-INFO.json")),
+                &Hold(f.root.join("app/BUILD-INFO.json")),
                 &CancellationToken::new()
             )
             .unwrap(),
@@ -906,7 +905,7 @@ fn recovery_rejects_junction_backups_and_signed_journal_path_tampering() {
     assert!(Applier::new(&f.root, key()).unwrap().recover().is_err());
     assert_eq!(outside.read("sentinel.txt"), b"do not touch");
     fs::remove_dir(&link).unwrap();
-    journal["entries"][0]["path"] = json!("agent/home/auth.json");
+    journal["entries"][0]["path"] = json!("data/config/auth.json");
     f.write(
         ".state/update/transaction.json",
         &serde_json::to_vec(&journal).unwrap(),
@@ -995,6 +994,86 @@ fn independent_updater_binary_recovers_interrupted_transaction_when_test_key_com
             .reason,
         Some(RollbackReason::Interrupted)
     );
+}
+
+#[test]
+fn upgrade_removes_legacy_wiztree_files_and_restores_them_on_rollback() {
+    // 1. Successful in-place upgrade removes legacy installed `app/tools/wiztree/WizTree64.exe`
+    let f = Fixture::new();
+    f.write("app/tools/wiztree/WizTree64.exe", b"legacy wiztree binary");
+    f.write("app/tools/wiztree/license.txt", b"legacy wiztree license");
+    let users = f.users();
+    let package = f.package();
+    let applier = Applier::new(&f.root, key()).unwrap();
+    let outcome = applier
+        .apply(package, &Host::default(), &CancellationToken::new())
+        .unwrap();
+    assert_eq!(outcome, ApplyOutcome::Updated { restarted: true });
+    assert!(!f.root.join("app/tools/wiztree/WizTree64.exe").exists());
+    assert!(!f.root.join("app/tools/wiztree/license.txt").exists());
+    assert_eq!(users, f.users());
+
+    // 2. Rollback after WizTree files have actually been moved out of the install tree
+    //    (at health check time, after all entries are installed/deleted) restores them byte-for-byte.
+    let f2 = Fixture::new();
+    f2.write("app/tools/wiztree/WizTree64.exe", b"legacy wiztree binary");
+    f2.write("app/tools/wiztree/license.txt", b"legacy wiztree license");
+    let mut package2 = f2.package();
+    let applier2 = Applier::new(&f2.root, key()).unwrap();
+    struct CrashAfterWizTreeRemoved {
+        root: PathBuf,
+    }
+    impl ApplyObserver for CrashAfterWizTreeRemoved {
+        fn reached(&self, step: ApplyStep) -> Result<(), String> {
+            if matches!(step, ApplyStep::Installed(_))
+                && !self.root.join("app/tools/wiztree/WizTree64.exe").exists()
+                && !self.root.join("app/tools/wiztree/license.txt").exists()
+            {
+                panic!("crash after legacy wiztree files were removed");
+            }
+            Ok(())
+        }
+    }
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| applier2.apply_observed(
+            &mut package2,
+            &Host::default(),
+            &CrashAfterWizTreeRemoved {
+                root: f2.root.clone(),
+            },
+            &CancellationToken::new()
+        )))
+        .is_err()
+    );
+    // Explicitly prove both legacy WizTree files were removed before rollback runs.
+    assert!(!f2.root.join("app/tools/wiztree/WizTree64.exe").exists());
+    assert!(!f2.root.join("app/tools/wiztree/license.txt").exists());
+    assert_eq!(applier2.recover().unwrap(), Recovery::RolledBack);
+    assert_eq!(
+        f2.read("app/tools/wiztree/WizTree64.exe"),
+        b"legacy wiztree binary"
+    );
+    assert_eq!(
+        f2.read("app/tools/wiztree/license.txt"),
+        b"legacy wiztree license"
+    );
+
+    // 3. New signed release package containing `app/tools/wiztree/*` is rejected at verify time.
+    let mut bad_files = files();
+    bad_files.insert("app/tools/wiztree/WizTree64.exe".into(), b"bad".to_vec());
+    let (envelope, _zip) = bundle(bad_files);
+    assert!(key().verify(&envelope).is_err());
+
+    // 4. Empty mixed-case `app/tools/WizTree/` directory in an assembled dist tree is rejected.
+    let dist_dir = std::env::temp_dir().join(format!("cst-dist-check-{}", uuid::Uuid::new_v4()));
+    for (rel, bytes) in files() {
+        let p = dist_dir.join(&rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, bytes).unwrap();
+    }
+    fs::create_dir_all(dist_dir.join("app/tools/WizTree")).unwrap();
+    assert!(cst_updater::verify::scan_clean_dist_tree(&dist_dir, "v0.7.0").is_err());
+    let _ = fs::remove_dir_all(&dist_dir);
 }
 
 #[test]

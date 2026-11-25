@@ -1,7 +1,8 @@
+use super::scan::SensitivePathFilter;
 use super::volume::NativeScanSource;
+use super::volume_index::{VolumeIndex, is_volume_root};
 use super::walk::WalkLimits;
 use super::win_native::{Control, DiagnosticSource};
-use super::wz_index::WzIndex;
 use super::{disk, ls};
 use pi_session::ToolDefinition;
 use std::path::{Path, PathBuf};
@@ -9,9 +10,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDefinition> {
-    let index = Arc::new(WzIndex::new(Arc::new(NativeScanSource::new(root))));
+    let filter = Arc::new(
+        cst_os::KitLayout::new(root)
+            .map(|layout| SensitivePathFilter::from_layout(&layout))
+            .unwrap_or_default(),
+    );
+    let index = Arc::new(VolumeIndex::new_production(Arc::new(
+        NativeScanSource::with_filter((*filter).clone()),
+    )));
     let ls_index = index.clone();
     let ls_source = source.clone();
+    let ls_filter = filter.clone();
     let mut ls = ToolDefinition::from_typed(
         "ls",
         "LS",
@@ -19,6 +28,7 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
         move |_, input: ls::LsInput, cancel, _, ctx| {
             let index = ls_index.clone();
             let source = ls_source.clone();
+            let filter = ls_filter.clone();
             let cwd = PathBuf::from(ctx.cwd());
             async move {
                 let value = super::execute(
@@ -28,12 +38,13 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
                     Duration::from_secs(215),
                     move |_, (input, cwd), control| {
                         let target = resolve(&cwd, &input.path)?;
-                        ls::run(
+                        ls::run_with_filter(
                             &index,
                             &target,
                             input.top.unwrap_or(20).clamp(1, 50),
                             control,
                             WalkLimits::default(),
+                            &filter,
                         )
                     },
                 )
@@ -44,6 +55,7 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
     );
     ls.prompt_snippet =
         Some("按大小浏览目录，仅统计直接子项，未知大小和预算下界在结果中说明。".into());
+    let disk_filter = filter;
     let mut disk = ToolDefinition::from_typed(
         "disk",
         "Disk",
@@ -51,6 +63,7 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
         move |_, input: disk::DiskInput, cancel, _, ctx| {
             let index = index.clone();
             let source = source.clone();
+            let filter = disk_filter.clone();
             let cwd = PathBuf::from(ctx.cwd());
             async move {
                 let timeout =
@@ -72,40 +85,8 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
                         let target =
                             resolve(&cwd, input.path.as_deref().ok_or("usage 需要提供 path。")?)?;
                         let top = input.top.unwrap_or(20).clamp(1, 100);
-                        let scan = Control::new(
-                            control.cancel.child_token(),
-                            Duration::from_secs(180).min(control.remaining()),
-                        );
-                        let fast = index.scan(&target, true, &scan);
-                        if control.cancel.is_cancelled() {
-                            control.check()?;
-                        }
-                        let usage = match fast {
-                            Ok(Some(snapshot)) => {
-                                if !index.is_current(&snapshot, &target) {
-                                    return Err("扫描期间卷身份变化，请重试。".into());
-                                }
-                                snapshot.usage(
-                                    &target,
-                                    top,
-                                    snapshot.identity.as_ref().map(|id| id.filesystem.as_str()),
-                                )
-                            }
-                            other => {
-                                let mut value = super::walk::usage(
-                                    &target,
-                                    top,
-                                    control,
-                                    WalkLimits::default(),
-                                )?;
-                                if let Err(error) = other {
-                                    value["degradedFrom"] =
-                                        serde_json::json!(format!("wiztree: {error}"));
-                                }
-                                value
-                            }
-                        };
-                        Ok(serde_json::json!({"usage":usage}))
+                        let usage = run_usage_with_filter(&index, &target, top, control, &filter)?;
+                        Ok(serde_json::json!({"usage": usage}))
                     },
                 )
                 .await?;
@@ -114,14 +95,110 @@ pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDe
         },
     );
     disk.prompt_snippet =
-        Some("查询磁盘空间、设备、SMART 或目录树占用；usage 扫描与 ls 共享卷缓存。".into());
+        Some("查询磁盘空间、设备、SMART 或目录树占用；整卷占用默认走原生并行目录遍历。".into());
     vec![ls, disk]
 }
+
+enum MftAttempt {
+    NotEligible,
+    Succeeded(serde_json::Value),
+    Degraded(String),
+}
+
+pub fn run_usage(
+    index: &VolumeIndex,
+    target: &Path,
+    top: usize,
+    control: &Control,
+) -> Result<serde_json::Value, String> {
+    run_usage_with_filter(index, target, top, control, &SensitivePathFilter::default())
+}
+
+pub fn run_usage_with_filter(
+    index: &VolumeIndex,
+    target: &Path,
+    top: usize,
+    control: &Control,
+    filter: &SensitivePathFilter,
+) -> Result<serde_json::Value, String> {
+    // MFT acceleration is strictly opt-in (gated by `index.allows_mft()`) and limited to elevated
+    // local NTFS volume roots. Default release path, regular subdirectories, non-NTFS volumes,
+    // UNC paths, and non-elevated runs go directly to bounded parallel Win32 directory walk
+    // without spurious `degradedFrom`.
+    let attempt = if index.allows_mft()
+        && is_volume_root(target)
+        && cst_os::is_elevated().unwrap_or(false)
+        && index
+            .filesystem(target)
+            .is_some_and(|fs| fs.eq_ignore_ascii_case("NTFS"))
+    {
+        let scan = Control::new(
+            control.cancel.child_token(),
+            Duration::from_secs(180).min(control.remaining()),
+        );
+        let fast = index.scan(target, true, &scan);
+        if control.cancel.is_cancelled() {
+            control.check()?;
+        }
+        match fast {
+            Ok(Some(snapshot)) => {
+                if !index.is_current(&snapshot, target) {
+                    MftAttempt::Degraded("扫描期间卷身份变化".into())
+                } else {
+                    MftAttempt::Succeeded(snapshot.usage(
+                        target,
+                        top,
+                        snapshot.identity.as_ref().map(|id| id.filesystem.as_str()),
+                    ))
+                }
+            }
+            Ok(None) => MftAttempt::Degraded("卷身份无法确认或未生成索引快照".into()),
+            Err(error) => {
+                control.check()?;
+                MftAttempt::Degraded(error)
+            }
+        }
+    } else {
+        MftAttempt::NotEligible
+    };
+
+    match attempt {
+        MftAttempt::Succeeded(value) => Ok(value),
+        MftAttempt::NotEligible => {
+            super::walk::usage_with_filter(target, top, control, WalkLimits::default(), filter)
+        }
+        MftAttempt::Degraded(reason) => {
+            let mut value = super::walk::usage_with_filter(
+                target,
+                top,
+                control,
+                WalkLimits::default(),
+                filter,
+            )?;
+            value["degradedFrom"] = serde_json::json!(format!("native-mft: {reason}"));
+            Ok(value)
+        }
+    }
+}
+
+/// Resolves user-supplied directory path, normalizing bare Windows drive letters (`"C:"`) to the
+/// drive root (`"C:\"`) instead of Windows drive-relative current directory semantics.
+pub(crate) fn normalize_path_input(input: &str) -> String {
+    let trimmed = input.trim();
+    let bytes = trimmed.as_bytes();
+    if bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        format!("{trimmed}\\")
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 fn resolve(cwd: &Path, input: &str) -> Result<PathBuf, String> {
     if input.trim().is_empty() {
         return Err("目录路径不能为空。".into());
     }
-    let target = cwd.join(input);
+    let normalized = normalize_path_input(input);
+    let target = cwd.join(normalized);
     let meta = std::fs::symlink_metadata(&target).map_err(|_| "目标目录无法读取。")?;
     if super::walk::linked(&meta) || !meta.is_dir() {
         return Err("目标必须是目录且不能是链接或重解析点。".into());
@@ -129,4 +206,17 @@ fn resolve(cwd: &Path, input: &str) -> Result<PathBuf, String> {
     target
         .canonicalize()
         .map_err(|_| "目标目录无法解析。".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_drive_letter_normalizes_to_volume_root() {
+        assert_eq!(normalize_path_input("C:"), "C:\\");
+        assert_eq!(normalize_path_input(" d: "), "d:\\");
+        assert_eq!(normalize_path_input("C:\\Windows"), "C:\\Windows");
+        assert_eq!(normalize_path_input("sub\\dir"), "sub\\dir");
+    }
 }

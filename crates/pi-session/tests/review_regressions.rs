@@ -22,6 +22,31 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
+#[tokio::test]
+async fn navigating_to_the_current_user_leaf_rewinds_and_returns_editor_text() {
+    let models = Arc::new(Models::default());
+    let registered = register_faux_provider(&models);
+    let mut manager = SessionManager::in_memory("/edit-user-leaf", None, None).unwrap();
+    manager
+        .append_message(AgentMessage::User(UserMessage::new("修改我")))
+        .unwrap();
+    let user_id = manager.get_leaf_id().unwrap().to_owned();
+    let session = AgentSession::new(AgentSessionOptions::new(
+        "/edit-user-leaf",
+        registered.model,
+        models,
+        manager,
+    ))
+    .unwrap();
+
+    let navigation = session
+        .navigate_tree(&user_id, Default::default())
+        .await
+        .unwrap();
+    assert_eq!(navigation.editor_text.as_deref(), Some("修改我"));
+    assert!(session.with_session_manager(|manager| manager.get_leaf_id().is_none()));
+}
+
 #[test]
 fn explicit_thinking_level_wins_over_persisted_session_history() {
     let models = Arc::new(Models::default());

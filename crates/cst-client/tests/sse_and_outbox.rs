@@ -29,11 +29,18 @@ struct ServerFixture {
 impl ServerFixture {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("cst-client-sse-{}", Uuid::new_v4()));
-        fs::create_dir_all(dir.join("agent/home")).unwrap();
+        fs::create_dir_all(dir.join("app/prompts")).unwrap();
+        fs::create_dir_all(dir.join("data/config")).unwrap();
+        fs::create_dir_all(dir.join("static")).unwrap();
+        fs::write(
+            dir.join("static/index.html"),
+            "<!doctype html><title>test</title>",
+        )
+        .unwrap();
         fs::write(dir.join("VERSION"), "cst-pilot v0.9.5\n").unwrap();
-        fs::write(dir.join("agent/home/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
+        fs::write(dir.join("app/prompts/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
         for name in SKILL_NAMES {
-            let p = dir.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = dir.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,
@@ -88,7 +95,7 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
     let model_provider = faux.model.provider.clone();
     let model_id = faux.model.id.clone();
     fs::write(
-        fixture.root.join("agent/home/auth.json"),
+        fixture.root.join("data/config/auth.json"),
         serde_json::to_vec(&json!({
             model_provider.clone(): {
                 "type": "api_key",
@@ -117,6 +124,7 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
 
     let mut cfg = ServerConfig::new(&fixture.root);
     cfg.port = Some(0);
+    cfg.static_dir = Some(fixture.root.join("static"));
     cfg.acquire_instance_lock = false;
     cfg.mode_config.first_connect_timeout = Duration::from_secs(5);
     cfg.mode_config.grace_period = Duration::from_secs(2);
@@ -221,6 +229,7 @@ async fn credentials_required_preserves_draft_and_web_mode_switch_suspends_and_r
 
     let mut cfg = ServerConfig::new(&fixture.root);
     cfg.port = Some(0);
+    cfg.static_dir = Some(fixture.root.join("static"));
     cfg.acquire_instance_lock = false;
     let server = RunningServer::start(host, cfg).await.unwrap();
 
@@ -418,6 +427,70 @@ mod controlled_http {
     }
 }
 
+#[tokio::test]
+async fn rejected_direct_payload_stays_recoverable_without_overwriting_the_composer() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use cst_client::{ComposerDraft, OutboxItemState};
+
+    let fixture = ServerFixture::new();
+    let (port, _) = spawn_controlled_server(|req| async move {
+        if req.method == "POST" && req.target == "/api/sessions/s1/messages" {
+            return RawReply::Json {
+                status: 409,
+                body: json!({"error": {"code": "credentials_required", "message": "缺少密钥"}}),
+            };
+        }
+        RawReply::Json {
+            status: 200,
+            body: json!({}),
+        }
+    })
+    .await;
+    let process = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: process.pid,
+            process_created: process.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+    let key = DraftKey::Session("s1".into());
+    handle.with_workspace_mut(|ws| ws.draft_mut(key.clone()).text = "保留草稿".into());
+
+    let error = handle
+        .submit_direct_payload(
+            "s1".into(),
+            ComposerDraft {
+                text: "重新生成这轮".into(),
+                ..ComposerDraft::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is_credentials_required(), "{error:?}");
+    handle.with_workspace(|ws| assert_eq!(ws.draft(&key).unwrap().text, "保留草稿"));
+    handle.with_outbox(|outbox| {
+        let items = outbox.session_items("s1");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "重新生成这轮");
+        assert!(matches!(
+            items[0].state,
+            OutboxItemState::Failed {
+                credentials_required: true,
+                ..
+            }
+        ));
+    });
+    handle.stop();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handles_reset_and_overflow()
  {
@@ -433,6 +506,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
     let release_slow_models = Arc::new(Notify::new());
     let slow_s1_started = Arc::new(Notify::new());
     let release_slow_s1 = Arc::new(Notify::new());
+    let subscribed_s1_fetch_started = Arc::new(Notify::new());
+    let release_subscribed_s1_fetch = Arc::new(Notify::new());
 
     let models_call_seq = Arc::new(AtomicUsize::new(0));
     let s1_fetch_seq = Arc::new(AtomicUsize::new(0));
@@ -443,6 +518,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
     let release_slow_models_h = Arc::clone(&release_slow_models);
     let slow_s1_started_h = Arc::clone(&slow_s1_started);
     let release_slow_s1_h = Arc::clone(&release_slow_s1);
+    let subscribed_s1_fetch_started_h = Arc::clone(&subscribed_s1_fetch_started);
+    let release_subscribed_s1_fetch_h = Arc::clone(&release_subscribed_s1_fetch);
     let models_seq_h = Arc::clone(&models_call_seq);
     let s1_seq_h = Arc::clone(&s1_fetch_seq);
     let mux_tx_h = Arc::clone(&mux_tx_slot);
@@ -453,6 +530,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         let release_slow_models = Arc::clone(&release_slow_models_h);
         let slow_s1_started = Arc::clone(&slow_s1_started_h);
         let release_slow_s1 = Arc::clone(&release_slow_s1_h);
+        let subscribed_s1_fetch_started = Arc::clone(&subscribed_s1_fetch_started_h);
+        let release_subscribed_s1_fetch = Arc::clone(&release_subscribed_s1_fetch_h);
         let models_seq = Arc::clone(&models_seq_h);
         let s1_seq = Arc::clone(&s1_seq_h);
         let mux_tx = Arc::clone(&mux_tx_h);
@@ -517,7 +596,7 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
             if req.target == "/api/sessions/s1" {
                 let n = s1_seq.fetch_add(1, Ordering::SeqCst);
                 if n == 0 {
-                    // Generation 1 snapshot: stall until after ResetSession completes Generation 2!
+                    // The speculative snapshot starts before any subscription to s1.
                     slow_s1_started.notify_one();
                     release_slow_s1.notified().await;
                     return RawReply::Json {
@@ -532,6 +611,11 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
                     };
                 }
                 if n == 1 {
+                    assert!(subs.lock().unwrap().iter().any(|body| body["sessions"] == json!(["s1"])));
+                    subscribed_s1_fetch_started.notify_one();
+                    release_subscribed_s1_fetch.notified().await;
+                }
+                if n <= 2 {
                     return RawReply::Json {
                         status: 200,
                         body: json!({
@@ -653,13 +737,21 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         "fresh-model"
     );
 
-    // 2. Generation + `eventCursor` watermark during overlapping `ActivateSession` + `ResetSession`
+    // 2. Activating during preload must subscribe first, then start a fresh GET.
+    tokio::time::timeout(Duration::from_secs(3), slow_s1_started.notified())
+        .await
+        .expect("preload did not start");
     let h_act = handle.clone();
     let act_task = tokio::spawn(async move { h_act.activate_session(Some("s1".into())).await });
-    slow_s1_started.notified().await;
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        subscribed_s1_fetch_started.notified(),
+    )
+    .await
+    .expect("activation did not replace the unsubscribed preload");
 
     let mux_sender = mux_tx_slot.lock().unwrap().clone().unwrap();
-    // Emit ResetSession -> starts generation 2 (`ep1:10`), followed by overlapping `ep1:9` (must skip!) and `ep1:11` (must apply!)
+    // Reset starts the next generation at ep1:10. The overlapping ep1:9 must be skipped.
     mux_sender
         .send("id: global:g0:1,s1:ep1:10\nevent: reset\ndata: {\"scope\":\"session\",\"sessionId\":\"s1\"}\n\n".to_owned())
         .unwrap();
@@ -680,8 +772,9 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         )
         .unwrap();
 
-    // Release slow generation 1 (`ep1:2`, `"m-old"`): must be discarded!
+    // Release both superseded snapshots: neither may overwrite the reset generation.
     release_slow_s1.notify_one();
+    release_subscribed_s1_fetch.notify_one();
     let loaded_s1 = act_task.await.unwrap().unwrap().unwrap();
     let _ = loaded_s1;
     tokio::time::sleep(Duration::from_millis(80)).await;
@@ -1010,6 +1103,400 @@ async fn home_uncertain_recovery_concurrent_draft_protection_and_outbox_actions(
         .unwrap();
     assert_eq!(removed.text, "旧主页提交");
     assert_eq!(handle.with_outbox(|ob| ob.total_unresolved_count()), 0);
+
+    handle.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn session_send_lost_202_reconciles_by_original_message_id_without_duplicate_post() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use cst_client::outbox::OutboxItemState;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    let fixture = ServerFixture::new();
+    let post_count = Arc::new(AtomicUsize::new(0));
+    let persisted_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let queried_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let pc_h = Arc::clone(&post_count);
+    let pid_h = Arc::clone(&persisted_ids);
+    let qid_h = Arc::clone(&queried_ids);
+
+    let (port, _requests) = spawn_controlled_server(move |req| {
+        let pc = Arc::clone(&pc_h);
+        let pids = Arc::clone(&pid_h);
+        let qids = Arc::clone(&qid_h);
+        async move {
+            if req.target == "/api/app/events" {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send("event: heartbeat\ndata: {}\n\n".to_owned());
+                std::mem::forget(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream?") {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send(
+                    "id: global:g0:1\nevent: state\ndata: {\"type\":\"stream_ready\",\"subscribedSessions\":[]}\n\n"
+                        .to_owned(),
+                );
+                std::mem::forget(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target == "/api/sessions/s-202/messages" && req.method == "POST" {
+                pc.fetch_add(1, Ordering::SeqCst);
+                let body_val: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let msg_id = body_val["id"].as_str().unwrap().to_owned();
+                // Server persisted and accepted the message, then TCP dropped BEFORE delivering 202!
+                pids.lock().unwrap().push(msg_id);
+                return RawReply::DropConnection;
+            }
+            if let Some(id) = req.target.strip_prefix("/api/sessions/s-202/messages/")
+                && req.method == "GET"
+            {
+                qids.lock().unwrap().push(id.to_owned());
+                let exists = pids.lock().unwrap().iter().any(|x| x == id);
+                return RawReply::Json {
+                    status: 200,
+                    body: if exists {
+                        json!({ "item": { "id": id, "status": "pending" } })
+                    } else {
+                        json!({ "item": null })
+                    },
+                };
+            }
+            RawReply::Json {
+                status: 200,
+                body: json!({
+                    "version": "v0.9.5",
+                    "channelMode": "app_active",
+                    "commands": [],
+                    "sessions": [],
+                    "providers": [],
+                    "loggedIn": false,
+                    "models": [],
+                    "catalog": [],
+                    "theme": "light",
+                    "defaultView": "gui",
+                    "sidebarCollapsed": false,
+                    "windowMaximized": false,
+                    "currentVersion": "v0.9.5",
+                    "status": { "phase": "unavailable", "message": "未启用" }
+                }),
+            }
+        }
+    })
+    .await;
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: self_id.pid,
+            process_created: self_id.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+
+    handle.with_workspace_mut(|ws| {
+        ws.draft_mut(DraftKey::Session("s-202".into())).text = "丢 202 响应测试消息".into();
+    });
+    let err = handle
+        .submit_draft(DraftKey::Session("s-202".into()))
+        .await
+        .unwrap_err();
+    assert!(err.is_disconnected());
+
+    let orig_cmid = handle.with_outbox(|ob| {
+        let items = ob.session_items("s-202");
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].state, OutboxItemState::Uncertain { .. }));
+        items[0].client_message_id.clone()
+    });
+    assert_eq!(post_count.load(Ordering::SeqCst), 1);
+
+    // Reconcile queries `GET /api/sessions/s-202/messages/<orig_cmid>`, finds it accepted,
+    // and clears outbox WITHOUT issuing any duplicate POST!
+    let rec = handle.reconcile_uncertain_outbox_detailed().await.unwrap();
+    assert_eq!(rec.resolved_count, 1);
+    assert_eq!(post_count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        queried_ids.lock().unwrap().as_slice(),
+        &[orig_cmid.as_str()]
+    );
+    assert_eq!(handle.with_outbox(|ob| ob.total_unresolved_count()), 0);
+
+    handle.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_cache_hit_rate() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use serde_json::Value;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    let fixture = ServerFixture::new();
+    let stage = Arc::new(AtomicUsize::new(0));
+    let mux_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> = Arc::new(Mutex::new(None));
+    let keepalive_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> =
+        Arc::new(Mutex::new(None));
+    let usage_queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let models_queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let stage_h = Arc::clone(&stage);
+    let mux_h = Arc::clone(&mux_tx_slot);
+    let keep_h = Arc::clone(&keepalive_tx_slot);
+    let usage_q_h = Arc::clone(&usage_queries);
+    let models_q_h = Arc::clone(&models_queries);
+
+    let (port, _requests) = spawn_controlled_server(move |req| {
+        let stage = Arc::clone(&stage_h);
+        let mux_slot = Arc::clone(&mux_h);
+        let keep_slot = Arc::clone(&keep_h);
+        let usage_q = Arc::clone(&usage_q_h);
+        let models_q = Arc::clone(&models_q_h);
+        async move {
+            if req.target == "/api/app/events" {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send("event: heartbeat\ndata: {}\n\n".to_owned());
+                *keep_slot.lock().unwrap() = Some(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream?") {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send(
+                    "id: global:g0:1\nevent: state\ndata: {\"type\":\"stream_ready\",\"subscribedSessions\":[]}\n\n"
+                        .to_owned(),
+                );
+                *mux_slot.lock().unwrap() = Some(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream/") && req.method == "PUT" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "subscribed": ["s-comp"] }),
+                };
+            }
+            if req.target == "/api/sessions/s-comp" {
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let body = if cur_stage == 0 {
+                    json!({
+                        "id": "s-comp",
+                        "eventCursor": "ep1:1",
+                        "running": false,
+                        "compacting": false,
+                        "contextUsage": { "tokens": null, "contextWindow": 131072, "percent": null },
+                        "usage": { "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }, "cacheHitRate": null },
+                        "messages": [],
+                        "entries": []
+                    })
+                } else {
+                    json!({
+                        "id": "s-comp",
+                        "eventCursor": "ep1:3",
+                        "running": false,
+                        "compacting": false,
+                        "contextUsage": { "tokens": 7075, "contextWindow": 131072, "percent": 5.398 },
+                        "usage": { "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 },
+                        "messages": [],
+                        "entries": []
+                    })
+                };
+                return RawReply::Json { status: 200, body };
+            }
+            if req.target == "/api/sessions/s-comp/usage" {
+                usage_q.lock().unwrap().push(req.target.clone());
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let body = if cur_stage == 0 {
+                    json!({
+                        "sessionId": "s-comp",
+                        "leafId": "c1",
+                        "contextUsage": { "tokens": null, "contextWindow": 131072, "percent": null },
+                        "usage": { "scope": "last_assistant", "sourceEntryId": null, "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }, "cacheHitRate": null }
+                    })
+                } else {
+                    json!({
+                        "sessionId": "s-comp",
+                        "leafId": "a2",
+                        "contextUsage": { "tokens": 7075, "contextWindow": 131072, "percent": 5.398 },
+                        "usage": { "scope": "last_assistant", "sourceEntryId": "a2", "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 }
+                    })
+                };
+                return RawReply::Json { status: 200, body };
+            }
+            if req.target.starts_with("/api/models") {
+                models_q.lock().unwrap().push(req.target.clone());
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let has_sid = req.target.contains("sessionId=s-comp");
+                let usage = if has_sid && cur_stage > 0 {
+                    json!({ "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 })
+                } else {
+                    Value::Null
+                };
+                let ctx = if has_sid && cur_stage > 0 {
+                    json!({ "tokens": 7075, "contextWindow": 131072, "percent": 5.398 })
+                } else {
+                    Value::Null
+                };
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({
+                        "models": [],
+                        "catalog": [],
+                        "contextUsage": ctx,
+                        "usage": usage
+                    }),
+                };
+            }
+            if req.target == "/api/app/settings" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "theme": "dark", "defaultView": "gui", "sidebarCollapsed": false, "windowMaximized": false }),
+                };
+            }
+            if req.target == "/api/auth" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "providers": [] }),
+                };
+            }
+            if req.target.starts_with("/api/account") {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "loggedIn": false }),
+                };
+            }
+            if req.target == "/api/app/update/status" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({
+                        "currentVersion": "v0.9.5",
+                        "status": { "phase": "unavailable", "message": "未启用" }
+                    }),
+                };
+            }
+            RawReply::Json {
+                status: 200,
+                body: json!({
+                    "version": "v0.9.5",
+                    "channelMode": "app_active",
+                    "commands": [],
+                    "sessions": [{ "id": "s-comp", "title": "压缩测试会话", "running": false }]
+                }),
+            }
+        }
+    })
+    .await;
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: self_id.pid,
+            process_created: self_id.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+
+    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < ready_deadline
+        && (!handle.snapshot().connected
+            || mux_tx_slot.lock().unwrap().is_none()
+            || keepalive_tx_slot.lock().unwrap().is_none())
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let initial = handle
+        .activate_session(Some("s-comp".into()))
+        .await
+        .unwrap()
+        .expect("s-comp loaded");
+    assert!(initial.context_usage.as_ref().unwrap()["tokens"].is_null());
+    assert!(initial.usage.as_ref().unwrap()["cacheHitRate"].is_null());
+
+    // Post-compaction chat reply finishes: server emits lightweight `agent_end` + global `usage_changed`,
+    // prompting client eager pull from read-only `GET /api/sessions/s-comp/usage` without refetching `/api/models`.
+    stage.store(1, Ordering::SeqCst);
+    let models_count_before = models_queries.lock().unwrap().len();
+    mux_tx_slot
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .send(
+            "id: global:g0:2,s-comp:ep1:2\nevent: session\ndata: {\"sessionId\":\"s-comp\",\"event\":{\"type\":\"agent_end\"}}\n\n"
+                .to_owned(),
+        )
+        .unwrap();
+    keepalive_tx_slot
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .send(
+            "event: state\ndata: {\"type\":\"usage_changed\",\"sessionId\":\"s-comp\"}\n\n"
+                .to_owned(),
+        )
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let snap = handle.snapshot();
+        let sess_ok = snap.loaded_sessions.get("s-comp").is_some_and(|s| {
+            s.context_usage
+                .as_ref()
+                .and_then(|u| u.get("tokens"))
+                .and_then(Value::as_u64)
+                == Some(7075)
+                && s.usage
+                    .as_ref()
+                    .and_then(|u| u.get("cacheHitRate"))
+                    .and_then(Value::as_f64)
+                    .is_some_and(|r| (r - 0.8116).abs() < 1e-4)
+        });
+        if sess_ok {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "expected post-compaction usage refresh via /usage, got session={:?}, usage_queries={:?}",
+            snap.loaded_sessions
+                .get("s-comp")
+                .map(|s| (&s.context_usage, &s.usage)),
+            usage_queries.lock().unwrap(),
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        usage_queries
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|q| q == "/api/sessions/s-comp/usage"),
+        "agent_end / usage_changed must pull GET /api/sessions/s-comp/usage"
+    );
+    assert_eq!(
+        models_queries.lock().unwrap().len(),
+        models_count_before,
+        "usage_changed must not trigger redundant /api/models refetch"
+    );
 
     handle.stop();
 }

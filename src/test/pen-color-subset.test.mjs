@@ -1,5 +1,5 @@
 // 颜色常量子集测试
-// 扫描 cst-pilot-web.pen 与 cst-pilot-tools.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
+// 扫描 cst-pilot-desktop.pen 与 cst-pilot-web.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
 //   1. 在 cst-pilot-colors.pen 中定义（12 步色阶、语义色、首页 Blue hour 色表等）；
 //   2. 在下方 EXCEPTIONS 清单中，且带有出处（DESIGN.md 例外章节等）。
 // 新增颜色时：优先取色阶画布已定义的步；确需新色时在 EXCEPTIONS 登记出处。
@@ -15,7 +15,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const penPaths = [
   "design/cst-pilot-desktop.pen",
   "design/cst-pilot-web.pen",
-  "design/cst-pilot-tools.pen",
 ].map((p) => path.join(root, p));
 const colorsPenPath = path.join(root, "design/cst-pilot-colors.pen");
 
@@ -104,6 +103,15 @@ const EXCEPTIONS = {
   "18181C": "桌面端浮层玻璃与弹窗底色 $bg-glass / $bg-modal（dark）",
   "111114": "桌面端模态遮罩底色 $bg-scrim（light）",
   "040406": "桌面端模态遮罩底色 $bg-scrim（dark）",
+  // cst-pilot-desktop.pen「00G · 应用图标定稿与品牌视觉」（om887）：品牌图标展示台与阳极黑瓷材质色
+  "0C0D10": "om887 品牌图标展示台深色底板",
+  "141518": "om887 阳极黑瓷图标底色",
+  "141519": "om887 品牌图标展示台卡片底色",
+  "16171B": "om887 阳极黑瓷图标渐变色",
+  "5F636B": "om887 品牌图标展示台次要标注文字",
+  "9BA3B4": "om887 阳极黑瓷图标金属高光描边",
+  "F4F5F7": "om887 品牌图标展示台浅色底板",
+  "F7F8FA": "om887 品牌图标展示台浅色卡片底色",
 };
 
 test("界面画布的颜色常量是色阶画布定义色与登记例外的子集", () => {

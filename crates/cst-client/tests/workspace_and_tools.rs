@@ -442,4 +442,35 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     assert_eq!(segments[0].calls.len(), 2);
     assert_eq!(segments[1].kind, ToolCallSegmentKind::Standalone);
     assert_eq!(segments[2].kind, ToolCallSegmentKind::Standalone);
+
+    // 6. ls ranking rows omit null pct and never duplicate `bytes` alongside null `size`
+    let ls_incomplete = map_tool(
+        &make_call("ls", json!({ "path": "C:\\" })),
+        &make_result(
+            Some(json!({
+                "path": "C:\\",
+                "totalChildren": 2,
+                "totalSize": "10.0 MB",
+                "method": "walk",
+                "entries": [
+                    { "name": "pagefile.sys", "type": "file", "bytes": 10485760, "size": "10.0 MB", "pct": null },
+                    { "name": "Documents and Settings", "type": "unknown", "bytes": null, "size": null, "pct": null }
+                ]
+            })),
+            "",
+            false,
+        ),
+    );
+    let listing = ls_incomplete
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ToolBlock::Listing { items, .. } => Some(items),
+            _ => None,
+        })
+        .expect("ls listing block");
+    assert_eq!(listing[0].metrics.len(), 1);
+    assert_eq!(listing[0].metrics[0].value, "10.0 MB");
+    assert_eq!(listing[1].metrics.len(), 1);
+    assert_eq!(listing[1].metrics[0].value, "大小未知");
 }

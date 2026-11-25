@@ -56,50 +56,57 @@ fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
 fn defaults() -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::from([
         ("cst-pilot.exe".into(), b"mock main binary".to_vec()),
-        ("cst-server.exe".into(), b"mock server binary".to_vec()),
-        ("cst-updater.exe".into(), b"mock updater binary".to_vec()),
+        ("app/cst-server.exe".into(), b"mock server binary".to_vec()),
+        (
+            "app/cst-updater.exe".into(),
+            b"mock updater binary".to_vec(),
+        ),
         ("VERSION".into(), b"cst-pilot v0.7.0\npi rust\n".to_vec()),
         (
-            "BUILD-INFO.json".into(),
+            "app/BUILD-INFO.json".into(),
             br#"{"version":"v0.7.0"}"#.to_vec(),
         ),
         ("LICENSE".into(), b"mock MIT license".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"mock notices".to_vec()),
-        ("licenses/example.txt".into(), b"mock license".to_vec()),
+        ("app/licenses/example.txt".into(), b"mock license".to_vec()),
         (
-            "assets/fonts/SourceHanSansCN-VF.otf".into(),
+            "app/fonts/SourceHanSansCN-VF.otf".into(),
             mock_sfnt(b"OTTO"),
         ),
-        ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+        ("app/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
         (
-            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            "app/fonts/JetBrainsMono-Regular.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+            "app/fonts/JetBrainsMono-Medium.ttf".into(),
             mock_sfnt(&[0, 1, 0, 0]),
         ),
         (
-            "assets/fonts/JetBrainsMono-OFL.txt".into(),
+            "app/fonts/JetBrainsMono-OFL.txt".into(),
             b"SIL OFL 1.1".to_vec(),
         ),
         (
-            "agent/home/APPEND_SYSTEM.md".into(),
+            "app/prompts/APPEND_SYSTEM.md".into(),
             b"mock system instructions".to_vec(),
         ),
         (
-            "agent/home/settings.json".into(),
+            "app/defaults/settings.json".into(),
             br#"{"newOption":true}"#.to_vec(),
         ),
+        ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+        ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+        ("app/defaults/web-search.json".into(), b"{}".to_vec()),
+        ("app/telemetry/currency.json".into(), b"{}".to_vec()),
     ]);
     for skill in cst_kit::SKILL_NAMES {
         files.insert(
-            format!("agent/home/skills/{skill}/SKILL.md"),
+            format!("app/skills/{skill}/SKILL.md"),
             b"mock maintenance skill".to_vec(),
         );
     }
     files.insert(
-        "agent/home/extensions/telemetry/timserver_1.crt".into(),
+        "app/telemetry/timserver_1.crt".into(),
         b"mock public certificate".to_vec(),
     );
     files
@@ -121,7 +128,7 @@ fn bundle(
             .unwrap();
         zip.write_all(bytes).unwrap();
     }
-    zip.start_file("cst-pilot/SHA256SUMS", options).unwrap();
+    zip.start_file("cst-pilot/app/SHA256SUMS", options).unwrap();
     zip.write_all(sums.as_bytes()).unwrap();
     for (name, bytes, symlink) in extra {
         if *symlink {
@@ -303,35 +310,51 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
         "assets/x.",
         "assets/ x",
         "assets//x",
+        "data/config/auth.json",
+        "data/config/device.json",
+        "data/config/desktop.json",
+        "data/config/web.json",
+        "data/config/tui.json",
         "agent/home/auth.json",
-        "agent/home/device.json",
-        "agent/home/desktop.json",
-        "agent/home/desktop-settings.json",
         "cst-pilot-desktop.exe",
         ".state/x",
-        "wiztree/tmp/a.csv",
-        "lhm/test/x",
-        "doc/AGENTS.md",
-        "assets/.env.local",
-        "assets/fonts/SourceHanSansCN-Regular.otf",
-        "agent/home/extensions/web/static/fonts/SourceHanSansCN-VF.otf",
+        "app/tools/wiztree/tmp/a.csv",
+        "app/tools/lhm/test/x",
+        "app/AGENTS.md",
+        "app/.env.local",
+        "app/fonts/SourceHanSansCN-Regular.otf",
+        "app/extra/SourceHanSansCN-VF.otf",
     ] {
         assert!(layout::classify(bad).is_err(), "{bad}");
     }
-    assert_eq!(layout::classify("cst-server.exe").unwrap(), Area::Program);
     assert_eq!(
-        layout::classify("assets/fonts/SourceHanSansCN-VF.otf").unwrap(),
+        layout::classify("app/cst-server.exe").unwrap(),
         Area::Program
     );
     assert_eq!(
-        layout::classify("assets/fonts/JetBrainsMono-Regular.ttf").unwrap(),
+        layout::classify("app/fonts/SourceHanSansCN-VF.otf").unwrap(),
         Area::Program
     );
     assert_eq!(
-        layout::classify("agent/home/telemetry.json").unwrap(),
+        layout::classify("app/fonts/JetBrainsMono-Regular.ttf").unwrap(),
+        Area::Program
+    );
+    // Retired WizTree paths are rejected in new releases while `classify` retains legacy
+    // installed-tree recognition so `applier.rs` can cleanly remove and roll them back.
+    assert!(layout::classify_release("app/tools/wiztree/WizTree64.exe").is_err());
+    assert!(layout::classify_release("app/tools/wiztree/license.txt").is_err());
+    assert_eq!(
+        layout::classify("app/tools/wiztree/WizTree64.exe").unwrap(),
+        Area::Program
+    );
+    assert_eq!(
+        layout::classify("data/config/telemetry.json").unwrap(),
         Area::Merge
     );
-    assert_eq!(layout::classify("doc/诊断说明.md").unwrap(), Area::Program);
+    assert_eq!(
+        layout::classify("app/docs/诊断说明.md").unwrap(),
+        Area::Program
+    );
     for bad in [
         "http://updates.example/a",
         "https://127.0.0.1/a",
@@ -360,7 +383,7 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
         br#"{"theme":"dark","enabled":false,"nested":{"mine":1},"keys":["user"],"unknown":4}"#;
     let next = br#"{"theme":"light","enabled":true,"nested":{"new":2},"keys":["new"],"added":5}"#;
     let merged: Value = serde_json::from_slice(
-        &layout::merge_defaults("agent/home/settings.json", Some(current), next).unwrap(),
+        &layout::merge_defaults("data/config/settings.json", Some(current), next).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -370,7 +393,7 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
     let current = br#"{"cstoa":{"etag":"current-account","lastModified":123,"models":[{"id":"private","maxTokens":9}]},"deepseek":{"models":[{"id":"deepseek-flash","maxTokens":8}]}}"#;
     let next = br#"{"cstoa":{"etag":"preset","lastModified":999,"models":[{"id":"offline","maxTokens":7}]},"deepseek":{"models":[{"id":"deepseek-flash","maxTokens":999},{"id":"added","maxTokens":3}]}}"#;
     let merged: Value = serde_json::from_slice(
-        &layout::merge_defaults("agent/home/models-store.json", Some(current), next).unwrap(),
+        &layout::merge_defaults("data/config/models-store.json", Some(current), next).unwrap(),
     )
     .unwrap();
     assert_eq!(merged["cstoa"]["etag"], "current-account");
@@ -380,18 +403,22 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
         merged["deepseek"]["models"],
         json!([{"id":"deepseek-flash","maxTokens":8},{"id":"added","maxTokens":3}])
     );
-    assert!(layout::merge_defaults("agent/home/auth.json", None, next).is_err());
+    assert!(layout::merge_defaults("data/config/auth.json", None, next).is_err());
     assert!(
         layout::merge_defaults(
-            "agent/home/settings.json",
+            "data/config/settings.json",
             Some(b"invalid private contents"),
             b"{}"
         )
         .is_err()
     );
     assert!(
-        layout::merge_defaults("agent/home/settings.json", Some(br#"{"a":1,"a":2}"#), b"{}")
-            .is_err()
+        layout::merge_defaults(
+            "data/config/settings.json",
+            Some(br#"{"a":1,"a":2}"#),
+            b"{}"
+        )
+        .is_err()
     );
 }
 
@@ -405,7 +432,7 @@ fn commented_local_settings_merge_with_defaults_without_relaxing_release_json() 
     }"#;
     let defaults = br#"{"theme":"light","extra":{"new":2}}"#;
     let merged: Value = serde_json::from_slice(
-        &layout::merge_defaults("agent/home/settings.json", Some(current), defaults).unwrap(),
+        &layout::merge_defaults("data/config/settings.json", Some(current), defaults).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -417,11 +444,11 @@ fn commented_local_settings_merge_with_defaults_without_relaxing_release_json() 
         b"{ // broken\n",
     ] {
         assert!(
-            layout::merge_defaults("agent/home/settings.json", Some(invalid), defaults).is_err()
+            layout::merge_defaults("data/config/settings.json", Some(invalid), defaults).is_err()
         );
     }
-    assert!(layout::merge_defaults("agent/home/telemetry.json", Some(current), defaults).is_err());
-    assert!(layout::merge_defaults("agent/home/settings.json", None, current).is_err());
+    assert!(layout::merge_defaults("data/config/telemetry.json", Some(current), defaults).is_err());
+    assert!(layout::merge_defaults("data/config/settings.json", None, current).is_err());
 }
 
 #[cfg(windows)]
@@ -475,9 +502,9 @@ mod windows_tests {
     async fn signed_package_streams_verifies_and_never_touches_user_data() {
         let f = Fixture::new();
         for name in [
-            "agent/home/auth.json",
-            "agent/home/models.json",
-            "agent/home/telemetry/pending.jsonl",
+            "data/config/auth.json",
+            "data/config/models.json",
+            "data/telemetry/pending.jsonl",
             "artifacts/local.txt",
             "cst-pilot.exe",
         ] {
@@ -494,9 +521,9 @@ mod windows_tests {
             .revalidate(&key(), &CancellationToken::new())
             .unwrap();
         for name in [
-            "agent/home/auth.json",
-            "agent/home/models.json",
-            "agent/home/telemetry/pending.jsonl",
+            "data/config/auth.json",
+            "data/config/models.json",
+            "data/telemetry/pending.jsonl",
             "artifacts/local.txt",
             "cst-pilot.exe",
         ] {
@@ -539,12 +566,12 @@ mod windows_tests {
         for (path, symlink) in [
             ("cst-pilot/../escape.txt", false),
             ("/absolute", false),
-            ("cst-pilot/agent/home/auth.json", false),
-            ("cst-pilot/assets/missing", false),
-            ("cst-pilot/assets/link", true),
-            ("cst-pilot/assets/foo:ads", false),
+            ("cst-pilot/data/config/auth.json", false),
+            ("cst-pilot/app/missing", false),
+            ("cst-pilot/app/link", true),
+            ("cst-pilot/app/foo:ads", false),
             ("other/cst-pilot.exe", false),
-            ("cst-pilot/assets/nul.txt", false),
+            ("cst-pilot/app/nul.txt", false),
         ] {
             let (info, zip) = bundle(&defaults(), &[(path, b"target", symlink)]);
             assert!(prepare(&f, &info, zip).await.is_err(), "{path}");
@@ -561,7 +588,7 @@ mod windows_tests {
             b"{\"private\":\"-----BEGIN PRIVATE KEY-----\"}",
         ] {
             let mut files = defaults();
-            files.insert("assets/config.json".into(), bytes.to_vec());
+            files.insert("app/config.json".into(), bytes.to_vec());
             let (info, zip) = bundle(&files, &[]);
             assert!(prepare(&f, &info, zip).await.is_err());
             assert_eq!(f.stages(), 0);
@@ -569,7 +596,7 @@ mod windows_tests {
         let mut files = defaults();
         let mut secret = vec![b'a'; 65520];
         secret.extend_from_slice(b" sk-abcdefghijklmnopqrstuvwxyz0123456789 ");
-        files.insert("assets/file.bin".into(), secret);
+        files.insert("app/file.bin".into(), secret);
         let (info, zip) = bundle(&files, &[]);
         assert!(prepare(&f, &info, zip).await.is_err());
     }
@@ -583,15 +610,15 @@ mod windows_tests {
                     files.insert("VERSION".into(), b"cst-pilot v0.6.2\n".to_vec());
                 }
                 1 => {
-                    files.remove("cst-updater.exe");
+                    files.remove("app/cst-updater.exe");
                 }
                 2 => {
-                    files.insert("assets/A/x".into(), b"x".to_vec());
-                    files.insert("assets/a/y".into(), b"y".to_vec());
+                    files.insert("app/A/x".into(), b"x".to_vec());
+                    files.insert("app/a/y".into(), b"y".to_vec());
                 }
                 _ => {
                     files.insert(
-                        "BUILD-INFO.json".into(),
+                        "app/BUILD-INFO.json".into(),
                         br#"{"version":"v0.6.2"}"#.to_vec(),
                     );
                 }
@@ -813,11 +840,11 @@ mod windows_tests {
     #[tokio::test]
     async fn staging_rejects_missing_server_exe_missing_fonts_or_corrupt_sfnt() {
         for missing in [
-            "cst-server.exe",
-            "assets/fonts/SourceHanSansCN-VF.otf",
-            "assets/fonts/JetBrainsMono-Regular.ttf",
-            "assets/fonts/JetBrainsMono-Medium.ttf",
-            "assets/fonts/JetBrainsMono-OFL.txt",
+            "app/cst-server.exe",
+            "app/fonts/SourceHanSansCN-VF.otf",
+            "app/fonts/JetBrainsMono-Regular.ttf",
+            "app/fonts/JetBrainsMono-Medium.ttf",
+            "app/fonts/JetBrainsMono-OFL.txt",
         ] {
             let f = Fixture::new();
             let mut files = defaults();
@@ -843,7 +870,7 @@ mod windows_tests {
         let f = Fixture::new();
         let mut corrupt = defaults();
         corrupt.insert(
-            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            "app/fonts/JetBrainsMono-Regular.ttf".into(),
             b"not-a-valid-ttf".to_vec(),
         );
         let (info, zip) = bundle(&corrupt, &[]);

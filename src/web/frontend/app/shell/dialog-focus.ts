@@ -3,9 +3,13 @@ import { type RefObject, useEffect } from "react";
 const FOCUSABLE_SELECTOR =
 	'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
+export function isTabbableElement(element: Pick<HTMLElement, "tabIndex" | "hidden">): boolean {
+	return element.tabIndex >= 0 && !element.hidden;
+}
+
 export function focusableElements(root: ParentNode): HTMLElement[] {
 	return [...root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter((element) => {
-		if (element.hidden || element.closest("[hidden], [inert], [aria-hidden='true']")) return false;
+		if (!isTabbableElement(element) || element.closest("[hidden], [inert], [aria-hidden='true']")) return false;
 		const style = getComputedStyle(element);
 		return style.display !== "none" && style.visibility !== "hidden";
 	});
@@ -28,7 +32,17 @@ export function resolveDialogTabTarget<T>(
 
 /** 将 Tab / Shift+Tab 严格循环限制在原生模态 <dialog> 内部，防止焦点逃逸到 document.body。 */
 export function trapDialogTab(event: KeyboardEvent, dialog: HTMLDialogElement | null): boolean {
-	if (event.key !== "Tab" || event.isComposing || !dialog || !dialog.open) return false;
+	if (
+		event.key !== "Tab" ||
+		event.ctrlKey ||
+		event.altKey ||
+		event.metaKey ||
+		event.isComposing ||
+		event.keyCode === 229 ||
+		!dialog ||
+		!dialog.open
+	)
+		return false;
 	const items = focusableElements(dialog);
 	const active =
 		document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)

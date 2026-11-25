@@ -32,11 +32,13 @@ struct CreateSessionRequest {
     thinking_level: MaybeOmitted<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_sessions_route(
     state: &ServerState,
     caller: CallerIdentity,
     method: &Method,
     pathname: &str,
+    query: Option<&str>,
     headers: &HeaderMap,
     raw_body: &[u8],
     conn_cancel: CancellationToken,
@@ -495,6 +497,20 @@ pub async fn handle_sessions_route(
 
     if suffix == "tree" && (*method == Method::GET || *method == Method::HEAD) {
         let slot = state.pool.open_saved(id).await.map_err(ApiError::from)?;
+        if query.is_some_and(|query| {
+            url::form_urlencoded::parse(query.as_bytes())
+                .any(|(key, value)| key == "format" && value == "flat")
+        }) {
+            let payload = slot.session().with_session_manager(|sm| {
+                let entries: Vec<_> = sm
+                    .get_entries()
+                    .into_iter()
+                    .map(|entry| json!({ "label": sm.get_label(entry.id()), "entry": entry }))
+                    .collect();
+                json!({ "entries": entries, "leafId": sm.get_leaf_id() })
+            });
+            return Ok(Some(json_response(StatusCode::OK, &payload, method)));
+        }
         let (tree, leaf_id) = slot
             .session()
             .with_session_manager(|sm| (sm.get_tree(), sm.get_leaf_id().map(str::to_owned)));
@@ -596,6 +612,13 @@ pub async fn handle_sessions_route(
 
                     slot.events
                         .publish("session", &json!({ "type": "session_tree" }));
+                    state.pool.global_events.publish(
+                        "state",
+                        &json!({
+                            "type": "usage_changed",
+                            "sessionId": id_owned,
+                        }),
+                    );
                     state.pool.global_events.publish(
                         "state",
                         &json!({

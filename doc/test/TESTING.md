@@ -115,9 +115,12 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 
 基于 `bsk` 与 `cst-server --standalone-web` 的完整 Web 验收方案位于 `web` 模块测试目录：
 
-1. [路由广度 E2E（bsk-e2e.md）](web/test/bsk-e2e.md)：覆盖全部 15 个叶路由与 28 个页内交互分支。
-2. [长会话与状态机深度 E2E（bsk-deep-e2e.md）](web/test/bsk-deep-e2e.md)：验证 500K 上下文自动压缩、瞬态重试、乐观发送对账，以及挂起交互桥与 33 会话聚合流分片。
-3. [用户体验量化 E2E（ux-e2e.md）](web/test/ux-e2e.md)：通过 5 类浏览器注入探针在 6 种视口断点与极限数据夹具下量化检验几何对齐、动效连续性、输入法焦点与流式零抖动。
+1. [路由广度 E2E（bsk-e2e.md）](../web/test/bsk-e2e.md)：覆盖全部 15 个叶路由与 28 个页内交互分支。
+2. [长会话与状态机深度 E2E（bsk-deep-e2e.md）](../web/test/bsk-deep-e2e.md)：验证 500K 上下文自动压缩、瞬态重试、乐观发送对账，以及挂起交互桥与 33 会话聚合流分片。
+3. [用户体验量化 E2E（ux-e2e.md）](../web/test/ux-e2e.md)：通过 5 类浏览器注入探针在 6 种视口断点与极限数据夹具下量化检验几何对齐、动效连续性、输入法焦点与流式零抖动。
+4. [桌面端 UX 与交互性能 E2E（desktop/test/ux-e2e.md）](../desktop/test/ux-e2e.md)：定义交互性能和体验正确性检查，列出 Win11 上的自动化子集、CPU 与提交内存限流、WARP 降级及补测范围。
+5. [Windows 10 / 11 与中国大陆特制版兼容性测试（desktop/test/windows-compat.md）](../desktop/test/windows-compat.md)：列出 Windows 10/11、家庭中文版、神州网信政府版、LTSC 与精简镜像的兼容性风险、Win11 本地验证结果和真机验收清单。
+6. [17 个开放工具设计评估与三维度测试规范（diagnostics/test/tools-test-spec.md）](../diagnostics/test/tools-test-spec.md)：按兼容性、性能与字段语义正确性三个维度评估全部 17 个开放工具并定义 `T01–T54` 补充测试矩阵。
 
 CI 自动化浏览器套件覆盖以下核心回归面：
 

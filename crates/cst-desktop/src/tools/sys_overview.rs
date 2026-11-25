@@ -1,19 +1,24 @@
 use cst_client::tool_presenter::{FieldRow, SpecialStatus};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, TransitionId, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, div, px, relative,
+    App, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
+    TestSupportExt, Window, div, px, relative,
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
+use crate::tools::render_special_details_section;
 
 pub struct SysOverviewProps<'a> {
     pub call_id: &'a str,
     pub status: SpecialStatus,
     pub title: &'a str,
     pub summary: &'a str,
+    pub raw: &'a str,
     pub machine: &'a str,
     pub uptime: &'a str,
     pub cpu_pct: Option<f64>,
@@ -23,15 +28,21 @@ pub struct SysOverviewProps<'a> {
     pub fields: &'a [FieldRow],
     pub errors: &'a [String],
     pub details_expanded: bool,
+    pub running_light_allowed: bool,
 }
 
 /// Renders the standalone System Overview persistent card (`sys` with `scope == "overview"`,
 /// `cst-pilot-desktop.pen` `wmkJw` `$bg-special` `12px` card).
-pub fn render_sys_overview_card(
+#[allow(clippy::too_many_arguments)]
+pub fn render_sys_overview_card<V: 'static>(
     props: SysOverviewProps<'_>,
     mono_family: SharedString,
     palette: &DesktopPalette,
-    on_toggle_details: crate::tools::ToggleKeyFn,
+    is_copied_fn: &dyn Fn(&str) -> bool,
+    on_toggle_details: crate::tools::ToggleDetailsFn,
+    on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
+    cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     let (status_icon, status_icon_color, status_text) = match props.status {
         SpecialStatus::Running | SpecialStatus::Pending => {
@@ -52,25 +63,22 @@ pub fn render_sys_overview_card(
 
     let cpu_pct_label = match props.cpu_pct {
         Some(p) => format_pct(p),
-        None => "--".to_owned(),
+        None => "未获取".to_owned(),
     };
     let cpu_sub = match props.cores {
         Some(c) => format!("{c} 个逻辑核心"),
-        None => "核心数未采集".to_owned(),
+        None => "逻辑核心未知".to_owned(),
     };
 
     let mem_pct_label = match props.memory_pct {
         Some(p) => format_pct(p),
-        None => "--".to_owned(),
+        None => "未获取".to_owned(),
     };
     let mem_sub = if props.capacity.trim().is_empty() {
-        "容量未采集".to_owned()
+        "容量未知".to_owned()
     } else {
         props.capacity.to_owned()
     };
-
-    let has_details = !props.fields.is_empty() || !props.errors.is_empty();
-    let detail_key = format!("sys-overview-details-{}", props.call_id);
 
     let card_title = if props.title.trim().is_empty() {
         "整机概览"
@@ -96,7 +104,7 @@ pub fn render_sys_overview_card(
         .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
-        .gap(space::MD)
+        .gap(space::LG)
         // 1. `28px` Header (`E8ziuK`): left `18px` Monitor + `16/24 @ 500` title; right `12px` status icon + `12/16` text
         .child(
             div()
@@ -133,11 +141,21 @@ pub fn render_sys_overview_card(
                         .items_center()
                         .gap(space::XS)
                         .flex_shrink_0()
-                        .child(
+                        .child(if status_icon == IconName::LoaderCircle {
+                            motion::animated_spinner(
+                                format!("sys-overview-spin-{}", props.call_id),
+                                px(12.0),
+                                status_icon_color,
+                                props.running_light_allowed,
+                                window,
+                                cx,
+                            )
+                        } else {
                             Icon::new(status_icon)
                                 .size(px(12.0))
-                                .text_color(status_icon_color),
-                        )
+                                .text_color(status_icon_color)
+                                .into_any_element()
+                        })
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(palette.text_secondary)
@@ -146,16 +164,19 @@ pub fn render_sys_overview_card(
                 ),
         );
 
-    // 2. Standalone machine summary row (`z4HOkb`, `14/20` `text_secondary`)
-    if !props.machine.trim().is_empty() {
-        card = card.child(
-            apply_scale(div(), scale::UI)
-                .w_full()
-                .truncate()
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(props.machine.to_owned())),
-        );
-    }
+    // 2. Standalone machine summary row (`z4HOkb` / `TIYSe`, `14/20` `text_secondary`)
+    let machine_label = if props.machine.trim().is_empty() {
+        "机型信息未获取"
+    } else {
+        props.machine
+    };
+    card = card.child(
+        apply_scale(div(), scale::UI)
+            .w_full()
+            .truncate()
+            .text_color(palette.text_secondary)
+            .child(SharedString::from(machine_label.to_owned())),
+    );
 
     // 3. Two-column `24px` gap neutral progress bars (`W8YDpW`)
     card = card.child(
@@ -165,130 +186,75 @@ pub fn render_sys_overview_card(
             .items_start()
             .gap(space::GROUP)
             .child(render_metric_column(
+                format!("sys-cpu-bar-{}", props.call_id),
                 "CPU",
                 &cpu_pct_label,
                 &cpu_sub,
                 cpu_val,
                 mono_family.clone(),
                 palette,
+                window,
+                cx,
             ))
             .child(render_metric_column(
+                format!("sys-mem-bar-{}", props.call_id),
                 "内存",
                 &mem_pct_label,
                 &mem_sub,
                 mem_val,
                 mono_family.clone(),
                 palette,
+                window,
+                cx,
             )),
     );
 
-    // 4. `1px` `border_subtle` divider + `24px` bottom bar (`S82Rar`)
-    if !props.uptime.trim().is_empty() || has_details {
-        card = card.child(div().w_full().h(px(1.0)).bg(palette.border_subtle));
+    // 4. `1px` `border_subtle` divider + `24px` bottom bar (`S82Rar`) + expanded `BMZLr` details
+    let uptime_label = if props.uptime.trim().is_empty() {
+        "运行时间未采集".to_owned()
+    } else {
+        format!("已运行 {}", props.uptime)
+    };
+    let left_uptime = div()
+        .flex()
+        .items_center()
+        .gap(space::SM)
+        .min_w_0()
+        .child(
+            Icon::new(IconName::Clock3)
+                .size(px(12.0))
+                .text_color(palette.text_secondary),
+        )
+        .child(
+            apply_scale(div(), scale::CAPTION)
+                .truncate()
+                .text_color(palette.text_secondary)
+                .child(SharedString::from(uptime_label)),
+        )
+        .into_any_element();
 
-        let uptime_label = if props.uptime.trim().is_empty() {
-            "运行时间未采集".to_owned()
-        } else {
-            format!("已运行 {}", props.uptime)
-        };
-
-        let mut bottom_bar = div()
-            .w_full()
-            .h(height::INLINE)
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(space::MD)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .min_w_0()
-                    .child(
-                        Icon::new(IconName::Clock3)
-                            .size(px(12.0))
-                            .text_color(palette.text_secondary),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .truncate()
-                            .text_color(palette.text_secondary)
-                            .child(SharedString::from(uptime_label)),
-                    ),
-            );
-
-        if has_details {
-            let dk = detail_key;
-            let toggle_id =
-                SharedString::from(format!("sys-overview-detail-toggle-{}", props.call_id));
-            bottom_bar = bottom_bar.child(
-                apply_scale(div(), scale::CAPTION)
-                    .id(toggle_id.clone())
-                    .test_support()
-                    .a11y_toggle_button(toggle_id, "整机概览详情", props.details_expanded)
-                    .h(height::INLINE)
-                    .flex()
-                    .items_center()
-                    .gap(space::XS)
-                    .flex_shrink_0()
-                    .text_color(palette.text_secondary)
-                    .hover(|s| s.text_color(palette.text_primary))
-                    .on_click(move |_, w, cx| (on_toggle_details)(dk.clone(), w, cx))
-                    .child(cjk_inline_label("详情"))
-                    .child(
-                        Icon::new(if props.details_expanded {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(px(12.0))
-                        .text_color(palette.text_secondary),
-                    ),
-            );
-        }
-
-        card = card.child(bottom_bar);
-
-        if has_details && props.details_expanded {
-            let mut detail_col = div()
-                .w_full()
-                .pt(space::XS)
-                .flex()
-                .flex_col()
-                .gap(space::XS);
-
-            for row in props.fields {
-                detail_col = detail_col.child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .justify_between()
-                        .gap(space::MD)
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(row.label.clone())),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .font_family(mono_family.clone())
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(row.value.clone())),
-                        ),
-                );
-            }
-
-            for err in props.errors {
-                detail_col = detail_col.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .text_color(palette.status_warning)
-                        .child(SharedString::from(err.clone())),
-                );
-            }
-
-            card = card.child(detail_col);
-        }
+    let toggle_id = SharedString::from(format!("sys-overview-detail-toggle-{}", props.call_id));
+    let raw_block_id = SharedString::from(format!("sys-overview-raw-{}", props.call_id));
+    if let Some(details_section) = render_special_details_section(
+        toggle_id,
+        "整机概览详情",
+        props.details_expanded,
+        Some("sys(scope: \"overview\")"),
+        props.fields,
+        props.errors,
+        props.status == SpecialStatus::Error,
+        raw_block_id,
+        props.raw,
+        Some(left_uptime),
+        mono_family,
+        palette,
+        is_copied_fn,
+        on_toggle_details,
+        on_mark_copied,
+        window,
+        cx,
+    ) {
+        card = card.child(details_section);
     }
 
     card.into_any_element()
@@ -303,15 +269,28 @@ fn format_pct(p: f64) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_metric_column(
+    bar_id: String,
     label: &'static str,
     pct_str: &str,
     sub_str: &str,
     pct: f64,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
-    let fill_ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
+    let target_ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
+    let tid: TransitionId = SharedString::from(bar_id).into();
+    let fill_ratio = transition(
+        tid,
+        target_ratio,
+        Transition::new(motion::NORMAL).ease(motion::ease_out()),
+        window,
+        cx,
+    )
+    .clamp(0.0, 1.0);
 
     div()
         .flex_1()
@@ -327,14 +306,13 @@ fn render_metric_column(
                 .justify_between()
                 .gap(space::SM)
                 .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .text_color(palette.text_primary)
+                    apply_scale(div(), scale::UI)
+                        .text_color(palette.text_secondary)
                         .child(cjk_inline_label(label)),
                 )
                 .child(
                     apply_scale(div(), scale::UI_MEDIUM)
                         .font_weight(FontWeight::SEMIBOLD)
-                        .font_family(mono_family)
                         .text_color(palette.text_primary)
                         .child(SharedString::from(pct_str.to_owned())),
                 ),

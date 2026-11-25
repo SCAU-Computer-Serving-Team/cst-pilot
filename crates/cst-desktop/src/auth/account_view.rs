@@ -1,71 +1,151 @@
 use cst_client::ClientHandle;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    Context, EventEmitter, FocusHandle, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::auth::login_view::LoginMethodTab;
+use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius,
     render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::model_picker::format_quota_balance;
 
 #[derive(Debug, Clone)]
 pub enum AccountViewEvent {
+    NavigateBack,
+    OpenLoginTab(LoginMethodTab),
     LoggedOutCstoa,
     ErrorMessage(String),
 }
 
-/// Exclusive CSTOA Account View (`cst-pilot-desktop.pen` 「04 · 账号与登录」):
+/// Exclusive CSTOA Account View (`cst-pilot-desktop.pen` 「04 · 账号与登录」 `d2XpB`):
 /// Top full-width `44px` `xWJOf` header + `816px` centered column with single-layer `$bg-workspace`
-/// `8px` card chaining three `56px` info rows (`c4PWw`), and neutral-border outline danger logout button.
+/// `8px` card chaining three `56px` info rows (`c4PWw`), `GOWKl` action bar, and `sVucQ` logout confirm dialog.
 pub struct AccountView {
     client: ClientHandle,
     quota_text: Option<SharedString>,
     quota_loading: bool,
     quota_error: Option<SharedString>,
     logging_out: bool,
+    logout_confirm_open: bool,
+    logout_trap_focus: FocusHandle,
+    logout_cancel_focus: FocusHandle,
+    logout_trigger_focus: FocusHandle,
+    logout_confirm_focus: FocusHandle,
+    _revision_task: gpui::Task<()>,
+    quota_task: Option<gpui::Task<()>>,
+    profile_error: Option<SharedString>,
 }
 
 impl EventEmitter<AccountViewEvent> for AccountView {}
 
 impl AccountView {
     pub fn new(client: ClientHandle, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
+        let mut rev_rx = client.subscribe_revisions();
+        let revision_task = cx.spawn(async move |weak, cx| {
+            let mut previous = None;
+            while rev_rx.changed().await.is_ok() {
+                let alive = weak
+                    .update(cx, |this, cx| {
+                        let account = this.client.snapshot().account.clone();
+                        if previous != account {
+                            previous = account;
+                            this.profile_error = None;
+                            cx.notify();
+                        }
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        });
+        Self {
             client,
             quota_text: None,
             quota_loading: false,
             quota_error: None,
             logging_out: false,
-        };
-        this.refresh_cstoa_quota(true, cx);
-        this
+            logout_confirm_open: false,
+            logout_trap_focus: cx.focus_handle(),
+            logout_cancel_focus: cx.focus_handle().tab_stop(true),
+            logout_trigger_focus: cx.focus_handle().tab_stop(true),
+            logout_confirm_focus: cx.focus_handle().tab_stop(true),
+            _revision_task: revision_task,
+            quota_task: None,
+            profile_error: None,
+        }
     }
 
-    pub fn refresh_cstoa_quota(&mut self, force_refresh: bool, cx: &mut Context<Self>) {
+    pub fn has_logout_confirm(&self) -> bool {
+        self.logout_confirm_open
+    }
+
+    pub fn blocks_workspace_shortcuts(&self) -> bool {
+        self.logout_confirm_open || self.logging_out
+    }
+
+    pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.logout_confirm_open = false;
+        self.quota_task.take();
+        self.quota_loading = false;
+        self.quota_text = None;
+        self.quota_error = None;
+        self.profile_error = None;
+        cx.notify();
+    }
+
+    pub fn open_logout_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.logging_out || self.logout_confirm_open {
+            return;
+        }
+        self.logout_confirm_open = true;
+        self.logout_cancel_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn dismiss_logout_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.logout_confirm_open {
+            return false;
+        }
+        self.logout_confirm_open = false;
+        self.logout_trigger_focus.focus(window, cx);
+        cx.notify();
+        true
+    }
+
+    pub fn refresh_cstoa_quota(&mut self, cx: &mut Context<Self>) {
         if self.quota_loading {
             return;
         }
         self.quota_loading = true;
         self.quota_error = None;
+        self.profile_error = None;
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client
-                .get_provider_quota("cstoa".into(), force_refresh)
-                .await;
+        self.quota_task = Some(cx.spawn(async move |weak, cx| {
+            // The account and quota endpoints share the upstream profile cache.
+            let account = client.refresh_account().await;
+            let res = client.get_provider_quota("cstoa".into(), false).await;
             let _ = weak.update(cx, |this, cx| {
                 this.quota_loading = false;
+                this.profile_error = account.err().map(|err| err.to_string().into());
                 match res {
                     Ok(val) => {
-                        this.quota_text = Some(SharedString::from(
-                            format_quota_balance(&val).unwrap_or_else(|| "已就绪".to_owned()),
-                        ));
-                        this.quota_error = None;
+                        this.quota_text = format_quota_balance(&val).map(SharedString::from);
+                        if this.quota_text.is_none() {
+                            this.quota_error = val
+                                .get("reason")
+                                .and_then(serde_json::Value::as_str)
+                                .map(SharedString::from);
+                        }
                     }
                     Err(err) => {
                         this.quota_error = Some(SharedString::from(err.to_string()));
@@ -73,12 +153,11 @@ impl AccountView {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
-    fn logout_cstoa_only(&mut self, cx: &mut Context<Self>) {
-        if self.logging_out {
+    fn logout_cstoa_only(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.logging_out || !self.dismiss_logout_confirm(window, cx) {
             return;
         }
         self.logging_out = true;
@@ -107,19 +186,42 @@ impl AccountView {
 }
 
 impl Render for AccountView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
-        let mono_family = theme_global.mono_font_family;
+        let transparency_enabled = theme_global.transparency_enabled;
 
         let snap = self.client.snapshot();
         let account = snap.account.as_ref();
         let name = account
             .and_then(|a| a.profile.name.as_deref())
-            .unwrap_or("科协队员");
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(if self.quota_loading {
+                "查询中…"
+            } else {
+                "未提供姓名"
+            });
         let student_id = account
             .and_then(|a| a.profile.student_id.as_deref())
-            .unwrap_or("未提供学号");
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or(if self.quota_loading {
+                "查询中…"
+            } else {
+                "未提供学号"
+            });
+        let profile_error = (!self.quota_loading)
+            .then(|| {
+                self.profile_error
+                    .clone()
+                    .or_else(|| {
+                        account
+                            .and_then(|a| a.profile.reason.as_deref())
+                            .filter(|reason| !reason.trim().is_empty())
+                            .map(SharedString::from)
+                    })
+                    .filter(|reason| self.quota_error.as_ref() != Some(reason))
+            })
+            .flatten();
 
         let quota_display = if self.quota_loading {
             SharedString::from("查询中…")
@@ -156,7 +258,6 @@ impl Render for AccountView {
                     )
                     .child(
                         apply_scale(div(), scale::BODY)
-                            .font_family(mono_family.clone())
                             .text_color(palette.text_primary)
                             .child(SharedString::from(student_id.to_owned())),
                     ),
@@ -208,7 +309,6 @@ impl Render for AccountView {
                             .gap(space::SM)
                             .child(
                                 apply_scale(div(), scale::BODY)
-                                    .font_family(mono_family)
                                     .text_color(if self.quota_error.is_some() {
                                         palette.status_danger
                                     } else {
@@ -229,7 +329,7 @@ impl Render for AccountView {
                                     .justify_center()
                                     .hover(|s| s.bg(palette.bg_item_hover))
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.refresh_cstoa_quota(true, cx);
+                                        this.refresh_cstoa_quota(cx);
                                     }))
                                     .child(
                                         Icon::new(IconName::RefreshCw)
@@ -240,20 +340,191 @@ impl Render for AccountView {
                     ),
             );
 
+        let info_card = info_card.children(profile_error.map(|err| {
+            apply_scale(div(), scale::UI)
+                .border_t_1()
+                .border_color(palette.border_subtle)
+                .p(space::LG)
+                .text_color(palette.text_secondary)
+                .child(err)
+        }));
+
+        let logout_scrim_p = motion::surface_presence(
+            "account-logout-scrim-p",
+            self.logout_confirm_open,
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
+        let confirm_modal_opt = self.logout_confirm_open.then(|| {
+            let scale_factor = window.scale_factor();
+            let card = render_frosted_surface(
+                "account-logout-confirm-dialog",
+                FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
+                    .with_opacity(logout_scrim_p),
+                palette.bg_elevated,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .a11y_dialog("account-logout-confirm-dialog", "退出 CSTOA 登录")
+            .w(layout::MODAL_STANDARD_WIDTH)
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .shadow(palette.craft_stack_shadows())
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        Icon::new(IconName::CircleAlert)
+                            .size(px(16.0))
+                            .text_color(palette.status_danger),
+                    )
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("确认退出 CSTOA？")),
+                    ),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_secondary)
+                    .child("退出后将清除本机 CSTOA 登录凭据，可随时重新扫码或通过密钥登录。"),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .pt(space::XS)
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("account-logout-cancel-btn")
+                            .test_support()
+                            .a11y_button("account-logout-cancel-btn", "取消")
+                            .track_focus(&self.logout_cancel_focus)
+                            .tab_index(0)
+                            .on_key_down(cx.listener(
+                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                    if crate::settings::activates_button(event) {
+                                        this.dismiss_logout_confirm(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_surface))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss_logout_confirm(window, cx);
+                            }))
+                            .child(cjk_inline_label("取消")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("account-logout-confirm-btn")
+                            .test_support()
+                            .a11y_button("account-logout-confirm-btn", "退出 CSTOA")
+                            .track_focus(&self.logout_confirm_focus)
+                            .tab_index(0)
+                            .on_key_down(cx.listener(
+                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                    if crate::settings::activates_button(event) {
+                                        this.logout_cstoa_only(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.status_danger)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.status_danger_hover))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.logout_cstoa_only(window, cx);
+                            }))
+                            .child(cjk_inline_label("退出 CSTOA")),
+                    ),
+            );
+
+            render_frosted_surface(
+                "account-logout-confirm-scrim",
+                FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
+                palette.bg_scrim,
+                transparency_enabled,
+                scale_factor,
+            )
+            .rounded(radius::ROW)
+            .opacity(0.01 + 0.99 * logout_scrim_p)
+            .occlude()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    this.dismiss_logout_confirm(window, cx);
+                }),
+            )
+            .child(
+                div()
+                    .tab_stop(false)
+                    .focus_trap("account-logout-confirm-trap", &self.logout_trap_focus)
+                    .child(motion::animate_modal_enter(
+                        "account-logout-confirm-anim",
+                        card,
+                        palette.craft_stack_shadows(),
+                    )),
+            )
+        });
+
         div()
             .id("account-view")
             .test_support()
             .a11y_region("account-view", "账号信息")
+            .relative()
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(render_subpage_header_xwjof(
                 "account-subpage-header",
                 IconName::User,
                 "账号信息",
                 None,
+                Some(std::rc::Rc::new({
+                    let e_back = cx.entity();
+                    move |_, cx| {
+                        e_back.update(cx, |_, cx| cx.emit(AccountViewEvent::NavigateBack));
+                    }
+                })),
                 &palette,
+                window,
+                cx,
             ))
             .child(
                 div()
@@ -262,7 +533,7 @@ impl Render for AccountView {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
-                    .px(space::GROUP)
+                    .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)
                     .flex()
                     .flex_col()
@@ -271,6 +542,8 @@ impl Render for AccountView {
                         div()
                             .w_full()
                             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                            .id("account-content-column")
+                            .test_support()
                             .flex()
                             .flex_col()
                             .gap(space::GROUP)
@@ -286,46 +559,115 @@ impl Render for AccountView {
                                     )
                                     .child(info_card),
                             )
+                            // `GOWKl`: action button row (`重新扫码登录` · `APIKEY 登录` · `退出 CSTOA`)
                             .child(
-                                div().flex().items_center().child(
-                                    apply_scale(div(), scale::UI_MEDIUM)
-                                        .id("account-cstoa-logout-btn")
-                                        .test_support()
-                                        .a11y_button(
-                                            "account-logout-btn",
-                                            if self.logging_out {
-                                                "正在退出"
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap(space::MD)
+                                    .pt(space::XS)
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .id("account-relogin-qr-btn")
+                                            .test_support()
+                                            .a11y_button("account-relogin-qr-btn", "重新扫码登录")
+                                            .h(height::CONTROL)
+                                            .px(space::MD)
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .border_color(palette.border_strong)
+                                            .bg(palette.bg_workspace)
+                                            .text_color(palette.text_primary)
+                                            .flex()
+                                            .items_center()
+                                            .hover(|s| s.bg(palette.bg_surface))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if !this.blocks_workspace_shortcuts() {
+                                                    cx.emit(AccountViewEvent::OpenLoginTab(
+                                                        LoginMethodTab::CstoaQr,
+                                                    ));
+                                                }
+                                            }))
+                                            .child(cjk_inline_label("重新扫码登录")),
+                                    )
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .id("account-relogin-apikey-btn")
+                                            .test_support()
+                                            .a11y_button(
+                                                "account-relogin-apikey-btn",
+                                                "APIKEY 登录",
+                                            )
+                                            .h(height::CONTROL)
+                                            .px(space::MD)
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .border_color(palette.border_strong)
+                                            .bg(palette.bg_workspace)
+                                            .text_color(palette.text_primary)
+                                            .flex()
+                                            .items_center()
+                                            .hover(|s| s.bg(palette.bg_surface))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if !this.blocks_workspace_shortcuts() {
+                                                    cx.emit(AccountViewEvent::OpenLoginTab(
+                                                        LoginMethodTab::ApiKey,
+                                                    ));
+                                                }
+                                            }))
+                                            .child(cjk_inline_label("APIKEY 登录")),
+                                    )
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .id("account-cstoa-logout-btn")
+                                            .test_support()
+                                            .a11y_button(
+                                                "account-logout-btn",
+                                                if self.logging_out {
+                                                    "正在退出"
+                                                } else {
+                                                    "退出 CSTOA"
+                                                },
+                                            )
+                                            .track_focus(&self.logout_trigger_focus)
+                                            .tab_index(0)
+                                            .on_key_down(cx.listener(
+                                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                                    if crate::settings::activates_button(event) {
+                                                        this.open_logout_confirm(window, cx);
+                                                        cx.stop_propagation();
+                                                    }
+                                                },
+                                            ))
+                                            .h(height::CONTROL)
+                                            .px(space::MD)
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .border_color(palette.border_strong)
+                                            .bg(palette.bg_workspace)
+                                            .text_color(palette.status_danger)
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::SM)
+                                            .hover(|s| s.bg(palette.status_danger_subtle))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_logout_confirm(window, cx);
+                                            }))
+                                            .child(
+                                                Icon::new(IconName::LogOut)
+                                                    .size(px(16.0))
+                                                    .text_color(palette.status_danger),
+                                            )
+                                            .child(cjk_inline_label(if self.logging_out {
+                                                "正在退出…"
                                             } else {
-                                                "退出 CSTOA 登录"
-                                            },
-                                        )
-                                        .h(height::CONTROL)
-                                        .px(space::MD)
-                                        .rounded(radius::CONTROL)
-                                        .border_1()
-                                        .border_color(palette.border_strong)
-                                        .bg(palette.bg_workspace)
-                                        .text_color(palette.status_danger)
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::XS)
-                                        .hover(|s| s.bg(palette.status_danger_subtle))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.logout_cstoa_only(cx);
-                                        }))
-                                        .child(
-                                            Icon::new(IconName::LogOut)
-                                                .size(px(13.0))
-                                                .text_color(palette.status_danger),
-                                        )
-                                        .child(cjk_inline_label(if self.logging_out {
-                                            "正在退出…"
-                                        } else {
-                                            "退出 CSTOA 登录"
-                                        })),
-                                ),
+                                                "退出 CSTOA"
+                                            })),
+                                    ),
                             ),
                     ),
             )
+            .children(confirm_modal_opt)
     }
 }

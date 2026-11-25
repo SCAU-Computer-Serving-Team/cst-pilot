@@ -63,6 +63,7 @@ pub struct OutboxItem {
     pub thinking_level: Option<String>,
     pub created_at_ms: u64,
     pub state: OutboxItemState,
+    attempt: u64,
 }
 
 impl OutboxItem {
@@ -102,6 +103,7 @@ impl OutboxItem {
             thinking_level: draft.selected_thinking_level.clone(),
             created_at_ms: now_ms,
             state,
+            attempt: 0,
         })
     }
 
@@ -129,6 +131,12 @@ impl OutboxItem {
 
     pub fn is_unresolved(&self) -> bool {
         true
+    }
+
+    fn matches_uncertain_attempt(&self, previous: &Self) -> bool {
+        self.client_message_id == previous.client_message_id
+            && self.attempt == previous.attempt
+            && matches!(self.state, OutboxItemState::Uncertain { .. })
     }
 }
 
@@ -207,6 +215,71 @@ impl SessionOutbox {
                 credentials_required: error.is_credentials_required(),
             };
         }
+    }
+
+    pub(crate) fn is_home_uncertain(&self, previous: &OutboxItem) -> bool {
+        self.home_pending
+            .as_ref()
+            .is_some_and(|item| item.matches_uncertain_attempt(previous))
+    }
+
+    pub(crate) fn reconcile_home_bound(
+        &mut self,
+        previous: &OutboxItem,
+        session_id: &str,
+        already_accepted: bool,
+        not_delivered_error: &ClientError,
+    ) -> bool {
+        if !self.is_home_uncertain(previous) {
+            return false;
+        }
+        self.bind_home_to_session(session_id);
+        if already_accepted {
+            self.mark_accepted(session_id, &previous.client_message_id);
+        } else {
+            self.mark_session_error(session_id, &previous.client_message_id, not_delivered_error);
+        }
+        true
+    }
+
+    pub(crate) fn reconcile_home_missing(
+        &mut self,
+        previous: &OutboxItem,
+        restored: bool,
+        not_created_error: &ClientError,
+    ) -> bool {
+        if !self.is_home_uncertain(previous) {
+            return false;
+        }
+        if restored {
+            self.clear_home();
+        } else {
+            self.mark_home_failed(not_created_error);
+        }
+        true
+    }
+
+    pub(crate) fn reconcile_session_uncertain(
+        &mut self,
+        session_id: &str,
+        previous: &OutboxItem,
+        accepted: bool,
+        error: Option<&ClientError>,
+    ) -> bool {
+        let still_uncertain = self.by_session.get(session_id).is_some_and(|list| {
+            list.iter()
+                .any(|item| item.matches_uncertain_attempt(previous))
+        });
+        let client_message_id = &previous.client_message_id;
+        if !still_uncertain {
+            return false;
+        }
+        if accepted {
+            self.mark_accepted(session_id, client_message_id);
+        } else if let Some(err) = error {
+            self.mark_session_error(session_id, client_message_id, err);
+        }
+        true
     }
 
     pub fn restore_home_failed_item(&mut self, mut item: OutboxItem, error: &ClientError) {
@@ -347,6 +420,7 @@ impl SessionOutbox {
             generate_creation_request_key()
         };
         item.creation_request_key = Some(req_key.clone());
+        item.attempt = item.attempt.wrapping_add(1);
         item.state = OutboxItemState::CreatingSession {
             request_key: req_key,
         };
@@ -381,6 +455,7 @@ impl SessionOutbox {
         }
         let was_uncertain = matches!(item.state, OutboxItemState::Uncertain { .. });
         self.paused_sessions.remove(session_id);
+        item.attempt = item.attempt.wrapping_add(1);
         item.state = OutboxItemState::Sending;
         Ok((item.clone(), was_uncertain))
     }
@@ -540,5 +615,51 @@ pub struct WebSwitchCheck {
 impl WebSwitchCheck {
     pub fn requires_confirmation(&self) -> bool {
         self.unresolved_local_outbox > 0 || self.unsent_drafts > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconciliation_does_not_apply_to_a_new_uncertain_attempt() {
+        let mut outbox = SessionOutbox::default();
+        let offline = ClientError::Disconnected("offline".into());
+        let missing = ClientError::NotFound {
+            code: "missing".into(),
+            message: "missing".into(),
+        };
+
+        let home = OutboxItem::from_draft(None, &ComposerDraft::default(), 0).unwrap();
+        outbox.enqueue_home(home.clone()).unwrap();
+        outbox.mark_home_uncertain(offline.to_string());
+        let before_retry = outbox.uncertain_items().pop().unwrap().1;
+        outbox.prepare_home_retry(&home.client_message_id).unwrap();
+        outbox.mark_home_uncertain(offline.to_string());
+        assert!(!outbox.reconcile_home_missing(&before_retry, true, &missing));
+        assert!(!outbox.reconcile_home_bound(&before_retry, "session", false, &missing));
+        assert!(matches!(
+            outbox.home_item().unwrap().state,
+            OutboxItemState::Uncertain { .. }
+        ));
+
+        let item =
+            OutboxItem::from_draft(Some("session".into()), &ComposerDraft::default(), 0).unwrap();
+        let id = item.client_message_id.clone();
+        outbox.enqueue_session("session", item);
+        outbox.mark_session_error("session", &id, &offline);
+        let before_retry = outbox.uncertain_items().pop().unwrap().1;
+        outbox.prepare_session_retry("session", &id).unwrap();
+        outbox.mark_session_error("session", &id, &offline);
+        assert!(!outbox.reconcile_session_uncertain(
+            "session",
+            &before_retry,
+            false,
+            Some(&missing)
+        ));
+        let current = outbox.uncertain_items().pop().unwrap().1;
+        assert!(outbox.reconcile_session_uncertain("session", &current, true, None));
+        assert!(outbox.session_items("session").is_empty());
     }
 }

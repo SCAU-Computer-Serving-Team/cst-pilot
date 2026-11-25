@@ -1,17 +1,23 @@
-use cst_client::ClientHandle;
+mod editor;
+
+use cst_client::{ClientError, ClientHandle};
+use gpui::{KeyDownEvent, MouseDownEvent};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputContentType, InputState};
+use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, TestSupportExt, Window, div, px,
 };
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +47,10 @@ impl CustomApiProtocol {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::OpenaiCompletions => "OpenAI Chat",
+            Self::OpenaiCompletions => "OpenAI Chat Completions",
             Self::OpenaiResponses => "OpenAI Responses",
-            Self::AnthropicMessages => "Anthropic",
-            Self::GoogleGenerativeAi => "Gemini",
+            Self::AnthropicMessages => "Anthropic Messages",
+            Self::GoogleGenerativeAi => "Google Gemini",
         }
     }
 
@@ -58,6 +64,28 @@ impl CustomApiProtocol {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TokenFieldKind {
+    ContextWindow,
+    MaxTokens,
+}
+
+pub(super) const CONTEXT_WINDOW_PRESETS: &[(&str, u64)] = &[
+    ("128K", 128_000),
+    ("256K", 256_000),
+    ("512K", 512_000),
+    ("1M", 1_000_000),
+];
+
+pub(super) const MAX_OUTPUT_PRESETS: &[(&str, u64)] = &[
+    ("16K", 16_384),
+    ("32K", 32_768),
+    ("64K", 65_536),
+    ("128K", 128_000),
+    ("256K", 256_000),
+    ("384K", 384_000),
+];
+
 pub struct EditableModelRow {
     pub id_input: Entity<InputState>,
     pub name_input: Entity<InputState>,
@@ -65,11 +93,15 @@ pub struct EditableModelRow {
     pub max_tokens: u64,
     pub reasoning: bool,
     pub image: bool,
+    pub is_new: bool,
+    pub _subs: Vec<Subscription>,
 }
 
 fn format_token_window(n: u64) -> String {
     if n >= 1_000_000 && n.is_multiple_of(1_000_000) {
         format!("{}M", n / 1_000_000)
+    } else if n >= 16_384 && n.is_multiple_of(1_024) {
+        format!("{}K", n / 1_024)
     } else if n >= 1_000 {
         format!("{}K", n / 1_000)
     } else {
@@ -77,24 +109,41 @@ fn format_token_window(n: u64) -> String {
     }
 }
 
-fn next_context_window(cur: u64) -> u64 {
-    match cur {
-        0..=32_768 => 64_000,
-        32_769..=65_536 => 128_000,
-        65_537..=131_072 => 200_000,
-        131_073..=262_144 => 1_000_000,
-        _ => 32_000,
+pub(super) fn cycle_token_preset(current: u64, presets: &[(&str, u64)]) -> u64 {
+    if let Some(pos) = presets.iter().position(|&(_, v)| v == current) {
+        presets[(pos + 1) % presets.len()].1
+    } else {
+        presets
+            .iter()
+            .find(|&&(_, v)| v > current)
+            .unwrap_or(&presets[0])
+            .1
     }
 }
 
-fn next_max_tokens(cur: u64) -> u64 {
-    match cur {
-        0..=4_096 => 8_192,
-        4_097..=8_192 => 16_384,
-        8_193..=16_384 => 32_768,
-        16_385..=32_768 => 65_536,
-        _ => 4_096,
+fn parse_token_window_input(raw: &str) -> Option<u64> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ',' | '_' | ' '))
+        .collect();
+    if cleaned.is_empty() {
+        return None;
     }
+    let lower = cleaned.to_ascii_lowercase();
+    let (num_part, mult) = if let Some(s) = lower.strip_suffix('m') {
+        (s, 1_000_000.0_f64)
+    } else if let Some(s) = lower.strip_suffix('k') {
+        (s, 1_000.0_f64)
+    } else {
+        (lower.as_str(), 1.0_f64)
+    };
+    let val = num_part.parse::<f64>().ok()?;
+    if !val.is_finite() || val <= 0.0 {
+        return None;
+    }
+    let out = (val * mult).round() as u64;
+    (out > 0).then_some(out)
 }
 
 #[derive(Debug, Clone)]
@@ -117,31 +166,91 @@ pub struct ProvidersTabView {
     base_url_input: Entity<InputState>,
     api_key_input: Entity<InputState>,
     protocol: CustomApiProtocol,
+    protocol_dropdown_open: bool,
+    protocol_dropdown_index: usize,
+    protocol_focus: FocusHandle,
+    inline_token_edit: Option<(usize, TokenFieldKind)>,
+    inline_token_input: Entity<InputState>,
     revision: Option<String>,
     editable_rows: Vec<EditableModelRow>,
     saving: bool,
+    loading: bool,
+    generation: u64,
+    window: gpui::AnyWindowHandle,
+    key_error: Option<SharedString>,
+    form_error: Option<SharedString>,
+    providers_expanded: bool,
+    page_slide: motion::PageSlide,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ProvidersTabEvent> for ProvidersTabView {}
 
 impl ProvidersTabView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("按模型 ID 或名称筛选…"));
-        let provider_id_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("服务标识（小写字母/数字/连字符，如 my-gateway）")
-        });
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("筛选模型…"));
+        let provider_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("如 my-gateway"));
         let provider_name_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("服务显示名称（如 本地网关）"));
-        let base_url_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Base URL（如 https://api.example.com/v1）")
-        });
+            cx.new(|cx| InputState::new(window, cx).placeholder("如 本地网关"));
+        let base_url_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
         let api_key_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("输入或更新 API Key（留空保持已有密钥）")
+                .placeholder("输入 API Key")
                 .masked(true)
         });
+        let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("128K"));
+
+        let mut subs =
+            vec![cx.subscribe(
+                &search_input,
+                |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    _ => {}
+                },
+            )];
+        subs.push(
+            cx.subscribe(&inline_token_input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Blur) {
+                    this.commit_inline_token_edit(cx);
+                }
+            }),
+        );
+        for inp in [&provider_id_input, &provider_name_input, &base_url_input] {
+            subs.push(
+                cx.subscribe(inp, |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        this.form_error = None;
+                        this.key_error = None;
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    _ => {}
+                }),
+            );
+        }
+        subs.push(cx.subscribe(
+            &api_key_input,
+            |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    this.form_error = None;
+                    this.key_error = None;
+                    cx.notify();
+                }
+                InputEvent::Focus => {
+                    this.dismiss_click_outside_dropdowns(cx);
+                }
+                _ => {}
+            },
+        ));
 
         Self {
             client,
@@ -155,17 +264,33 @@ impl ProvidersTabView {
             base_url_input,
             api_key_input,
             protocol: CustomApiProtocol::OpenaiCompletions,
+            protocol_dropdown_open: false,
+            protocol_dropdown_index: 0,
+            protocol_focus: cx.focus_handle(),
+            inline_token_edit: None,
+            inline_token_input,
             revision: None,
             editable_rows: Vec::new(),
             saving: false,
+            loading: false,
+            generation: 0,
+            window: window.window_handle(),
+            key_error: None,
+            form_error: None,
+            providers_expanded: false,
+            page_slide: motion::PageSlide::default(),
+            _subscriptions: subs,
         }
     }
 
     pub fn open_new_custom_provider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.active_provider_id = None;
+        self.page_slide.start(1.0, cx);
+        self.reset_form();
         self.creating_new_custom = true;
         self.inline_edit_mode = true;
         self.revision = None;
+        self.key_error = None;
+        self.form_error = None;
         self.protocol = CustomApiProtocol::OpenaiCompletions;
         self.provider_id_input
             .update(cx, |i, cx| i.set_value("", window, cx));
@@ -173,19 +298,125 @@ impl ProvidersTabView {
             .update(cx, |i, cx| i.set_value("", window, cx));
         self.base_url_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.api_key_input
+        self.clear_key(window, cx);
+        self.search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.editable_rows.clear();
         self.append_blank_editable_row(window, cx);
         cx.notify();
     }
 
-    fn return_to_provider_list(&mut self, cx: &mut Context<Self>) {
+    pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.providers_expanded = false;
+        self.reset_form();
+        let key = self.api_key_input.downgrade();
+        let window = self.window;
+        cx.spawn(async move |_, cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = key.update(cx, |input, cx| {
+                    input.set_value("", window, cx);
+                    input.set_masked(true, window, cx);
+                });
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn return_to_provider_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.page_slide.start(-1.0, cx);
+        self.reset_form();
+        self.clear_key(window, cx);
+        cx.notify();
+    }
+
+    fn clear_key(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.api_key_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_masked(true, window, cx);
+        });
+    }
+
+    pub fn has_dropdown(&self) -> bool {
+        self.protocol_dropdown_open || self.inline_token_edit.is_some()
+    }
+
+    pub fn dismiss_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        if self.protocol_dropdown_open {
+            self.protocol_dropdown_open = false;
+            changed = true;
+        }
+        if self.inline_token_edit.take().is_some() {
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub fn dismiss_click_outside_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.protocol_dropdown_open {
+            return false;
+        }
+        self.protocol_dropdown_open = false;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn start_inline_token_edit(
+        &mut self,
+        row_idx: usize,
+        kind: TokenFieldKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = self.editable_rows.get(row_idx) else {
+            return;
+        };
+        self.protocol_dropdown_open = false;
+        let current = match kind {
+            TokenFieldKind::ContextWindow => row.context_window,
+            TokenFieldKind::MaxTokens => row.max_tokens,
+        };
+        let initial = format_token_window(current);
+        self.inline_token_edit = Some((row_idx, kind));
+        self.inline_token_input.update(cx, |inp, cx| {
+            inp.set_value(initial, window, cx);
+            inp.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(super) fn commit_inline_token_edit(&mut self, cx: &mut Context<Self>) {
+        let Some((row_idx, kind)) = self.inline_token_edit.take() else {
+            return;
+        };
+        let raw = self.inline_token_input.read(cx).value().to_string();
+        if let Some(parsed) = parse_token_window_input(&raw)
+            && let Some(row) = self.editable_rows.get_mut(row_idx)
+        {
+            match kind {
+                TokenFieldKind::ContextWindow => row.context_window = parsed,
+                TokenFieldKind::MaxTokens => row.max_tokens = parsed,
+            }
+        }
+        cx.notify();
+    }
+
+    fn reset_form(&mut self) {
+        self.generation += 1;
+        self.loading = false;
+        self.revision = None;
+        self.editable_rows.clear();
         self.inline_edit_mode = false;
         self.creating_new_custom = false;
         self.active_provider_id = None;
         self.search_visible = false;
-        cx.notify();
+        self.protocol_dropdown_open = false;
+        self.inline_token_edit = None;
+        self.key_error = None;
+        self.form_error = None;
     }
 
     fn select_provider(
@@ -202,38 +433,51 @@ impl ProvidersTabView {
             .and_then(|p| p.custom)
             .unwrap_or(false);
 
-        self.active_provider_id = Some(provider_id.clone());
-        self.creating_new_custom = false;
-        self.inline_edit_mode = is_custom;
-        self.api_key_input
+        self.page_slide.start(1.0, cx);
+        self.reset_form();
+        self.clear_key(window, cx);
+        self.search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.editable_rows.clear();
+        self.active_provider_id = Some(provider_id.clone());
+        self.inline_edit_mode = is_custom;
+        self.provider_id_input
+            .update(cx, |i, cx| i.set_value(provider_id.clone(), window, cx));
+        let pname = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider_id))
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        self.provider_name_input
+            .update(cx, |i, cx| i.set_value(pname, window, cx));
+        self.base_url_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
 
         if is_custom {
+            self.loading = true;
+            let generation = self.generation;
             let client = self.client.clone();
-            let pid = provider_id.clone();
-            cx.spawn(async move |weak, cx| {
-                if let Ok(val) = client.get_custom_provider(pid).await {
-                    let _ = weak.update_in(cx, |this, window, cx| {
-                        this.populate_from_custom_json(&val, window, cx);
-                    });
-                }
+            cx.spawn_in(window, async move |weak, cx| {
+                let result = client.get_custom_provider(provider_id.clone()).await;
+                let _ = weak.update_in(cx, |this, window, cx| {
+                    if this.generation != generation {
+                        return;
+                    }
+                    this.loading = false;
+                    match result {
+                        Ok(val)
+                            if val.get("id").and_then(Value::as_str)
+                                == Some(provider_id.as_str())
+                                && val.get("revision").and_then(Value::as_str).is_some() =>
+                        {
+                            this.populate_from_custom_json(&val, window, cx);
+                        }
+                        _ => this.form_error = Some("无法读取服务配置，请返回列表重试。".into()),
+                    }
+                    cx.notify();
+                });
             })
             .detach();
-        } else {
-            let pname = snap
-                .auth_providers
-                .as_ref()
-                .and_then(|list| list.iter().find(|p| p.id == provider_id))
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| provider_id.clone());
-            self.provider_id_input
-                .update(cx, |i, cx| i.set_value(provider_id, window, cx));
-            self.provider_name_input
-                .update(cx, |i, cx| i.set_value(pname, window, cx));
-            self.base_url_input
-                .update(cx, |i, cx| i.set_value("", window, cx));
-            self.revision = None;
         }
         cx.notify();
     }
@@ -280,7 +524,7 @@ impl ProvidersTabView {
                 let reasoning = m.get("reasoning").and_then(Value::as_bool).unwrap_or(false);
                 let image = m.get("image").and_then(Value::as_bool).unwrap_or(false);
                 let id_inp = cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("model-id");
+                    let mut s = InputState::new(window, cx).placeholder("模型 ID");
                     s.set_value(mid, window, cx);
                     s
                 });
@@ -296,6 +540,8 @@ impl ProvidersTabView {
                     max_tokens: mt,
                     reasoning,
                     image,
+                    is_new: false,
+                    _subs: Vec::new(),
                 });
             }
         }
@@ -303,46 +549,35 @@ impl ProvidersTabView {
     }
 
     fn append_blank_editable_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.inline_edit_mode {
-            self.inline_edit_mode = true;
-            if let Some(ref pid) = self.active_provider_id
-                && let Some(models) = self.client.snapshot().models.as_ref()
-            {
-                for m in models.catalog.iter().filter(|m| &m.provider == pid) {
-                    let mid = m.id.clone();
-                    let mname = m.name.clone();
-                    let id_inp = cx.new(|cx| {
-                        let mut s = InputState::new(window, cx).placeholder("model-id");
-                        s.set_value(mid, window, cx);
-                        s
-                    });
-                    let name_inp = cx.new(|cx| {
-                        let mut s = InputState::new(window, cx).placeholder("显示名称");
-                        s.set_value(mname, window, cx);
-                        s
-                    });
-                    self.editable_rows.push(EditableModelRow {
-                        id_input: id_inp,
-                        name_input: name_inp,
-                        context_window: m.context_window.unwrap_or(128_000),
-                        max_tokens: m.max_tokens.unwrap_or(16_384),
-                        reasoning: m.reasoning,
-                        image: m.input.iter().any(|x| x == "image"),
-                    });
-                }
-            }
+        if !self.inline_edit_mode || self.loading || self.saving {
+            return;
         }
+        self.form_error = None;
 
-        let id_input = cx.new(|cx| InputState::new(window, cx).placeholder("新模型 ID…"));
-        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("模型名称…"));
+        let id_input = cx.new(|cx| InputState::new(window, cx).placeholder("模型 ID"));
+        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("显示名称"));
+        let subs = vec![
+            cx.subscribe(&id_input, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&name_input, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+        ];
         id_input.update(cx, |i, cx| i.focus(window, cx));
         self.editable_rows.push(EditableModelRow {
             id_input,
             name_input,
             context_window: 128_000,
-            max_tokens: 16_384,
+            max_tokens: 65_536,
             reasoning: true,
             image: false,
+            is_new: true,
+            _subs: subs,
         });
         cx.notify();
     }
@@ -363,42 +598,44 @@ impl ProvidersTabView {
         .detach();
     }
 
-    fn save_builtin_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+    fn remove_active_provider_credentials(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving || self.loading || (self.inline_edit_mode && self.revision.is_none()) {
             return;
         }
         let Some(provider) = self.active_provider_id.clone() else {
             return;
         };
-        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
-        if raw_key.is_empty() {
-            cx.emit(ProvidersTabEvent::ErrorMessage(
-                "请输入要更新的 API Key。".into(),
-            ));
-            return;
-        }
-        let base_url = {
-            let b = self.base_url_input.read(cx).value().trim().to_owned();
-            (!b.is_empty()).then_some(b)
-        };
-        self.api_key_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
         self.saving = true;
+        self.key_error = None;
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client
-                .save_provider_api_key(provider, raw_key, base_url)
-                .await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+        let revision = self.revision.clone();
+        let generation = self.generation;
+        cx.spawn_in(window, async move |weak, cx| {
+            let custom = revision.is_some();
+            let res = match revision {
+                Some(revision) => client.delete_custom_provider(provider, revision).await,
+                None => client.logout_provider(provider).await,
+            };
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(_) => {
-                        cx.emit(ProvidersTabEvent::CredentialsSaved);
-                        cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
+                        this.return_to_provider_list(window, cx);
+                        cx.emit(ProvidersTabEvent::Notice(if custom {
+                            "已删除自定义提供商。".into()
+                        } else {
+                            "已移除服务凭据。".into()
+                        }));
                     }
                     Err(err) => {
                         cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
@@ -410,23 +647,91 @@ impl ProvidersTabView {
         .detach();
     }
 
-    fn save_inline_provider_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+    fn save_builtin_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving || self.inline_edit_mode {
             return;
         }
-        let pid = self.provider_id_input.read(cx).value().trim().to_owned();
+        let Some(provider) = self.active_provider_id.clone() else {
+            return;
+        };
+        let raw_key = self.read_key(cx);
+        if raw_key.is_empty() {
+            self.key_error = Some("请输入要更新的 API Key。".into());
+            cx.notify();
+            return;
+        }
+        self.key_error = None;
+        let base_url = self.base_url_input.read(cx).value().trim().to_owned();
+        self.saving = true;
+        cx.notify();
+
+        let generation = self.generation;
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client
+                .save_provider_api_key(
+                    provider,
+                    raw_key,
+                    (!base_url.is_empty()).then_some(base_url),
+                )
+                .await;
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
+                match res {
+                    Ok(_) => {
+                        this.clear_key(window, cx);
+                        cx.emit(ProvidersTabEvent::CredentialsSaved);
+                        cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
+                    }
+                    Err(ClientError::BadRequest { .. }) => {
+                        this.key_error = Some("无法保存凭据，请检查 API Key 和服务地址。".into());
+                    }
+                    Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
+                        "保存凭据失败，请重试。".into(),
+                    )),
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn read_key(&self, cx: &gpui::App) -> Zeroizing<String> {
+        let input = Zeroizing::new(self.api_key_input.read(cx).text().to_string());
+        Zeroizing::new(input.trim().to_owned())
+    }
+
+    fn save_inline_provider_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_inline_token_edit(cx);
+        self.protocol_dropdown_open = false;
+        if self.saving
+            || self.loading
+            || !self.inline_edit_mode
+            || (!self.creating_new_custom && self.revision.is_none())
+        {
+            return;
+        }
+        let pid = self
+            .active_provider_id
+            .clone()
+            .unwrap_or_else(|| self.provider_id_input.read(cx).value().trim().to_owned());
         let name = self.provider_name_input.read(cx).value().trim().to_owned();
         let base_url = self.base_url_input.read(cx).value().trim().to_owned();
-        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
-        self.api_key_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+        let raw_key = self.read_key(cx);
 
         if pid.is_empty() || name.is_empty() || base_url.is_empty() {
-            cx.emit(ProvidersTabEvent::ErrorMessage(
-                "请完整填写服务标识、名称与 Base URL。".into(),
-            ));
+            self.form_error = Some("请完整填写服务标识、显示名称与 Base URL。".into());
+            cx.notify();
             return;
         }
+        self.form_error = None;
 
         let mut models_arr = Vec::new();
         for row in &self.editable_rows {
@@ -463,10 +768,7 @@ impl ProvidersTabView {
             "api".into(),
             Value::String(self.protocol.wire_value().to_owned()),
         );
-        if !raw_key.is_empty() {
-            payload.insert("apiKey".into(), Value::String(raw_key.as_str().to_owned()));
-        }
-        drop(raw_key);
+        let key = (!raw_key.is_empty()).then_some(raw_key);
         payload.insert("models".into(), Value::Array(models_arr));
         if let Some(ref rev) = self.revision {
             payload.insert("revision".into(), Value::String(rev.clone()));
@@ -476,14 +778,22 @@ impl ProvidersTabView {
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client.save_custom_provider(Value::Object(payload)).await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+        let generation = self.generation;
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client.save_custom_provider(payload, key).await;
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(saved) => {
+                        this.clear_key(window, cx);
                         this.revision = saved
                             .get("revision")
                             .and_then(Value::as_str)
@@ -491,11 +801,14 @@ impl ProvidersTabView {
                         this.creating_new_custom = false;
                         this.active_provider_id = Some(pid);
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
-                        cx.emit(ProvidersTabEvent::Notice("模型服务配置已保存。".into()));
+                        cx.emit(ProvidersTabEvent::Notice("提供商配置已保存。".into()));
                     }
-                    Err(err) => {
-                        cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+                    Err(ClientError::BadRequest { .. }) => {
+                        this.form_error = Some("无法保存提供商，请检查配置和密钥。".into());
                     }
+                    Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
+                        "保存提供商失败，请重试。".into(),
+                    )),
                 }
                 cx.notify();
             });
@@ -512,7 +825,7 @@ impl ProvidersTabView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("providers-back-to-list-btn")
                 .test_support()
-                .a11y_button("providers-back-to-list-btn", "返回模型服务列表")
+                .a11y_button("providers-back-to-list-btn", "返回提供商列表")
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
@@ -521,535 +834,76 @@ impl ProvidersTabView {
                 .items_center()
                 .gap(space::XS)
                 .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.return_to_provider_list(cx);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.return_to_provider_list(window, cx);
                 }))
                 .child(
                     Icon::new(IconName::ArrowLeft)
                         .size(px(14.0))
                         .text_color(palette.text_secondary),
                 )
-                .child(cjk_inline_label("模型服务")),
+                .child(cjk_inline_label("提供商")),
         )
-    }
-
-    fn render_group_header_with_3_icon_buttons(
-        &self,
-        title: &'static str,
-        palette: &DesktopPalette,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        // Strictly 3 icon-only action buttons (`search`, `refresh-cw`, `plus`) on right — ZERO text buttons!
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child(cjk_inline_label(title)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::XS)
-                    .child(
-                        div()
-                            .id("providers-hdr-search-btn")
-                            .test_support()
-                            .a11y_toggle_button(
-                                "providers-hdr-search-btn",
-                                "搜索模型",
-                                self.search_visible,
-                            )
-                            .w(height::COMPACT)
-                            .h(height::COMPACT)
-                            .rounded(radius::CONTROL)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.search_visible = !this.search_visible;
-                                if this.search_visible {
-                                    this.search_input.update(cx, |i, cx| i.focus(w, cx));
-                                }
-                                cx.notify();
-                            }))
-                            .child(
-                                Icon::new(IconName::Search)
-                                    .size(px(14.0))
-                                    .text_color(palette.text_secondary),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("providers-hdr-refresh-btn")
-                            .test_support()
-                            .a11y_button("providers-hdr-refresh-btn", "刷新模型目录")
-                            .w(height::COMPACT)
-                            .h(height::COMPACT)
-                            .rounded(radius::CONTROL)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.trigger_refresh_models(cx);
-                            }))
-                            .child(
-                                Icon::new(IconName::RefreshCw)
-                                    .size(px(14.0))
-                                    .text_color(palette.text_secondary),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("providers-hdr-add-model-btn")
-                            .test_support()
-                            .a11y_button("providers-hdr-add-model-btn", "添加模型行")
-                            .w(height::COMPACT)
-                            .h(height::COMPACT)
-                            .rounded(radius::CONTROL)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.append_blank_editable_row(w, cx);
-                            }))
-                            .child(
-                                Icon::new(IconName::Plus)
-                                    .size(px(14.0))
-                                    .text_color(palette.text_secondary),
-                            ),
-                    ),
-            )
-    }
-
-    fn render_borderless_hairline_editor(
-        &self,
-        mono_family: SharedString,
-        palette: &DesktopPalette,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let mut protocol_row = div().flex().flex_wrap().gap(space::XS);
-        for proto in CustomApiProtocol::ALL {
-            let active = self.protocol == proto;
-            let proto_id = SharedString::from(format!("custom-proto-{}", proto.wire_value()));
-            protocol_row = protocol_row.child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(proto_id.clone())
-                    .test_support()
-                    .a11y_tab(proto_id, proto.label(), active)
-                    .h(height::COMPACT)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(if active {
-                        palette.border_strong
-                    } else {
-                        palette.border_subtle
-                    })
-                    .bg(if active {
-                        palette.bg_item_active
-                    } else {
-                        palette.bg_workspace
-                    })
-                    .text_color(if active {
-                        palette.text_primary
-                    } else {
-                        palette.text_secondary
-                    })
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.protocol = proto;
-                        cx.notify();
-                    }))
-                    .child(SharedString::from(proto.label())),
-            );
-        }
-
-        // Borderless hairline editable table with `32px` column header row (`思考` / `图片` 16×16 checkboxes)
-        let mut hairline_table = div()
-            .id("providers-hairline-edit-table")
-            .test_support()
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .w_full()
-                    .h(height::CONTROL)
-                    .border_b_1()
-                    .border_color(palette.border_subtle)
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .flex_1()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("模型 ID")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .flex_1()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("显示名称")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(76.0))
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("上下文窗口")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(68.0))
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("最大输出")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("思考")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("图片")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(36.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("移除")),
-                    ),
-            );
-
-        let filter_q = self.search_input.read(cx).value().to_lowercase();
-        for (idx, row) in self.editable_rows.iter().enumerate() {
-            if self.search_visible && !filter_q.is_empty() {
-                let id_v = row.id_input.read(cx).value().to_lowercase();
-                let nm_v = row.name_input.read(cx).value().to_lowercase();
-                if !id_v.contains(&filter_q) && !nm_v.contains(&filter_q) {
-                    continue;
-                }
-            }
-            let reasoning = row.reasoning;
-            let image = row.image;
-            let cw_text = format_token_window(row.context_window);
-            let mt_text = format_token_window(row.max_tokens);
-            let cw_id = SharedString::from(format!("edit-row-cw-{idx}"));
-            let mt_id = SharedString::from(format!("edit-row-mt-{idx}"));
-            let rm_id = SharedString::from(format!("edit-row-remove-{idx}"));
-
-            hairline_table = hairline_table.child(
-                div()
-                    .py(space::SM)
-                    .border_b_1()
-                    .border_color(palette.border_hairline)
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.id_input)
-                                .accessibility_id(SharedString::from(format!(
-                                    "providers-row-id-input-{idx}"
-                                )))
-                                .aria_label(format!("第 {} 行模型 ID", idx + 1)),
-                        ),
-                    )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.name_input)
-                                .accessibility_id(SharedString::from(format!(
-                                    "providers-row-name-input-{idx}"
-                                )))
-                                .aria_label(format!("第 {} 行模型显示名称", idx + 1)),
-                        ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .id(cw_id.clone())
-                            .test_support()
-                            .a11y_button(cw_id, format!("切换上下文窗口：{cw_text}"))
-                            .w(px(76.0))
-                            .h(height::COMPACT)
-                            .px(space::XS)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_subtle)
-                            .bg(palette.bg_workspace)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.context_window = next_context_window(r.context_window);
-                                    cx.notify();
-                                }
-                            }))
-                            .child(SharedString::from(cw_text)),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .id(mt_id.clone())
-                            .test_support()
-                            .a11y_button(mt_id, format!("切换最大输出：{mt_text}"))
-                            .w(px(68.0))
-                            .h(height::COMPACT)
-                            .px(space::XS)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_subtle)
-                            .bg(palette.bg_workspace)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.max_tokens = next_max_tokens(r.max_tokens);
-                                    cx.notify();
-                                }
-                            }))
-                            .child(SharedString::from(mt_text)),
-                    )
-                    .child(
-                        div()
-                            .w(px(40.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(capability_checkbox(
-                                SharedString::from(format!("edit-row-reasoning-{idx}")),
-                                SharedString::from(format!("第 {} 行支持思考", idx + 1)),
-                                reasoning,
-                                palette,
-                                cx.listener(move |this, _, _, cx| {
-                                    if let Some(r) = this.editable_rows.get_mut(idx) {
-                                        r.reasoning = !r.reasoning;
-                                        cx.notify();
-                                    }
-                                }),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w(px(40.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(capability_checkbox(
-                                SharedString::from(format!("edit-row-image-{idx}")),
-                                SharedString::from(format!("第 {} 行支持图片", idx + 1)),
-                                image,
-                                palette,
-                                cx.listener(move |this, _, _, cx| {
-                                    if let Some(r) = this.editable_rows.get_mut(idx) {
-                                        r.image = !r.image;
-                                        cx.notify();
-                                    }
-                                }),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w(px(36.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                div()
-                                    .id(rm_id.clone())
-                                    .test_support()
-                                    .a11y_button(rm_id, format!("移除第 {} 行模型", idx + 1))
-                                    .w(height::COMPACT)
-                                    .h(height::COMPACT)
-                                    .rounded(radius::CONTROL)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if idx < this.editable_rows.len() {
-                                            this.editable_rows.remove(idx);
-                                            cx.notify();
-                                        }
-                                    }))
-                                    .child(
-                                        Icon::new(IconName::Trash)
-                                            .size(px(13.0))
-                                            .text_color(palette.text_muted),
-                                    ),
-                            ),
-                    ),
-            );
-        }
-
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(space::MD)
-            .child(self.render_back_bar(palette, cx))
-            .child(
-                div()
-                    .flex()
-                    .gap(space::SM)
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&self.provider_id_input)
-                                .accessibility_id("providers-id-input")
-                                .aria_label("服务标识")
-                                .h(height::FIELD),
-                        ),
-                    )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&self.provider_name_input)
-                                .accessibility_id("providers-name-input")
-                                .aria_label("服务显示名称")
-                                .h(height::FIELD),
-                        ),
-                    ),
-            )
-            .child(protocol_row)
-            .child(
-                Input::new(&self.base_url_input)
-                    .accessibility_id("providers-baseurl-input")
-                    .aria_label("服务 Base URL")
-                    .h(height::FIELD),
-            )
-            .child(
-                Input::new(&self.api_key_input)
-                    .accessibility_id("providers-apikey-input")
-                    .content_type(InputContentType::Password)
-                    .aria_label("服务 API Key")
-                    .h(height::FIELD)
-                    .mask_toggle(),
-            )
-            .child(self.render_group_header_with_3_icon_buttons("模型列表", palette, cx))
-            .children(self.search_visible.then(|| {
-                Input::new(&self.search_input)
-                    .accessibility_id("providers-search-input")
-                    .aria_label("筛选模型")
-                    .h(height::FIELD)
-                    .cleanable(true)
-            }))
-            .child(hairline_table)
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("providers-inline-cancel-btn")
-                            .test_support()
-                            .a11y_button("providers-inline-cancel-btn", "取消")
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.return_to_provider_list(cx);
-                            }))
-                            .child(cjk_inline_label("取消")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("providers-inline-save-btn")
-                            .test_support()
-                            .a11y_button(
-                                "providers-inline-save-btn",
-                                if self.saving {
-                                    "正在保存"
-                                } else {
-                                    "保存"
-                                },
-                            )
-                            .h(height::CONTROL)
-                            .px(space::LG)
-                            .rounded(radius::CONTROL)
-                            .bg(palette.accent_solid)
-                            .text_color(palette.text_on_accent)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.accent_hover))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.save_inline_provider_form(w, cx);
-                            }))
-                            .child(cjk_inline_label(if self.saving {
-                                "正在保存…"
-                            } else {
-                                "保存"
-                            })),
-                    ),
-            )
     }
 }
 
 impl Render for ProvidersTabView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
+        let (slide_opacity, slide_dx) = self.page_slide.sample(window, cx);
 
-        // 1. Custom / Inline Provider Editor Mode
+        // 1. Custom / Inline Provider Editor Mode (`Geto8` -> `q8NLwK`)
         if self.creating_new_custom || self.inline_edit_mode {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
-                .a11y_region("settings-providers-tab", "模型服务设置")
+                .a11y_region("settings-providers-tab", "提供商设置")
                 .w_full()
+                .relative()
+                .left(slide_dx)
+                .opacity(slide_opacity)
                 .flex()
                 .flex_col()
-                .gap(space::MD)
-                .child(
-                    apply_scale(div(), scale::TITLE)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("模型服务")),
+                .gap(space::GROUP)
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.protocol_dropdown_open = false;
+                        cx.notify();
+                    }),
                 )
-                .child(self.render_borderless_hairline_editor(mono_family, &palette, cx));
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::SM)
+                        .child(self.render_back_bar(&palette, cx))
+                        .child(
+                            div().w_full().flex().items_center().gap(space::MD).child(
+                                apply_scale(div(), scale::TITLE)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("自定义提供商")),
+                            ),
+                        ),
+                )
+                .child(self.render_custom_provider_editor(mono_family, &palette, window, cx));
         }
 
-        // 2. Built-in Provider Detail / Credential Management Mode
+        // 2. Built-in Provider Detail / Credential Management Mode (`T5us8O`)
         if let Some(ref pid) = self.active_provider_id {
             let pid_owned = pid.clone();
-            let prov_name = snap
+            let prov_entry = snap
                 .auth_providers
                 .as_ref()
-                .and_then(|list| list.iter().find(|p| p.id == pid_owned))
+                .and_then(|list| list.iter().find(|p| p.id == pid_owned));
+            let prov_name = prov_entry
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| pid_owned.clone());
+            let is_configured = prov_entry.and_then(|p| p.configured) == Some(true);
             let filter_q = self.search_input.read(cx).value().to_lowercase();
             let catalog_models: Vec<_> = snap
                 .models
@@ -1128,7 +982,6 @@ impl Render for ProvidersTabView {
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .font_family(mono_family.clone())
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(m.id.clone())),
                         )
@@ -1143,7 +996,6 @@ impl Render for ProvidersTabView {
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .w(px(76.0))
-                                .font_family(mono_family.clone())
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(format_token_window(
                                     m.context_window.unwrap_or(128_000),
@@ -1169,75 +1021,183 @@ impl Render for ProvidersTabView {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
-                .a11y_region("settings-providers-tab", "模型服务设置")
+                .a11y_region("settings-providers-tab", "提供商设置")
                 .w_full()
+                .relative()
+                .left(slide_dx)
+                .opacity(slide_opacity)
                 .flex()
                 .flex_col()
                 .gap(space::MD)
                 .child(
                     apply_scale(div(), scale::TITLE)
                         .text_color(palette.text_primary)
-                        .child(cjk_inline_label("模型服务")),
+                        .child(cjk_inline_label("提供商")),
                 )
                 .child(self.render_back_bar(&palette, cx))
                 .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .child(SharedString::from(prov_name)),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::MD)
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(prov_name)),
+                        )
+                        .children(is_configured.then(|| {
+                            div()
+                                .h(height::INLINE)
+                                .px(space::SM)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.bg_surface)
+                                .flex()
+                                .items_center()
+                                .gap(space::XS)
+                                .child(
+                                    div()
+                                        .w(px(6.0))
+                                        .h(px(6.0))
+                                        .rounded(radius::FULL)
+                                        .bg(palette.status_success),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("已连接")),
+                                )
+                        })),
                 )
                 .child(
                     div()
+                        .w_full()
                         .flex()
-                        .gap(space::SM)
+                        .flex_col()
+                        .gap(space::TIGHT)
                         .child(
-                            div().flex_1().child(
-                                Input::new(&self.api_key_input)
-                                    .accessibility_id("providers-apikey-input")
-                                    .content_type(InputContentType::Password)
-                                    .aria_label("服务 API Key")
-                                    .h(height::FIELD)
-                                    .mask_toggle(),
-                            ),
+                            div()
+                                .flex()
+                                .gap(space::SM)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .h(height::FIELD)
+                                        .px(space::XS)
+                                        .rounded(radius::CONTROL)
+                                        .border_1()
+                                        .border_color(if self.key_error.is_some() {
+                                            palette.status_danger
+                                        } else {
+                                            palette.border_strong
+                                        })
+                                        .bg(palette.bg_workspace)
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            Input::new(&self.api_key_input)
+                                                .accessibility_id("providers-apikey-input")
+                                                .content_type(InputContentType::Password)
+                                                .aria_label("服务 API Key")
+                                                .appearance(false)
+                                                .bordered(false)
+                                                .focus_bordered(false)
+                                                .w_full()
+                                                .h_full()
+                                                .mask_toggle(),
+                                        ),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("providers-builtin-save-key-btn")
+                                        .test_support()
+                                        .a11y_button(
+                                            "providers-builtin-save-key-btn",
+                                            if self.saving {
+                                                "正在保存"
+                                            } else {
+                                                "保存密钥"
+                                            },
+                                        )
+                                        .h(height::FIELD)
+                                        .px(space::LG)
+                                        .rounded(radius::CONTROL)
+                                        .bg(palette.accent_solid)
+                                        .text_color(palette.text_on_accent)
+                                        .flex()
+                                        .items_center()
+                                        .hover(|s| s.bg(palette.accent_hover))
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.save_builtin_api_key(w, cx);
+                                        }))
+                                        .child(cjk_inline_label(if self.saving {
+                                            "正在保存…"
+                                        } else {
+                                            "保存密钥"
+                                        })),
+                                ),
+                        )
+                        .children(self.key_error.clone().map(|err| {
+                            apply_scale(div(), scale::CAPTION)
+                                .id("providers-apikey-error-text")
+                                .test_support()
+                                .a11y_status("providers-apikey-error-text", err.clone())
+                                .text_color(palette.status_danger)
+                                .child(err)
+                        })),
+                )
+                .child(self.render_model_list_header("模型列表", &palette, cx))
+                .children(self.search_visible.then(|| {
+                    let search_focused = self
+                        .search_input
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window);
+                    let search_focus_ent = self.search_input.clone();
+                    div()
+                        .id("providers-builtin-search-box")
+                        .w_full()
+                        .h(height::FIELD)
+                        .px(space::MD)
+                        .rounded(radius::CONTROL)
+                        .border_1()
+                        .border_color(if search_focused {
+                            palette.border_focus
+                        } else {
+                            palette.border_strong
+                        })
+                        .bg(palette.bg_workspace)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .on_click(move |_, w, cx| {
+                            search_focus_ent.focus_handle(cx).focus(w, cx);
+                        })
+                        .child(
+                            Icon::new(IconName::Search)
+                                .size(px(14.0))
+                                .text_color(palette.text_muted),
                         )
                         .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
-                                .id("providers-builtin-save-key-btn")
-                                .test_support()
-                                .a11y_button(
-                                    "providers-builtin-save-key-btn",
-                                    if self.saving {
-                                        "正在保存"
-                                    } else {
-                                        "保存密钥"
-                                    },
-                                )
-                                .h(height::FIELD)
-                                .px(space::LG)
-                                .rounded(radius::CONTROL)
-                                .bg(palette.accent_solid)
-                                .text_color(palette.text_on_accent)
-                                .flex()
-                                .items_center()
-                                .hover(|s| s.bg(palette.accent_hover))
-                                .on_click(cx.listener(|this, _, w, cx| {
-                                    this.save_builtin_api_key(w, cx);
-                                }))
-                                .child(cjk_inline_label(if self.saving {
-                                    "正在保存…"
-                                } else {
-                                    "保存密钥"
-                                })),
-                        ),
-                )
-                .child(self.render_group_header_with_3_icon_buttons("模型列表", &palette, cx))
-                .children(self.search_visible.then(|| {
-                    Input::new(&self.search_input)
-                        .accessibility_id("providers-search-input")
-                        .aria_label("筛选模型")
-                        .h(height::FIELD)
-                        .cleanable(true)
+                            div().flex_1().min_w_0().child(
+                                Input::new(&self.search_input)
+                                    .accessibility_id("providers-search-input")
+                                    .aria_label("筛选模型")
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .p_0(),
+                            ),
+                        )
                 }))
-                .child(model_table);
+                .child(model_table)
+                .children(is_configured.then(|| {
+                    render_remove_credentials_card(
+                        &palette,
+                        cx.listener(|this, _, window, cx| {
+                            this.remove_active_provider_credentials(window, cx);
+                        }),
+                    )
+                }));
         }
 
         // 3. Main Merged Provider List (`$bg-workspace` + `8px` radius + `72px` rows)
@@ -1283,7 +1243,7 @@ impl Render for ProvidersTabView {
                             .child(
                                 apply_scale(div(), scale::BODY)
                                     .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("CSTOA 科协专属服务")),
+                                    .child(cjk_inline_label("计维CSTOA")),
                             )
                             .child(
                                 apply_scale(div(), scale::CAPTION)
@@ -1298,9 +1258,9 @@ impl Render for ProvidersTabView {
                             .a11y_button(
                                 "providers-cstoa-action-btn",
                                 if cstoa_signed_in {
-                                    "管理 CSTOA 账号"
+                                    "管理 计维CSTOA 账号"
                                 } else {
-                                    "扫码登录 CSTOA"
+                                    "扫码登录 计维CSTOA"
                                 },
                             )
                             .h(height::CONTROL)
@@ -1331,27 +1291,46 @@ impl Render for ProvidersTabView {
             .as_ref()
             .map(|p| p.as_slice())
             .unwrap_or(&[]);
-        for prov in providers.iter().filter(|p| p.id != "cstoa") {
-            let pid = prov.id.clone();
-            let pid_btn = pid.clone();
-            let (status_label, status_color) = if prov.requires_login {
-                ("凭据已失效，请重新配置", palette.status_warning)
-            } else if prov.configured == Some(true) {
-                ("已就绪", palette.status_success)
+        // Configured providers first (keeping original order within each group) so active providers stay above the fold.
+        let mut ordered_others: Vec<_> = providers.iter().filter(|p| p.id != "cstoa").collect();
+        ordered_others.sort_by_key(|p| {
+            if p.configured == Some(true) || p.requires_login {
+                0u8
             } else {
-                ("尚未配置凭据", palette.status_warning)
-            };
+                1u8
+            }
+        });
+        const PROVIDERS_COLLAPSED_LIMIT: usize = 5;
+        let total_providers_count = 1 + ordered_others.len();
+        let can_collapse_providers = total_providers_count > PROVIDERS_COLLAPSED_LIMIT;
+        let head_limit = PROVIDERS_COLLAPSED_LIMIT.saturating_sub(1);
+        let render_provider_row =
+            |prov: &cst_client::ProviderStatusDto, interactive: bool, cx: &mut Context<Self>| {
+                let pid = prov.id.clone();
+                let pid_btn = pid.clone();
+                let (status_label, status_color) = if prov.requires_login {
+                    ("凭据已失效，请重新配置", palette.status_warning)
+                } else if prov.configured == Some(true) {
+                    ("已就绪", palette.status_success)
+                } else {
+                    ("尚未配置凭据", palette.status_warning)
+                };
 
-            let row_id = SharedString::from(format!("provider-row-{pid}"));
-            let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
-            let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
-            let manage_label = SharedString::from(format!("管理 {}", prov.name));
+                let row_id = SharedString::from(if interactive {
+                    format!("provider-row-{pid}")
+                } else {
+                    format!("provider-row-{pid}-exit")
+                });
+                let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
+                let manage_id = SharedString::from(if interactive {
+                    format!("provider-manage-btn-{pid_btn}")
+                } else {
+                    format!("provider-manage-btn-{pid_btn}-exit")
+                });
+                let manage_label = SharedString::from(format!("管理 {}", prov.name));
 
-            merged_card = merged_card.child(
-                div()
+                let row = div()
                     .id(row_id.clone())
-                    .test_support()
-                    .a11y_listitem(row_id, row_label, false)
                     .w_full()
                     .h(px(72.0))
                     .px(space::LG)
@@ -1361,10 +1340,6 @@ impl Render for ProvidersTabView {
                     .items_center()
                     .justify_between()
                     .gap(space::LG)
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, w, cx| {
-                        this.select_provider(pid.clone(), w, cx);
-                    }))
                     .child(
                         div()
                             .flex()
@@ -1381,36 +1356,124 @@ impl Render for ProvidersTabView {
                                     .text_color(status_color)
                                     .child(cjk_inline_label(status_label)),
                             ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id(manage_id.clone())
-                            .test_support()
-                            .a11y_button(manage_id, manage_label)
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, w, cx| {
-                                this.select_provider(pid_btn.clone(), w, cx);
-                                cx.stop_propagation();
-                            }))
-                            .child(cjk_inline_label("管理")),
-                    ),
+                    );
+                let manage_btn = apply_scale(div(), scale::UI_MEDIUM)
+                    .id(manage_id.clone())
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .child(cjk_inline_label("管理"));
+                let manage_btn_any = if interactive {
+                    manage_btn
+                        .test_support()
+                        .a11y_button(manage_id, manage_label)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            this.select_provider(pid_btn.clone(), w, cx);
+                            cx.stop_propagation();
+                        }))
+                        .into_any_element()
+                } else {
+                    manage_btn.into_any_element()
+                };
+                let row = row.child(manage_btn_any);
+                if interactive {
+                    row.test_support()
+                        .a11y_listitem(row_id, row_label, false)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            this.select_provider(pid.clone(), w, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    row.into_any_element()
+                }
+            };
+
+        for prov in ordered_others.iter().take(head_limit) {
+            merged_card = merged_card.child(render_provider_row(prov, true, cx));
+        }
+
+        if can_collapse_providers {
+            let overflow_providers: Vec<cst_client::ProviderStatusDto> = ordered_others
+                .iter()
+                .skip(head_limit)
+                .map(|p| (*p).clone())
+                .collect();
+            if let Some(collapsed_section) = motion::animated_collapse_with_exit(
+                "providers-expand-list",
+                self.providers_expanded,
+                window,
+                cx,
+                |interactive, _, cx| {
+                    let mut list = div().w_full().flex().flex_col();
+                    for prov in &overflow_providers {
+                        list = list.child(render_provider_row(prov, interactive, cx));
+                    }
+                    list.into_any_element()
+                },
+            ) {
+                merged_card = merged_card.child(collapsed_section);
+            }
+
+            let expanded = self.providers_expanded;
+            let toggle_label = if expanded {
+                SharedString::from("收起列表")
+            } else {
+                SharedString::from(format!("查看全部提供商（{total_providers_count}）"))
+            };
+            merged_card = merged_card.child(
+                apply_scale(div(), scale::UI)
+                    .id("providers-toggle-expand-btn")
+                    .test_support()
+                    .a11y_button("providers-toggle-expand-btn", toggle_label.clone())
+                    .w_full()
+                    .h(height::HEADER)
+                    .px(space::LG)
+                    .border_t_1()
+                    .border_color(palette.border_subtle)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.providers_expanded = !this.providers_expanded;
+                        cx.notify();
+                    }))
+                    .child(cjk_inline_label(toggle_label))
+                    .child(motion::animated_chevron(
+                        "providers-expand-chevron",
+                        expanded,
+                        true,
+                        px(14.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    )),
             );
         }
+
+        let configured_count = usize::from(cstoa_signed_in)
+            + providers
+                .iter()
+                .filter(|p| p.id != "cstoa" && p.configured == Some(true))
+                .count();
 
         div()
             .id("settings-providers-tab")
             .test_support()
-            .a11y_region("settings-providers-tab", "模型服务设置")
+            .a11y_region("settings-providers-tab", "提供商设置")
             .w_full()
+            .relative()
+            .left(slide_dx)
+            .opacity(slide_opacity)
             .flex()
             .flex_col()
             .gap(space::GROUP)
@@ -1423,13 +1486,13 @@ impl Render for ProvidersTabView {
                     .child(
                         apply_scale(div(), scale::TITLE)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label("模型服务")),
+                            .child(cjk_inline_label("提供商")),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-new-custom-btn")
                             .test_support()
-                            .a11y_button("providers-new-custom-btn", "添加服务")
+                            .a11y_button("providers-new-custom-btn", "添加提供商")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -1449,11 +1512,100 @@ impl Render for ProvidersTabView {
                                     .size(px(14.0))
                                     .text_color(palette.text_secondary),
                             )
-                            .child(cjk_inline_label("添加服务")),
+                            .child(cjk_inline_label("添加提供商")),
                     ),
             )
-            .child(merged_card)
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                apply_scale(div(), scale::BODY_SEMIBOLD)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("提供商列表")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label(format!(
+                                        "{configured_count} 个已配置"
+                                    ))),
+                            ),
+                    )
+                    .child(merged_card),
+            )
     }
+}
+
+fn render_remove_credentials_card<F>(palette: &DesktopPalette, on_remove: F) -> impl IntoElement
+where
+    F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+{
+    div()
+        .id("providers-remove-credentials-card-gawme")
+        .test_support()
+        .w_full()
+        .min_h(px(72.0))
+        .px(space::LG)
+        .py(space::MD)
+        .rounded(radius::ROW)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .bg(palette.bg_special)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(space::LG)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::MICRO)
+                .min_w_0()
+                .child(
+                    apply_scale(div(), scale::BODY_MEDIUM)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("移除此服务凭据")),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_secondary)
+                        .child("移除后本机保存的 API Key 将立即清除，关联模型从选择器中隐藏。"),
+                ),
+        )
+        .child(
+            apply_scale(div(), scale::UI)
+                .id("providers-remove-cred-btn")
+                .test_support()
+                .a11y_button("providers-remove-cred-btn", "移除凭据")
+                .h(height::CONTROL)
+                .px(space::MD)
+                .rounded(radius::CONTROL)
+                .border_1()
+                .border_color(palette.border_strong)
+                .bg(palette.bg_workspace)
+                .text_color(palette.status_danger)
+                .flex()
+                .items_center()
+                .gap(space::SM)
+                .flex_shrink_0()
+                .hover(|s| s.bg(palette.status_danger_subtle))
+                .on_click(on_remove)
+                .child(
+                    Icon::new(IconName::Trash)
+                        .size(px(16.0))
+                        .text_color(palette.status_danger),
+                )
+                .child(cjk_inline_label("移除凭据")),
+        )
 }
 
 fn capability_checkbox<F>(

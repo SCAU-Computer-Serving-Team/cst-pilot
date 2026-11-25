@@ -68,8 +68,9 @@ impl ServerConfig {
 pub struct ServerState {
     pub host: KitHost,
     kit_root: PathBuf,
-    agent_dir: PathBuf,
-    static_dir: PathBuf,
+    config_dir: PathBuf,
+    fonts_dir: PathBuf,
+    static_dir: Option<PathBuf>,
     artifacts_root: PathBuf,
     kit_version: String,
     process_created: u64,
@@ -94,12 +95,23 @@ pub struct ServerState {
 impl ServerState {
     pub fn new(host: KitHost, config: &ServerConfig) -> Arc<Self> {
         let kit_root = strip_windows_verbatim_prefix(host.kit().root());
-        let agent_dir = strip_windows_verbatim_prefix(&host.kit().agent_dir());
+        let config_dir = strip_windows_verbatim_prefix(&host.kit().config_dir());
+        let fonts_dir = strip_windows_verbatim_prefix(&host.kit().fonts_dir());
         let cwd = config.cwd.clone().unwrap_or_else(|| kit_root.clone());
-        let static_dir = config
-            .static_dir
-            .clone()
-            .unwrap_or_else(|| agent_dir.join("extensions/web/static"));
+        let static_dir = if let Some(explicit) = config.static_dir.clone() {
+            Some(explicit)
+        } else if crate::routes::static_files::has_embedded_web_index() {
+            None
+        } else if host.kit().layout().is_dev_workspace() {
+            let vite_out = kit_root.join("src/web/frontend/build/client");
+            if vite_out.join("index.html").is_file() {
+                Some(vite_out)
+            } else {
+                Some(kit_root.join("agent/home/extensions/web/static"))
+            }
+        } else {
+            None
+        };
         let artifacts_root = config
             .artifacts_root
             .clone()
@@ -118,8 +130,8 @@ impl ServerState {
         let mode = ModeController::new(config.mode_config.clone());
         let locks = KeyedLocks::new();
         let pool = SessionPool::with_max_idle(host.clone(), cwd, config.max_idle_sessions);
-        let web_settings = WebSettingsStore::new(&agent_dir);
-        let desktop_settings = DesktopSettingsStore::new(&agent_dir);
+        let web_settings = WebSettingsStore::new(&config_dir);
+        let desktop_settings = DesktopSettingsStore::new(&config_dir);
         let ui_hints = UiHintsStore::new(&kit_root);
 
         let global_for_updates = pool.global_events.clone();
@@ -177,7 +189,7 @@ impl ServerState {
             }
         });
 
-        let metadata_dir = agent_dir.join("session-exports");
+        let metadata_dir = strip_windows_verbatim_prefix(&host.kit().exports_dir());
         let initial_origin = format!("http://127.0.0.1:{initial_port}");
         let export_renderer = config.export_renderer.clone().unwrap_or_else(|| {
             create_chromiumoxide_renderer(
@@ -192,7 +204,8 @@ impl ServerState {
         Arc::new(Self {
             host,
             kit_root,
-            agent_dir,
+            config_dir,
+            fonts_dir,
             static_dir,
             artifacts_root,
             kit_version,
@@ -226,12 +239,23 @@ impl ServerState {
         &self.kit_root
     }
 
-    pub fn agent_dir(&self) -> &Path {
-        &self.agent_dir
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
     }
 
-    pub fn static_dir(&self) -> &Path {
-        &self.static_dir
+    pub fn fonts_dir(&self) -> &Path {
+        &self.fonts_dir
+    }
+
+    pub fn static_dir(&self) -> Option<&Path> {
+        self.static_dir.as_deref()
+    }
+
+    pub fn has_web_static(&self) -> bool {
+        match &self.static_dir {
+            Some(dir) => dir.join("index.html").is_file(),
+            None => crate::routes::static_files::has_embedded_web_index(),
+        }
     }
 
     pub fn artifacts_root(&self) -> &Path {

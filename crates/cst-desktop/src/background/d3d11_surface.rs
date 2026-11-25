@@ -1,6 +1,4 @@
 #[cfg(windows)]
-use std::collections::VecDeque;
-#[cfg(windows)]
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -11,7 +9,7 @@ use gpui::{WindowsSurfaceDrawContext, WindowsSurfaceRenderer};
 
 use crate::background::presets::{
     BlueHourUniforms, FrostedGlassSpec, FrostedGlassUniforms, SkyPreset, SkyUniforms,
-    decode_palette_256x1, generate_rounded_rect_sdf_rgba16f,
+    decode_palette_256x1,
 };
 #[cfg(windows)]
 use crate::shaders::{
@@ -38,8 +36,8 @@ pub struct SurfaceRuntimeDiagnostics {
 
 pub fn surface_diagnostics() -> SurfaceRuntimeDiagnostics {
     SurfaceRuntimeDiagnostics {
-        supports_sm50: SUPPORTS_SM50.load(Ordering::Relaxed),
-        is_software_adapter: IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed),
+        supports_sm50: d3d_sm50_supported(),
+        is_software_adapter: d3d_is_software_adapter(),
         sky_draw_count: SKY_DRAW_COUNT.load(Ordering::Relaxed),
         frosted_draw_count: FROSTED_DRAW_COUNT.load(Ordering::Relaxed),
         device_build_count: DEVICE_BUILD_COUNT.load(Ordering::Relaxed),
@@ -47,10 +45,18 @@ pub fn surface_diagnostics() -> SurfaceRuntimeDiagnostics {
 }
 
 pub fn d3d_sm50_supported() -> bool {
+    #[cfg(feature = "test-support")]
+    if crate::ux_probe::forced_warp_enabled() {
+        return false;
+    }
     SUPPORTS_SM50.load(Ordering::Relaxed)
 }
 
 pub fn d3d_is_software_adapter() -> bool {
+    #[cfg(feature = "test-support")]
+    if crate::ux_probe::forced_warp_enabled() {
+        return true;
+    }
     IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed)
 }
 
@@ -84,18 +90,9 @@ mod imp {
         ID3D11VertexShader,
     };
     use windows::Win32::Graphics::Dxgi::Common::{
-        DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
+        DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
     };
     use windows::core::Interface;
-
-    const MAX_CACHED_SDFS: usize = 16;
-
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    struct SdfCacheKey {
-        width: u32,
-        height: u32,
-        radius_tenths: u32,
-    }
 
     pub(super) struct DevicePipelines {
         device_ptr: usize,
@@ -117,7 +114,6 @@ mod imp {
             ID3D11Texture2D,
             ID3D11ShaderResourceView,
         )>,
-        sdf_cache: VecDeque<(SdfCacheKey, ID3D11ShaderResourceView)>,
     }
 
     // SAFETY: D3D11 resource handles in `DevicePipelines` are only mutated under `PIPELINE_CACHE` Mutex
@@ -230,7 +226,6 @@ mod imp {
                     palette_light_srv,
                     palette_dark_srv,
                     backdrop_tex: None,
-                    sdf_cache: VecDeque::with_capacity(MAX_CACHED_SDFS),
                 })
             }
         }
@@ -242,12 +237,14 @@ mod imp {
             min_h: u32,
             format: DXGI_FORMAT,
         ) -> Result<(u32, u32, ID3D11Texture2D, ID3D11ShaderResourceView)> {
-            if let Some((aw, ah, afmt, ref tex, ref srv)) = self.backdrop_tex
-                && aw >= min_w
-                && ah >= min_h
-                && afmt == format
-            {
-                return Ok((aw, ah, tex.clone(), srv.clone()));
+            let need_area = u64::from(min_w.max(64)) * u64::from(min_h.max(64));
+            if let Some((aw, ah, afmt, ref tex, ref srv)) = self.backdrop_tex {
+                let alloc_area = u64::from(aw) * u64::from(ah);
+                let oversized =
+                    alloc_area > 1024 * 1024 && alloc_area > need_area.saturating_mul(4);
+                if aw >= min_w && ah >= min_h && afmt == format && !oversized {
+                    return Ok((aw, ah, tex.clone(), srv.clone()));
+                }
             }
             let alloc_w = min_w.max(64).div_ceil(256) * 256;
             let alloc_h = min_h.max(64).div_ceil(256) * 256;
@@ -279,65 +276,6 @@ mod imp {
                 let srv = srv.unwrap();
                 self.backdrop_tex = Some((alloc_w, alloc_h, format, tex.clone(), srv.clone()));
                 Ok((alloc_w, alloc_h, tex, srv))
-            }
-        }
-
-        fn ensure_sdf_srv(
-            &mut self,
-            device: &ID3D11Device,
-            width: u32,
-            height: u32,
-            radius_px: f32,
-        ) -> Result<ID3D11ShaderResourceView> {
-            let key = SdfCacheKey {
-                width: width.max(1),
-                height: height.max(1),
-                radius_tenths: (radius_px.max(0.0) * 10.0).round() as u32,
-            };
-            if let Some(pos) = self.sdf_cache.iter().position(|(k, _)| *k == key) {
-                let entry = self.sdf_cache.remove(pos).unwrap();
-                let srv = entry.1.clone();
-                self.sdf_cache.push_back(entry);
-                return Ok(srv);
-            }
-
-            let texels = generate_rounded_rect_sdf_rgba16f(key.width, key.height, radius_px);
-            let desc = D3D11_TEXTURE2D_DESC {
-                Width: key.width,
-                Height: key.height,
-                MipLevels: 1,
-                ArraySize: 1,
-                Format: DXGI_FORMAT_R16G16B16A16_FLOAT,
-                SampleDesc: DXGI_SAMPLE_DESC {
-                    Count: 1,
-                    Quality: 0,
-                },
-                Usage: D3D11_USAGE_IMMUTABLE,
-                BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-                CPUAccessFlags: 0,
-                MiscFlags: 0,
-            };
-            let init = D3D11_SUBRESOURCE_DATA {
-                pSysMem: texels.as_ptr().cast(),
-                SysMemPitch: key.width * 8,
-                SysMemSlicePitch: 0,
-            };
-            unsafe {
-                let mut tex = None;
-                device
-                    .CreateTexture2D(&desc, Some(&init), Some(&mut tex))
-                    .context("CreateTexture2D(sdf_rgba16f)")?;
-                let tex = tex.unwrap();
-                let mut srv = None;
-                device
-                    .CreateShaderResourceView(&tex, None, Some(&mut srv))
-                    .context("CreateShaderResourceView(sdf_rgba16f)")?;
-                let srv = srv.unwrap();
-                if self.sdf_cache.len() >= MAX_CACHED_SDFS {
-                    self.sdf_cache.pop_front();
-                }
-                self.sdf_cache.push_back((key, srv.clone()));
-                Ok(srv)
             }
         }
     }
@@ -629,10 +567,7 @@ mod imp {
             );
         }
 
-        let surf_w = (ctx.bounds.size.width.0.round() as u32).max(1);
-        let surf_h = (ctx.bounds.size.height.0.round() as u32).max(1);
         let scaled_radius = spec.corner_radius_px * scale_factor.max(1.0);
-        let sdf_srv = pipes.ensure_sdf_srv(device, surf_w, surf_h, scaled_radius)?;
 
         let u = FrostedGlassUniforms {
             slot0: [
@@ -663,7 +598,7 @@ mod imp {
                 spec.specular,
                 ctx.bounds.origin.x.0 - cap_left as f32,
                 ctx.bounds.origin.y.0 - cap_top as f32,
-                0.0,
+                scaled_radius,
             ],
             slot5: [cap_w as f32, cap_h as f32, alloc_w as f32, alloc_h as f32],
         };
@@ -675,11 +610,8 @@ mod imp {
             );
             write_cbuffer_bytes(d3d_ctx, &pipes.cbuffer_96, raw)?;
 
-            let srvs = [Some(sdf_srv), Some(backdrop_srv)];
-            let smps = [
-                Some(pipes.sampler_linear_clamp.clone()),
-                Some(pipes.sampler_linear_clamp.clone()),
-            ];
+            let srvs = [Some(backdrop_srv)];
+            let smps = [Some(pipes.sampler_linear_clamp.clone())];
             let cb = Some(pipes.cbuffer_96.clone());
 
             d3d_ctx.IASetInputLayout(None);

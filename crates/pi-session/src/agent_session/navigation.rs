@@ -54,16 +54,15 @@ impl AgentSession {
         cancel: CancellationToken,
     ) -> Result<NavigateTreeResult, String> {
         let old_leaf_id = self.with_session_manager(|sm| sm.get_leaf_id().map(ToOwned::to_owned));
-        if old_leaf_id.as_deref() == Some(target_id) {
-            return Ok(NavigateTreeResult {
-                cancelled: false,
-                ..NavigateTreeResult::default()
-            });
-        }
-
         let target_entry = self
             .with_session_manager(|sm| sm.get_entry(target_id).cloned())
             .ok_or_else(|| format!("Entry {target_id} not found"))?;
+        // Editing a user/custom message at the current leaf still rewinds to its parent.
+        let rewinds_to_parent = matches!(&target_entry, SessionEntry::Message(m) if m.message.role() == "user")
+            || matches!(&target_entry, SessionEntry::CustomMessage(_));
+        if old_leaf_id.as_deref() == Some(target_id) && !rewinds_to_parent {
+            return Ok(NavigateTreeResult::default());
+        }
 
         let collected = self.with_session_manager(|sm| {
             collect_entries_for_branch_summary(sm, old_leaf_id.as_deref(), Some(target_id))
@@ -635,55 +634,30 @@ impl AgentSession {
 
     /// 获取当前上下文用量（刚完成压缩且尚无压缩后新助手回复时，`tokens` 与 `percent` 返回 `None`）。
     pub fn get_context_usage(&self) -> Option<ContextUsage> {
-        if !self.has_configured_model() {
-            return None;
-        }
-        let model = self.limits_model();
-        let context_window = model.context_window;
-        if context_window == 0 {
-            return None;
-        }
+        self.with_context_branch(|_, _, usage| usage)
+    }
 
-        let (projection, branch) =
-            self.with_session_manager(|sm| (sm.build_session_projection(), sm.get_branch(None)));
-
-        if let Some(latest_comp) = get_latest_compaction_entry(&branch) {
-            let projected_asst_ids: BTreeSet<String> = projection
-                .entries
-                .iter()
-                .filter(|e| {
-                    e.messages.iter().any(|m| {
-                        matches!(
-                            m,
-                            AgentMessage::Assistant(a)
-                                if !matches!(a.stop_reason, StopReason::Aborted | StopReason::Error)
-                                    && calculate_context_tokens(&a.usage) > 0
-                        )
-                    })
-                })
-                .map(|e| e.source_entry.id().to_owned())
-                .collect();
-
-            let comp_idx = branch.iter().position(|e| e.id() == latest_comp.id)?;
-            let has_post_compaction_usage = branch[comp_idx + 1..]
-                .iter()
-                .any(|e| projected_asst_ids.contains(e.id()));
-            if !has_post_compaction_usage {
-                return Some(ContextUsage {
-                    tokens: None,
-                    context_window,
-                    percent: None,
-                });
-            }
-        }
-
-        let estimate = estimate_projected_context_tokens(&projection, &branch);
-        let percent = (estimate.tokens as f64 / context_window as f64) * 100.0;
-        Some(ContextUsage {
-            tokens: Some(estimate.tokens),
-            context_window,
-            percent: Some(percent),
-        })
+    /// Read the leaf, branch and capacity estimate from one session-manager snapshot.
+    pub fn with_context_branch<R>(
+        &self,
+        read: impl FnOnce(Option<&str>, Vec<SessionEntry>, Option<ContextUsage>) -> R,
+    ) -> R {
+        let context_window = if self.has_configured_model() {
+            self.limits_model().context_window
+        } else {
+            0
+        };
+        let (leaf, branch, projection) = self.with_session_manager(|sm| {
+            (
+                sm.get_leaf_id().map(str::to_owned),
+                sm.get_branch(None),
+                (context_window > 0).then(|| sm.build_session_projection()),
+            )
+        });
+        let context_usage = projection.as_ref().and_then(|projection| {
+            crate::compaction::context_usage_for_branch(projection, &branch, context_window)
+        });
+        read(leaf.as_deref(), branch, context_usage)
     }
 
     pub fn get_session_stats(&self) -> SessionStats {

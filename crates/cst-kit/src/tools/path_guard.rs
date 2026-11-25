@@ -2,37 +2,49 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+use cst_os::KitLayout;
 use pi_runtime::ReadOperations;
 
-const SECRET_FILES: &[&str] = &[
-    "agent/home/auth.json",
-    "agent/home/models.json",
-    "agent/home/mcp-auth.json",
-    "agent/home/web-search.json",
-    "agent/home/telemetry/identity.json",
-];
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Clone)]
 pub struct PathGuard {
-    root: PathBuf,
+    layout: KitLayout,
 }
 
 impl PathGuard {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, String> {
-        let root = root
-            .as_ref()
-            .canonicalize()
-            .map_err(|_| "工具包目录无法读取。")?;
-        Ok(Self { root })
+        let layout = KitLayout::new(root)?;
+        Ok(Self { layout })
+    }
+
+    pub fn from_layout(layout: KitLayout) -> Self {
+        Self { layout }
+    }
+
+    fn secret_paths(&self) -> [PathBuf; 5] {
+        let cfg = self.layout.config_dir();
+        [
+            cfg.join("auth.json"),
+            cfg.join("models.json"),
+            cfg.join("mcp-auth.json"),
+            cfg.join("web-search.json"),
+            self.layout.telemetry_data_dir().join("identity.json"),
+        ]
     }
 
     /// Resolve aliases before comparing; re-evaluate protected aliases on every access.
     pub fn check(&self, path: impl AsRef<Path>) -> Result<PathBuf, String> {
+        #[cfg(test)]
+        CHECKS.update(|count| count + 1);
         let path = path.as_ref();
         reject_alternate_stream(path)?;
         let resolved = path.canonicalize().map_err(|_| "目标路径无法读取。")?;
         let key = path_key(&resolved);
-        let state = self.root.join(".state");
+        let state = self.layout.state_dir();
         for candidate in [Some(state.clone()), state.canonicalize().ok()]
             .into_iter()
             .flatten()
@@ -49,8 +61,7 @@ impl PathGuard {
         {
             return Err(denied());
         }
-        for relative in SECRET_FILES {
-            let secret = self.root.join(relative);
+        for secret in self.secret_paths() {
             if key == path_key(&secret)
                 || secret.canonicalize().is_ok_and(|p| path_key(&p) == key)
                 || same_file::is_same_file(&resolved, &secret).unwrap_or(false)
@@ -71,7 +82,7 @@ impl PathGuard {
         if crate::runbook::storage::link_count(file)? <= 1 {
             return Ok(());
         }
-        let state = self.root.join(".state");
+        let state = self.layout.state_dir();
         let state = match state.canonicalize() {
             Ok(state) => state,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -119,8 +130,8 @@ impl PathGuard {
         if handle != same_file::Handle::from_path(current).map_err(|_| denied())? {
             return Err(denied());
         }
-        for relative in SECRET_FILES {
-            if let Ok(secret) = same_file::Handle::from_path(self.root.join(relative))
+        for secret in self.secret_paths() {
+            if let Ok(secret) = same_file::Handle::from_path(&secret)
                 && handle == secret
             {
                 return Err(denied());

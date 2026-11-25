@@ -109,6 +109,12 @@ jobs:
         run: node src/web/frontend/scripts/prepare-fonts.mjs
       - name: 桌面端 Clippy 检查
         run: cargo clippy -p cst-desktop --all-targets --locked -- -D warnings
+      - name: Windows 存储诊断 Clippy 检查
+        run: cargo clippy -p cst-kit --tests --locked -- -D warnings
+      - name: Windows 存储诊断回归测试
+        run: |
+          cargo test -p cst-kit --locked --lib diagnostics::walk
+          cargo test -p cst-kit --locked --test storage_scan
       - name: 桌面端隔离回归测试
         run: cargo test -p cst-desktop --locked
       - name: 桌面端故障注入 Clippy 检查

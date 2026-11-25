@@ -9,6 +9,7 @@ use cst_kit::telemetry::TelemetryOptions;
 use cst_kit::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
 use cst_kit::update::service::UpdateOptions;
 use cst_kit::{Kit, KitHost, SKILL_NAMES};
+use cst_server::discovery::{ServerInstanceLock, discovery_file_path, read_discovery_file};
 use cst_server::{RunningServer, ServerConfig};
 use pi_agent::BoxFuture;
 use serde_json::{Value, json};
@@ -60,7 +61,7 @@ impl TestKitDir {
         fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
         for name in SKILL_NAMES {
-            let p = root.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = root.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,
@@ -68,8 +69,10 @@ impl TestKitDir {
             )
             .unwrap();
         }
+        fs::create_dir_all(root.join("app/prompts")).unwrap();
+        fs::create_dir_all(root.join("data/config")).unwrap();
         fs::write(
-            root.join("agent/home/APPEND_SYSTEM.md"),
+            root.join("app/prompts/APPEND_SYSTEM.md"),
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
@@ -88,7 +91,7 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
     let fixture = TestKitDir::new();
     // Write a CSTOA API key so catalog refresh will hit our mock OA transport
     fs::write(
-        fixture.0.join("agent/home/auth.json"),
+        fixture.0.join("data/config/auth.json"),
         serde_json::to_vec(&json!({
             "cstoa": {
                 "type": "api_key",
@@ -148,6 +151,135 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
 }
 
 #[tokio::test]
+async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
+    let fixture = TestKitDir::new();
+    fs::write(
+        fixture.0.join("data/config/auth.json"),
+        json!({ "deepseek": { "type": "api_key", "key": "test-offline-key" } }).to_string(),
+    )
+    .unwrap();
+    let kit = Kit::new(&fixture.0).unwrap();
+    let oa = OaClient::new("https://oa.example").unwrap();
+    let auth = AuthRuntime::create(&fixture.0, Channel::Gui, oa)
+        .await
+        .unwrap();
+    let host = KitHost::new(
+        kit,
+        auth,
+        TelemetryOptions::default(),
+        UpdateOptions::Disabled,
+    )
+    .await
+    .unwrap();
+    let settings_path = host.kit().config_dir().join("settings.json");
+    let wildcard = "DeepSeek/*:high";
+    let unrelated = "anthropic/claude-fable-5";
+    let unmatched = "missing-provider/*";
+    fs::write(
+        &settings_path,
+        json!({ "enabledModels": [wildcard, unrelated, unmatched] }).to_string(),
+    )
+    .unwrap();
+
+    let mut cfg = ServerConfig::new(&fixture.0);
+    cfg.port = Some(0);
+    cfg.acquire_instance_lock = false;
+    let server = RunningServer::start(host, cfg).await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let snapshot: Value = client
+        .get(format!("{}/api/models", server.base_url()))
+        .header("X-CST-Client", "app")
+        .bearer_auth(server.app_token())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rules = snapshot["scopeRules"].as_array().unwrap();
+    assert_eq!(rules.len(), 3, "{rules:?}");
+    assert_eq!(rules[0]["pattern"], wildcard);
+    assert!(rules[0]["matches"].as_array().unwrap().iter().any(|m| {
+        m["id"] == "deepseek/deepseek-flash" && m["pattern"] == "deepseek/deepseek-flash:high"
+    }));
+    assert_eq!(rules[1]["matches"][0]["id"], unrelated);
+    assert_eq!(rules[2], json!({ "pattern": unmatched, "matches": [] }));
+    let saved: Vec<_> = rules
+        .iter()
+        .filter_map(|rule| {
+            rule["pattern"]
+                .as_str()
+                .filter(|pattern| *pattern != unrelated)
+        })
+        .collect();
+
+    client
+        .post(format!("{}/api/models/scoped", server.base_url()))
+        .header("X-CST-Client", "app")
+        .header("Idempotency-Key", "remove-unrelated-model")
+        .bearer_auth(server.app_token())
+        .json(&json!({ "patterns": saved }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    assert_eq!(settings["enabledModels"], json!([wildcard, unmatched]));
+
+    let ready = host_available_ids(&snapshot);
+    assert!(!ready.is_empty());
+    for (key, preserve_explicit, expected) in [
+        ("legacy-default-order", false, Value::Null),
+        ("explicit-default-order", true, json!(ready)),
+    ] {
+        let result: Value = client
+            .post(format!("{}/api/models/scoped", server.base_url()))
+            .header("X-CST-Client", "app")
+            .header("Idempotency-Key", key)
+            .bearer_auth(server.app_token())
+            .json(&json!({ "patterns": ready, "preserveExplicit": preserve_explicit }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(result["enabled"], expected);
+        let settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+        assert_eq!(settings["enabledModels"], expected);
+    }
+    server.shutdown().await;
+}
+
+fn host_available_ids(snapshot: &Value) -> Vec<String> {
+    let full_id = |model: &Value| {
+        format!(
+            "{}/{}",
+            model["provider"].as_str().unwrap(),
+            model["id"].as_str().unwrap()
+        )
+    };
+    let ready: std::collections::HashSet<_> = snapshot["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(full_id)
+        .collect();
+    snapshot["catalog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(full_id)
+        .filter(|id| ready.contains(id))
+        .collect()
+}
+
+#[tokio::test]
 async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     let fixture = TestKitDir::new();
     let kit = Kit::new(&fixture.0).unwrap();
@@ -165,8 +297,9 @@ async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     .unwrap();
 
     // Pre-set TUI theme in shared `settings.json` to "solarized-tui"
+    fs::create_dir_all(host.kit().config_dir()).unwrap();
     fs::write(
-        host.kit().agent_dir().join("settings.json"),
+        host.kit().config_dir().join("settings.json"),
         serde_json::to_vec_pretty(&json!({ "theme": "solarized-tui" })).unwrap(),
     )
     .unwrap();
@@ -220,18 +353,18 @@ async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     assert_eq!(app_json["theme"], "system");
     assert_eq!(app_json["defaultView"], "tui");
     assert_eq!(app_json["windowWidth"], 1440);
-    assert!(host.kit().agent_dir().join("desktop.json").exists());
+    assert!(host.kit().config_dir().join("desktop.json").exists());
     assert!(
         !host
             .kit()
-            .agent_dir()
+            .config_dir()
             .join("desktop-settings.json")
             .exists()
     );
 
     // 3. Verify all three themes remain strictly isolated on disk
     let tui_settings_json: Value =
-        serde_json::from_slice(&fs::read(host.kit().agent_dir().join("settings.json")).unwrap())
+        serde_json::from_slice(&fs::read(host.kit().config_dir().join("settings.json")).unwrap())
             .unwrap();
     assert_eq!(tui_settings_json["theme"], "solarized-tui");
 
@@ -365,7 +498,7 @@ async fn desktop_json_forward_compatibility_corruption_protection_and_health_enr
     let client = reqwest::Client::new();
 
     // 1. Missing `desktop.json`: `GET /api/app/settings` returns defaults without creating file on disk
-    let desktop_path = host.kit().agent_dir().join("desktop.json");
+    let desktop_path = host.kit().config_dir().join("desktop.json");
     assert!(!desktop_path.exists());
     let initial_get: Value = client
         .get(format!("{}/api/app/settings", server.base_url()))
@@ -771,32 +904,41 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::from([
         ("VERSION".into(), b"cst-pilot v0.9.0\n".to_vec()),
         (
-            "BUILD-INFO.json".into(),
+            "app/BUILD-INFO.json".into(),
             br#"{"version":"v0.9.0"}"#.to_vec(),
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-        ("licenses/mock.txt".into(), b"mock notice".to_vec()),
+        ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
         ("cst-pilot.exe".into(), b"new-pilot-bin".to_vec()),
-        ("cst-server.exe".into(), b"new-server-bin".to_vec()),
-        ("cst-updater.exe".into(), b"new-updater-bin".to_vec()),
+        ("app/cst-server.exe".into(), b"new-server-bin".to_vec()),
+        ("app/cst-updater.exe".into(), b"new-updater-bin".to_vec()),
         (
-            "agent/home/APPEND_SYSTEM.md".into(),
+            "app/prompts/APPEND_SYSTEM.md".into(),
             b"CST Pilot Rules".to_vec(),
         ),
         (
-            "agent/home/extensions/telemetry/timserver_1.crt".into(),
+            "app/telemetry/timserver_1.crt".into(),
             b"synthetic public certificate".to_vec(),
         ),
+        ("app/telemetry/currency.json".into(), b"{}".to_vec()),
+        ("app/defaults/settings.json".into(), b"{}".to_vec()),
+        ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+        ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+        ("app/defaults/web-search.json".into(), b"{}".to_vec()),
     ]);
     for name in SKILL_NAMES {
         files.insert(
-            format!("agent/home/skills/{name}/SKILL.md"),
+            format!("app/skills/{name}/SKILL.md"),
             format!("---\nname: {name}\ndescription: {name}\n---\nGuide").into_bytes(),
         );
     }
     for rel in REQUIRED_FONT_FILES {
-        files.insert((*rel).to_owned(), fs::read(repo_root.join(rel)).unwrap());
+        let font_name = rel.strip_prefix("app/fonts/").unwrap();
+        files.insert(
+            (*rel).to_owned(),
+            fs::read(repo_root.join("assets/fonts").join(font_name)).unwrap(),
+        );
     }
     let signing = SigningKey::from_bytes(&[9u8; 32]);
     let release_key = ReleaseKey::from_bytes(&signing.verifying_key().to_bytes()).unwrap();
@@ -815,7 +957,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 .unwrap();
             zip.write_all(content).unwrap();
         }
-        zip.start_file("cst-pilot/SHA256SUMS", SimpleFileOptions::default())
+        zip.start_file("cst-pilot/app/SHA256SUMS", SimpleFileOptions::default())
             .unwrap();
         zip.write_all(sums.as_bytes()).unwrap();
         zip.finish().unwrap();
@@ -1020,7 +1162,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .arg("--standalone-web")
         .arg("--port")
         .arg("0")
-        .env("PI_CODING_AGENT_DIR", dummy_agent_kit.0.join("agent/home"))
+        .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1029,8 +1171,8 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .unwrap()
         .expect("child identity alive");
 
-    // Write an unloaded session's unresolved `web-inbox/<id>.json` on disk -> `409 session_busy_for_update`
-    let inbox_dir = host.kit().agent_dir().join("web-inbox");
+    // Write an unloaded session's unresolved `data/inbox/<id>.json` on disk -> `409 session_busy_for_update`
+    let inbox_dir = host.kit().inbox_dir();
     fs::create_dir_all(&inbox_dir).unwrap();
     let inbox_file = inbox_dir.join("unloaded-sess-1.json");
     fs::write(
@@ -1096,4 +1238,73 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let _ = child.wait();
     drop(sse_stream);
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn running_server_publishes_and_cleans_up_dynamically_bound_port() {
+    let fixture = TestKitDir::new();
+    let kit = Kit::new(&fixture.0).unwrap();
+    let oa = OaClient::with_transport(
+        "https://oa.example.test",
+        Arc::new(CountingOaTransport::default()),
+        Arc::new(cst_kit::auth::oa::SystemClock),
+    )
+    .unwrap();
+    let auth = AuthRuntime::create(kit.root(), Channel::Gui, oa)
+        .await
+        .unwrap();
+    let host = KitHost::new(
+        kit,
+        auth,
+        TelemetryOptions::default(),
+        UpdateOptions::Disabled,
+    )
+    .await
+    .unwrap();
+
+    let mut cfg = ServerConfig::new(&fixture.0);
+    // Exercise dynamic-port publication without relying on the host's default port or environment.
+    cfg.port = Some(0);
+    cfg.mode_config.standalone_web = true;
+    let server = RunningServer::start(host, cfg).await.unwrap();
+
+    assert!(server.port() > 0);
+    assert_eq!(server.state.port(), server.port());
+    let lock_conflict = ServerInstanceLock::acquire(&fixture.0)
+        .err()
+        .expect("running server should hold the instance lock");
+    assert!(lock_conflict.starts_with("server_already_running:"));
+
+    let discovery = read_discovery_file(&fixture.0)
+        .expect("discovery file should be written with the bound port");
+    assert_eq!(discovery.port, server.port());
+    assert_eq!(discovery.token, server.app_token());
+    let origin = format!("http://127.0.0.1:{}", discovery.port);
+    assert_eq!(origin, server.base_url());
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let health = async {
+        client
+            .get(format!("{origin}/api/health"))
+            .header("Origin", &origin)
+            .header("X-CST-Client", "app")
+            .bearer_auth(&discovery.token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await
+    }
+    .await;
+
+    server.shutdown().await;
+    let health = health.unwrap();
+    assert_eq!(health["pid"], discovery.pid);
+    assert_eq!(health["connected"], true);
+    assert!(!discovery_file_path(&fixture.0).try_exists().unwrap());
+    ServerInstanceLock::acquire(&fixture.0).expect("shutdown should release the instance lock");
 }

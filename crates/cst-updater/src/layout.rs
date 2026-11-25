@@ -6,6 +6,11 @@ use serde_json::Value;
 
 use crate::manifest::version;
 
+pub const SHA256SUMS_PATH: &str = "app/SHA256SUMS";
+pub const BUILD_INFO_PATH: &str = "app/BUILD-INFO.json";
+pub const SERVER_EXE_PATH: &str = "app/cst-server.exe";
+pub const UPDATER_EXE_PATH: &str = "app/cst-updater.exe";
+
 pub const REQUIRED_SKILL_NAMES: &[&str] = &[
     "disk",
     "ls",
@@ -18,11 +23,38 @@ pub const REQUIRED_SKILL_NAMES: &[&str] = &[
 ];
 
 pub const REQUIRED_FONT_FILES: &[&str] = &[
-    "assets/fonts/SourceHanSansCN-VF.otf",
-    "assets/fonts/LICENSE.txt",
-    "assets/fonts/JetBrainsMono-Regular.ttf",
-    "assets/fonts/JetBrainsMono-Medium.ttf",
-    "assets/fonts/JetBrainsMono-OFL.txt",
+    "app/fonts/SourceHanSansCN-VF.otf",
+    "app/fonts/LICENSE.txt",
+    "app/fonts/JetBrainsMono-Regular.ttf",
+    "app/fonts/JetBrainsMono-Medium.ttf",
+    "app/fonts/JetBrainsMono-OFL.txt",
+];
+
+pub const DEFAULT_CONFIG_FILES: &[&str] = &[
+    "app/defaults/models-store.json",
+    "app/defaults/telemetry.json",
+    "app/defaults/web-search.json",
+    "app/defaults/settings.json",
+];
+
+pub const MERGE_FILES: &[&str] = &[
+    "data/config/models-store.json",
+    "data/config/telemetry.json",
+    "data/config/web-search.json",
+    "data/config/settings.json",
+];
+
+pub const DEFAULT_MERGE_TARGETS: &[(&str, &str)] = &[
+    (
+        "app/defaults/models-store.json",
+        "data/config/models-store.json",
+    ),
+    ("app/defaults/telemetry.json", "data/config/telemetry.json"),
+    (
+        "app/defaults/web-search.json",
+        "data/config/web-search.json",
+    ),
+    ("app/defaults/settings.json", "data/config/settings.json"),
 ];
 
 pub fn validate_sfnt_font_bytes(bytes: &[u8], expected_magic: &[u8; 4]) -> Result<(), String> {
@@ -63,13 +95,6 @@ pub enum Area {
     Program,
     Merge,
 }
-
-pub const MERGE_FILES: &[&str] = &[
-    "agent/home/models-store.json",
-    "agent/home/telemetry.json",
-    "agent/home/web-search.json",
-    "agent/home/settings.json",
-];
 
 /// ZIP and SHA256SUMS use one portable, Windows-safe spelling for each path.
 pub fn safe_path(path: &str) -> Result<(), String> {
@@ -134,17 +159,19 @@ pub fn classify(path: &str) -> Result<Area, String> {
                 | "models.json"
                 | "mcp-auth.json"
                 | "device.json"
+                | "web.json"
                 | "web-settings.json"
                 | "desktop.json"
                 | "desktop-settings.json"
+                | "tui.json"
                 | "identity.json"
         ) || p.starts_with(".env.")
             || *p == "agents.md"
-    }) || (lower.ends_with(".otf") && path != "assets/fonts/SourceHanSansCN-VF.otf")
-        || lower.starts_with("wiztree/tmp/")
+    }) || (lower.ends_with(".otf") && path != "app/fonts/SourceHanSansCN-VF.otf")
+        || lower.starts_with("app/tools/wiztree/tmp/")
         || matches!(
             lower.as_str(),
-            "wiztree/wiztree3.ini" | "wiztree/wiztree3.ini.bad"
+            "app/tools/wiztree/wiztree3.ini" | "app/tools/wiztree/wiztree3.ini.bad"
         )
     {
         return Err("升级包包含运行状态或开发文件。".into());
@@ -152,46 +179,38 @@ pub fn classify(path: &str) -> Result<Area, String> {
     if MERGE_FILES.contains(&path) {
         return Ok(Area::Merge);
     }
-    let file = matches!(
+    let root_file = matches!(
         path,
         "cst-pilot.exe"
-            | "cst-server.exe"
-            | "cst-updater.exe"
-            | "pi.cmd"
-            | "pi-web.cmd"
-            | "launcher.ps1"
             | "VERSION"
-            | "BUILD-INFO.json"
-            | "SHA256SUMS"
             | "README.md"
             | "CHANGELOG.md"
             | "LICENSE"
             | "THIRD-PARTY-NOTICES.md"
-            | "biome.json"
-            | "agent/home/APPEND_SYSTEM.md"
-            | "agent/home/open-tui.json"
     );
-    let directory = [
-        "assets/",
-        "doc/",
-        "licenses/",
-        "pwsh/",
-        "wiztree/",
-        "lhm/",
-        "agent/.runtime/",
-        "agent/node_modules/",
-        "agent/home/extensions/",
-        "agent/home/skills/",
-        "agent/home/packages/",
-        "agent/home/bin/",
-    ]
-    .iter()
-    .any(|p| path.starts_with(p));
-    if file || directory || (!path.contains('/') && lower.ends_with(".dll")) {
+    if root_file || path.starts_with("app/") || (!path.contains('/') && lower.ends_with(".dll")) {
         Ok(Area::Program)
     } else {
         Err("升级包含程序白名单外的路径，用户数据不可随包替换。".into())
     }
+}
+
+/// Rejects retired third-party component paths (`app/tools/wiztree` and any child, case-insensitive)
+/// for newly packaged/verified release trees and archives (both files and empty directories).
+pub fn reject_retired_release_path(path: &str) -> Result<(), String> {
+    let lower = path.to_lowercase();
+    if lower == "app/tools/wiztree" || lower.starts_with("app/tools/wiztree/") {
+        return Err("升级包包含已移除的第三方组件路径（app/tools/wiztree）。".into());
+    }
+    Ok(())
+}
+
+/// Stricter classifier for newly packaged/verified releases: rejects retired components
+/// (`app/tools/wiztree/`) while [`classify`] keeps legacy installation cleanup & rollback working.
+pub fn classify_release(path: &str) -> Result<Area, String> {
+    let area = classify(path)?;
+    reject_retired_release_path(path)?;
+    Ok(area)
 }
 
 /// Arrays are user choices and remain intact. Models-store merges by stable model id.
@@ -216,7 +235,9 @@ pub fn merge_defaults(
     };
     let next = parse(defaults)?;
     let Some(current) = current else {
-        return serde_json::to_vec_pretty(&next).map_err(|_| "配置无法编码。".into());
+        let mut bytes = serde_json::to_vec_pretty(&next).map_err(|_| "配置无法编码。")?;
+        bytes.push(b'\n');
+        return Ok(bytes);
     };
     let mut old = crate::json::parse_local(path, current)?;
     if !old.is_object() {
@@ -286,23 +307,30 @@ pub fn read_version(root: &Path) -> Result<String, String> {
     Ok(value.into())
 }
 
-pub(crate) fn validate_metadata(
+pub fn validate_metadata(
     files: &BTreeMap<String, String>,
     root: &Path,
     target: &str,
 ) -> Result<(), String> {
     for path in [
         "cst-pilot.exe",
-        "cst-server.exe",
-        "cst-updater.exe",
+        SERVER_EXE_PATH,
+        UPDATER_EXE_PATH,
         "VERSION",
-        "BUILD-INFO.json",
+        BUILD_INFO_PATH,
         "LICENSE",
         "THIRD-PARTY-NOTICES.md",
-        "agent/home/APPEND_SYSTEM.md",
+        "app/prompts/APPEND_SYSTEM.md",
+        "app/telemetry/timserver_1.crt",
+        "app/telemetry/currency.json",
     ] {
         if !files.contains_key(path) {
             return Err("升级包缺少必需的程序、版本或许可文件。".into());
+        }
+    }
+    for default_cfg in DEFAULT_CONFIG_FILES {
+        if !files.contains_key(*default_cfg) {
+            return Err("升级包缺少必需的默认配置模板。".into());
         }
     }
     for font in REQUIRED_FONT_FILES {
@@ -311,33 +339,30 @@ pub(crate) fn validate_metadata(
         }
     }
     for skill in REQUIRED_SKILL_NAMES {
-        if !files.contains_key(&format!("agent/home/skills/{skill}/SKILL.md")) {
+        if !files.contains_key(&format!("app/skills/{skill}/SKILL.md")) {
             return Err("升级包缺少维护技能。".into());
         }
     }
-    if !files.contains_key("agent/home/extensions/telemetry/timserver_1.crt") {
-        return Err("升级包缺少遥测证书。".into());
-    }
-    if !files.keys().any(|p| p.starts_with("licenses/")) {
+    if !files.keys().any(|p| p.starts_with("app/licenses/")) {
         return Err("升级包缺少第三方许可目录。".into());
     }
     if read_version(root)? != target {
         return Err("升级包 VERSION 与签名清单不一致。".into());
     }
     let storage = Storage::new(root)?;
-    let _pin = storage.pin_directory(Path::new(""), false)?;
+    let _pin = storage.pin_directory(Path::new("app"), false)?;
     let bytes = storage
-        .read_limited(&root.join("BUILD-INFO.json"), 64 * 1024)?
+        .read_limited(&root.join(BUILD_INFO_PATH), 64 * 1024)?
         .ok_or("升级包缺少构建信息。")?;
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "升级构建信息无效。")?;
     if value.get("version").and_then(Value::as_str) != Some(target) {
         return Err("升级构建信息的版本不一致。".into());
     }
-    let _fonts_pin = storage.pin_directory(Path::new("assets/fonts"), false)?;
+    let _fonts_pin = storage.pin_directory(Path::new("app/fonts"), false)?;
     for (rel, magic) in [
-        ("assets/fonts/SourceHanSansCN-VF.otf", b"OTTO"),
-        ("assets/fonts/JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
-        ("assets/fonts/JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
+        ("app/fonts/SourceHanSansCN-VF.otf", b"OTTO"),
+        ("app/fonts/JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
+        ("app/fonts/JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
     ] {
         let font_bytes = storage
             .read_limited(&root.join(rel), 32 * 1024 * 1024)?

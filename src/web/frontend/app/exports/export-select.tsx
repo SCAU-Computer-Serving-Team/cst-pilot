@@ -1,7 +1,8 @@
 import { Label, ListBox, Select } from "@heroui/react";
-import { ChevronDown } from "lucide-react";
-import { useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 export function ExportSelect<T extends string>({
 	label,
@@ -18,7 +19,11 @@ export function ExportSelect<T extends string>({
 }) {
 	const [open, setOpen] = useState(false);
 	const trigger = useRef<HTMLButtonElement>(null);
+	const shell = useWorkspaceShell();
 	usePanelDismiss(open, () => setOpen(false), undefined, trigger);
+	useEffect(() => {
+		if (shell?.appActive) setOpen(false);
+	}, [shell?.appActive]);
 	return (
 		<Select
 			className="export-select"
@@ -34,13 +39,19 @@ export function ExportSelect<T extends string>({
 			<Label>{label}</Label>
 			<Select.Trigger ref={trigger} className="export-select-trigger">
 				<Select.Value>{items.find((item) => item.id === value)?.label}</Select.Value>
-				<ChevronDown size={16} aria-hidden="true" />
+				<ChevronDown size={14} aria-hidden="true" />
 			</Select.Trigger>
-			<Select.Popover className="export-select-popover" placement="bottom start" offset={8}>
-				<ListBox aria-label={label}>
+			<Select.Popover className="tier-2-glass tier-2-menu export-select-popover" placement="bottom start" offset={6}>
+				<ListBox aria-label={label} className="tier-2-menu-list">
 					{items.map((item) => (
-						<ListBox.Item key={item.id} id={item.id} textValue={item.label}>
-							{item.label}
+						<ListBox.Item
+							key={item.id}
+							id={item.id}
+							textValue={item.label}
+							className="menu-row export-select-option"
+						>
+							<span>{item.label}</span>
+							{item.id === value && <Check size={14} className="export-select-check" aria-hidden="true" />}
 						</ListBox.Item>
 					))}
 				</ListBox>

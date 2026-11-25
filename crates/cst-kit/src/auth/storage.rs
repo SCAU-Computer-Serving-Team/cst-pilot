@@ -19,9 +19,10 @@ use crate::runbook::{
 
 /// One transaction covers read/validate/update/atomic commit for all auth JSON files.
 #[derive(Clone)]
-pub(crate) struct JsonFiles(Storage, Arc<crate::kit::KitRootState>);
+pub(crate) struct JsonFiles(cst_os::KitLayout, Arc<crate::kit::KitRootState>);
 pub(crate) struct Transaction {
     files: JsonFiles,
+    storage: Storage,
     _lock: DirectoryLock,
     _paths: DirectoryLease,
     _queue: OwnedMutexGuard<()>,
@@ -29,14 +30,19 @@ pub(crate) struct Transaction {
 }
 impl JsonFiles {
     pub fn new(root: &Path) -> Result<Self, String> {
-        let root_state = crate::kit::root_state_for(root)?;
-        Ok(Self(Storage::new(root)?, root_state))
+        let layout = cst_os::KitLayout::new(root)?;
+        let root_state = crate::kit::root_state_for(layout.root())?;
+        Ok(Self(layout, root_state))
     }
     pub fn enter_activity(&self) -> Result<crate::update::activity::ActivityLease, String> {
         self.1.gate.enter()
     }
     pub fn path(&self, name: &str) -> PathBuf {
-        self.0.root.join("agent/home").join(name)
+        if name.is_empty() {
+            self.0.config_dir()
+        } else {
+            self.0.config_dir().join(name)
+        }
     }
     pub fn read(&self, name: &str) -> Result<Option<Value>, String> {
         self.read_inner(name, false)
@@ -46,16 +52,17 @@ impl JsonFiles {
     }
     fn read_inner(&self, name: &str, discard_invalid: bool) -> Result<Option<Value>, String> {
         // Do not create files while inspecting an offline kit.
-        if !self.0.root.join("agent/home").exists() {
+        if !self.0.config_dir().exists() {
             return Ok(None);
         }
-        let _paths = self
-            .0
-            .pin_directory(Path::new("agent/home"), false)
+        let (storage, data_rel) = crate::kit::open_data_storage(&self.0, false)
             .map_err(|_| format!("{name} 的目录不可读或包含链接，请检查工具包。"))?;
-        let bytes = self
-            .0
-            .read_limited(&self.path(name), 8 * 1024 * 1024)
+        let cfg_rel = data_rel.join("config");
+        let _paths = storage
+            .pin_directory(&cfg_rel, false)
+            .map_err(|_| format!("{name} 的目录不可读或包含链接，请检查工具包。"))?;
+        let bytes = storage
+            .read_limited(&storage.root.join(&cfg_rel).join(name), 8 * 1024 * 1024)
             .map_err(|_| format!("{name} 无法安全读取，请检查存储和文件链接。"))?;
         let parsed = bytes
             .map(|bytes| {
@@ -80,14 +87,17 @@ impl JsonFiles {
         let queue = self.1.auth_writes.clone().lock_owned().await;
         let files = self.clone();
         tokio::task::spawn_blocking(move || {
-            let paths = files
-                .0
-                .pin_directory(Path::new("agent/home"), true)
+            let (storage, data_rel) = crate::kit::open_data_storage(&files.0, true)
                 .map_err(|_| "配置目录不可写或包含链接。")?;
-            let lock = DirectoryLock::acquire(&files.path(""))
+            let cfg_rel = data_rel.join("config");
+            let paths = storage
+                .pin_directory(&cfg_rel, true)
+                .map_err(|_| "配置目录不可写或包含链接。")?;
+            let lock = DirectoryLock::acquire(&storage.root.join(&cfg_rel))
                 .map_err(|_| "配置正在被其他进程修改，请稍后重试。")?;
             Ok(Transaction {
                 files,
+                storage,
                 _activity: activity,
                 _queue: queue,
                 _paths: paths,
@@ -111,21 +121,26 @@ impl Transaction {
         if let Some(value) = self.files.read_cache()? {
             return Ok(value);
         }
-        if let Some(bytes) = self
-            .files
-            .0
-            .read_limited(&self.files.path("models-store.json"), 8 * 1024 * 1024)?
-        {
-            let backup = self.files.path(&format!(
+        let target = self.target_path("models-store.json");
+        if let Some(bytes) = self.storage.read_limited(&target, 8 * 1024 * 1024)? {
+            let backup = self.target_path(&format!(
                 "models-store.corrupt-{}.json",
                 uuid::Uuid::new_v4()
             ));
-            self.files
-                .0
+            self.storage
                 .atomic(&backup, &bytes, false, &CancellationToken::new())
                 .map_err(|_| "模型目录缓存备份失败，原文件已保留。")?;
         }
         Ok(Value::Object(Map::new()))
+    }
+    fn target_path(&self, name: &str) -> PathBuf {
+        let data_rel = self
+            .files
+            .0
+            .data_dir()
+            .strip_prefix(self.files.0.root())
+            .unwrap_or_else(|_| Path::new(""));
+        self.storage.root.join(data_rel).join("config").join(name)
     }
     pub fn write(&self, name: &str, value: &Value) -> Result<(), String> {
         let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| "配置无法编码。")?;
@@ -133,10 +148,9 @@ impl Transaction {
             return Err("配置文件超过 8 MiB。".into());
         }
         bytes.push(b'\n');
-        self.files
-            .0
+        self.storage
             .atomic(
-                &self.files.path(name),
+                &self.target_path(name),
                 &bytes,
                 true,
                 &CancellationToken::new(),

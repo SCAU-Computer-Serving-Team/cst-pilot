@@ -3001,11 +3001,16 @@ impl Window {
     /// the platform window, then notifies observers. Normally called automatically
     /// by the platform's resize callback, but exposed publicly for test infrastructure.
     pub fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
+        let next_scale = self.platform_window.scale_factor();
+        let next_size = self.platform_window.content_size();
+        let layout_changed = next_scale != self.scale_factor || next_size != self.viewport_size;
+        self.scale_factor = next_scale;
+        self.viewport_size = next_size;
         self.mouse_position = self.platform_window.mouse_position();
 
-        self.refresh();
+        if layout_changed {
+            self.refresh();
+        }
 
         self.bounds_observers
             .clone()
@@ -3198,6 +3203,17 @@ impl Window {
     /// Requests dismissal of the virtual keyboard without changing GPUI focus.
     pub fn dismiss_virtual_keyboard(&self) {
         self.platform_window.hide_soft_keyboard();
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn set_test_pointer_state(&mut self, active: bool, hovered: bool, cx: &mut App) {
+        self.hovered.set(hovered);
+        if self.active.replace(active) != active {
+            self.activation_observers
+                .clone()
+                .retain(|callback| callback(self, cx));
+        }
+        self.refresh();
     }
 
     /// Returns whether this window is focused by the operating system (receiving key events).
@@ -6974,6 +6990,16 @@ impl Window {
                 window.platform_window.set_input_handler(input_handler);
             }
         });
+    }
+
+    /// Completes native IME composition and returns the committed text for the caller to apply.
+    pub fn finish_ime_composition(&self) -> Option<String> {
+        self.platform_window.finish_ime_composition()
+    }
+
+    /// Cancels and discards any active platform IME composition string on the focused window.
+    pub fn cancel_ime_composition(&self) {
+        self.platform_window.cancel_ime_composition();
     }
 
     /// Present a platform dialog.

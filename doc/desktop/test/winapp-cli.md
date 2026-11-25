@@ -20,30 +20,32 @@ winapp --version
 
 调试时在 `E:/tmp/<YYYY-MM-DD>/` 或 `F:/tmp/<YYYY-MM-DD>/` 下构造独立工具包目录，避免污染本机真实配置，且支持与正在运行的开发版实例并存：
 
-1. 创建当日临时工具包目录与输出目录，复制字体、系统提示词、内置技能、版本文件和三个编译产物：`cst-pilot.exe`、`cst-server.exe`、`cst-updater.exe`。
-2. 设置 `PI_CODING_AGENT_DIR`、`PI_OFFLINE=1` 与 `CST_ALLOW_UNELEVATED=1`（免弹 UAC 对话框），先用 `--port 0` 启动隔离后台服务，避免与其他实例争用端口。桌面端随后连接同一工具包的服务。
+1. 使用 `cargo run -p xtask -- dist --out <runDir>` 组装干净发行树，或按阶段 9.2 目录契约复制字体、`app/prompts/APPEND_SYSTEM.md`、`app/skills/`、`app/defaults/`、`VERSION`、`cst-pilot.exe`、`app/cst-server.exe` 与 `app/cst-updater.exe`。
+2. 设置 `CST_PILOT_ROOT`、`CST_OFFLINE=1` 与 `CST_ALLOW_UNELEVATED=1`（免弹 UAC 对话框），先用 `--port 0` 启动隔离后台服务，避免与其他实例争用端口。桌面端随后连接同一工具包的服务。
 3. 按桌面进程 PID 调用 `winapp ui list-windows` 过滤主窗口句柄 `$hwnd`（排除系统 `100x100` 输入指示浮窗），首次执行一次 `inspect` 唤醒 GPUI 惰性无障碍树，后续命令统一携带 `-w $hwnd`。
 
 ```powershell
-$dayDir = Join-Path 'F:/tmp' (Get-Date -Format 'yyyy-MM-dd')
+$dayDir = Join-Path 'E:/tmp' (Get-Date -Format 'yyyy-MM-dd')
 $runDir = Join-Path $dayDir ('desktop-' + (Get-Date -Format 'HHmmssfff'))
 $kitDir = "$runDir/kit"
 $outDir = "$runDir/winapp"
-New-Item -ItemType Directory -Force "$kitDir/assets/fonts", "$kitDir/agent/home/skills", $outDir | Out-Null
+New-Item -ItemType Directory -Force "$kitDir/app/fonts", "$kitDir/app/prompts", "$kitDir/app/skills", "$kitDir/app/defaults", "$kitDir/data/config", $outDir | Out-Null
 
-Copy-Item -Path 'assets/fonts/*' -Destination "$kitDir/assets/fonts/" -Recurse -Force
-Copy-Item -Path 'agent/home/APPEND_SYSTEM.md' -Destination "$kitDir/agent/home/APPEND_SYSTEM.md" -Force
-Copy-Item -Path 'agent/home/skills/*' -Destination "$kitDir/agent/home/skills/" -Recurse -Force
-Set-Content -Path "$kitDir/VERSION" -Value 'cst-pilot 0.1.0' -Encoding utf8NoBOM
-Copy-Item -Path 'target/debug/cst-pilot.exe', 'target/debug/cst-server.exe', 'target/debug/cst-updater.exe' -Destination "$kitDir/" -Force
+Copy-Item -Path 'assets/fonts/*' -Destination "$kitDir/app/fonts/" -Recurse -Force
+Copy-Item -Path 'app/prompts/APPEND_SYSTEM.md' -Destination "$kitDir/app/prompts/APPEND_SYSTEM.md" -Force
+Copy-Item -Path 'app/skills/*' -Destination "$kitDir/app/skills/" -Recurse -Force
+Copy-Item -Path 'app/defaults/*' -Destination "$kitDir/app/defaults/" -Recurse -Force
+Set-Content -Path "$kitDir/VERSION" -Value 'cst-pilot v0.1.0' -Encoding utf8NoBOM
+Copy-Item -Path 'target/release/cst-pilot.exe' -Destination "$kitDir/" -Force
+Copy-Item -Path 'target/release/cst-server.exe', 'target/release/cst-updater.exe' -Destination "$kitDir/app/" -Force
 
-$env:PI_CODING_AGENT_DIR = "$kitDir/agent/home"
-$env:PI_OFFLINE = '1'
+$env:CST_PILOT_ROOT = $kitDir
+$env:CST_OFFLINE = '1'
 $env:CST_ALLOW_UNELEVATED = '1'
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
 
 $kitArg = '"{0}"' -f $kitDir
-$srv = Start-Process -FilePath "$kitDir/cst-server.exe" -ArgumentList @('--port', '0', '--kit-root', $kitArg) -WindowStyle Hidden -PassThru
+$srv = Start-Process -FilePath "$kitDir/app/cst-server.exe" -ArgumentList @('--port', '0', '--kit-root', $kitArg) -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 1
 if ($srv.HasExited) { throw '隔离后台服务启动失败。' }
 $proc = Start-Process -FilePath "$kitDir/cst-pilot.exe" -ArgumentList @('--kit-root', $kitArg) -PassThru

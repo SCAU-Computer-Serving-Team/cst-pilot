@@ -1,43 +1,43 @@
-import { Button } from "@heroui/react";
-import { X } from "lucide-react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { ArrowLeft } from "lucide-react";
+import { useCallback, useRef } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { ProviderLoginForm } from "../auth/provider-login-form";
 import { returnPath } from "../auth/providers";
 import { BlueHour } from "../shell/blue-hour";
-import { HomeSurface } from "../shell/shell";
 
 export default function Login() {
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const destination = returnPath(params.get("returnTo"));
+	const backHandler = useRef<(() => boolean) | null>(null);
+	const handleBack = useCallback(() => {
+		if (backHandler.current?.()) return;
+		void navigate(destination);
+	}, [navigate, destination]);
 	return (
 		<div className="login-scene">
-			<div className="login-behind" aria-hidden="true" inert>
-				<HomeSurface paused />
+			<div className="login-sky" aria-hidden="true">
+				<BlueHour kind="sky" />
+				<div className="login-sky-feather" />
 			</div>
-			<div className="login-shade" aria-hidden="true" />
+			<button
+				type="button"
+				className="btn-ghost login-back"
+				aria-label="返回"
+				aria-keyshortcuts="Escape"
+				onClick={handleBack}
+			>
+				<ArrowLeft size={16} aria-hidden="true" />
+				返回
+			</button>
 			<main className="login-panel" aria-label="登录">
-				<BlueHour kind="air" />
-				<div className="login-bottom-gradient" aria-hidden="true" />
-				<Button
-					type="button"
-					variant="ghost"
-					isIconOnly
-					className="login-close"
-					aria-label="关闭登录"
-					aria-keyshortcuts="Escape"
-					onPress={() => void navigate(destination)}
-				>
-					<X size={22} aria-hidden="true" />
-				</Button>
-				<Link className="login-brand" to={destination}>
-					CST Pilot
-				</Link>
-				<div className="login-heading">
-					<h1>欢迎回来</h1>
+				<div className="login-top-spacer" aria-hidden="true" />
+				<div className="login-viewport">
+					<ProviderLoginForm backHandlerRef={backHandler} />
 				</div>
-				<ProviderLoginForm />
-				<span className="login-footnote">@cst-pilot-web</span>
+				<footer className="login-footnote">
+					<span>@cst-pilot</span>
+				</footer>
 			</main>
 		</div>
 	);

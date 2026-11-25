@@ -1,14 +1,18 @@
 use cst_kit::diagnostics::result::diagnostic_result;
 use cst_kit::diagnostics::win_native::{
     CIMV2, Control, DiagnosticSource, EventQuery, EventRead, EventRecord, EventVisitor,
-    NativeError, ProcessSample, STORAGE, SpaceSample, SpaceSnapshot, StartupSnapshot,
+    LazyEventVisitor, NativeError, NativeHealthRow, ProcessSample, STORAGE, SpaceSample,
+    SpaceSnapshot, StartupSnapshot, VolumeSnapshot,
 };
 use cst_kit::diagnostics::{self, disk, driver, eventlog, startup, sys};
 use pi_ai::UserContentBlock;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -22,9 +26,18 @@ struct MockSource {
     folders: Vec<Value>,
     events: Vec<EventRecord>,
     admin: bool,
+    admin_error: Option<NativeError>,
+    formatted: Arc<Mutex<Vec<u64>>>,
     unreadable: usize,
     scan_truncated: bool,
     requests: Mutex<Vec<(String, String)>>,
+    space_calls: AtomicUsize,
+    volume_calls: AtomicUsize,
+    volume_extents: HashMap<String, Vec<u32>>,
+    native_volumes: Option<VolumeSnapshot>,
+    native_physical_disks: Option<Vec<Value>>,
+    native_health: HashMap<u32, Result<Option<NativeHealthRow>, NativeError>>,
+    expected_serial_checks: Mutex<Vec<(u32, Option<String>)>>,
 }
 impl MockSource {
     fn rows(&mut self, class: &str, rows: Vec<Value>) {
@@ -57,6 +70,7 @@ impl DiagnosticSource for MockSource {
         Ok(self.process.lock().unwrap().pop_front().unwrap_or_default())
     }
     fn space(&self, drive: Option<&str>, _: &Control) -> Result<SpaceSnapshot, NativeError> {
+        self.space_calls.fetch_add(1, Ordering::SeqCst);
         Ok(SpaceSnapshot {
             rows: self
                 .spaces
@@ -67,6 +81,40 @@ impl DiagnosticSource for MockSource {
             errors: self.space_errors.clone(),
         })
     }
+    fn volume_disk_numbers(
+        &self,
+        drive: &str,
+        _: &Control,
+    ) -> Result<Option<Vec<u32>>, NativeError> {
+        Ok(self.volume_extents.get(drive).cloned())
+    }
+    fn native_volumes(
+        &self,
+        _: Option<&str>,
+        _: &Control,
+    ) -> Result<Option<VolumeSnapshot>, NativeError> {
+        self.volume_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.native_volumes.clone())
+    }
+    fn native_physical_disks(&self, _: &Control) -> Result<Option<Vec<Value>>, NativeError> {
+        Ok(self.native_physical_disks.clone())
+    }
+    fn native_disk_health(
+        &self,
+        disk_number: u32,
+        _: &str,
+        expected_serial: Option<&str>,
+        _: &Control,
+    ) -> Result<Option<NativeHealthRow>, NativeError> {
+        self.expected_serial_checks
+            .lock()
+            .unwrap()
+            .push((disk_number, expected_serial.map(str::to_owned)));
+        self.native_health
+            .get(&disk_number)
+            .cloned()
+            .unwrap_or(Ok(None))
+    }
     fn startup(&self, _: &Control) -> Result<StartupSnapshot, NativeError> {
         Ok(StartupSnapshot {
             reg_items: self.registry.clone(),
@@ -75,7 +123,7 @@ impl DiagnosticSource for MockSource {
         })
     }
     fn admin(&self) -> Result<bool, NativeError> {
-        Ok(self.admin)
+        self.admin_error.clone().map_or(Ok(self.admin), Err)
     }
     fn events(
         &self,
@@ -110,6 +158,29 @@ impl DiagnosticSource for MockSource {
             unreadable: self.unreadable,
             truncated: self.scan_truncated,
         })
+    }
+    fn events_lazy(
+        &self,
+        query: &EventQuery,
+        visitor: &mut LazyEventVisitor<'_>,
+        control: &Control,
+    ) -> Result<EventRead, NativeError> {
+        self.events(
+            query,
+            &mut |mut event| {
+                let message = event.message.take();
+                let id = event.record_id;
+                let formatted = self.formatted.clone();
+                visitor(
+                    event,
+                    Box::new(move || {
+                        formatted.lock().unwrap().push(id);
+                        message
+                    }),
+                )
+            },
+            control,
+        )
     }
 }
 fn control() -> Control {
@@ -284,6 +355,7 @@ fn disk_association_filters_data_and_failure_keeps_info_but_blocks_smart() {
     )
     .unwrap();
     assert_eq!(result["physicalDisks"].as_array().unwrap().len(), 2);
+    assert_eq!(result["collectionErrors"].as_array().unwrap().len(), 1);
     assert!(result["infoNotice"].is_string());
     assert!(result["smart"].is_null());
     assert_eq!(result["degraded"], true);
@@ -318,6 +390,48 @@ fn smart_admin_hint_requires_an_actual_access_denial() {
         assert!(result["smart"].is_null());
     }
 }
+#[test]
+fn driver_core_reports_failure_when_all_five_queries_fail() {
+    let mut source = MockSource::default();
+    for class in [
+        "Win32_NetworkAdapter",
+        "Win32_PnPEntity",
+        "Win32_VideoController",
+        "Win32_Service",
+        "Win32_PnPSignedDriver",
+    ] {
+        source.fail(class, 5);
+    }
+    let result = driver::run(&source, input(json!({"scope":"core"})), &control());
+    assert!(result.is_err());
+    assert_eq!(source.requests.lock().unwrap().len(), 5);
+}
+
+#[test]
+fn proc_cpu_percentage_cannot_exceed_one_hundred() {
+    let value = sys::process_result(
+        &[process(1, 0, 0, 1)],
+        &[process(1, 0, 12_000_000, 1)],
+        1.0,
+        1,
+        10,
+    );
+    assert_eq!(value["byCpu"][0]["cpuPct"], 100.0);
+}
+
+#[test]
+fn overview_preserves_bios_version_without_manufacturer() {
+    let mut source = MockSource::default();
+    for vendor in [json!(null), json!("  ")] {
+        source.rows(
+            "Win32_BIOS",
+            vec![json!({"Manufacturer":vendor,"SMBIOSBIOSVersion":"v1.2"})],
+        );
+        let result = sys::run(&source, input(json!({"scope":"overview"})), &control()).unwrap();
+        assert_eq!(result["overview"]["machine"]["bios"], "v1.2");
+    }
+}
+
 #[test]
 fn driver_find_is_and_composed_and_includes_hardware_ids() {
     let mut source = MockSource::default();
@@ -495,6 +609,87 @@ fn event_filters_counts_bounds_errors_and_detail_contract() {
     assert!(result["query"]["noMatch"].is_null());
 }
 #[test]
+fn event_formats_only_final_top_after_provider_filter_and_joining_logs() {
+    let mut old = event(1, 1, "Keep");
+    old.message = None;
+    let mut newest = event(2, 2, "Keep");
+    newest.log = "Application".into();
+    newest.time = "2026-11-09T01:02:03Z".into();
+    let mut filtered = event(3, 3, "Drop");
+    filtered.message = None;
+    let source = MockSource {
+        events: vec![old, newest, filtered],
+        admin: true,
+        ..Default::default()
+    };
+    let result = eventlog::run(
+        &source,
+        input(json!({"scope":"recent","provider":"^Keep$","top":1})),
+        &control(),
+    )
+    .unwrap();
+    let recent = &result["recent"];
+    assert_eq!(recent["events"][0]["recordId"], 2);
+    assert_eq!(recent["total"], 2);
+    assert_eq!(recent["unreadable"], 0);
+    assert_eq!(*source.formatted.lock().unwrap(), [2]);
+}
+
+#[test]
+fn event_message_filter_formats_candidates_only_and_reports_unreadable() {
+    let mut bad = event(1, 1, "Keep");
+    bad.message = None;
+    let source = MockSource {
+        events: vec![bad, event(2, 2, "Keep"), event(3, 3, "Drop")],
+        admin: true,
+        ..Default::default()
+    };
+    let value = eventlog::run(
+        &source,
+        input(json!({"scope":"query","msg":"崩溃","provider":"^Keep$"})),
+        &control(),
+    )
+    .unwrap();
+    assert_eq!(value["query"]["total"], 1);
+    assert_eq!(value["query"]["unreadable"], 1);
+    assert_eq!(*source.formatted.lock().unwrap(), [1, 2]);
+}
+
+#[test]
+fn security_token_failure_keeps_unknown_admin_and_the_original_error() {
+    let source = MockSource {
+        admin_error: Some(error("token", 6)),
+        ..Default::default()
+    };
+    let result = eventlog::run(&source, input(json!({"scope":"security"})), &control()).unwrap();
+    assert!(result["security"]["admin"].is_null());
+    assert_eq!(result["security"]["collectionErrors"][0]["code"], 6);
+    assert!(
+        result["security"]["notice"]
+            .as_str()
+            .unwrap()
+            .contains("无法确认")
+    );
+    assert!(source.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn event_query_bounds_ids_before_opening_channel() {
+    let source = MockSource::default();
+    let oversized = input(json!({"scope":"query", "ids":(1..=17).collect::<Vec<_>>() }));
+    assert!(
+        eventlog::run(&source, oversized, &control())
+            .unwrap_err()
+            .contains("16")
+    );
+    assert!(source.requests.lock().unwrap().is_empty());
+    let allowed =
+        input(json!({"scope":"query", "level":"warn", "ids":(1..=16).collect::<Vec<_>>() }));
+    eventlog::run(&source, allowed, &control()).unwrap();
+    assert!(source.requests.lock().unwrap()[0].1.contains("EventID=16"));
+}
+
+#[test]
 fn event_scan_limits_and_unreadable_records_are_reported() {
     let source = MockSource {
         scan_truncated: true,
@@ -526,13 +721,23 @@ fn smart_keeps_successful_devices_when_another_device_fails() {
         "MSFT_StorageReliabilityCounter",
         vec![json!({"DeviceId":"1","Temperature":30})],
     );
-    source.fail("SELECT DeviceId,Wear,Temperature,PowerOnHours,ReadErrorsTotal,WriteErrorsTotal FROM MSFT_StorageReliabilityCounter WHERE DeviceId='2'",0x80070005);
+    source
+        .native_health
+        .insert(2, Err(error("SMART_RCV_DRIVE_DATA", 0x80070005)));
     let result = disk::run(&source, input(json!({"scope":"health"})), &control()).unwrap();
     assert_eq!(result["smart"].as_array().unwrap().len(), 1);
     assert_eq!(result["smart"][0]["DeviceId"], "1");
     assert_eq!(result["smartErrors"][0]["deviceId"], "2");
     assert_eq!(result["degraded"], true);
     assert!(result["smartNotice"].as_str().unwrap().contains("管理员"));
+    let wmi_smart_queries = source
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, q)| q.contains("MSFT_StorageReliabilityCounter"))
+        .count();
+    assert_eq!(wmi_smart_queries, 1);
 }
 
 #[test]
@@ -623,4 +828,179 @@ async fn worker_cancellation_timeout_and_registration_are_bounded() {
     .await
     .unwrap();
     assert_eq!(result["proc"]["totalProcs"], 0);
+}
+
+#[test]
+fn disk_prefers_native_extents_volumes_ioctl_health_and_single_batch_wmi_fallback() {
+    let mut source = MockSource::default();
+    source.rows(
+        "MSFT_PhysicalDisk",
+        vec![
+            json!({"DeviceId":"0","SerialNumber":"SN-NVME-0","Size":1073741824000u64,"FriendlyName":"NVMe 0","MediaType":4,"BusType":17}),
+            json!({"DeviceId":"1","SerialNumber":"SN-SATA-1","Size":2147483648000u64,"FriendlyName":"SATA 1","MediaType":3,"BusType":11}),
+            json!({"DeviceId":"2","SerialNumber":"SN-USB-2","Size":536870912000u64,"FriendlyName":"USB 2","MediaType":0,"BusType":7}),
+        ],
+    );
+    source.volume_extents.insert("C:".into(), vec![0]);
+    source.native_volumes = Some(VolumeSnapshot {
+        rows: vec![
+            json!({"DeviceID":"C:","VolumeName":"OS","FileSystem":"NTFS","DriveType":3,"Size":107374182400u64,"FreeSpace":53687091200u64}),
+        ],
+        errors: vec![],
+    });
+    source.native_health.insert(
+        0,
+        Ok(Some(NativeHealthRow::device(json!({
+            "DeviceId":"0",
+            "Wear":3,
+            "Temperature":41,
+            "PowerOnHours":1200,
+            "ReadErrorsTotal":null,
+            "WriteErrorsTotal":null
+        })))),
+    );
+    source.native_health.insert(1, Ok(None));
+    source.native_health.insert(2, Ok(None));
+    source.rows(
+        "MSFT_StorageReliabilityCounter",
+        vec![json!({"DeviceId":"1","Temperature":35,"PowerOnHours":4000})],
+    );
+
+    // 1. info(drive=C:) uses native extents + native volumes and skips CIMV2 WMI completely
+    let info = disk::run(
+        &source,
+        input(json!({"scope":"info","drive":"C:"})),
+        &control(),
+    )
+    .unwrap();
+    assert_eq!(info["physicalDisks"].as_array().unwrap().len(), 1);
+    assert_eq!(info["physicalDisks"][0]["DeviceId"], "0");
+    assert_eq!(info["volumes"][0]["drive"], "C:");
+    assert_eq!(info["volumes"][0]["fs"], "NTFS");
+    assert!(
+        source
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(ns, _)| ns != CIMV2),
+        "native extents + volumes must avoid CIMV2 WMI"
+    );
+
+    // 2. all(drive=C:) reuses one `native_volumes` probe across both `space` and `info`
+    //    without issuing a duplicate `space()` probe.
+    source.space_calls.store(0, Ordering::SeqCst);
+    source.volume_calls.store(0, Ordering::SeqCst);
+    let all = disk::run(
+        &source,
+        input(json!({"scope":"all","drive":"C:"})),
+        &control(),
+    )
+    .unwrap();
+    assert_eq!(all["space"][0]["drive"], "C:");
+    assert_eq!(all["volumes"][0]["drive"], "C:");
+    assert_eq!(source.volume_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(source.space_calls.load(Ordering::SeqCst), 0);
+
+    // 3. health(all disks) passes expected_serial for cross-checking, gets disk 0 from native IOCTL,
+    //    queries batch WMI ONCE for disks 1 & 2, preserves disk 0 and disk 1, and reports missing counter for disk 2.
+    source.requests.lock().unwrap().clear();
+    source.expected_serial_checks.lock().unwrap().clear();
+    let health = disk::run(&source, input(json!({"scope":"health"})), &control()).unwrap();
+    let smart = health["smart"].as_array().unwrap();
+    assert_eq!(smart.len(), 2);
+    assert_eq!(smart[0]["DeviceId"], "0");
+    assert_eq!(smart[0]["Wear"], 3);
+    let keys0: BTreeSet<&str> = smart[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys0,
+        BTreeSet::from([
+            "DeviceId",
+            "PowerOnHours",
+            "ReadErrorsTotal",
+            "Temperature",
+            "Wear",
+            "WriteErrorsTotal",
+        ])
+    );
+    assert_eq!(smart[1]["DeviceId"], "1");
+    assert_eq!(health["smartErrors"].as_array().unwrap().len(), 1);
+    assert_eq!(health["smartErrors"][0]["deviceId"], "2");
+    assert_eq!(health["degraded"], true);
+    let checked = source.expected_serial_checks.lock().unwrap();
+    assert!(
+        checked
+            .iter()
+            .any(|(n, s)| *n == 0 && s.as_deref() == Some("SN-NVME-0"))
+    );
+    let wmi_smart_queries = source
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, q)| q.contains("MSFT_StorageReliabilityCounter"))
+        .count();
+    assert_eq!(
+        wmi_smart_queries, 1,
+        "fallback must issue one batch WMI query instead of per-disk loop"
+    );
+
+    // 4. Partial extent match (disk 0 exists in WMI, disk 5 does NOT) must NOT silently drop disk 5.
+    let mut partial = MockSource::default();
+    partial.rows(
+        "MSFT_PhysicalDisk",
+        vec![json!({"DeviceId":"0","FriendlyName":"Disk 0"})],
+    );
+    partial.volume_extents.insert("D:".into(), vec![0, 5]);
+    partial.native_volumes = Some(VolumeSnapshot {
+        rows: vec![
+            json!({"DeviceID":"D:","VolumeName":"Span","FileSystem":"NTFS","DriveType":3,"Size":100u64,"FreeSpace":50u64}),
+        ],
+        errors: vec![],
+    });
+    let span_info = disk::run(
+        &partial,
+        input(json!({"scope":"info","drive":"D:"})),
+        &control(),
+    )
+    .unwrap();
+    assert!(
+        span_info["infoNotice"].is_string(),
+        "partial extent overlap must fail safe with infoNotice instead of dropping missing extent"
+    );
+    let span_health = disk::run(
+        &partial,
+        input(json!({"scope":"health","drive":"D:"})),
+        &control(),
+    )
+    .unwrap();
+    assert!(span_health["smart"].is_null());
+    assert!(
+        span_health["smartNotice"]
+            .as_str()
+            .unwrap()
+            .contains("停止查询")
+    );
+
+    // 5. WinPE fallback: Storage WMI fails -> native_physical_disks takes over cleanly
+    let mut winpe = MockSource::default();
+    winpe.fail("MSFT_PhysicalDisk", 0x8004100E);
+    winpe.native_physical_disks = Some(vec![
+        json!({"DeviceId":"0","FriendlyName":"WinPE NVMe","SerialNumber":"S1","MediaType":4,"BusType":17,"HealthStatus":null,"OperationalStatus":null,"Size":536870912000u64}),
+    ]);
+    winpe.native_volumes = Some(VolumeSnapshot {
+        rows: vec![
+            json!({"DeviceID":"X:","VolumeName":"Boot","FileSystem":"NTFS","DriveType":3,"Size":1073741824u64,"FreeSpace":536870912u64}),
+        ],
+        errors: vec![],
+    });
+    let pe_info = disk::run(&winpe, input(json!({"scope":"info"})), &control()).unwrap();
+    assert_eq!(pe_info["physicalDisks"][0]["FriendlyName"], "WinPE NVMe");
+    assert!(pe_info["physicalDisks"][0]["HealthStatus"].is_null());
+    assert!(pe_info.get("degraded").is_none());
 }

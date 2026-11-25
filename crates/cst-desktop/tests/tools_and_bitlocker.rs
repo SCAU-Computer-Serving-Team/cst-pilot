@@ -147,6 +147,132 @@ async fn secret_input_55_byte_zeroize_accessibility_copy_block_and_paste_validat
     }
 }
 
+struct ToolStateFixture {
+    live: bool,
+    result: Option<cst_client::tool_presenter::ToolCardView>,
+    expanded: bool,
+}
+
+impl gpui::Render for ToolStateFixture {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{InteractiveElement as _, ParentElement as _, Styled as _};
+        use gpui_kit::TestSupportExt as _;
+        let palette = cst_desktop::theme::DesktopThemeGlobal::current(cx).palette;
+        let entity = cx.entity();
+        gpui::div()
+            .flex()
+            .flex_col()
+            .child(
+                cst_desktop::tools::normal_card::render_normal_tool_card_with_args(
+                    "changing",
+                    "read",
+                    Some(&json!({"path": "test.txt"})),
+                    None,
+                    self.result.is_some(),
+                    false,
+                    self.live,
+                    false,
+                    None,
+                    self.result.as_ref(),
+                    self.expanded,
+                    false,
+                    "monospace".into(),
+                    &palette,
+                    &|_| false,
+                    std::rc::Rc::new(move |_, _, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.expanded = !this.expanded;
+                            cx.notify();
+                        })
+                    }),
+                    std::rc::Rc::new(|_, _, _| {}),
+                    std::rc::Rc::new(|_, _, _| {}),
+                    |_, _, _| {},
+                    window,
+                    cx,
+                ),
+            )
+            .child(
+                gpui::div()
+                    .id("after-changing-tool")
+                    .h(gpui::px(8.0))
+                    .test_support(),
+            )
+    }
+}
+
+#[gpui_kit::test]
+async fn normal_tool_remeasures_when_result_arrives_and_omits_missing_result(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use cst_client::tool_presenter::{ToolCallInput, ToolResultInput, map_tool};
+    cx.update(gpui_kit::init);
+    let win = cx.add_window(|_, _| ToolStateFixture {
+        live: true,
+        result: None,
+        expanded: false,
+    });
+    let state = win.root(cx).unwrap();
+
+    cx.update_window(win.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("normal-tool-hdr-changing", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(260));
+    let mut initial_y = gpui::px(0.0);
+    cx.update_window(win.into(), |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+        assert!(window.find("normal-tool-capsule-changing").visible());
+        assert!(window.try_find("normal-tool-raw-toggle-changing").is_none());
+        initial_y = window.find("after-changing-tool").bounds().origin.y;
+    })
+    .unwrap();
+
+    let call = ToolCallInput {
+        id: "changing".into(),
+        name: "read".into(),
+        arguments: Default::default(),
+        execution: None,
+    };
+    let result = ToolResultInput::from_message_json(&json!({
+        "content": [{"type": "text", "text": "line one\nline two\nline three"}]
+    }));
+    cx.update_window(win.into(), |_, window, cx| {
+        state.update(cx, |this, cx| {
+            this.result = Some(map_tool(&call, &result));
+            this.live = false;
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert!(window.find("norm-text-copy-changing-0").visible());
+        assert!(window.find("normal-tool-raw-toggle-changing").visible());
+        assert!(window.find("after-changing-tool").bounds().origin.y > initial_y);
+    })
+    .unwrap();
+
+    cx.update_window(win.into(), |_, window, cx| {
+        state.update(cx, |this, cx| {
+            this.result = None;
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert!(window.find("normal-tool-capsule-changing").visible());
+        assert!(window.try_find("norm-text-copy-changing-0").is_none());
+        assert!(window.try_find("normal-tool-raw-toggle-changing").is_none());
+        assert_eq!(
+            window.find("after-changing-tool").bounds().origin.y,
+            initial_y
+        );
+    })
+    .unwrap();
+}
+
 #[derive(Default)]
 struct ToolsMockState {
     bitlocker_submissions: Vec<String>,
@@ -319,6 +445,7 @@ impl ToolsMockBackend {
                                                     "durationMs": 3200,
                                                     "content": [
                                                         { "type": "toolCall", "id": "tc-disk", "name": "disk", "arguments": { "scope": "volumes" } },
+                                                        { "type": "toolCall", "id": "tc-disk-running", "name": "disk", "arguments": { "scope": "usage", "path": "C:\\Users\\Test", "top": 10 } },
                                                         { "type": "toolCall", "id": "tc-sys", "name": "sys", "arguments": { "scope": "overview" } },
                                                         { "type": "toolCall", "id": "tc-ws", "name": "web_search", "arguments": { "queries": ["0x116 nvlddmkm", "BitLocker error"] } },
                                                         { "type": "toolCall", "id": "tc-rb", "name": "runbook_deliver", "arguments": { "name": "fix-d-drive.txt" } },
@@ -555,13 +682,53 @@ async fn headless_tools_17_cards_bitlocker_400_retry_ime_restore_unknown_review_
         ml.update(cx, |m, cx| m.scroll_to_top(cx));
         window.render_frame(cx);
 
-        // Expand process segment -> verify `normal-tool-card-tc-disk` & its `"原始数据"` disclosure
-        window.click("process-hdr-u-tools:process-start", cx);
+        // Live turn process segment (`running: true`) starts expanded by default and can be collapsed & re-expanded
         assert!(window.find("normal-tool-hdr-tc-disk").visible());
+        window.click("process-hdr-u-tools:process-start", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(260));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+        assert!(window.try_find("normal-tool-hdr-tc-disk").is_none());
+        window.click("process-hdr-u-tools:process-start", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(260));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+        assert!(window.find("normal-tool-hdr-tc-disk").visible());
+        assert!(window.find("normal-tool-hdr-tc-disk-running").visible());
         window.click("normal-tool-hdr-tc-disk", cx);
+        window.click("normal-tool-hdr-tc-disk-running", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(260));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
         assert!(window.find("normal-tool-raw-toggle-tc-disk").visible());
+        assert!(
+            window.find("normal-tool-capsule-tc-disk-running").visible(),
+            "running normal tool card still expands its call parameter capsule"
+        );
+        assert!(
+            window
+                .try_find("norm-text-copy-tc-disk-running-0")
+                .is_none(),
+            "running normal tool card must not render empty-result text box"
+        );
+        assert!(
+            window
+                .try_find("normal-tool-raw-toggle-tc-disk-running")
+                .is_none(),
+            "running normal tool card must not render raw output toggle"
+        );
 
         // Scroll back to bottom so Runbook & BitLocker cards are inside viewport
+        let ml = shell.read(cx).workbench().read(cx).message_list().clone();
         ml.update(cx, |m, cx| m.scroll_to_bottom_and_follow(cx));
         window.render_frame(cx);
 

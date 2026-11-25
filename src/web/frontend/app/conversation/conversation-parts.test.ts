@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { ContentPart, Message } from "../data/web-state.ts";
 import {
 	activeTurnIndex,
+	assistantErrors,
 	formatDuration,
 	groupTurns,
 	isConversationMessage,
@@ -11,6 +12,21 @@ import {
 	type TurnEntry,
 	visibleQueueItems,
 } from "./conversation-parts.ts";
+
+test("导出保留后续回复覆盖的错误并识别无详情错误", () => {
+	const turn = {
+		assistants: [
+			{ id: "timeout", message: { role: "assistant", content: [], timestamp: 1, errorMessage: "timeout" } },
+			{ id: "failed", message: { role: "assistant", content: [], timestamp: 2, stopReason: "error" } },
+			{ id: "ok", message: { role: "assistant", content: "恢复成功", timestamp: 3 } },
+		] satisfies TurnEntry[],
+	};
+	assert.deepEqual(assistantErrors(turn, false), []);
+	assert.deepEqual(
+		assistantErrors(turn, true).map(({ id }) => id),
+		["timeout", "failed"],
+	);
+});
 
 const call = (id: string, name = "disk"): ContentPart => ({ type: "toolCall", id, name, arguments: {} });
 test("assistant prose stays before and after the corresponding tool calls", () => {

@@ -13,6 +13,7 @@ import {
 	type TreeNode,
 	visibleByDefault,
 	visibleByFilter,
+	visibleTreeCursor,
 } from "./branch-tree.ts";
 
 const entry = (id: string, overrides: Partial<TreeEntry> = {}): TreeEntry => ({
@@ -54,6 +55,14 @@ test("默认视图隐藏无正文 assistant，其子条目挂到最近可见祖�
 	const roots = buildVisibleTree(tree(), "7");
 	assert.equal(roots.length, 1);
 	assert.equal(roots[0].children[0].entry.id, "3");
+});
+
+test("方向键游标按条目 ID 跟随；折叠后落在可见祖先", () => {
+	const rows = layoutTree(buildVisibleTree(tree(), "7"), "7");
+	const { visible } = applyFold(rows, new Set(["6"]));
+	assert.equal(visible[visibleTreeCursor(rows, visible, "7")].node.entry.id, "6");
+	assert.equal(visible[visibleTreeCursor(rows, visible, "8")].node.entry.id, "8");
+	assert.equal(visibleTreeCursor(rows, visible, "missing"), -1);
 });
 
 test("列形态：连接符列是方块，其余是竖线或留空", () => {

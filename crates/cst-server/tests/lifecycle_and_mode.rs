@@ -20,7 +20,7 @@ use uuid::Uuid;
 #[test]
 fn single_instance_lock_and_discovery_file_lifecycle() {
     let dir = std::env::temp_dir().join(format!("cst-server-disc-{}", Uuid::new_v4()));
-    fs::create_dir_all(dir.join("agent/home")).unwrap();
+    fs::create_dir_all(dir.join("app")).unwrap();
 
     let lock1 = ServerInstanceLock::acquire(&dir).expect("first instance lock");
     let conflict = ServerInstanceLock::acquire(&dir).err().unwrap();
@@ -44,19 +44,19 @@ fn single_instance_lock_and_discovery_file_lifecycle() {
 #[test]
 fn session_owner_lock_rejects_second_holder_until_dropped() {
     let dir = std::env::temp_dir().join(format!("cst-server-sesslock-{}", Uuid::new_v4()));
-    let agent_dir = dir.join("agent/home");
-    fs::create_dir_all(&agent_dir).unwrap();
+    let config_dir = dir.join("data/config");
+    fs::create_dir_all(&config_dir).unwrap();
 
-    let lock1 = SessionOwnerLock::acquire(&agent_dir, "sess-1").expect("first session lock");
-    let err = SessionOwnerLock::acquire(&agent_dir, "sess-1")
+    let lock1 = SessionOwnerLock::acquire(&config_dir, "sess-1").expect("first session lock");
+    let err = SessionOwnerLock::acquire(&config_dir, "sess-1")
         .err()
         .unwrap();
     assert!(err.starts_with("session_owned:"));
 
-    let _other = SessionOwnerLock::acquire(&agent_dir, "sess-2").expect("distinct session id");
+    let _other = SessionOwnerLock::acquire(&config_dir, "sess-2").expect("distinct session id");
     drop(lock1);
     let _reacquired =
-        SessionOwnerLock::acquire(&agent_dir, "sess-1").expect("reacquire after release");
+        SessionOwnerLock::acquire(&config_dir, "sess-1").expect("reacquire after release");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -456,11 +456,12 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
     use std::process::Command;
 
     let dir = std::env::temp_dir().join(format!("cst-server-hc-{}", Uuid::new_v4()));
-    fs::create_dir_all(dir.join("agent/home")).unwrap();
+    fs::create_dir_all(dir.join("app/prompts")).unwrap();
+    fs::create_dir_all(dir.join("data/config")).unwrap();
     fs::write(dir.join("VERSION"), "cst-pilot v0.9.4\n").unwrap();
-    fs::write(dir.join("agent/home/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
+    fs::write(dir.join("app/prompts/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
     for name in SKILL_NAMES {
-        let p = dir.join(format!("agent/home/skills/{name}/SKILL.md"));
+        let p = dir.join(format!("app/skills/{name}/SKILL.md"));
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(
             p,
@@ -473,9 +474,10 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
         .and_then(Path::parent)
         .unwrap();
     for rel in REQUIRED_FONT_FILES {
+        let font_name = rel.strip_prefix("app/fonts/").unwrap();
         let dst = dir.join(rel);
         fs::create_dir_all(dst.parent().unwrap()).unwrap();
-        fs::copy(repo_root.join(rel), dst).unwrap();
+        fs::copy(repo_root.join("assets/fonts").join(font_name), dst).unwrap();
     }
 
     // Hold the server single-instance lock to prove `--health-check` runs lock-free!
@@ -484,7 +486,7 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
     let exe = env!("CARGO_BIN_EXE_cst-server");
     let ok_out = Command::new(exe)
         .arg("--health-check")
-        .env("PI_CODING_AGENT_DIR", dir.join("agent/home"))
+        .env("CST_PILOT_ROOT", &dir)
         .output()
         .expect("spawn cst-server --health-check");
     assert!(
@@ -498,14 +500,10 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
     );
 
     // Corrupt a bundled font file -> `--health-check` must reject
-    fs::write(
-        dir.join("assets/fonts/JetBrainsMono-Regular.ttf"),
-        b"bad-font",
-    )
-    .unwrap();
+    fs::write(dir.join("app/fonts/JetBrainsMono-Regular.ttf"), b"bad-font").unwrap();
     let bad_out = Command::new(exe)
         .arg("--health-check")
-        .env("PI_CODING_AGENT_DIR", dir.join("agent/home"))
+        .env("CST_PILOT_ROOT", &dir)
         .output()
         .expect("spawn cst-server --health-check on corrupt font");
     assert!(!bad_out.status.success());

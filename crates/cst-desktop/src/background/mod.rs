@@ -17,7 +17,7 @@ pub use d3d11_surface::{
     SurfaceRuntimeDiagnostics, d3d_is_software_adapter, d3d_sm50_supported,
     reset_d3d11_pipeline_cache, surface_diagnostics,
 };
-pub use presets::{FrostedGlassSpec, SkyPreset, generate_rounded_rect_sdf_rgba16f};
+pub use presets::{FrostedGlassSpec, SkyPreset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnimationGateInputs {
@@ -107,7 +107,7 @@ impl ShaderFrameScheduler {
         window: &mut Window,
     ) -> f32 {
         let vp = window.viewport_size();
-        let minimized = vp.width <= px(1.0) || vp.height <= px(1.0);
+        let minimized = !window.is_visible() || vp.width <= px(1.0) || vp.height <= px(1.0);
         let inputs = AnimationGateInputs {
             route_has_sky_shader,
             web_active_locked,
@@ -180,26 +180,21 @@ pub fn render_sky_background_rounded(
     corner_radii_logical: [f32; 4],
     scale_factor: f32,
 ) -> Div {
-    let (top_color, bottom_color) = preset.fallback_gradient_stops();
+    let clamped_opacity = opacity.clamp(0.0, 1.0);
     let sf = scale_factor.max(1.0);
     let base = div()
         .size_full()
         .rounded_tl(px(corner_radii_logical[0]))
         .rounded_tr(px(corner_radii_logical[1]))
         .rounded_br(px(corner_radii_logical[2]))
-        .rounded_bl(px(corner_radii_logical[3]))
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(top_color, 0.0),
-            linear_color_stop(bottom_color, 1.0),
-        ));
+        .rounded_bl(px(corner_radii_logical[3]));
 
     #[cfg(windows)]
     if d3d_sm50_supported() {
         let renderer: Arc<dyn gpui::WindowsSurfaceRenderer> = Arc::new(D3d11SkySurface {
             preset,
             time_sec,
-            opacity,
+            opacity: clamped_opacity,
             corner_radii_phys: [
                 corner_radii_logical[0] * sf,
                 corner_radii_logical[1] * sf,
@@ -207,11 +202,30 @@ pub fn render_sky_background_rounded(
                 corner_radii_logical[3] * sf,
             ],
         });
-        return base.child(gpui_kit::surface(renderer).size_full());
+        // Skip the opaque fallback gradient while the D3D11 surface is semi-transparent during
+        // route transitions so it alpha-blends cleanly against `$bg-workspace` under feather masks.
+        let surface_wrap = if clamped_opacity >= 0.999 {
+            let (top_color, bottom_color) = preset.fallback_gradient_stops();
+            base.bg(linear_gradient(
+                180.0,
+                linear_color_stop(top_color, 0.0),
+                linear_color_stop(bottom_color, 1.0),
+            ))
+        } else {
+            base
+        };
+        return surface_wrap.child(gpui_kit::surface(renderer).size_full());
     }
 
-    let _ = (time_sec, opacity);
-    base
+    let (mut top_color, mut bottom_color) = preset.fallback_gradient_stops();
+    top_color.a *= clamped_opacity;
+    bottom_color.a *= clamped_opacity;
+    let _ = time_sec;
+    base.bg(linear_gradient(
+        180.0,
+        linear_color_stop(top_color, 0.0),
+        linear_color_stop(bottom_color, 1.0),
+    ))
 }
 
 /// Renders the 9-stop nonlinear horizontal fade mask on the right side of Login's `864×800` shader canvas
@@ -253,19 +267,30 @@ pub fn render_login_9_stop_fade(palette: &DesktopPalette) -> Div {
         .flex()
         .flex_row();
 
-    for pair in stops.windows(2) {
+    let last_idx = stops.len().saturating_sub(2);
+    for (idx, pair) in stops.windows(2).enumerate() {
         let (p0, a0) = pair[0];
         let (p1, a1) = pair[1];
         let seg_w = ((p1 - p0) * total_w).max(1.0);
-        let mut c0 = palette.bg_workspace;
-        c0.a = a0;
-        let mut c1 = palette.bg_workspace;
-        c1.a = a1;
-        row = row.child(div().w(px(seg_w)).h_full().bg(linear_gradient(
-            90.0,
-            linear_color_stop(c0, 0.0),
-            linear_color_stop(c1, 1.0),
-        )));
+        let is_solid_tail = idx == last_idx && a0 >= 1.0 && a1 >= 1.0;
+        let seg = if is_solid_tail {
+            div()
+                .flex_1()
+                .min_w(px(seg_w))
+                .h_full()
+                .bg(palette.bg_workspace)
+        } else {
+            let mut c0 = palette.bg_workspace;
+            c0.a = a0;
+            let mut c1 = palette.bg_workspace;
+            c1.a = a1;
+            div().w(px(seg_w)).h_full().bg(linear_gradient(
+                90.0,
+                linear_color_stop(c0, 0.0),
+                linear_color_stop(c1, 1.0),
+            ))
+        };
+        row = row.child(seg);
     }
     row
 }
@@ -280,25 +305,33 @@ pub fn render_frosted_surface(
     transparency_enabled: bool,
     scale_factor: f32,
 ) -> Stateful<Div> {
-    let is_elevated_card = spec.corner_radius_px > 0.0;
-    let shadow_sm: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let is_elevated_card = spec.specular > 0.0;
+    let is_light_tint = spec.tint_rgb[0] > 0.5;
+    let shadow_contact: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_110F
     } else {
-        0x0000_0066
+        0x0000_003D
     })
     .into();
-    let shadow_lg: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let shadow_mid: Hsla = gpui_kit::rgba(if is_light_tint {
+        0x1111_110F
+    } else {
+        0x0000_0047
+    })
+    .into();
+    let shadow_lg: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_1117
     } else {
-        0x0000_0080
+        0x0000_0061
     })
     .into();
-    let highlight_top: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let mut highlight_top: Hsla = gpui_kit::rgba(if is_light_tint {
         0xFFFF_FFF2
     } else {
         0xFFFF_FF1F
     })
     .into();
+    highlight_top.a *= spec.opacity.clamp(0.0, 1.0);
 
     let mut container = div().id(id).relative();
     if is_elevated_card {
@@ -311,24 +344,24 @@ pub fn render_frosted_surface(
                 inset: true,
             },
             gpui_kit::BoxShadow {
-                color: shadow_sm,
+                color: shadow_contact,
                 offset: gpui_kit::point(px(0.0), px(1.0)),
-                blur_radius: px(2.0),
+                blur_radius: px(if is_light_tint { 2.0 } else { 3.0 }),
                 spread_radius: px(0.0),
                 inset: false,
             },
             gpui_kit::BoxShadow {
-                color: shadow_sm,
+                color: shadow_mid,
                 offset: gpui_kit::point(px(0.0), px(6.0)),
                 blur_radius: px(14.0),
-                spread_radius: px(-2.0),
+                spread_radius: px(if is_light_tint { -2.0 } else { -1.0 }),
                 inset: false,
             },
             gpui_kit::BoxShadow {
                 color: shadow_lg,
-                offset: gpui_kit::point(px(0.0), px(18.0)),
-                blur_radius: px(36.0),
-                spread_radius: px(-6.0),
+                offset: gpui_kit::point(px(0.0), px(if is_light_tint { 18.0 } else { 16.0 })),
+                blur_radius: px(if is_light_tint { 36.0 } else { 34.0 }),
+                spread_radius: px(if is_light_tint { -6.0 } else { -4.0 }),
                 inset: false,
             },
         ]);

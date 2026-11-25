@@ -577,6 +577,8 @@ impl ExportBrowser {
                     result_slot,
                 } => loop {
                     let notified = notify.notified();
+                    tokio::pin!(notified);
+                    notified.as_mut().enable();
                     if let Some(res) = result_slot.lock().expect("result slot lock").clone() {
                         break res?;
                     }
@@ -756,15 +758,23 @@ impl ExportBrowser {
         self.stopped.store(true, Ordering::SeqCst);
         self.cancel_idle_timer();
         loop {
-            let wait_notify = {
+            let wait_target = {
                 let guard = self.state.lock().expect("browser state lock");
                 match &*guard {
-                    LaunchSlotState::Starting { notify, .. } => Some(notify.clone()),
+                    LaunchSlotState::Starting { notify, result, .. } => {
+                        Some((notify.clone(), result.clone()))
+                    }
                     _ => None,
                 }
             };
-            if let Some(notify) = wait_notify {
-                notify.notified().await;
+            if let Some((notify, result_slot)) = wait_target {
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if result_slot.lock().expect("result slot lock").is_some() {
+                    continue;
+                }
+                notified.await;
             } else {
                 break;
             }

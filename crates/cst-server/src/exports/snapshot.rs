@@ -246,7 +246,10 @@ pub fn build_export_snapshot_from_entries(
         if role == "assistant"
             && filtered_content.as_array().is_some_and(Vec::is_empty)
             && msg.get("errorMessage").is_none()
-            && msg.get("stopReason").and_then(Value::as_str) != Some("aborted")
+            && !matches!(
+                msg.get("stopReason").and_then(Value::as_str),
+                Some("aborted" | "error")
+            )
         {
             continue;
         }
@@ -259,6 +262,9 @@ pub fn build_export_snapshot_from_entries(
             msg.get("timestamp").cloned().unwrap_or(Value::Null),
         );
         if role == "assistant" {
+            if let Some(prov) = msg.get("provider") {
+                msg_obj.insert("provider".to_owned(), prov.clone());
+            }
             if let Some(sr) = msg.get("stopReason") {
                 msg_obj.insert("stopReason".to_owned(), sr.clone());
             }

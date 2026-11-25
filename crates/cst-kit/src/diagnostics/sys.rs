@@ -59,7 +59,7 @@ pub fn run_with(
             let second = source.processes(control).map_err(|e| e.to_string())?;
             let elapsed = started.elapsed().as_secs_f64();
             Ok(
-                json!({"proc": process_result(&first,&second,elapsed,std::thread::available_parallelism().map_or(1,usize::from),input.top.unwrap_or(10).clamp(1,50))}),
+                json!({"proc": process_result(&first,&second,elapsed,std::thread::available_parallelism().map_or(1,usize::from),top)}),
             )
         }
     }
@@ -76,7 +76,7 @@ pub fn process_result(
     let rows:Vec<Value>=second.iter().filter_map(|p| {
         let previous=first.get(&(p.pid,p.created))?;
         let delta=p.cpu_100ns.checked_sub(previous.cpu_100ns)?;
-        Some(json!({"name":p.name,"pid":p.pid,"wsMB":p.working_set.map(|v|rounded(v as f64/1048576.0,0)),"cpuPct":rounded(100.0*delta as f64/10_000_000.0/interval/cores.max(1) as f64,1),"path":p.path}))
+        Some(json!({"name":p.name,"pid":p.pid,"wsMB":p.working_set.map(|v|rounded(v as f64/1048576.0,0)),"cpuPct":rounded(100.0*delta as f64/10_000_000.0/interval/cores.max(1) as f64,1).clamp(0.0,100.0),"path":p.path}))
     }).collect();
     let mut cpu = rows.clone();
     let mut mem = rows.clone();
@@ -167,13 +167,19 @@ fn overview(source: &dyn DiagnosticSource, control: &Control) -> Result<Value, S
         .iter()
         .map(|p| number(p, "NumberOfCores"))
         .try_fold(0.0, |sum, v| v.map(|n| sum + n));
+    let bios_label = ["Manufacturer", "SMBIOSBIOSVersion"]
+        .iter()
+        .filter_map(|key| bios[*key].as_str().map(str::trim))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut result = json!({
         "cpuTotalPct":cpu.iter().find(|r|r["Name"]=="_Total").and_then(|r|number(r,"PercentProcessorTime")),
         "logicalCores":number(&cs,"NumberOfLogicalProcessors"),
         "mem":{"totalMB":total.map(|v|rounded(v,0)),"freeMB":free.map(|v|rounded(v,0)),"usedMB":used.map(|v|rounded(v,0)),"usedPct":used.zip(total).filter(|(_,t)|*t>0.0).map(|(u,t)|rounded(u/t*100.0,1))},
         "pagefile":pages.iter().map(|r|super::win_native::selected(r,&[("name","Name"),("allocMB","AllocatedBaseSize"),("usedMB","CurrentUsage"),("peakMB","PeakUsage")])).collect::<Vec<_>>(),
         "pool":{"nonpagedMB":number(&pool,"PoolNonpagedBytes").map(|v|rounded(v/1048576.0,0)),"pagedMB":number(&pool,"PoolPagedBytes").map(|v|rounded(v/1048576.0,0))},
-        "machine":{"vendor":cs["Manufacturer"],"model":cs["Model"],"cpu":processors.first().and_then(|p|p["Name"].as_str()).map(|s|s.split_whitespace().collect::<Vec<_>>().join(" ")),"physicalCores":cores.filter(|v|*v>0.0),"bios":bios["Manufacturer"].as_str().zip(bios["SMBIOSBIOSVersion"].as_str()).map(|(a,b)|format!("{a} {b}")),"biosDate":bios["ReleaseDate"].as_str().and_then(parse_dmtf).map(|d|d.format("%Y-%m-%d").to_string())},
+        "machine":{"vendor":cs["Manufacturer"],"model":cs["Model"],"cpu":processors.first().and_then(|p|p["Name"].as_str()).map(|s|s.split_whitespace().collect::<Vec<_>>().join(" ")),"physicalCores":cores.filter(|v|*v>0.0),"bios":(!bios_label.is_empty()).then_some(bios_label),"biosDate":bios["ReleaseDate"].as_str().and_then(parse_dmtf).map(|d|d.format("%Y-%m-%d").to_string())},
         "uptime":uptime,"notice":"Windows 原生 WMI 快照。内存与内核池单位为 MiB；cpuTotalPct 为系统格式化计数器当前值。null 表示未采集到数据，部分失败见 collectionErrors。"
     });
     add_errors(&mut result, errors);

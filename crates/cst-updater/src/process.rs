@@ -17,7 +17,10 @@ impl UpdateHost for NativeHost {
         let expected_version = crate::layout::read_version(root)?;
         let expected_line = format!("cst-pilot {expected_version}");
         run_health_checks_in_shared_job(
-            &[root.join("cst-server.exe"), root.join("cst-pilot.exe")],
+            &[
+                root.join(crate::layout::SERVER_EXE_PATH),
+                root.join("cst-pilot.exe"),
+            ],
             &[OsString::from("--health-check")],
             &expected_line,
             Duration::from_secs(15),

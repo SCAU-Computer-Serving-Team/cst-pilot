@@ -154,11 +154,16 @@ impl Executor {
                 .as_ref()
                 .is_none_or(|d| v.drive.as_ref().is_some_and(|v| v.eq_ignore_ascii_case(d)))
         });
+        if result.volumes.is_empty() && !result.collection_errors.is_empty() {
+            let causes = serde_json::to_string(&result.collection_errors)
+                .map_err(|_| "BitLocker 状态编码失败。")?;
+            return Err(format!(
+                "BitLocker 查询失败。collectionErrors: {}",
+                redact(&causes)
+            ));
+        }
         if drive.is_some() && result.volumes.len() != 1 {
             return Err("指定盘符未找到唯一的可查询 BitLocker 卷。".into());
-        }
-        if result.volumes.is_empty() && !result.collection_errors.is_empty() {
-            return Err("BitLocker 查询失败，请检查 collectionErrors 或系统权限。".into());
         }
         if input.scope == Scope::Status {
             return finish(result, input.scope);

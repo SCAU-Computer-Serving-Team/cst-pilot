@@ -1,8 +1,10 @@
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
@@ -11,11 +13,111 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
+/// Hover-pausable countdown state for transient top banners (`toast` `2600ms` + `pauseOnHover`).
+#[derive(Debug, Clone)]
+pub struct BannerCountdownState {
+    generation: u64,
+    timer_epoch: u64,
+    remaining: Duration,
+    hovered: bool,
+    deadline: Option<Instant>,
+}
+
+impl Default for BannerCountdownState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BannerCountdownState {
+    pub fn new() -> Self {
+        Self {
+            generation: 0,
+            timer_epoch: 0,
+            remaining: Duration::ZERO,
+            hovered: false,
+            deadline: None,
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    pub fn remaining(&self) -> Duration {
+        self.remaining
+    }
+
+    /// A fresh banner has its own hover hitbox and full countdown.
+    pub fn start(&mut self, now: Instant) -> BannerDeadline {
+        self.generation = self.generation.wrapping_add(1);
+        self.remaining = motion::BANNER_AUTO_DISMISS;
+        self.hovered = false;
+        self.resume(now)
+    }
+
+    fn resume(&mut self, now: Instant) -> BannerDeadline {
+        let at = now + self.remaining;
+        self.deadline = Some(at);
+        self.timer_epoch = self.timer_epoch.wrapping_add(1);
+        BannerDeadline {
+            timer_epoch: self.timer_epoch,
+            at,
+        }
+    }
+
+    /// Call only for the currently displayed banner. A pause invalidates the
+    /// current deadline; a resume starts a new timer for the unspent time.
+    pub fn set_hovered(&mut self, hovered: bool, now: Instant) -> Option<BannerDeadline> {
+        if self.hovered == hovered || (self.deadline.is_none() && !self.hovered) {
+            return None;
+        }
+        self.hovered = hovered;
+        if hovered {
+            let deadline = self.deadline.take().expect("running banner has a deadline");
+            self.remaining = deadline.saturating_duration_since(now);
+            None
+        } else {
+            Some(self.resume(now))
+        }
+    }
+
+    pub fn expire(&mut self, deadline: BannerDeadline, now: Instant) -> bool {
+        if self.timer_epoch != deadline.timer_epoch
+            || self.deadline != Some(deadline.at)
+            || now < deadline.at
+        {
+            return false;
+        }
+        self.deadline = None;
+        self.remaining = Duration::ZERO;
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BannerDeadline {
+    timer_epoch: u64,
+    at: Instant,
+}
+
+impl BannerDeadline {
+    pub fn remaining_at(self, now: Instant) -> Duration {
+        self.at.saturating_duration_since(now)
+    }
+}
+
 /// `WebActive` takeover lock overlay (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `sYHwZ`, card `WO6NQ`, `384px` wide).
+#[allow(clippy::too_many_arguments)]
 pub fn render_web_active_lock_overlay(
+    scrim_progress: f32,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -29,11 +131,12 @@ pub fn render_web_active_lock_overlay(
 
     let scrim = render_frosted_surface(
         "web-active-scrim",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -47,7 +150,7 @@ pub fn render_web_active_lock_overlay(
 
     let card = render_frosted_surface(
         "web-active-card-wo6nq",
-        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -75,8 +178,8 @@ pub fn render_web_active_lock_overlay(
                     .gap(space::SM)
                     .child(
                         Icon::new(IconName::Globe)
-                            .size(px(18.0))
-                            .text_color(palette.accent_solid),
+                            .size(px(16.0))
+                            .text_color(palette.accent_ink),
                     )
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)
@@ -143,117 +246,175 @@ pub fn render_web_active_lock_overlay(
     scrim.child(
         div()
             .tab_stop(false)
-            .child(card)
+            .child(motion::animate_modal_enter(
+                "web-active-card-anim",
+                card,
+                palette.craft_stack_shadows(),
+            ))
             .focus_trap("web-active-focus-trap", trap_focus),
     )
 }
 
 /// Workspace top-center `40px` rectangular error bar (`X2gAh`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleAlert` `16px` `$status-danger` + single-line reason, `H2p2z` frosted glass).
+#[allow(clippy::too_many_arguments)]
 pub fn render_workspace_error_bar(
+    interactive: bool,
+    progress: f32,
     message: SharedString,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label = single_line_banner_label(&message);
+    let card = render_frosted_surface(
+        if interactive {
+            "workspace-top-error-bar"
+        } else {
+            "workspace-top-error-bar-exit"
+        },
+        FrostedGlassSpec::popover(palette).with_opacity(progress),
+        palette.bg_elevated,
+        transparency_enabled,
+        scale_factor,
+    )
+    .opacity(0.01 + 0.99 * progress)
+    .mt(px(-8.0 * (1.0 - progress)))
+    .shadow(motion::scale_shadows(
+        palette.craft_stack_shadows(),
+        progress.powi(3),
+    ))
+    .h(height::FIELD)
+    .max_w(px(640.0))
+    .px(space::LG)
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_hairline)
+    .flex()
+    .items_center()
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::MD)
+            .min_w_0()
+            .child(
+                Icon::new(IconName::CircleAlert)
+                    .size(px(16.0))
+                    .text_color(palette.status_danger),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_primary)
+                    .min_w_0()
+                    .truncate()
+                    .child(cjk_inline_label(label)),
+            ),
+    )
+    .map(|el| {
+        if interactive {
+            el.test_support()
+                .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
+                .on_hover(on_hover)
+                .into_any_element()
+        } else {
+            el.into_any_element()
+        }
+    });
     div()
         .absolute()
-        .top(px(20.0))
+        .top(space::LG)
         .left_0()
         .right_0()
         .flex()
         .justify_center()
-        .child(
-            render_frosted_surface(
-                "workspace-top-error-bar",
-                FrostedGlassSpec::popover_h2p2z(palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
-            .h(height::FIELD)
-            .max_w(px(640.0))
-            .px(space::LG)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .min_w_0()
-                    .child(
-                        Icon::new(IconName::CircleAlert)
-                            .size(px(16.0))
-                            .text_color(palette.status_danger),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_primary)
-                            .truncate()
-                            .child(cjk_inline_label(message)),
-                    ),
-            ),
-        )
+        .child(card)
 }
 
 /// Non-blocking top notice banner (`h1BufF`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
+#[allow(clippy::too_many_arguments)]
 pub fn render_top_notice_banner(
+    interactive: bool,
+    progress: f32,
     message: SharedString,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label = single_line_banner_label(&message);
+    let card = render_frosted_surface(
+        if interactive {
+            "top-notice-banner"
+        } else {
+            "top-notice-banner-exit"
+        },
+        FrostedGlassSpec::popover(palette).with_opacity(progress),
+        palette.bg_elevated,
+        transparency_enabled,
+        scale_factor,
+    )
+    .opacity(0.01 + 0.99 * progress)
+    .mt(px(-8.0 * (1.0 - progress)))
+    .shadow(motion::scale_shadows(
+        palette.craft_stack_shadows(),
+        progress.powi(3),
+    ))
+    .h(height::FIELD)
+    .max_w(px(480.0))
+    .px(space::LG)
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_hairline)
+    .flex()
+    .items_center()
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::MD)
+            .min_w_0()
+            .child(
+                Icon::new(IconName::CircleCheck)
+                    .size(px(16.0))
+                    .text_color(palette.status_success),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_primary)
+                    .min_w_0()
+                    .truncate()
+                    .child(cjk_inline_label(label)),
+            ),
+    )
+    .map(|el| {
+        if interactive {
+            el.test_support()
+                .a11y_status("top-notice-banner", format!("提示：{message}"))
+                .on_hover(on_hover)
+                .into_any_element()
+        } else {
+            el.into_any_element()
+        }
+    });
     div()
         .absolute()
-        .top(px(20.0))
+        .top(space::LG)
         .left_0()
         .right_0()
         .flex()
         .justify_center()
-        .child(
-            render_frosted_surface(
-                "top-notice-banner",
-                FrostedGlassSpec::popover_h2p2z(palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_status("top-notice-banner", format!("提示：{message}"))
-            .h(height::FIELD)
-            .max_w(px(480.0))
-            .px(space::LG)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(space::MD)
-                    .min_w_0()
-                    .child(
-                        Icon::new(IconName::CircleCheck)
-                            .size(px(16.0))
-                            .text_color(palette.status_success),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_primary)
-                            .truncate()
-                            .child(cjk_inline_label(message)),
-                    ),
-            ),
-        )
+        .child(card)
+}
+
+fn single_line_banner_label(message: &SharedString) -> SharedString {
+    if message.contains(['\r', '\n']) {
+        message.replace(['\r', '\n'], " ").into()
+    } else {
+        message.clone()
+    }
 }

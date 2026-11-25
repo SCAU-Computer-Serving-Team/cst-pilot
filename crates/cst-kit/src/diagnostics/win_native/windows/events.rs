@@ -1,7 +1,7 @@
-use super::{Control, EventQuery, EventRead, EventVisitor, NativeError, stopped, wide};
+use super::{Control, EventQuery, EventRead, LazyEventVisitor, NativeError, stopped, wide};
 use crate::diagnostics::win_native::EventRecord;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_ITEMS};
 use windows::Win32::System::EventLog::*;
 use windows::core::PCWSTR;
@@ -116,15 +116,39 @@ fn message(metadata: EVT_HANDLE, event: EVT_HANDLE) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
+type Publishers = Rc<RefCell<HashMap<String, Option<EventHandle>>>>;
+struct PendingMessage {
+    // EvtClose on a query closes its child handles. Drop the event first.
+    event: EventHandle,
+    _query: Rc<EventHandle>,
+    publishers: Publishers,
+    provider: String,
+}
+impl PendingMessage {
+    fn format(self) -> Option<String> {
+        let mut publishers = self.publishers.borrow_mut();
+        if publishers.len() >= 128 && !publishers.contains_key(&self.provider) {
+            publishers.clear();
+        }
+        let publisher = publishers.entry(self.provider.clone()).or_insert_with(|| {
+            let name = wide(&self.provider);
+            unsafe { EvtOpenPublisherMetadata(None, PCWSTR(name.as_ptr()), PCWSTR::null(), 0, 0) }
+                .ok()
+                .map(EventHandle)
+        });
+        publisher.as_ref().and_then(|p| message(p.0, self.event.0))
+    }
+}
+
 pub fn query(
     query: &EventQuery,
-    visitor: &mut EventVisitor<'_>,
+    visitor: &mut LazyEventVisitor<'_>,
     control: &Control,
 ) -> Result<EventRead, NativeError> {
     stopped("EventLog", control)?;
     let log = wide(&query.log);
     let xpath = wide(&query.xpath);
-    let result = EventHandle(
+    let result = Rc::new(EventHandle(
         unsafe {
             EvtQuery(
                 None,
@@ -134,8 +158,8 @@ pub fn query(
             )
         }
         .map_err(|e| error(&query.log, e))?,
-    );
-    let mut publishers: HashMap<String, Option<EventHandle>> = HashMap::new();
+    ));
+    let publishers = Publishers::default();
     let mut read = EventRead::default();
     let mut scanned = 0;
     loop {
@@ -146,6 +170,7 @@ pub fn query(
         match unsafe { EvtNext(result.0, &mut raw[..capacity], 1000, 0, &mut returned) } {
             Ok(()) => {}
             Err(e) if is_code(&e, ERROR_NO_MORE_ITEMS.0) => break,
+            Err(e) if is_code(&e, windows::Win32::Foundation::ERROR_TIMEOUT.0) => continue,
             Err(e) => return Err(error(&query.log, e)),
         }
         let handles: Vec<_> = raw[..returned as usize]
@@ -162,32 +187,25 @@ pub fn query(
                     continue;
                 }
             };
-            let publisher = publishers
-                .entry(xml.provider.name.clone())
-                .or_insert_with(|| {
-                    let name = wide(&xml.provider.name);
-                    unsafe {
-                        EvtOpenPublisherMetadata(None, PCWSTR(name.as_ptr()), PCWSTR::null(), 0, 0)
-                    }
-                    .ok()
-                    .map(EventHandle)
-                });
-            let msg = publisher
-                .as_ref()
-                .and_then(|publisher| message(publisher.0, event.0));
-            if msg.is_none() {
-                read.unreadable += 1;
-            }
-            visitor(EventRecord {
-                log: xml.channel,
-                time: xml.time.time,
-                record_id: xml.record_id,
-                level: xml.level,
-                provider: xml.provider.name,
-                id: xml.id,
-                machine: xml.computer,
-                message: msg,
-            })
+            let pending = PendingMessage {
+                event,
+                _query: result.clone(),
+                publishers: publishers.clone(),
+                provider: xml.provider.name.clone(),
+            };
+            visitor(
+                EventRecord {
+                    log: xml.channel,
+                    time: xml.time.time,
+                    record_id: xml.record_id,
+                    level: xml.level,
+                    provider: xml.provider.name,
+                    id: xml.id,
+                    machine: xml.computer,
+                    message: None,
+                },
+                Box::new(move || pending.format()),
+            )
             .map_err(|message| NativeError {
                 source: "EventLog".into(),
                 code: None,

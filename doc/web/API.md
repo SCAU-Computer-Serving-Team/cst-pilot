@@ -61,9 +61,10 @@
 | `POST` | `/api/sessions/<id>/exports/preview` | `200`。返回筛选与脱敏后的当前分支快照，不落盘 |
 | `POST` | `/api/sessions/<id>/exports` | `202`。固定快照并入队创建后台导出任务，须携带 `Idempotency-Key` |
 | `GET` | `/api/sessions/<id>/exports` | 最近 50 条导出记录，按快照时间倒序 |
+| `GET` | `/api/exports/recent?limit=<n>` | 跨会话近期已完成导出记录（默认 20 条，上限 50 条），按快照时间倒序，供桌面端 `Ctrl+O` 快速打开使用 |
 | `GET` | `/api/exports/<exportId>` | 查询任务状态（`queued / rendering / completed / failed`）、选项、目录、文件列表或错误 |
 | `GET` | `/api/exports/<exportId>/files/<index>` | 按下标读取已登记文件并核验 SHA-256。文件被修改返回 `409 export_file_changed`，缺失返回 `404 export_file_missing` |
-| `POST` | `/api/exports/<exportId>/open` | 正文 `{}`（须带 `Idempotency-Key`）。由已完成记录推导并校验真实目录后启动本机资源管理器，返回 `{ launched: true }` |
+| `POST` | `/api/exports/<exportId>/open` | 正文 `{}`（须带 `Idempotency-Key`）。由已完成记录推导并校验真实目录与目标文件后启动本机资源管理器（存在已登记文件时通过 `explorer.exe /select` 高亮选中首个导出文件），返回 `{ launched: true }` |
 
 请求参数与资源上限：
 
@@ -86,11 +87,11 @@ CSTOA 远端网关协议见 [../auth/API.md](../auth/API.md)。本机模型与�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/models` | 返回可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围及可选 `sessionId` 的当前模型与支持思考档位 `thinkingLevels` |
+| `GET` | `/api/models` | 返回可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围及可选 `sessionId` 的当前模型与支持思考档位 `thinkingLevels`。显式范围的 `scopeRules` 按保存顺序返回原表达式 `pattern` 和匹配项 `matches: { id, pattern }[]`；默认范围返回 `null` |
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置服务商目录，返回 `{ aborted, failedProviders }` |
 | `POST` | `/api/models/select` | 切换指定 `sessionId` 的模型（未传 `sessionId` 时仅返回所选描述，不修改默认值） |
 | `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存三端共用的新会话默认模型 |
-| `POST` | `/api/models/scoped` | 正文 `{ patterns: string[], empty?: boolean }`，保存启用模型范围并同步更新内存中已加载会话的范围视图 |
+| `POST` | `/api/models/scoped` | 正文 `{ patterns: string[], empty?: boolean, preserveExplicit?: boolean }`，保存启用模型范围并同步到已加载会话。`preserveExplicit: true` 保留非空显式规则，即使结果与默认范围及顺序完全一致 |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 修改思考强度档位 |
 | `GET` | `/api/auth` | 返回全部服务商的配置状态、凭据类型、登录能力、`custom` 与 `requiresLogin` 标记 |
 | `GET` / `POST` / `DELETE` | `/api/auth/custom/<provider>`、`/api/auth/custom` | 读取（仅含 `apiKeySet` 与 `revision`）、保存或删除自定义兼容模型服务 |

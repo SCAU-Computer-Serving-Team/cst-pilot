@@ -4,9 +4,35 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{Image, ImageFormat};
 use image::{Rgba, RgbaImage};
-use qrcode::QrCode;
 use qrcode::types::Color as QrColor;
+use qrcode::{EcLevel, QrCode};
 use serde_json::Value;
+
+#[derive(Debug, Clone)]
+pub struct QrMatrix {
+    pub width: usize,
+    pub dark: Vec<bool>,
+}
+
+/// Pure-Rust in-memory QR matrix encoder (`qrcode` -> exact boolean module grid).
+/// Rendering modules directly via GPUI `canvas` avoids texture-atlas bilinear edge bleed
+/// and stays crisp across all Windows DPI scaling factors.
+pub fn encode_qr_matrix_offline(verification_uri_complete: &str) -> Result<Arc<QrMatrix>, String> {
+    let trimmed = verification_uri_complete.trim();
+    if trimmed.is_empty() {
+        return Err("授权链接为空，无法生成二维码。".into());
+    }
+
+    let code = QrCode::with_error_correction_level(trimmed.as_bytes(), EcLevel::M)
+        .map_err(|e| format!("二维码编码失败：{e}"))?;
+    let width = code.width();
+    let dark = code
+        .to_colors()
+        .into_iter()
+        .map(|c| c == QrColor::Dark)
+        .collect();
+    Ok(Arc::new(QrMatrix { width, dark }))
+}
 
 /// Pure-Rust in-memory QR code rasterizer (`qrcode` -> `RgbaImage` -> `gpui::Image`).
 /// Never transmits `verification_uri_complete` over any external network service.
@@ -16,9 +42,10 @@ pub fn rasterize_qr_image_offline(verification_uri_complete: &str) -> Result<Arc
         return Err("授权链接为空，无法生成二维码。".into());
     }
 
-    let code = QrCode::new(trimmed.as_bytes()).map_err(|e| format!("二维码编码失败：{e}"))?;
+    let code = QrCode::with_error_correction_level(trimmed.as_bytes(), EcLevel::M)
+        .map_err(|e| format!("二维码编码失败：{e}"))?;
     let width_modules = code.width();
-    let quiet_zone = 3usize;
+    let quiet_zone = 4usize;
     let total_modules = width_modules + quiet_zone * 2;
     let scale = (216usize / total_modules.max(1)).max(4);
     let img_px = (total_modules * scale) as u32;
@@ -48,7 +75,7 @@ pub fn rasterize_qr_image_offline(verification_uri_complete: &str) -> Result<Arc
     Ok(Arc::new(Image::from_bytes(ImageFormat::Png, png_bytes)))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ParsedDeviceQrPayload {
     pub flow_id: Option<String>,
     pub verification_uri_complete: String,
@@ -65,12 +92,15 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         .map(str::to_owned);
 
     let auth_obj = val.get("auth").or_else(|| val.get("device"));
+    let device_code = val.get("deviceCode");
     let uri = val
         .get("verificationUriComplete")
         .or_else(|| val.get("verification_uri_complete"))
         .or_else(|| val.get("url"))
         .or_else(|| auth_obj.and_then(|a| a.get("verificationUriComplete")))
         .or_else(|| auth_obj.and_then(|a| a.get("url")))
+        .or_else(|| device_code.and_then(|d| d.get("verificationUriComplete")))
+        .or_else(|| device_code.and_then(|d| d.get("verificationUri")))
         .and_then(Value::as_str)?
         .trim()
         .to_owned();
@@ -87,8 +117,9 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         .or_else(|| {
             val.get("expiresIn")
                 .or_else(|| auth_obj.and_then(|a| a.get("expiresIn")))
+                .or_else(|| device_code.and_then(|d| d.get("expiresInSeconds")))
                 .and_then(Value::as_u64)
-                .map(|secs| now + secs * 1000)
+                .map(|secs| now.saturating_add(secs.saturating_mul(1000)))
         })
         .unwrap_or(now + 300_000);
 
@@ -97,6 +128,18 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         verification_uri_complete: uri,
         expires_at_ms,
     })
+}
+
+pub fn extract_cstoa_oauth_error(val: &Value) -> Option<String> {
+    val.get("error")
+        .and_then(|err| {
+            err.as_str()
+                .or_else(|| err.get("message").and_then(Value::as_str))
+        })
+        .or_else(|| val.get("message").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 pub fn now_epoch_ms() -> u64 {

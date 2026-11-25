@@ -531,6 +531,8 @@ impl SessionInbox {
         self.closed.store(true, Ordering::SeqCst);
         loop {
             let notified = self.idle_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             let dispatching = self.coord.lock().expect("dispatch coord").dispatching;
             if !dispatching && self.in_flight_count.load(Ordering::SeqCst) == 0 {
                 break;

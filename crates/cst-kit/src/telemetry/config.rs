@@ -21,10 +21,20 @@ pub struct Config {
 impl Config {
     /// Disabled/missing/invalid configuration performs no environment or identity work.
     pub fn load(root: &Path) -> Result<Option<Self>, String> {
-        let storage = Storage::new(root)?;
-        let Some(bytes) = read(&storage, Path::new("agent/home/telemetry.json"), 64 * 1024)? else {
+        let layout = cst_os::KitLayout::new(root)?;
+        if !layout.config_dir().exists() {
+            return Ok(None);
+        }
+        let (data_storage, data_rel) = crate::kit::open_data_storage(&layout, false)?;
+        let Some(bytes) = read(
+            &data_storage,
+            &data_rel.join("config/telemetry.json"),
+            64 * 1024,
+        )?
+        else {
             return Ok(None);
         };
+        let app_storage = Storage::new(layout.root())?;
         let raw: Value = match serde_json::from_slice(&bytes) {
             Ok(Value::Object(object)) => Value::Object(object),
             _ => return Ok(None),
@@ -74,8 +84,8 @@ impl Config {
                     })
                     .filter(|_| endpoint.url.starts_with("https:"));
                 endpoint.ca = valid.and_then(|file| {
-                    let path = PathBuf::from("agent/home/extensions/telemetry").join(file);
-                    let bytes = read(&storage, &path, 128 * 1024).ok()??;
+                    let path = PathBuf::from("app/telemetry").join(file);
+                    let bytes = read(&app_storage, &path, 128 * 1024).ok()??;
                     reqwest::Certificate::from_pem(&bytes).ok()?;
                     String::from_utf8(bytes).ok()
                 });
@@ -87,8 +97,8 @@ impl Config {
             return Ok(None);
         }
         let currency = read(
-            &storage,
-            Path::new("agent/home/extensions/telemetry/currency.json"),
+            &app_storage,
+            Path::new("app/telemetry/currency.json"),
             64 * 1024,
         )
         .ok()

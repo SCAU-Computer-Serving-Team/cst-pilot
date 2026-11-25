@@ -1,6 +1,7 @@
-import { Button, Label, ListBox, Select } from "@heroui/react";
+import { Label, ListBox, Select } from "@heroui/react";
 import {
 	Bot,
+	Check,
 	ChevronDown,
 	ChevronsDownUp,
 	ChevronsUpDown,
@@ -16,12 +17,17 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { draftKey } from "../composer/drafts";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionTitle, useSessionTree } from "../data/web-state";
+import { focusableElements, resolveDialogTabTarget } from "../shell/dialog-focus";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { isNavigationKeyEvent, scrollRowIntoView } from "../shell/keyboard-navigation";
 import { Notification } from "../shell/notification";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
 import { branchSummaryHref } from "../tree/branch-summary";
 import {
 	applyFold,
@@ -38,6 +44,7 @@ import {
 	type TreeRow,
 	VIEW_FILTERS,
 	type ViewFilter,
+	visibleTreeCursor,
 } from "../tree/branch-tree";
 import { sampleTree } from "../tree/branch-tree-sample";
 
@@ -67,6 +74,10 @@ function RowPrefix({ row }: { row: TreeRow }) {
 
 export default function SessionTree() {
 	const { sessionId } = useParams();
+	return <SessionTreeView key={sessionId} sessionId={sessionId} />;
+}
+
+function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
@@ -82,14 +93,36 @@ export default function SessionTree() {
 	const [filter, setFilter] = useState<ViewFilter>(loadViewFilter);
 	// 视图过滤下拉弹层打开中：Esc 先关弹层，不退出树页。
 	const [filterOpen, setFilterOpen] = useState(false);
+	const filterTriggerRef = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(filterOpen, () => setFilterOpen(false), undefined, filterTriggerRef);
 	const [choice, setChoice] = useState("");
 	// 键盘光标在三个选项间的位置；对话框打开时重置。
 	const [choiceIndex, setChoiceIndex] = useState(0);
+	const choiceDialogRef = useRef<HTMLDivElement>(null);
+	const shell = useWorkspaceShell();
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		setChoice("");
+		setFilterOpen(false);
+	}, [shell?.appActive]);
 	const [toast, setToast] = useState("");
 	const [actionError, setActionError] = useState("");
-	// 键盘游标：null 表示跟随当前叶（leafIndex）。
-	const [cursor, setCursor] = useState<number | null>(null);
-	const rowRefs = useRef(new Map<string, HTMLElement>());
+	// 未指定条目时跟随当前叶。
+	const [cursorId, setCursorId] = useState<string | null>(null);
+	const [kbdActive, setKbdActive] = useState(false);
+	const clearKeyboard = useCallback(() => setKbdActive(false), []);
+	const kbdStyle = useKeyboardFocusStyle();
+	const listRef = useRef<HTMLUListElement>(null);
+	const rowRefs = useRef(new Map<string, HTMLLIElement>());
+	const mounted = useRef(false);
+	const initialLeafScrolled = useRef(false);
+	useLayoutEffect(() => {
+		mounted.current = true;
+		if (!preview) listRef.current?.focus({ preventScroll: true });
+		return () => {
+			mounted.current = false;
+		};
+	}, [preview]);
 	// 选中一行：当前叶位置不变时只给消息弹窗，否则打开选择对话框。
 	const selectRow = useCallback(
 		(id: string) => {
@@ -109,8 +142,9 @@ export default function SessionTree() {
 					body: { entryId },
 				});
 				if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
-				navigate(`/s/${sessionId}`, { viewTransition: true });
+				if (mounted.current) navigate(`/s/${sessionId}`, { viewTransition: true });
 			} catch (cause) {
+				if (!mounted.current) return;
 				setActionError(cause instanceof Error ? cause.message : "分支导航未完成");
 				await refresh();
 			}
@@ -131,28 +165,87 @@ export default function SessionTree() {
 	useEffect(() => {
 		if (choice) setChoiceIndex(0);
 	}, [choice]);
-	// 选择对话框的键盘操作：方向键移动光标，Enter 确认，Esc 关闭。
+	// 选择对话框打开时记录焦点并在关闭后归还；箭头键移动光标不重置焦点。
+	const choiceIndexRef = useRef(choiceIndex);
+	choiceIndexRef.current = choiceIndex;
+	const chooseRef = useRef(choose);
+	chooseRef.current = choose;
 	useEffect(() => {
 		if (!choice) return;
+		const previous = document.activeElement;
+		const list = listRef.current;
+		const frame = requestAnimationFrame(() => {
+			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
+		});
 		const onKey = (event: KeyboardEvent) => {
+			const dialog = choiceDialogRef.current;
+			if (
+				!dialog ||
+				dialog.closest("[inert]") ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229
+			)
+				return;
 			if (event.key === "Escape") {
+				event.preventDefault();
 				setChoice("");
 				return;
 			}
+			if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+				const items = focusableElements(dialog);
+				const active =
+					document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)
+						? document.activeElement
+						: null;
+				const target = resolveDialogTabTarget(items, active, event.shiftKey);
+				if (target) {
+					event.preventDefault();
+					if (target === "dialog") dialog.focus();
+					else target.focus();
+				}
+				return;
+			}
+			if (!isNavigationKeyEvent(event)) return;
 			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+				const options = [...dialog.querySelectorAll<HTMLButtonElement>(".summary-option")];
+				if (options.length === 0) return;
 				event.preventDefault();
-				setChoiceIndex((index) => (event.key === "ArrowUp" ? (index + 2) % 3 : (index + 1) % 3));
+				const active = document.activeElement;
+				const focused = active instanceof HTMLButtonElement ? options.indexOf(active) : -1;
+				const from = focused >= 0 ? focused : choiceIndexRef.current;
+				const step = event.key === "ArrowUp" ? -1 : 1;
+				const next = (from + step + options.length) % options.length;
+				setChoiceIndex(next);
+				options[next]?.focus({ preventScroll: true });
 				return;
 			}
 			if (event.key === "Enter") {
+				if (document.activeElement instanceof HTMLButtonElement && dialog.contains(document.activeElement)) {
+					return;
+				}
 				event.preventDefault();
-				const mode = (["none", "summarize", "custom"] as const)[choiceIndex];
-				void choose(mode);
+				const mode = (["none", "summarize", "custom"] as const)[choiceIndexRef.current];
+				void chooseRef.current(mode);
 			}
 		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [choice, choiceIndex, choose]);
+		window.addEventListener("keydown", onKey, true);
+		return () => {
+			cancelAnimationFrame(frame);
+			window.removeEventListener("keydown", onKey, true);
+			if (document.querySelector(".standby-scrim")) return;
+			if (
+				previous instanceof HTMLElement &&
+				previous !== document.body &&
+				previous.isConnected &&
+				!previous.closest("[inert]")
+			) {
+				previous.focus({ preventScroll: true });
+			} else if (list?.isConnected && !list.closest("[inert]")) {
+				list.focus({ preventScroll: true });
+			}
+		};
+	}, [choice]);
 	const toolCalls = useMemo(() => collectToolCalls(tree ?? []), [tree]);
 	const allRows = useMemo(
 		() => layoutTree(buildVisibleTree(tree ?? [], leafId, filter), leafId),
@@ -169,62 +262,149 @@ export default function SessionTree() {
 		return allRows.filter((row) => matchesSearch(row.node, rowTexts.get(row.node.entry.id)!, query));
 	}, [allRows, foldResult, query, rowTexts]);
 	const leafIndex = useMemo(() => rows.findIndex((row) => row.node.entry.id === leafId), [rows, leafId]);
-	const cursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
-
-	// 方向键移动游标，Enter 选中行；输入框、下拉与选择对话框打开时不接管。
-	// Ctrl+O 循环切换视图过滤（Shift 反向），与 TUI 一致；换档时清空折叠集合。
-	const cycleFilter = useCallback(
-		(step: number) => {
-			const index = VIEW_FILTERS.findIndex((item) => item.id === filter);
-			const next = VIEW_FILTERS[(index + step + VIEW_FILTERS.length) % VIEW_FILTERS.length];
-			setFilter(next.id);
-			saveViewFilter(next.id);
-			setFolded(new Set());
-		},
-		[filter],
+	const resolvedCursor = visibleTreeCursor(allRows, rows, cursorId ?? leafId);
+	const cursorIndex = resolvedCursor >= 0 ? resolvedCursor : leafIndex >= 0 ? leafIndex : rows.length - 1;
+	const overlayBlocked = !!choice || filterOpen || !!shell?.appActive || !!shell?.overlay;
+	const targetId = kbdActive && !overlayBlocked ? (rows[cursorIndex]?.node.entry.id ?? null) : null;
+	usePointerMutex(targetId !== null, clearKeyboard);
+	const [narrowViewport, setNarrowViewport] = useState(
+		() =>
+			typeof window !== "undefined" &&
+			typeof window.matchMedia === "function" &&
+			window.matchMedia("(max-width: 960px)").matches,
 	);
 	useEffect(() => {
-		if (preview) return;
+		if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+		const mq = window.matchMedia("(max-width: 960px)");
+		const sync = () => setNarrowViewport(mq.matches);
+		sync();
+		mq.addEventListener("change", sync);
+		return () => mq.removeEventListener("change", sync);
+	}, []);
+
+	const moveTo = useCallback((row: TreeRow) => {
+		listRef.current?.focus({ preventScroll: true });
+		setCursorId(row.node.entry.id);
+		setKbdActive(true);
+	}, []);
+
+	// Esc 返回会话；方向键、Home/End 与 Enter 收敛在树列表内部，避免拦截按钮、弹层或待机层。
+	useEffect(() => {
+		if (preview || overlayBlocked) return;
 		const onKey = (event: KeyboardEvent) => {
-			if (choice) return;
-			const target = event.target as HTMLElement | null;
-			if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-			// 行自身聚焦时 Enter 由行的按键处理，避免同一按键选中两次。
-			if (target?.classList.contains("tree-row")) return;
-			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-				event.preventDefault();
-				setCursor((value) => {
-					const base = value ?? leafIndex;
-					const next = event.key === "ArrowUp" ? Math.max(0, base - 1) : Math.min(rows.length - 1, base + 1);
-					return rows.length ? next : null;
-				});
+			if (
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				document.querySelector(
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"]',
+				)
+			) {
 				return;
 			}
-			if (event.key === "Enter" && cursorIndex >= 0 && cursorIndex < rows.length) {
-				event.preventDefault();
-				selectRow(rows[cursorIndex].node.entry.id);
-				return;
-			}
+			const target = event.target;
+			const list = listRef.current;
+			if (!(target instanceof HTMLElement) || !list) return;
+			if (target.isContentEditable || target.matches("input, textarea, select")) return;
 			if (event.key === "Escape") {
-				if (filterOpen) return;
 				event.preventDefault();
 				navigate(`/s/${sessionId}`, { viewTransition: true });
 				return;
 			}
-			if (event.key.toLowerCase() === "o" && event.ctrlKey && !event.altKey && !event.metaKey) {
-				event.preventDefault();
-				cycleFilter(event.shiftKey ? -1 : 1);
+			const row = rows[cursorIndex];
+			const fromList =
+				target === document.body || target === list || (list.contains(target) && target.matches(".tree-row"));
+			if (!fromList || !row || !isNavigationKeyEvent(event)) return;
+			const id = row.node.entry.id;
+			switch (event.key) {
+				case "ArrowUp":
+				case "ArrowDown": {
+					if (!kbdActive) {
+						const initial = cursorId === null && leafIndex < 0 ? 0 : cursorIndex;
+						moveTo(rows[Math.max(0, Math.min(rows.length - 1, initial))]);
+						break;
+					}
+					const step = event.key === "ArrowUp" ? -1 : 1;
+					moveTo(rows[Math.max(0, Math.min(rows.length - 1, cursorIndex + step))]);
+					break;
+				}
+				case "Home":
+					moveTo(rows[0]);
+					break;
+				case "End":
+					moveTo(rows[rows.length - 1]);
+					break;
+				case "ArrowLeft": {
+					if (query.trim()) return;
+					if (foldable(row) && !folded.has(id)) {
+						moveTo(row);
+						setFolded((current) => new Set(current).add(id));
+					} else {
+						const parent = allRows[row.parentIndex];
+						const index = visibleTreeCursor(allRows, rows, parent?.node.entry.id ?? null);
+						moveTo(rows[index] ?? row);
+					}
+					break;
+				}
+				case "ArrowRight": {
+					if (query.trim()) return;
+					if (folded.has(id) && foldable(row)) {
+						moveTo(row);
+						setFolded((current) => {
+							const next = new Set(current);
+							next.delete(id);
+							return next;
+						});
+					} else {
+						const child = rows[cursorIndex + 1];
+						moveTo(child?.parentIndex === row.index ? child : row);
+					}
+					break;
+				}
+				case "Enter":
+					if (event.repeat) return;
+					moveTo(row);
+					selectRow(id);
+					break;
+				default:
+					return;
 			}
+			event.preventDefault();
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [preview, choice, rows, leafIndex, cursorIndex, selectRow, cycleFilter, filterOpen, navigate, sessionId]);
+	}, [
+		preview,
+		overlayBlocked,
+		rows,
+		allRows,
+		folded,
+		query,
+		leafIndex,
+		cursorId,
+		cursorIndex,
+		kbdActive,
+		moveTo,
+		selectRow,
+		navigate,
+		sessionId,
+	]);
 
-	// 游标行滚动到可见区域。
-	useEffect(() => {
-		if (cursorIndex < 0 || cursorIndex >= rows.length) return;
-		rowRefs.current.get(rows[cursorIndex].node.entry.id)?.scrollIntoView({ block: "nearest" });
-	}, [cursorIndex, rows]);
+	useLayoutEffect(() => {
+		const list = listRef.current;
+		if (!list) return;
+		if (cursorIndex >= 0 && targetId) {
+			const row = rowRefs.current.get(targetId);
+			if (row) scrollRowIntoView(list, row);
+			initialLeafScrolled.current = true;
+		} else if (!initialLeafScrolled.current && leafId && leafIndex >= 0) {
+			const leaf = rowRefs.current.get(leafId);
+			if (leaf) {
+				scrollRowIntoView(list, leaf);
+				initialLeafScrolled.current = true;
+			}
+		}
+	}, [targetId, cursorIndex, leafId, leafIndex]);
 
 	function toggleFold(row: TreeRow) {
 		const id = row.node.entry.id;
@@ -240,21 +420,21 @@ export default function SessionTree() {
 	return (
 		<main className="chat-main tree-main">
 			<header className="chat-header">
-				<HardDrive size={22} />
+				<SidebarHeaderToggle />
+				<HardDrive size={16} aria-hidden="true" />
 				<h1>
 					{title}
 					<span className="tree-suffix">· 分支树</span>
 				</h1>
 				{preview && <span className="preview-tag">设计预览 · 示例数据</span>}
-				<Button
-					variant="ghost"
-					isIconOnly
-					className="tree-close"
+				<button
+					type="button"
+					className="btn-icon sm-28 tree-close"
 					aria-label="关闭分支树，返回会话"
-					onPress={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`, { viewTransition: true })}
+					onClick={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`, { viewTransition: true })}
 				>
-					<X size={18} />
-				</Button>
+					<X size={16} aria-hidden="true" />
+				</button>
 			</header>
 			{(error || actionError) && (
 				<div className="connection-banner" role="alert">
@@ -269,12 +449,28 @@ export default function SessionTree() {
 						placeholder="搜索条目"
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+							if (event.key === "Escape" && query) {
+								event.preventDefault();
+								event.stopPropagation();
+								setQuery("");
+								return;
+							}
+							if (preview || !isNavigationKeyEvent(event.nativeEvent)) return;
+							if ((event.key === "ArrowDown" || event.key === "Enter") && rows[0]) {
+								event.preventDefault();
+								event.stopPropagation();
+								moveTo(rows[0]);
+							}
+						}}
 					/>
 				</div>
 				<Select
 					aria-label="视图过滤"
 					className="tree-filter"
 					selectedKey={filter}
+					isOpen={filterOpen}
 					onOpenChange={setFilterOpen}
 					onSelectionChange={(key) => {
 						setFilter(key as ViewFilter);
@@ -283,38 +479,63 @@ export default function SessionTree() {
 					}}
 				>
 					<Label className="visually-hidden">视图过滤</Label>
-					<Select.Trigger className="tree-filter-trigger">
+					<Select.Trigger ref={filterTriggerRef} className="tree-filter-trigger">
 						<span>{VIEW_FILTERS.find((item) => item.id === filter)?.label}</span>
-						<ChevronDown size={14} />
+						<ChevronDown size={14} aria-hidden="true" />
 					</Select.Trigger>
-					<Select.Popover>
-						<ListBox>
+					<Select.Popover
+						className="tier-2-glass tier-2-menu tree-filter-popover"
+						placement="bottom start"
+						offset={6}
+					>
+						<ListBox className="tier-2-menu-list">
 							{VIEW_FILTERS.map((item) => (
-								<ListBox.Item key={item.id} id={item.id} textValue={item.label}>
-									{item.label}
+								<ListBox.Item
+									key={item.id}
+									id={item.id}
+									textValue={item.label}
+									className="menu-row tree-filter-option"
+								>
+									<span>{item.label}</span>
+									{filter === item.id && <Check size={14} className="tree-filter-check" aria-hidden="true" />}
 								</ListBox.Item>
 							))}
 						</ListBox>
 					</Select.Popover>
 				</Select>
 				<span className="tree-toolbar-spacer" />
-				<Button variant="ghost" className="tree-toolbar-button" onPress={() => setFolded(new Set())}>
+				<button
+					type="button"
+					className="btn-ghost tree-toolbar-button"
+					title="全部展开"
+					onClick={() => setFolded(new Set())}
+				>
 					<ChevronsUpDown size={16} aria-hidden="true" />
 					全部展开
-				</Button>
-				<Button
-					variant="ghost"
-					className="tree-toolbar-button"
-					onPress={() => setFolded(new Set(foldableRows.map((row) => row.node.entry.id)))}
+				</button>
+				<button
+					type="button"
+					className="btn-ghost tree-toolbar-button"
+					title="全部折叠"
+					onClick={() => setFolded(new Set(foldableRows.map((row) => row.node.entry.id)))}
 				>
 					<ChevronsDownUp size={16} aria-hidden="true" />
 					全部折叠
-				</Button>
+				</button>
 				<span className="tree-counter">
 					{leafIndex >= 0 ? leafIndex + 1 : "–"} / {rows.length} 条
 				</span>
 			</div>
-			<ul className="tree-list" aria-label="分支树条目">
+			<ul
+				className="tree-list kbd-focus-scope"
+				ref={listRef}
+				tabIndex={-1}
+				aria-label="分支树条目"
+				data-kbd-active={targetId !== null || undefined}
+				onBlur={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget) && !overlayBlocked) clearKeyboard();
+				}}
+			>
 				{tree === undefined ? (
 					<li className="tree-empty">正在读取分支树…</li>
 				) : rows.length === 0 ? (
@@ -332,14 +553,33 @@ export default function SessionTree() {
 									if (el) rowRefs.current.set(id, el);
 									else rowRefs.current.delete(id);
 								}}
-								// biome-ignore lint/a11y/noNoninteractiveTabindex: 行要能 Tab 聚焦并用 Enter 选择；分支树的键盘跳段落地后改为 roving tabindex
-								tabIndex={0}
-								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""} ${
-									index === cursorIndex ? "tree-row-cursor" : ""
-								}`}
-								onClick={() => selectRow(id)}
+								tabIndex={index === cursorIndex ? 0 : -1}
+								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""}`}
+								onFocus={(event) => {
+									if (event.target !== event.currentTarget) {
+										clearKeyboard();
+										return;
+									}
+									setCursorId(id);
+									setKbdActive(event.currentTarget.matches(":focus-visible"));
+								}}
+								onClick={() => {
+									clearKeyboard();
+									setCursorId(id);
+									selectRow(id);
+								}}
 								onKeyDown={(event) => {
-									if (event.key === "Enter" && event.target === event.currentTarget) selectRow(id);
+									if (
+										event.target !== event.currentTarget ||
+										event.key !== "Enter" ||
+										event.repeat ||
+										!isNavigationKeyEvent(event.nativeEvent) ||
+										preview ||
+										overlayBlocked
+									)
+										return;
+									event.preventDefault();
+									selectRow(id);
 								}}
 							>
 								<RowPrefix row={row} />
@@ -362,7 +602,6 @@ export default function SessionTree() {
 											event.stopPropagation();
 											toggleFold(row);
 										}}
-										onKeyDown={(event) => event.stopPropagation()}
 									>
 										{isFolded ? (
 											<>
@@ -381,11 +620,22 @@ export default function SessionTree() {
 						);
 					})
 				)}
+				<KbdFocusOverlay
+					containerRef={listRef}
+					itemRefs={rowRefs}
+					targetId={targetId}
+					as="li"
+					style={kbdStyle}
+					insetX={narrowViewport ? 12 : 20}
+					insetY={1}
+				/>
 			</ul>
 			{!!choice && (
-				<div className="summary-scrim" role="none" onMouseDown={() => setChoice("")}>
+				<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
 					<div
-						className="summary-dialog"
+						ref={choiceDialogRef}
+						tabIndex={-1}
+						className="summary-dialog tier-3-dialog"
 						role="dialog"
 						aria-modal="true"
 						aria-label="选择"
@@ -393,9 +643,9 @@ export default function SessionTree() {
 					>
 						<div className="summary-dialog-head">
 							<h2>选择</h2>
-							<Button variant="ghost" isIconOnly aria-label="关闭" onPress={() => setChoice("")}>
-								<X size={18} />
-							</Button>
+							<button type="button" className="btn-icon sm-28" aria-label="关闭" onClick={() => setChoice("")}>
+								<X size={16} aria-hidden="true" />
+							</button>
 						</div>
 						<div className="summary-dialog-options">
 							{[
@@ -406,11 +656,12 @@ export default function SessionTree() {
 								<button
 									type="button"
 									key={option.mode}
-									className={`summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									onFocus={() => setChoiceIndex(index)}
 									onMouseEnter={() => setChoiceIndex(index)}
 									onClick={() => void choose(option.mode)}
 								>
-									<option.icon size={18} aria-hidden="true" />
+									<option.icon size={16} aria-hidden="true" />
 									<span>{option.label}</span>
 								</button>
 							))}
@@ -426,15 +677,15 @@ export default function SessionTree() {
 					duration={2600}
 					onDismiss={() => setToast("")}
 				>
-					<Info size={18} aria-hidden="true" />
-					<span>{toast}</span>
+					<Info size={16} aria-hidden="true" />
+					<span className="notification-message">{toast}</span>
 					<button
 						type="button"
-						className="notification-close"
+						className="btn-icon xs-24 notification-close"
 						aria-label="关闭消息提示"
 						onClick={() => setToast("")}
 					>
-						<X size={18} aria-hidden="true" />
+						<X size={14} aria-hidden="true" />
 					</button>
 				</Notification>
 			)}

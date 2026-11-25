@@ -329,7 +329,9 @@ pub async fn classify(
 
         let auth_header = format!("Bearer {api_key}");
         let headers = build_header_map(
+            (&model.provider, &model.base_url),
             options.and_then(|o| o.identity.as_ref()),
+            None,
             &[
                 ("authorization", &auth_header),
                 ("content-type", "application/json"),

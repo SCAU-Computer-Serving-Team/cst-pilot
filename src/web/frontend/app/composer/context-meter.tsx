@@ -1,34 +1,67 @@
-import { ChevronRight, Info, Menu } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { ChevronRight, Info } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { formatQuotaBalance, quotaProviders } from "./quota-format";
 import { useProviderQuota } from "./use-quota";
 
 type ContextUsage = { tokens: number | null; contextWindow: number; percent: number | null } | null;
 const windowNames = { rolling: "5 小时", weekly: "本周", monthly: "本月" } as const;
+const RING_CIRCUMFERENCE = 2 * Math.PI * 5.5;
+
+function quotaSourceLabel(provider: string) {
+	if (provider === "cstoa") return "CSTOA 托管";
+	if (provider === "deepseek") return "DeepSeek 账户";
+	if (provider === "opencode-go") return "OpenCode Go";
+	return provider;
+}
 
 export function ContextMeter({
 	usage,
 	cacheHitRate,
 	provider,
+	onOpen,
 }: {
 	usage: ContextUsage;
 	cacheHitRate: number | null;
 	provider: string;
+	onOpen?: () => void;
 }) {
-	const percent = usage?.percent ?? 0;
+	const percent = Math.max(0, Math.min(100, usage?.percent ?? 0));
+	const ringOffset = RING_CIRCUMFERENCE * (1 - percent / 100);
 	const panelId = useId();
+	const wrap = useRef<HTMLFieldSetElement>(null);
 	const panel = useRef<HTMLElement>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
+	const pointerActivating = useRef(false);
+	const shell = useWorkspaceShell();
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
+	const [pinned, setPinned] = useState(false);
 	const [dismissed, setDismissed] = useState(false);
-	const open = (hovered || focused) && !dismissed;
-	usePanelDismiss(open, () => {
-		if (panel.current?.contains(document.activeElement)) trigger.current?.focus();
-		setDismissed(true);
-	});
+	const open = (pinned || hovered || focused) && !dismissed && !shell?.appActive;
+	useEffect(() => {
+		if (open) onOpen?.();
+	}, [open, onOpen]);
+	useEffect(() => {
+		if (shell?.appActive) {
+			setPinned(false);
+			setHovered(false);
+			setFocused(false);
+			setDismissed(true);
+		}
+	}, [shell?.appActive]);
+	usePanelDismiss(
+		open,
+		() => {
+			if (panel.current?.contains(document.activeElement)) trigger.current?.focus();
+			setPinned(false);
+			setDismissed(true);
+		},
+		wrap,
+		trigger,
+	);
 	const { quota: current, loading, retry } = useProviderQuota(provider, open);
 	const showQuota = quotaProviders.has(provider);
 	const balance = formatQuotaBalance(current);
@@ -55,48 +88,98 @@ export function ContextMeter({
 
 	return (
 		<fieldset
+			ref={wrap}
 			className="context-meter-wrap"
 			aria-label="上下文"
 			data-open={open}
-			onMouseEnter={() => {
+			onPointerEnter={(event) => {
+				if (event.pointerType !== "mouse") return;
 				setHovered(true);
 				setDismissed(false);
 			}}
-			onMouseLeave={() => setHovered(false)}
-			onFocusCapture={() => {
-				setFocused(true);
-				setDismissed(false);
+			onPointerLeave={(event) => {
+				if (event.pointerType !== "mouse") return;
+				setHovered(false);
+			}}
+			onFocusCapture={(event) => {
+				if (pointerActivating.current) return;
+				const target = event.target;
+				if (
+					panel.current?.contains(target as Node) ||
+					(target instanceof Element && target.matches(":focus-visible"))
+				) {
+					setFocused(true);
+					setDismissed(false);
+				}
 			}}
 			onBlurCapture={(event) => {
-				if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget))
+				if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
 					setFocused(false);
+					setPinned(false);
+				}
 			}}
 		>
 			<button
 				ref={trigger}
 				type="button"
-				className="context-meter"
+				className="btn-icon sm-28 context-meter"
+				data-open={open || undefined}
 				aria-expanded={open}
 				aria-controls={panelId}
 				aria-label={usage?.percent == null ? "上下文用量未知" : `上下文用量 ${Math.round(percent)}%`}
+				onPointerDown={() => {
+					pointerActivating.current = true;
+					queueMicrotask(() => {
+						pointerActivating.current = false;
+					});
+				}}
+				onPointerCancel={() => {
+					pointerActivating.current = false;
+				}}
+				onClick={() => {
+					pointerActivating.current = false;
+					if (pinned || (open && focused && !hovered)) {
+						setPinned(false);
+						setDismissed(true);
+					} else {
+						setDismissed(false);
+						setPinned(true);
+					}
+				}}
 			>
-				<Menu size={16} aria-hidden="true" />
+				<svg className="context-ring" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+					<circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--border-strong)" strokeWidth="2" />
+					{percent > 0 && (
+						<circle
+							cx="7"
+							cy="7"
+							r="5.5"
+							fill="none"
+							stroke="var(--accent-solid)"
+							strokeWidth="2"
+							strokeDasharray={RING_CIRCUMFERENCE}
+							strokeDashoffset={ringOffset}
+							strokeLinecap="round"
+							transform="rotate(-90 7 7)"
+						/>
+					)}
+				</svg>
 			</button>
-			<section className="context-panel" ref={panel} id={panelId} aria-label="上下文信息">
+			<section className="tier-2-glass context-panel" ref={panel} id={panelId} aria-label="上下文信息">
 				<span className="context-row">
 					<span className="context-label">上下文容量</span>
 					<span className="context-value">
 						{usage?.tokens == null
 							? "用量未知"
-							: `${usage.tokens.toLocaleString("zh-CN")} / ${usage.contextWindow.toLocaleString("zh-CN")}（${usage.percent == null ? "占比未知" : `${usage.percent.toFixed(1)}%`}）`}
+							: `${usage.tokens.toLocaleString("zh-CN")} / ${usage.contextWindow.toLocaleString("zh-CN")} (${usage.percent == null ? "占比未知" : `${usage.percent.toFixed(1)}%`})`}
 					</span>
 				</span>
 				<span className="context-progress" aria-hidden="true">
-					<span style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+					<span style={{ width: `${percent}%` }} />
 				</span>
 				<span className="context-row context-row--sub">
 					<span className="context-label">平均缓存命中率</span>
-					<span className="context-value">
+					<span className="context-value context-value--strong">
 						{cacheHitRate == null ? "暂无缓存数据" : `${(cacheHitRate * 100).toFixed(1)}%`}
 					</span>
 				</span>
@@ -120,7 +203,7 @@ export function ContextMeter({
 							{provider === "cstoa" ? (
 								<Link className="context-more" to="/account" viewTransition>
 									账号信息
-									<ChevronRight size={14} aria-hidden="true" />
+									<ChevronRight size={12} aria-hidden="true" />
 								</Link>
 							) : (
 								<a
@@ -132,13 +215,16 @@ export function ContextMeter({
 									rel="noreferrer"
 								>
 									更多
-									<ChevronRight size={14} aria-hidden="true" />
+									<ChevronRight size={12} aria-hidden="true" />
 								</a>
 							)}
 						</span>
 						{balance !== null ? (
-							<span className="context-balance" data-unit={current?.unit}>
-								{balance}
+							<span className="context-balance-row">
+								<span className="context-source">{quotaSourceLabel(provider)}</span>
+								<span className="context-balance" data-unit={current?.unit}>
+									{balance}
+								</span>
 							</span>
 						) : null}
 						{provider === "opencode-go" && current?.supported && current.windows

@@ -1,9 +1,9 @@
-import { Button } from "@heroui/react";
 import { ArrowLeft, CircleCheck, TriangleAlert, X } from "lucide-react";
 import { type ComponentProps, createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { Notification } from "../shell/notification";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { loadSetting, settingReady } from "./settings-resource-cache";
 
 const Feedback = createContext<(message?: string, kind?: "success" | "warning") => void>(() => {});
@@ -97,18 +97,18 @@ export function SettingsFeedback({ children }: { children: ReactNode }) {
 					onDismiss={() => setNotice(null)}
 				>
 					{notice.kind === "warning" ? (
-						<TriangleAlert size={18} aria-hidden="true" />
+						<TriangleAlert size={16} aria-hidden="true" />
 					) : (
-						<CircleCheck size={18} aria-hidden="true" />
+						<CircleCheck size={16} aria-hidden="true" />
 					)}
 					<span className="notification-message">{notice.message}</span>
 					<button
 						type="button"
-						className="notification-close"
+						className="btn-icon xs-24 notification-close"
 						aria-label="关闭通知"
 						onClick={() => setNotice(null)}
 					>
-						<X size={18} aria-hidden="true" />
+						<X size={14} aria-hidden="true" />
 					</button>
 				</Notification>
 			)}
@@ -128,22 +128,26 @@ export function SettingsHeading({
 	back?: boolean;
 }) {
 	const navigate = useNavigate();
+	const shell = useWorkspaceShell();
 	useEffect(() => {
-		if (!back) return;
+		if (!back || shell?.appActive || shell?.overlay) return;
 		const onEscape = (event: KeyboardEvent) => {
 			if (
 				event.key !== "Escape" ||
 				event.defaultPrevented ||
 				event.isComposing ||
-				document.querySelector('dialog[open], [role="listbox"], [role="tooltip"]')
+				event.keyCode === 229 ||
+				document.querySelector(
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"], [role="listbox"], [role="tooltip"]',
+				)
 			)
 				return;
 			event.preventDefault();
 			void navigate("/settings", { viewTransition: true });
 		};
-		document.addEventListener("keydown", onEscape);
-		return () => document.removeEventListener("keydown", onEscape);
-	}, [back, navigate]);
+		window.addEventListener("keydown", onEscape);
+		return () => window.removeEventListener("keydown", onEscape);
+	}, [back, navigate, shell?.appActive, shell?.overlay]);
 	return (
 		<>
 			{back && (
@@ -198,9 +202,9 @@ export function SettingsLoadState({
 			{error && (
 				<div className="settings-load-error" role="alert">
 					<span>{error}</span>
-					<Button size="sm" variant="ghost" onPress={onRetry}>
+					<button type="button" className="tier-1-btn-outline" onClick={onRetry}>
 						重试
-					</Button>
+					</button>
 				</div>
 			)}
 		</>

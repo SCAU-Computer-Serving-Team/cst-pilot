@@ -4382,6 +4382,7 @@ impl ScrollHandle {
     /// Update [ScrollHandleState]'s active item for scrolling to in prepaint
     pub fn scroll_to_item(&self, ix: usize) {
         let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
         state.active_item = Some(ScrollActiveItem {
             index: ix,
             strategy: ScrollStrategy::default(),
@@ -4392,6 +4393,7 @@ impl ScrollHandle {
     /// This scrolls the minimal amount to ensure that the child is the first visible element
     pub fn scroll_to_top_of_item(&self, ix: usize) {
         let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
         state.active_item = Some(ScrollActiveItem {
             index: ix,
             strategy: ScrollStrategy::Top,
@@ -4452,14 +4454,23 @@ impl ScrollHandle {
     /// Scrolls to the bottom.
     pub fn scroll_to_bottom(&self) {
         let mut state = self.0.borrow_mut();
+        state.active_item = None;
         state.scroll_to_bottom = true;
+    }
+
+    /// Cancels a pending `scroll_to_bottom` request before layout runs.
+    pub fn cancel_scroll_to_bottom(&self) {
+        let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
     }
 
     /// Set the offset explicitly. The offset is the distance from the top left of the
     /// parent container to the top left of the first child.
     /// As you scroll further down the offset becomes more negative.
     pub fn set_offset(&self, position: Point<Pixels>) {
-        let state = self.0.borrow();
+        let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
+        state.active_item = None;
         *state.offset.borrow_mut() = position;
     }
 

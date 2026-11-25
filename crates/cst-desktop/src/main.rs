@@ -36,10 +36,13 @@ fn show_error_dialog(message: &str) {
 
 /// Ensures administrator availability on normal startup:
 /// - Split-token administrators (`TokenElevationTypeLimited`) keep `cst-pilot.exe` at Medium Integrity Level
-///   so global hotkeys (e.g. `F1` screenshot tools), Explorer drag-and-drop, and zero-UAC single-instance wakeups
-///   are never blocked by Windows UIPI, while `cst-client` elevates headless `cst-server.exe` via UAC.
+///   so screenshot tools, global hotkeys, Explorer drag-and-drop, and zero-UAC single-instance wakeups
+///   are never blocked by Windows UIPI, while `cst-client` elevates headless `cst-server.exe` via UAC
+///   so all diagnostic tools (NTFS $MFT, BitLocker, SMART, EventLog) always run elevated.
 /// - Restricted standard accounts (`TokenElevationTypeDefault` + non-admin) fall back to elevating the whole process
 ///   at entry so desktop and server share the same target administrator SID.
+///
+/// Skipped only for `--health-check` (handled before this call) or `CST_ALLOW_UNELEVATED=1`.
 fn ensure_elevated_at_entry(
     kit_root: &std::path::Path,
     has_explicit_kit_root: bool,

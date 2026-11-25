@@ -1,4 +1,5 @@
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -8,7 +9,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 #[derive(Debug, Clone)]
@@ -24,33 +25,37 @@ pub struct MissingKeyModalState {
 #[allow(clippy::too_many_arguments)]
 pub fn render_missing_key_dialog(
     state: &MissingKeyModalState,
+    scrim_progress: f32,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    trap_focus: &FocusHandle,
+    cancel_focus: &FocusHandle,
     on_cancel: impl Fn(&mut Window, &mut App) + 'static,
     on_configure: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let clean_prov = state.provider_label.as_deref().filter(|s| !s.is_empty());
     let title_text = match clean_prov {
-        Some(prov) => SharedString::from(format!("缺少 {prov} 服务凭据")),
-        None => SharedString::from("缺少模型服务凭据"),
+        Some(prov) => SharedString::from(format!("缺少 {prov} 凭据")),
+        None => SharedString::from("缺少提供商凭据"),
     };
     let body_text = match clean_prov {
         Some(prov) => SharedString::from(format!(
             "当前所选模型所属的 {prov} 尚未配置有效凭据。已保留输入框内的草稿与附图，配置完成后可返回原会话继续发送。"
         )),
         None => SharedString::from(
-            "当前尚未配置任何可用的模型服务凭据。前往「设置 · 模型服务」或登录页完成配置即可开始诊断。",
+            "当前尚未配置任何可用的提供商凭据。前往「设置 · 提供商」或登录页完成配置即可开始诊断。",
         ),
     };
 
     render_frosted_surface(
         "missing-key-scrim-ywnbk",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -62,88 +67,98 @@ pub fn render_missing_key_dialog(
     .justify_center()
     .occlude()
     .child(
-        render_frosted_surface(
-            "missing-key-dialog-e7fety",
-            FrostedGlassSpec::modal_k3x72(palette, 8.0),
-            palette.bg_modal,
-            transparency_enabled,
-            scale_factor,
-        )
-        .test_support()
-        .a11y_dialog("missing-key-dialog", title_text.clone())
-        .w(layout::MODAL_STANDARD_WIDTH)
-        .p(px(20.0))
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_subtle)
-        .flex()
-        .flex_col()
-        .gap(space::MD)
-        .child(
-            div()
-                .relative()
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(16.0))
-                        .text_color(palette.status_warning),
+        div()
+            .tab_stop(false)
+            .focus_trap("missing-key-focus-trap", trap_focus)
+            .child(motion::animate_modal_enter(
+                "missing-key-dialog-anim",
+                render_frosted_surface(
+                    "missing-key-dialog-e7fety",
+                    FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                    palette.bg_modal,
+                    transparency_enabled,
+                    scale_factor,
                 )
-                .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .min_w_0()
-                        .truncate()
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label(title_text)),
-                ),
-        )
-        .child(
-            apply_scale(div(), scale::UI)
-                .relative()
-                .text_color(palette.text_secondary)
-                .child(body_text),
-        )
-        .child(
-            div()
-                .relative()
+                .test_support()
+                .a11y_dialog("missing-key-dialog", title_text.clone())
+                .w(layout::MODAL_STANDARD_WIDTH)
+                .p(px(20.0))
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette.border_subtle)
                 .flex()
-                .justify_end()
-                .gap(space::SM)
+                .flex_col()
+                .gap(space::MD)
                 .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .id("missing-key-cancel-btn")
-                        .test_support()
-                        .a11y_button("missing-key-cancel-btn", "取消")
-                        .h(height::CONTROL)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.border_strong)
-                        .bg(palette.bg_workspace)
-                        .text_color(palette.text_primary)
+                    div()
+                        .relative()
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(move |_, w, cx| on_cancel(w, cx))
-                        .child(cjk_inline_label("取消")),
+                        .gap(space::SM)
+                        .child(
+                            Icon::new(IconName::TriangleAlert)
+                                .size(px(16.0))
+                                .text_color(palette.status_warning),
+                        )
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .min_w_0()
+                                .truncate()
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label(title_text)),
+                        ),
                 )
                 .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .id("missing-key-configure-btn")
-                        .test_support()
-                        .a11y_button("missing-key-configure-btn", "去配置")
-                        .h(height::CONTROL)
-                        .px(space::LG)
-                        .rounded(radius::CONTROL)
-                        .bg(palette.accent_solid)
-                        .text_color(palette.text_on_accent)
+                    apply_scale(div(), scale::UI)
+                        .relative()
+                        .text_color(palette.text_secondary)
+                        .child(body_text),
+                )
+                .child(
+                    div()
+                        .relative()
                         .flex()
-                        .items_center()
-                        .hover(|s| s.bg(palette.accent_hover))
-                        .on_click(move |_, w, cx| on_configure(w, cx))
-                        .child(cjk_inline_label("去配置")),
+                        .justify_end()
+                        .gap(space::SM)
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("missing-key-cancel-btn")
+                                .test_support()
+                                .tab_index(0)
+                                .track_focus(cancel_focus)
+                                .a11y_button("missing-key-cancel-btn", "取消")
+                                .h(height::CONTROL)
+                                .px(space::MD)
+                                .rounded(radius::CONTROL)
+                                .border_1()
+                                .border_color(palette.border_strong)
+                                .bg(palette.bg_workspace)
+                                .text_color(palette.text_primary)
+                                .flex()
+                                .items_center()
+                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .on_click(move |_, w, cx| on_cancel(w, cx))
+                                .child(cjk_inline_label("取消")),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("missing-key-configure-btn")
+                                .test_support()
+                                .tab_index(0)
+                                .a11y_button("missing-key-configure-btn", "去配置")
+                                .h(height::CONTROL)
+                                .px(space::LG)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.accent_solid)
+                                .text_color(palette.text_on_accent)
+                                .flex()
+                                .items_center()
+                                .hover(|s| s.bg(palette.accent_hover))
+                                .on_click(move |_, w, cx| on_configure(w, cx))
+                                .child(cjk_inline_label("去配置")),
+                        ),
                 ),
-        ),
+                palette.craft_stack_shadows(),
+            )),
     )
 }

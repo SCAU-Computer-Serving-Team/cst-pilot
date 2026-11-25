@@ -1,3 +1,4 @@
+use std::io::Read as _;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -8,34 +9,48 @@ use gpui::{
     ObjectFit, PathPromptOptions, StyledImage as _,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
+use gpui_kit::base::motion::{Transition, TransitionState};
 use gpui_kit::component::input::{
-    InlineToken as UiInlineToken, InputContent, InputEvent, InputState, Textarea, TextareaState,
+    Enter, IndentInline, InlineToken as UiInlineToken, InputContent, InputEvent, MoveDown, MoveUp,
+    OutdentInline, Textarea, TextareaState,
 };
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    InteractiveElement, IntoElement, ParentElement, Render, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt, Window, div, img, px,
     rgba,
 };
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_handle};
 use crate::workbench::model_picker::{
     ModelPickerPage, is_quota_provider, render_context_quota_popover, render_context_ring_button,
     render_model_picker_popover, resolve_scoped_models, thinking_level_label,
 };
-use crate::workbench::queue_bar::{ParsedQueueSnapshot, QueueBarCallbacks, render_queue_bar};
+use crate::workbench::queue_bar::{
+    ParsedQueueSnapshot, QueueBarCallbacks, QueueMutation, VisibleQueueItem, render_queue_bar,
+};
 
 #[derive(Debug, Clone)]
 pub enum ComposerHostEvent {
-    SubmittedToSession { session_id: String },
-    MissingCredentials { provider: String },
+    SubmittedToSession {
+        session_id: String,
+    },
+    RequestEditQueueItem {
+        session_id: String,
+        item: VisibleQueueItem,
+        version: u64,
+    },
+    MissingCredentials {
+        provider: String,
+    },
     NavigateSlashRoute(SlashNavigationTarget),
     OpenAccountPage,
     OpenLightbox(LightboxImageTarget),
@@ -191,18 +206,27 @@ pub struct ComposerView {
     had_active_ime_mark: bool,
     textarea: Entity<TextareaState>,
     completion: Option<CompletionPopupState>,
+    completion_source: Option<(InputContent, usize)>,
+    completion_scroll: ScrollHandle,
     file_search_task: Option<Task<()>>,
+    submitting: Option<DraftKey>,
+    model_change_pending: bool,
     picker_open: bool,
+    picker_open_epoch: u64,
+    picker_presence: TransitionState<f32>,
     picker_page: ModelPickerPage,
     picker_hi_idx: usize,
+    picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
     context_popover_open: bool,
+    context_presence: TransitionState<f32>,
     context_prior_focus: Option<FocusHandle>,
     cached_quota_provider: Option<String>,
     cached_quota: Option<Value>,
+    quota_task: Option<Task<()>>,
     quota_loading: bool,
-    editing_queue_item_id: Option<String>,
-    queue_edit_input: Option<Entity<InputState>>,
+    queue_pending: Option<(String, ParsedQueueSnapshot)>,
+    queue_receipt: Option<(String, ParsedQueueSnapshot)>,
     model_btn_focus: FocusHandle,
     context_btn_focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -214,6 +238,30 @@ impl Focusable for ComposerView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.textarea.read(cx).presentation().focus_handle().clone()
     }
+}
+
+fn find_model_choice<'a>(
+    models: &'a cst_client::ModelsSnapshot,
+    provider: &str,
+    id: &str,
+) -> Option<&'a cst_client::ModelChoiceDto> {
+    models
+        .selected
+        .iter()
+        .chain(models.models.iter())
+        .chain(models.catalog.iter())
+        .chain(models.default_model.iter())
+        .find(|m| m.provider == provider && m.id == id)
+}
+
+fn active_thinking_levels<'a>(
+    models: &'a cst_client::ModelsSnapshot,
+    provider: &str,
+    id: &str,
+) -> &'a [String] {
+    find_model_choice(models, provider, id)
+        .map(|m| m.thinking_levels.as_slice())
+        .unwrap_or_default()
 }
 
 impl ComposerView {
@@ -231,8 +279,8 @@ impl ComposerView {
                 .auto_grow(1, 8)
         });
 
-        let model_btn_focus = cx.focus_handle();
-        let context_btn_focus = cx.focus_handle();
+        let model_btn_focus = cx.focus_handle().tab_stop(true);
+        let context_btn_focus = cx.focus_handle().tab_stop(true);
 
         let sub = cx.subscribe_in(&textarea, window, Self::on_textarea_event);
         let obs = cx.observe_in(&textarea, window, |this, textarea, window, cx| {
@@ -243,6 +291,9 @@ impl ComposerView {
                 .is_some();
             if marked {
                 this.had_active_ime_mark = true;
+                if this.clear_completion() {
+                    cx.notify();
+                }
             }
         });
 
@@ -253,18 +304,27 @@ impl ComposerView {
             had_active_ime_mark: false,
             textarea,
             completion: None,
+            completion_source: None,
+            completion_scroll: ScrollHandle::new(),
             file_search_task: None,
+            submitting: None,
+            model_change_pending: false,
             picker_open: false,
+            picker_open_epoch: 0,
+            picker_presence: TransitionState::default(),
             picker_page: ModelPickerPage::Main,
             picker_hi_idx: 0,
+            picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
             context_popover_open: false,
+            context_presence: TransitionState::default(),
             context_prior_focus: None,
             cached_quota_provider: None,
             cached_quota: None,
+            quota_task: None,
             quota_loading: false,
-            editing_queue_item_id: None,
-            queue_edit_input: None,
+            queue_pending: None,
+            queue_receipt: None,
             model_btn_focus,
             context_btn_focus,
             _subscriptions: vec![sub, obs],
@@ -308,12 +368,14 @@ impl ComposerView {
             self.reconcile_external_draft_changes(window, cx);
             return;
         }
-        self.push_to_workspace(cx);
+        // Change events already persist committed text; never save IME preedit on switch.
         self.draft_key = next_key.clone();
         self.last_synced_edit_rev = 0;
-        self.completion = None;
-        self.editing_queue_item_id = None;
-        self.queue_edit_input = None;
+        self.clear_completion();
+        self.close_picker();
+        self.context_popover_open = false;
+        self.context_prior_focus = None;
+        self.had_active_ime_mark = false;
         let ph = Self::placeholder_for(&next_key);
         self.textarea.update(cx, |st, cx| {
             st.set_placeholder(ph, window, cx);
@@ -331,23 +393,39 @@ impl ComposerView {
             .is_some()
     }
 
+    pub fn close_floating_popovers(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        if self.clear_completion() {
+            changed = true;
+        }
+        if self.picker_open {
+            self.close_picker();
+            changed = true;
+        }
+        if self.context_popover_open {
+            self.context_popover_open = false;
+            self.context_prior_focus = None;
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
     /// Closes the single topmost open composer popover (`completion` / `picker` / `context`) and restores focus.
     pub fn dismiss_topmost_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.completion.take().is_some() {
-            let fh = self.textarea.read(cx).presentation().focus_handle().clone();
-            fh.focus(window, cx);
+        if self.clear_completion() {
             cx.notify();
             return true;
         }
         if self.picker_open {
             if self.picker_page != ModelPickerPage::Main {
-                self.picker_page = ModelPickerPage::Main;
-                self.picker_hi_idx = 0;
+                self.set_picker_page(ModelPickerPage::Main);
                 cx.notify();
                 return true;
             }
-            self.picker_open = false;
-            if let Some(prev) = self.picker_prior_focus.take() {
+            if let Some(prev) = self.close_picker() {
                 prev.focus(window, cx);
             } else {
                 self.model_btn_focus.focus(window, cx);
@@ -377,7 +455,7 @@ impl ComposerView {
         let ext_rev = self
             .client
             .with_workspace(|ws| ws.draft_edit_revision(&self.draft_key));
-        if ext_rev != self.last_synced_edit_rev {
+        if ext_rev != self.last_synced_edit_rev && !self.is_ime_composing(window, cx) {
             self.pull_from_workspace(window, cx);
         }
     }
@@ -391,8 +469,15 @@ impl ComposerView {
         });
         self.last_synced_edit_rev = rev;
         let content = build_input_content_from_draft(&draft);
-        if self.textarea.read(cx).content() != content {
+        let had_ime_mark = self.is_ime_composing(window, cx);
+        if self.textarea.read(cx).content() != content || had_ime_mark {
+            self.clear_completion();
+            self.had_active_ime_mark = false;
+            if had_ime_mark {
+                window.cancel_ime_composition();
+            }
             self.textarea.update(cx, |st, cx| {
+                EntityInputHandler::unmark_text(st, window, cx);
                 st.set_value(content, window, cx);
             });
         }
@@ -431,293 +516,378 @@ impl ComposerView {
                 self.update_completion_from_caret(cx);
                 cx.notify();
             }
-            InputEvent::PressEnter { secondary, shift } => {
-                // Strict IME composition guard: NEVER confirm completion or submit while marked preedit exists!
-                if self.is_ime_composing(window, cx) {
-                    return;
-                }
-                if *shift && !*secondary {
-                    return;
-                }
-                if self.completion.is_some() {
-                    self.accept_selected_completion(window, cx);
-                    return;
-                }
-                self.trigger_submit(window, cx);
+            InputEvent::PressEnter { .. } => {}
+            InputEvent::Blur => {
+                self.clear_completion();
+                self.had_active_ime_mark = false;
+                cx.notify();
             }
-            InputEvent::Focus | InputEvent::Blur => {
+            InputEvent::Focus => {
+                if self.picker_open {
+                    self.close_picker();
+                }
+                if self.context_popover_open {
+                    self.context_popover_open = false;
+                    self.context_prior_focus = None;
+                }
                 cx.notify();
             }
         }
     }
 
-    fn handle_capture_key_down(
+    fn clear_completion(&mut self) -> bool {
+        self.completion_source = None;
+        let searching = self.file_search_task.take().is_some();
+        self.completion.take().is_some() || searching
+    }
+
+    fn completion_is_current(&self, cx: &App) -> bool {
+        let st = self.textarea.read(cx);
+        self.completion_source
+            .as_ref()
+            .is_some_and(|(content, caret)| *caret == st.cursor() && *content == st.content())
+    }
+
+    fn move_completion(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle(cx).is_focused(window) {
+            cx.propagate();
+            return;
+        }
+        if self.is_ime_composing(window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if !self.completion_is_current(cx) {
+            if self.clear_completion() {
+                cx.notify();
+            }
+            cx.propagate();
+            return;
+        }
+        let Some(comp) = &mut self.completion else {
+            cx.propagate();
+            return;
+        };
+        let (index, len, separator) = match comp {
+            CompletionPopupState::Slash {
+                items,
+                selected_idx,
+                ..
+            } => {
+                let separator = items
+                    .iter()
+                    .position(|item| !item.command.starts_with("/skill:"))
+                    .filter(|i| *i > 0);
+                (selected_idx, items.len(), separator)
+            }
+            CompletionPopupState::Files {
+                paths,
+                selected_idx,
+                ..
+            } => (selected_idx, paths.len(), None),
+        };
+        if len == 0 {
+            cx.propagate();
+            return;
+        }
+        *index = if forward {
+            (*index + 1) % len
+        } else {
+            (*index + len - 1) % len
+        };
+        self.completion_scroll
+            .scroll_to_item(*index + usize::from(separator.is_some_and(|i| *index >= i)));
+        cx.stop_propagation();
+        cx.notify();
+    }
+
+    fn complete_on_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle(cx).is_focused(window) {
+            cx.propagate();
+            return;
+        }
+        cx.stop_propagation();
+        if self.is_ime_composing(window, cx) {
+            return;
+        }
+        if self.completion.is_some() && self.completion_is_current(cx) {
+            self.accept_selected_completion(window, cx);
+            return;
+        }
+
+        self.clear_completion();
+        self.close_picker();
+        self.context_popover_open = false;
+        self.context_prior_focus = None;
+        let st = self.textarea.read(cx);
+        let pos = st.cursor();
+        self.completion_source = Some((st.content(), pos));
+        self.completion_scroll = ScrollHandle::new();
+        self.completion = Some(CompletionPopupState::Slash {
+            replace_range: pos..pos,
+            items: SLASH_CATALOG.to_vec(),
+            selected_idx: 0,
+        });
+        cx.notify();
+    }
+
+    fn close_picker(&mut self) -> Option<FocusHandle> {
+        self.picker_open = false;
+        self.picker_prior_focus.take()
+    }
+
+    fn set_picker_page(&mut self, page: ModelPickerPage) {
+        self.picker_page = page;
+        self.picker_hi_idx = 0;
+        self.picker_scroll = ScrollHandle::new();
+    }
+
+    fn handle_picker_key(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let key = event.keystroke.key.as_str();
-        // 1. IME composition isolation: while marked text is active, Enter/Escape/Tab stay strictly with IME!
-        if self.is_ime_composing(window, cx) {
-            if matches!(key, "enter" | "escape" | "tab") {
-                cx.stop_propagation();
-            }
+        if !self.picker_open
+            || !self.model_btn_focus.is_focused(window)
+            || event.keystroke.modifiers.number_of_modifiers() != 0
+        {
             return;
         }
+        let snap = self.client.snapshot();
+        let empty_models = cst_client::ModelsSnapshot::default();
+        let models = snap.models.as_deref().unwrap_or(&empty_models);
+        let scoped = resolve_scoped_models(models);
+        let (provider, id, _, _) = self.current_model_choice(&snap);
+        let levels = super::model_picker::effective_thinking_levels(active_thinking_levels(
+            models, &provider, &id,
+        ));
+        let count = match self.picker_page {
+            ModelPickerPage::Main => 2,
+            ModelPickerPage::Models => scoped.len(),
+            ModelPickerPage::Thinking => levels.len(),
+        };
+        let index = self.picker_hi_idx.min(count.saturating_sub(1));
+        match event.keystroke.key.as_str() {
+            "down" if count > 0 => self.picker_hi_idx = (index + 1) % count,
+            "up" if count > 0 => self.picker_hi_idx = (index + count - 1) % count,
+            "home" if count > 0 => self.picker_hi_idx = 0,
+            "end" if count > 0 => self.picker_hi_idx = count - 1,
+            "down" | "up" | "home" | "end" => {}
+            "enter" if !event.is_held => match self.picker_page {
+                ModelPickerPage::Main => self.set_picker_page(if index == 0 {
+                    ModelPickerPage::Models
+                } else {
+                    ModelPickerPage::Thinking
+                }),
+                ModelPickerPage::Models => {
+                    if let Some(model) = scoped.get(index) {
+                        self.select_model(model.provider.clone(), model.id.clone(), cx);
+                    }
+                }
+                ModelPickerPage::Thinking => {
+                    if let Some(level) = levels.get(index) {
+                        self.select_thinking(level.clone(), window, cx);
+                    }
+                }
+            },
+            _ => return,
+        }
+        if self.picker_page == ModelPickerPage::Models {
+            self.picker_scroll.scroll_to_item(self.picker_hi_idx);
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
 
-        // 2. Completion popup navigation (`Up` / `Down` / `Tab` / `Escape`)
-        if let Some(ref mut comp) = self.completion {
-            let len = match comp {
-                CompletionPopupState::Slash { items, .. } => items.len(),
-                CompletionPopupState::Files { paths, .. } => paths.len(),
-            };
-            match key {
-                "down" if len > 0 => {
-                    match comp {
-                        CompletionPopupState::Slash { selected_idx, .. }
-                        | CompletionPopupState::Files { selected_idx, .. } => {
-                            *selected_idx = (*selected_idx + 1) % len;
-                        }
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                    return;
-                }
-                "up" if len > 0 => {
-                    match comp {
-                        CompletionPopupState::Slash { selected_idx, .. }
-                        | CompletionPopupState::Files { selected_idx, .. } => {
-                            *selected_idx = if *selected_idx == 0 {
-                                len - 1
-                            } else {
-                                *selected_idx - 1
-                            };
-                        }
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                    return;
-                }
-                "tab" | "enter" if len > 0 && !event.keystroke.modifiers.shift => {
-                    cx.stop_propagation();
-                    self.accept_selected_completion(window, cx);
-                    return;
-                }
-                "escape" => {
-                    self.completion = None;
-                    cx.stop_propagation();
-                    cx.notify();
-                    return;
-                }
-                _ => {}
-            }
-        } else if key == "tab" && !event.keystroke.modifiers.shift {
-            // Pressing Tab opens the `/` slash command completion menu at the current cursor!
-            let val = self.textarea.read(cx).value();
-            let pos = val.len();
-            self.completion = Some(CompletionPopupState::Slash {
-                replace_range: pos..pos,
-                items: SLASH_CATALOG.to_vec(),
-                selected_idx: 0,
-            });
-            cx.stop_propagation();
-            cx.notify();
+    fn select_model(&mut self, provider: String, model_id: String, cx: &mut Context<Self>) {
+        if !self.picker_open
+            || self.picker_page != ModelPickerPage::Models
+            || self.model_change_pending
+        {
             return;
         }
-
-        // 3. Model picker keyboard navigation (`Up` / `Down` / `Home` / `End` / `Enter` / `Escape`)
-        if self.picker_open {
-            let snap = self.client.snapshot();
-            let empty_models = cst_client::ModelsSnapshot::default();
-            let models_ref = snap.models.as_deref().unwrap_or(&empty_models);
-            let scoped = resolve_scoped_models(models_ref);
-            let levels = &models_ref.thinking_levels;
-            let item_count = match self.picker_page {
-                ModelPickerPage::Main => 2,
-                ModelPickerPage::Models => scoped.len().max(1),
-                ModelPickerPage::Thinking => levels.len().max(1),
-            };
-            match key {
-                "down" => {
-                    self.picker_hi_idx = (self.picker_hi_idx + 1) % item_count;
-                    cx.stop_propagation();
-                    cx.notify();
+        let key = self.draft_key.clone();
+        let sid = match &key {
+            DraftKey::Session(id) => Some(id.clone()),
+            DraftKey::NewSession => None,
+        };
+        let client = self.client.clone();
+        // Only the accepted selection becomes a draft override. On error the old choice stays intact.
+        self.model_change_pending = true;
+        cx.spawn(async move |weak, cx| {
+            let res = client
+                .select_model(sid.clone(), provider.clone(), model_id.clone())
+                .await;
+            if res.is_ok() {
+                if let Some(ref session_id) = sid {
+                    client.refresh_session_usage(session_id.clone());
                 }
-                "up" => {
-                    self.picker_hi_idx = if self.picker_hi_idx == 0 {
-                        item_count - 1
-                    } else {
-                        self.picker_hi_idx - 1
-                    };
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-                "home" => {
-                    self.picker_hi_idx = 0;
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-                "end" => {
-                    self.picker_hi_idx = item_count.saturating_sub(1);
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-                "enter" => {
-                    match self.picker_page {
-                        ModelPickerPage::Main => {
-                            self.picker_page = if self.picker_hi_idx == 0 {
-                                ModelPickerPage::Models
-                            } else {
-                                ModelPickerPage::Thinking
-                            };
-                            self.picker_hi_idx = 0;
-                        }
-                        ModelPickerPage::Models => {
-                            if let Some(m) = scoped.get(self.picker_hi_idx) {
-                                let prov = m.provider.clone();
-                                let mid = m.id.clone();
-                                let key_d = self.draft_key.clone();
-                                self.last_synced_edit_rev = self.client.with_workspace_mut(|ws| {
-                                    let d = ws.draft_mut(key_d.clone());
-                                    d.selected_provider = Some(prov.clone());
-                                    d.selected_model_id = Some(mid.clone());
-                                    ws.draft_edit_revision(&key_d)
-                                });
-                                let sid = match &self.draft_key {
-                                    DraftKey::Session(id) => Some(id.clone()),
-                                    DraftKey::NewSession => None,
-                                };
-                                let c = self.client.clone();
-                                cx.spawn(async move |weak, cx| {
-                                    let res = c.select_model(sid.clone(), prov, mid).await;
-                                    let _ = c.refresh_models(sid).await;
-                                    if let Err(e) = res {
-                                        let _ = weak.update(cx, |_, cx| {
-                                            cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                        });
-                                    }
-                                })
-                                .detach();
-                                self.picker_page = ModelPickerPage::Main;
-                            }
-                        }
-                        ModelPickerPage::Thinking => {
-                            if let Some(lvl) = levels.get(self.picker_hi_idx).cloned() {
-                                let key_d = self.draft_key.clone();
-                                self.last_synced_edit_rev = self.client.with_workspace_mut(|ws| {
-                                    let d = ws.draft_mut(key_d.clone());
-                                    d.selected_thinking_level = Some(lvl.clone());
-                                    ws.draft_edit_revision(&key_d)
-                                });
-                                if let DraftKey::Session(sid) = self.draft_key.clone() {
-                                    let c = self.client.clone();
-                                    cx.spawn(async move |weak, cx| {
-                                        let res =
-                                            c.set_session_thinking_level(sid.clone(), lvl).await;
-                                        let _ = c.refresh_models(Some(sid)).await;
-                                        if let Err(e) = res {
-                                            let _ = weak.update(cx, |_, cx| {
-                                                cx.emit(ComposerHostEvent::ErrorMessage(
-                                                    e.to_string(),
-                                                ));
-                                            });
-                                        }
+                let _ = client.refresh_models(sid).await;
+            }
+            let _ = weak.update(cx, |this, cx| {
+                this.model_change_pending = false;
+                match res {
+                    Ok(model) => {
+                        let selected =
+                            serde_json::from_value::<cst_client::ModelChoiceDto>(model).ok();
+                        this.client.with_workspace_mut(|ws| {
+                            let draft = ws.draft_mut(key.clone());
+                            draft.selected_provider = Some(provider);
+                            draft.selected_model_id = Some(model_id);
+                            let previous = draft.selected_thinking_level.take();
+                            if let Some(selected) = selected {
+                                draft.selected_thinking_level = previous
+                                    .filter(|level| {
+                                        matches!(key, DraftKey::NewSession)
+                                            && selected.thinking_levels.contains(level)
                                     })
-                                    .detach();
-                                }
-                                self.picker_open = false;
-                                if let Some(prev) = self.picker_prior_focus.take() {
-                                    prev.focus(window, cx);
-                                }
+                                    .or(selected.thinking_level);
                             }
-                        }
+                        });
                     }
-                    cx.stop_propagation();
-                    cx.notify();
+                    Err(e) => cx.emit(ComposerHostEvent::ErrorMessage(e.to_string())),
                 }
-                "escape" => {
-                    let _ = self.dismiss_topmost_popover(window, cx);
-                    cx.stop_propagation();
-                }
-                _ => {}
+                cx.notify();
+            });
+        })
+        .detach();
+        self.set_picker_page(ModelPickerPage::Main);
+        cx.notify();
+    }
+
+    fn select_thinking(&mut self, level: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.picker_open
+            || self.picker_page != ModelPickerPage::Thinking
+            || self.model_change_pending
+        {
+            return;
+        }
+        let key = self.draft_key.clone();
+        match key {
+            DraftKey::NewSession => self.client.with_workspace_mut(|ws| {
+                ws.draft_mut(key).selected_thinking_level = Some(level);
+            }),
+            DraftKey::Session(ref sid) => {
+                let sid = sid.clone();
+                let client = self.client.clone();
+                self.model_change_pending = true;
+                cx.spawn(async move |weak, cx| {
+                    let res = client
+                        .set_session_thinking_level(sid.clone(), level.clone())
+                        .await;
+                    if res.is_ok() {
+                        let _ = client.refresh_models(Some(sid)).await;
+                    }
+                    let _ = weak.update(cx, |this, cx| {
+                        this.model_change_pending = false;
+                        match res {
+                            Ok(_) => this.client.with_workspace_mut(|ws| {
+                                ws.draft_mut(key).selected_thinking_level = Some(level);
+                            }),
+                            Err(e) => cx.emit(ComposerHostEvent::ErrorMessage(e.to_string())),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             }
         }
+        self.close_picker()
+            .unwrap_or_else(|| self.model_btn_focus.clone())
+            .focus(window, cx);
+        cx.notify();
     }
 
     fn update_completion_from_caret(&mut self, cx: &mut Context<Self>) {
-        let content = self.textarea.read(cx).content();
-        let text = content.text().as_ref();
+        self.clear_completion();
+        if self.picker_open || self.context_popover_open {
+            return;
+        }
+        let st = self.textarea.read(cx);
+        let content = st.content();
+        let caret = st.cursor();
+        let Some(text) = content.text().get(..caret) else {
+            return;
+        };
         let tokens = content.tokens();
-
-        // 1. Leading `/` command trigger (outside existing inline tokens)
-        let trimmed_start = text.trim_start_matches(' ');
-        let leading_spaces = text.len() - trimmed_start.len();
-        if let Some(after_slash) = trimmed_start.strip_prefix('/')
-            && !after_slash.contains(char::is_whitespace)
-            && !tokens
+        let overlaps_token = |start| {
+            tokens
                 .iter()
-                .any(|s| s.range().start <= leading_spaces && leading_spaces < s.range().end)
+                .any(|span| span.range().start < caret && start < span.range().end)
+        };
+
+        let line_start = text.rfind('\n').map_or(0, |ix| ix + 1);
+        let line = &text[line_start..];
+        let trimmed = line.trim_start_matches(' ');
+        let slash_start = caret - trimmed.len();
+        if let Some(query) = trimmed.strip_prefix('/')
+            && !query.contains(char::is_whitespace)
+            && !overlaps_token(slash_start)
         {
-            let q = after_slash.to_ascii_lowercase();
-            let filtered: Vec<SlashEntrySpec> = SLASH_CATALOG
+            let query = query.to_ascii_lowercase();
+            let items: Vec<_> = SLASH_CATALOG
                 .iter()
                 .filter(|item| {
-                    item.command[1..].to_ascii_lowercase().contains(&q)
-                        || item.short_label.to_ascii_lowercase().contains(&q)
+                    item.command[1..].contains(&query)
+                        || item.short_label.to_ascii_lowercase().contains(&query)
                 })
                 .cloned()
                 .collect();
-            if !filtered.is_empty() {
+            if !items.is_empty() {
+                self.completion_source = Some((content, caret));
+                self.completion_scroll = ScrollHandle::new();
                 self.completion = Some(CompletionPopupState::Slash {
-                    replace_range: leading_spaces..text.len(),
-                    items: filtered,
+                    replace_range: slash_start..caret,
+                    items,
                     selected_idx: 0,
                 });
                 return;
             }
         }
 
-        // 2. Trailing `@<query>` file reference trigger
-        if let Some(at_pos) = text.rfind('@') {
-            let valid_boundary = at_pos == 0 || text[..at_pos].ends_with(char::is_whitespace);
-            let after_at = &text[at_pos + 1..];
-            let inside_token = tokens
-                .iter()
-                .any(|s| s.range().start <= at_pos && at_pos < s.range().end);
-            if valid_boundary && !inside_token && !after_at.contains(char::is_whitespace) {
-                let query_bg = after_at.to_owned();
-                let replace_range = at_pos..text.len();
-                let sid = match &self.draft_key {
-                    DraftKey::Session(id) => Some(id.clone()),
-                    DraftKey::NewSession => None,
-                };
-                let client = self.client.clone();
-                self.file_search_task = Some(cx.spawn(async move |weak, cx| {
-                    let res = client.search_files(sid, query_bg).await;
-                    if let Ok(paths) = res {
-                        let _ = weak.update(cx, |this, cx| {
-                            if paths.is_empty() {
-                                this.completion = None;
-                            } else {
-                                this.completion = Some(CompletionPopupState::Files {
-                                    replace_range,
-                                    paths,
-                                    selected_idx: 0,
-                                });
-                            }
-                            cx.notify();
+        if let Some(at) = text.rfind('@')
+            && (at == 0 || text[..at].ends_with(char::is_whitespace))
+            && !overlaps_token(at)
+            && !text[at + 1..].contains(char::is_whitespace)
+        {
+            let query = text[at + 1..].to_owned();
+            let sid = match &self.draft_key {
+                DraftKey::Session(id) => Some(id.clone()),
+                DraftKey::NewSession => None,
+            };
+            let client = self.client.clone();
+            self.completion_source = Some((content, caret));
+            self.file_search_task = Some(cx.spawn(async move |weak, cx| {
+                let result = client.search_files(sid, query).await;
+                let _ = weak.update(cx, |this, cx| {
+                    this.file_search_task = None;
+                    if let Ok(paths) = result
+                        && !paths.is_empty()
+                        && this.completion_is_current(cx)
+                    {
+                        this.completion_scroll = ScrollHandle::new();
+                        this.completion = Some(CompletionPopupState::Files {
+                            replace_range: at..caret,
+                            paths,
+                            selected_idx: 0,
                         });
+                    } else {
+                        this.clear_completion();
                     }
-                }));
-                return;
-            }
+                    cx.notify();
+                });
+            }));
         }
-
-        self.completion = None;
     }
 
     fn accept_selected_completion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_ime_composing(window, cx) || !self.completion_is_current(cx) {
+            self.clear_completion();
+            cx.notify();
+            return;
+        }
+        self.completion_source = None;
         let Some(comp) = self.completion.take() else {
             return;
         };
@@ -744,13 +914,6 @@ impl ComposerView {
                     cx.emit(ComposerHostEvent::NavigateSlashRoute(nav));
                     cx.notify();
                     return;
-                }
-                if spec.command == "/compact"
-                    && let DraftKey::Session(ref sid) = self.draft_key
-                {
-                    // `/compact` inside an active session can also be inserted as an atomic token or executed on submit;
-                    // per plan §3.3.2: "选中诊断技能或 `/compact` 后在 `TextareaState` 中插入 `InlineToken`"
-                    let _ = sid;
                 }
                 let tok =
                     UiInlineToken::new(spec.command, spec.command).with_label(spec.short_label);
@@ -877,17 +1040,7 @@ impl ComposerView {
                 let res = cx
                     .background_executor()
                     .spawn(async move {
-                        let meta = std::fs::metadata(&path).map_err(|e| {
-                            ClientError::InvalidImage(format!("无法读取图片文件：{e}"))
-                        })?;
-                        if meta.len() > cst_client::workspace::MAX_SUBMISSION_IMAGE_BYTES as u64 {
-                            return Err(ClientError::ImageBudgetExceeded(
-                                "单张图片原始体积超过 12 MiB 上限。".into(),
-                            ));
-                        }
-                        let bytes = std::fs::read(&path).map_err(|e| {
-                            ClientError::InvalidImage(format!("无法读取图片字节：{e}"))
-                        })?;
+                        let bytes = read_attachment_file(&path)?;
                         let fname = path.file_name().and_then(|s| s.to_str()).map(str::to_owned);
                         let pool = client.with_workspace(|ws| ws.image_pool().clone());
                         let handle = pool.admit_image(bytes, fname)?;
@@ -920,34 +1073,73 @@ impl ComposerView {
         cx.notify();
     }
 
-    pub fn trigger_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn trigger_submit_from_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_ime_composing(window, cx) {
+            let committed = window.finish_ime_composition();
+            self.textarea.update(cx, |st, cx| {
+                if let Some(text) = committed {
+                    EntityInputHandler::replace_text_in_range(st, None, &text, window, cx);
+                } else {
+                    EntityInputHandler::unmark_text(st, window, cx);
+                }
+            });
+            self.had_active_ime_mark = false;
+        }
+        self.trigger_submit(window, cx);
+    }
+
+    pub fn trigger_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.submitting.is_some()
+            || self.model_change_pending
+            || self.is_ime_composing(window, cx)
+            || matches!(&self.draft_key, DraftKey::Session(id)
+                if self.client.with_workspace(|ws| ws.active_session_id() != Some(id.as_str())))
+        {
             return;
         }
+        self.clear_completion();
         self.push_to_workspace(cx);
 
-        // Handle `/compact` command token inside an active session directly
-        let is_compact_only = self.client.with_workspace(|ws| {
-            ws.draft(&self.draft_key).is_some_and(|d| {
-                d.text.trim().is_empty()
-                    && d.images.is_empty()
-                    && d.tokens.iter().any(
-                        |t| matches!(t, DraftToken::Command { name, .. } if name == "/compact"),
-                    )
+        // Handle `/compact` command token (with optional custom instructions) inside an active session directly
+        let compact_instructions = self.client.with_workspace(|ws| {
+            ws.draft(&self.draft_key).and_then(|d| {
+                let has_compact_token = matches!(
+                    d.tokens.as_slice(),
+                    [DraftToken::Command { name, .. }] if name == "/compact"
+                );
+                (d.images.is_empty() && has_compact_token).then(|| {
+                    let trimmed = d.text.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+                })
             })
         });
-        if is_compact_only && let DraftKey::Session(sid) = self.draft_key.clone() {
+        if let Some(instructions) = compact_instructions
+            && let DraftKey::Session(sid) = self.draft_key.clone()
+        {
             let key = self.draft_key.clone();
-            let _ = self.client.with_workspace_mut(|ws| ws.take_draft(&key));
+            self.submitting = Some(key.clone());
+            let draft = self.client.with_workspace_mut(|ws| ws.take_draft(&key));
             self.pull_from_workspace(window, cx);
             let client = self.client.clone();
-            cx.spawn(async move |weak, cx| {
-                let res = client.compact_session(sid, None).await;
-                let _ = weak.update(cx, |_, cx| match res {
-                    Ok(_) => cx.emit(ComposerHostEvent::TopNotice(
-                        "已完成会话上下文压缩。".into(),
-                    )),
-                    Err(e) => cx.emit(ComposerHostEvent::ErrorMessage(e.to_string())),
+            cx.spawn_in(window, async move |weak, cx| {
+                let res = client.compact_session(sid, instructions).await;
+                let _ = weak.update_in(cx, |this, window, cx| {
+                    this.submitting = None;
+                    match res {
+                        Ok(_) => {
+                            cx.emit(ComposerHostEvent::TopNotice(
+                                "已完成会话上下文压缩。".into(),
+                            ));
+                        }
+                        Err(e) => {
+                            this.client.with_workspace_mut(|ws| {
+                                ws.restore_draft_if_empty(key, draft);
+                            });
+                            this.reconcile_external_draft_changes(window, cx);
+                            cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
+                        }
+                    }
+                    cx.notify();
                 });
             })
             .detach();
@@ -966,12 +1158,20 @@ impl ComposerView {
         let active_provider = self.current_model_choice(&snap).0;
 
         let target_key = self.draft_key.clone();
-        // Clear editor immediately on optimistic take; if Home submission fails, `submit_draft` restores it into `WorkspaceState`!
+        self.submitting = Some(target_key.clone());
         let client = self.client.clone();
+        let submission = client.begin_submit_draft(target_key.clone());
+        self.pull_from_workspace(window, cx);
+        cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
-            let submit_res = client.submit_draft(target_key.clone()).await;
+            let submit_res = submission.await;
             let _ = weak.update_in(cx, |this, window, cx| {
-                this.pull_from_workspace(window, cx);
+                this.submitting = None;
+                if this.draft_key != target_key {
+                    cx.notify();
+                    return;
+                }
+                this.reconcile_external_draft_changes(window, cx);
                 match submit_res {
                     Ok(outcome) => {
                         cx.emit(ComposerHostEvent::SubmittedToSession {
@@ -991,6 +1191,161 @@ impl ComposerView {
             });
         })
         .detach();
+    }
+
+    fn queue_snapshot(&self, sid: &str, raw: Option<&Value>) -> ParsedQueueSnapshot {
+        let server = ParsedQueueSnapshot::from_json(raw);
+        if let Some((_, receipt)) = self
+            .queue_receipt
+            .as_ref()
+            .filter(|(key, queue)| sid == key && queue.version > server.version)
+        {
+            return receipt.clone();
+        }
+        server
+    }
+
+    fn mutate_queue(
+        &mut self,
+        sid: String,
+        version: u64,
+        mutation: QueueMutation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.queue_pending.is_some() || self.draft_key != DraftKey::Session(sid.clone()) {
+            return;
+        }
+        let snap = self.client.snapshot();
+        let queue = self.queue_snapshot(
+            &sid,
+            snap.loaded_sessions
+                .get(&sid)
+                .and_then(|s| s.queue.as_ref()),
+        );
+        if queue.version != version {
+            cx.notify();
+            return;
+        }
+        self.queue_pending = Some((sid.clone(), mutation.project(queue)));
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let result = mutation.send(client, sid.clone(), version).await;
+            let _ = weak.update_in(cx, |this, _window, cx| {
+                this.queue_pending = None;
+                match result {
+                    Ok(response) => {
+                        if let Some(raw) = response.get("queue") {
+                            this.queue_receipt =
+                                Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
+                        }
+                    }
+                    Err(err) => cx.emit(ComposerHostEvent::ErrorMessage(err.to_string())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Atomically deletes the queued item using optimistic-lock `version` and backfills its content
+    /// into the bottom main composer ONLY after `200 OK`.
+    pub(crate) fn execute_queue_item_backfill(
+        &mut self,
+        sid: String,
+        item: VisibleQueueItem,
+        version: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.queue_pending.is_some() || self.draft_key != DraftKey::Session(sid.clone()) {
+            return;
+        }
+        let snap = self.client.snapshot();
+        let queue = self.queue_snapshot(
+            &sid,
+            snap.loaded_sessions
+                .get(&sid)
+                .and_then(|s| s.queue.as_ref()),
+        );
+        if queue.version != version {
+            cx.emit(ComposerHostEvent::ErrorMessage(
+                "排队消息状态已更新，请重新点击编辑。".into(),
+            ));
+            cx.notify();
+            return;
+        }
+        let mutation = QueueMutation::Delete(item.id.clone());
+        self.queue_pending = Some((sid.clone(), mutation.project(queue)));
+        let client = self.client.clone();
+        let key = DraftKey::Session(sid.clone());
+        let (draft_revision, pool) =
+            client.with_workspace(|ws| (ws.draft_edit_revision(&key), ws.image_pool().clone()));
+        cx.spawn_in(window, async move |weak, cx| {
+            let result = async {
+                let mut draft = ComposerDraft {
+                    cursor_char_offset: item.text.chars().count(),
+                    text: item.text,
+                    ..ComposerDraft::default()
+                };
+                if let Some(skill) = item.skill {
+                    let cmd = format!("/skill:{skill}");
+                    draft.tokens.push(DraftToken::Command {
+                        raw: cmd.clone(),
+                        name: cmd,
+                    });
+                }
+                for id in item.attachment_ids {
+                    let bytes = client.get_session_attachment_bytes(sid.clone(), id).await?;
+                    draft.attach_image(pool.admit_image(bytes, None)?)?;
+                }
+                let response = mutation.send(client.clone(), sid.clone(), version).await?;
+                Ok::<_, ClientError>((response, draft))
+            }
+            .await;
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.queue_pending = None;
+                match result {
+                    Ok((response, mut draft)) => {
+                        if let Some(raw) = response.get("queue") {
+                            this.queue_receipt =
+                                Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
+                        }
+                        let active = this.draft_key == key;
+                        let composing = active && this.is_ime_composing(window, cx);
+                        let installed = this.client.with_workspace_mut(|ws| {
+                            if composing || ws.draft_edit_revision(&key) != draft_revision {
+                                return false;
+                            }
+                            let target = ws.draft_mut(key);
+                            target.cursor_char_offset = draft.cursor_char_offset;
+                            target.text = std::mem::take(&mut draft.text);
+                            target.tokens = std::mem::take(&mut draft.tokens);
+                            target.images = std::mem::take(&mut draft.images);
+                            true
+                        });
+                        if !installed {
+                            match this.client.retain_recovered_payload(&sid, &draft) {
+                                Ok(()) => cx.emit(ComposerHostEvent::TopNotice(
+                                    "当前草稿有新内容，排队消息已保留在对话中。".into(),
+                                )),
+                                Err(err) => {
+                                    cx.emit(ComposerHostEvent::ErrorMessage(err.to_string()))
+                                }
+                            }
+                        } else if active {
+                            this.pull_from_workspace(window, cx);
+                            this.focus_handle(cx).focus(window, cx);
+                        }
+                    }
+                    Err(err) => cx.emit(ComposerHostEvent::ErrorMessage(err.to_string())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn current_model_choice(
@@ -1024,10 +1379,8 @@ impl ComposerView {
             .and_then(|o| o.1.clone())
             .or_else(|| base_model.map(|m| m.id.clone()))
             .unwrap_or_else(|| "未选择模型".to_owned());
-        let model_label = models_ref
-            .catalog
-            .iter()
-            .find(|m| m.provider == provider && m.id == model_id)
+        let active_model = find_model_choice(models_ref, &provider, &model_id);
+        let model_label = active_model
             .map(|m| {
                 if m.name.trim().is_empty() {
                     m.id.clone()
@@ -1038,8 +1391,12 @@ impl ComposerView {
             .unwrap_or_else(|| model_id.clone());
         let thinking = draft_override
             .and_then(|o| o.2)
-            .or_else(|| base_model.and_then(|m| m.thinking_level.clone()))
-            .unwrap_or_else(|| "medium".to_owned());
+            .or_else(|| active_model.and_then(|m| m.thinking_level.clone()));
+        let levels = active_thinking_levels(models_ref, &provider, &model_id);
+        let thinking = thinking
+            .filter(|level| levels.contains(level))
+            .or_else(|| levels.first().cloned())
+            .unwrap_or_else(|| "off".to_owned());
 
         (provider, model_id, model_label, thinking)
     }
@@ -1053,17 +1410,18 @@ impl ComposerView {
         if !is_quota_provider(&provider) {
             return;
         }
-        if !force
-            && self.cached_quota_provider.as_deref() == Some(provider.as_str())
-            && self.cached_quota.is_some()
-        {
+        let same_provider = self.cached_quota_provider.as_deref() == Some(provider.as_str());
+        if same_provider && (self.quota_loading || (!force && self.cached_quota.is_some())) {
             return;
+        }
+        if !same_provider {
+            self.cached_quota = None;
         }
         self.cached_quota_provider = Some(provider.clone());
         self.quota_loading = true;
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client.get_provider_quota(provider.clone(), force).await;
+        self.quota_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client.get_provider_quota(provider, force).await;
             let _ = weak.update(cx, |this, cx| {
                 this.quota_loading = false;
                 if let Ok(val) = res {
@@ -1071,35 +1429,33 @@ impl ComposerView {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn render_completion_popover(
         &self,
-        mono_family: SharedString,
+        _mono_family: SharedString,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> Option<gpui_kit::AnyElement> {
         let comp = self.completion.as_ref()?;
-        let mut pop = render_frosted_surface(
-            "composer-completion-popover-p2bit",
-            FrostedGlassSpec::popover_h2p2z(palette),
-            palette.bg_elevated,
-            transparency_enabled,
-            scale_factor,
-        )
-        .test_support()
-        .w_full()
-        .p(space::XS)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_hairline)
-        .flex()
-        .flex_col()
-        .gap(space::MICRO);
+        let mut pop = div()
+            .id("composer-completion-popover-p2bit")
+            .test_support()
+            .occlude()
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .w_full()
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .bg(palette.bg_glass)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MICRO);
 
         match comp {
             CompletionPopupState::Slash {
@@ -1109,29 +1465,44 @@ impl ComposerView {
             } => {
                 let mut scroll = div()
                     .id("composer-slash-list")
+                    .track_scroll(&self.completion_scroll)
                     .relative()
                     .max_h(px(264.0))
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
                     .gap(space::MICRO);
+                let mut saw_skill = false;
+                let mut inserted_sep = false;
                 for (idx, item) in items.iter().enumerate() {
+                    let is_skill = item.command.starts_with("/skill:");
+                    if is_skill {
+                        saw_skill = true;
+                    } else if saw_skill && !inserted_sep {
+                        inserted_sep = true;
+                        scroll = scroll.child(
+                            div()
+                                .w_full()
+                                .py(space::XS)
+                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
+                        );
+                    }
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
                     let icon = icon_for_token_key(item.short_label);
                     let slash_id = SharedString::from(format!("slash-item-{}", item.short_label));
                     let slash_label =
-                        SharedString::from(format!("{} {}", item.command, item.description));
+                        SharedString::from(format!("{} {}", item.short_label, item.description));
                     scroll = scroll.child(
                         apply_scale(div(), scale::UI)
                             .id(slash_id.clone())
                             .test_support()
                             .a11y_listitem(slash_id, slash_label, is_sel)
-                            .h(height::CONTROL)
+                            .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
                             .bg(if is_sel {
-                                palette.bg_item_active
+                                palette.bg_track_recess
                             } else {
                                 gpui_kit::transparent_black()
                             })
@@ -1139,7 +1510,7 @@ impl ComposerView {
                             .items_center()
                             .justify_between()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_active))
+                            .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Slash {
@@ -1157,32 +1528,26 @@ impl ComposerView {
                                     .flex()
                                     .items_center()
                                     .gap(space::SM)
-                                    .child(
-                                        div()
-                                            .w(px(20.0))
-                                            .h(px(20.0))
-                                            .rounded(px(4.0))
-                                            .bg(palette.accent_subtle)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .flex_shrink_0()
-                                            .child(
-                                                Icon::new(icon)
-                                                    .size(px(13.0))
-                                                    .text_color(palette.accent_ink),
-                                            ),
-                                    )
+                                    .child(Icon::new(icon).size(px(14.0)).text_color(if is_sel {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    }))
                                     .child(
                                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                                            .font_family(mono_family.clone())
                                             .text_color(palette.text_primary)
-                                            .child(item.command),
+                                            .child(item.short_label),
                                     ),
                             )
                             .child(
-                                apply_scale(div(), scale::CAPTION)
-                                    .text_color(palette.text_secondary)
+                                div()
+                                    .text_size(px(11.0))
+                                    .line_height(px(16.0))
+                                    .text_color(if is_sel {
+                                        palette.text_primary
+                                    } else {
+                                        palette.text_secondary
+                                    })
                                     .truncate()
                                     .child(cjk_inline_label(item.description)),
                             ),
@@ -1197,6 +1562,7 @@ impl ComposerView {
             } => {
                 let mut scroll = div()
                     .id("composer-files-list")
+                    .track_scroll(&self.completion_scroll)
                     .relative()
                     .max_h(px(240.0))
                     .overflow_y_scroll()
@@ -1212,7 +1578,7 @@ impl ComposerView {
                             .id(file_id.clone())
                             .test_support()
                             .a11y_listitem(file_id, path.clone(), is_sel)
-                            .h(height::CONTROL)
+                            .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
                             .bg(if is_sel {
@@ -1255,8 +1621,13 @@ impl ComposerView {
                 .left_0()
                 .right_0()
                 .bottom_full()
-                .pb(space::SM)
-                .child(pop)
+                .pb(px(2.0))
+                .child(motion::animate_popover_enter(
+                    "composer-comp-pop-anim",
+                    pop,
+                    palette.flat_popover_shadows(),
+                    6.0,
+                ))
                 .into_any_element(),
         )
     }
@@ -1265,6 +1636,9 @@ impl ComposerView {
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.reconcile_external_draft_changes(window, cx);
+        if self.completion.is_some() && !self.completion_is_current(cx) {
+            self.clear_completion();
+        }
 
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
@@ -1278,8 +1652,6 @@ impl Render for ComposerView {
             DraftKey::NewSession => None,
         };
         let is_session_running = active_session.as_ref().is_some_and(|s| s.running);
-        let parsed_queue =
-            ParsedQueueSnapshot::from_json(active_session.as_ref().and_then(|s| s.queue.as_ref()));
 
         let draft_images = self.client.with_workspace(|ws| {
             ws.draft(&self.draft_key)
@@ -1292,10 +1664,15 @@ impl Render for ComposerView {
         let (cur_provider, cur_model_id, cur_model_label, cur_thinking) =
             self.current_model_choice(&snap);
         let scoped_models = resolve_scoped_models(models_ref);
-        let context_usage = active_session
-            .as_ref()
-            .and_then(|s| s.context_usage.as_ref())
-            .or(models_ref.context_usage.as_ref());
+        let (context_usage, usage_stats) = match &self.draft_key {
+            DraftKey::Session(_) => (
+                active_session
+                    .as_ref()
+                    .and_then(|s| s.context_usage.as_ref()),
+                active_session.as_ref().and_then(|s| s.usage.as_ref()),
+            ),
+            DraftKey::NewSession => (None, None),
+        };
         let percent_opt = context_usage
             .and_then(|u| u.get("percent"))
             .and_then(Value::as_f64);
@@ -1311,119 +1688,82 @@ impl Render for ComposerView {
 
         // 1. Optional QueueBar (`rnehA`)
         let queue_element = if let DraftKey::Session(ref sid) = self.draft_key {
-            let sid_s = sid.clone();
-            let sid_r = sid.clone();
-            let sid_d = sid.clone();
-            let sid_ord = sid.clone();
-            let sid_save = sid.clone();
-            let q1 = entity.clone();
-            let q2 = entity.clone();
-            let q3 = entity.clone();
-            let q4 = entity.clone();
-            let q5 = entity.clone();
-            let q6 = entity.clone();
-            let q7 = entity.clone();
-
+            let server_queue =
+                self.queue_snapshot(sid, active_session.as_ref().and_then(|s| s.queue.as_ref()));
+            let parsed_queue = self
+                .queue_pending
+                .as_ref()
+                .filter(|(key, queue)| key == sid && queue.version == server_queue.version)
+                .map_or(&server_queue, |(_, projected)| projected);
+            let q1 = (entity.clone(), sid.clone());
+            let q2 = (entity.clone(), sid.clone());
+            let q3 = (entity.clone(), sid.clone());
+            let q4 = (entity.clone(), sid.clone());
+            let q_edit = (entity.clone(), sid.clone());
             render_queue_bar(
-                &parsed_queue,
-                self.editing_queue_item_id.as_deref(),
-                self.queue_edit_input.as_ref(),
+                parsed_queue,
+                sid,
                 &palette,
+                window,
+                cx,
                 QueueBarCallbacks {
-                    on_steer: Rc::new(move |iid, ver, _, cx| {
-                        let s = sid_s.clone();
-                        q1.update(cx, |this, cx| {
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.steer_queue_item(s, iid, ver).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
+                    on_steer: Rc::new(move |id, version, w, cx| {
+                        q1.0.update(cx, |this, cx| {
+                            this.mutate_queue(
+                                q1.1.clone(),
+                                version,
+                                QueueMutation::Steer(id),
+                                w,
+                                cx,
+                            );
                         });
                     }),
-                    on_retry: Rc::new(move |iid, ver, _, cx| {
-                        let s = sid_r.clone();
-                        q2.update(cx, |this, cx| {
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.retry_queue_item(s, iid, ver).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
+                    on_retry: Rc::new(move |id, version, w, cx| {
+                        q2.0.update(cx, |this, cx| {
+                            this.mutate_queue(
+                                q2.1.clone(),
+                                version,
+                                QueueMutation::Retry(id),
+                                w,
+                                cx,
+                            );
                         });
                     }),
-                    on_delete: Rc::new(move |iid, ver, _, cx| {
-                        let s = sid_d.clone();
-                        q3.update(cx, |this, cx| {
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.delete_queue_item(s, iid, ver).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
+                    on_delete: Rc::new(move |id, version, w, cx| {
+                        q3.0.update(cx, |this, cx| {
+                            this.mutate_queue(
+                                q3.1.clone(),
+                                version,
+                                QueueMutation::Delete(id),
+                                w,
+                                cx,
+                            );
                         });
                     }),
-                    on_reorder: Rc::new(move |ver, ids, _, cx| {
-                        let s = sid_ord.clone();
-                        q4.update(cx, |this, cx| {
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.reorder_queue(s, ver, ids).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
+                    on_reorder: Rc::new(move |version, ids, w, cx| {
+                        q4.0.update(cx, |this, cx| {
+                            this.mutate_queue(
+                                q4.1.clone(),
+                                version,
+                                QueueMutation::Reorder(ids),
+                                w,
+                                cx,
+                            );
                         });
                     }),
-                    on_begin_edit: Rc::new(move |iid, cur_text, window, cx| {
-                        q5.update(cx, |this, cx| {
-                            let inp = cx.new(|cx| {
-                                let mut s = InputState::new(window, cx);
-                                s.set_value(cur_text, window, cx);
-                                s
-                            });
-                            this.editing_queue_item_id = Some(iid);
-                            this.queue_edit_input = Some(inp);
-                            cx.notify();
-                        });
-                    }),
-                    on_commit_edit: Rc::new(move |iid, ver, _, cx| {
-                        let s = sid_save.clone();
-                        q6.update(cx, |this, cx| {
-                            let Some(ref inp) = this.queue_edit_input else {
+                    on_edit: Rc::new(move |item, version, _w, cx| {
+                        let sid_for_edit = q_edit.1.clone();
+                        q_edit.0.update(cx, |this, cx| {
+                            if this.queue_pending.is_some()
+                                || this.draft_key != DraftKey::Session(sid_for_edit.clone())
+                            {
                                 return;
-                            };
-                            let new_text = inp.read(cx).value().to_string();
-                            this.editing_queue_item_id = None;
-                            this.queue_edit_input = None;
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.edit_queue_item(s, iid, ver, new_text).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                            cx.notify();
-                        });
-                    }),
-                    on_cancel_edit: Rc::new(move |_, cx| {
-                        q7.update(cx, |this, cx| {
-                            this.editing_queue_item_id = None;
-                            this.queue_edit_input = None;
-                            cx.notify();
+                            }
+                            cx.emit(ComposerHostEvent::RequestEditQueueItem {
+                                session_id: sid_for_edit,
+                                item,
+                                version,
+                            });
                         });
                     }),
                 },
@@ -1519,21 +1859,43 @@ impl Render for ComposerView {
         });
 
         // 3. `Textarea` with `28px` `InlineToken` (`MkfFr`) renderer & clipboard image paste hook
+        let has_inline_tokens = !self.textarea.read(cx).content().tokens().is_empty();
         let ent_tok = entity.clone();
         let ent_paste = entity.clone();
         let textarea_element = Textarea::new(&self.textarea)
             .accessibility_id("composer-input")
             .aria_label("对话输入框")
+            .xsmall()
             .appearance(false)
             .bordered(false)
+            .text_size(scale::BODY.font_size)
+            // `gpui-base` clips custom inline tokens to `line_height`; raise to `32px` while tokens are
+            // present so the `28px` `MkfFr` chip keeps crisp top/bottom borders, corners, and shadow.
+            .line_height(if has_inline_tokens {
+                px(32.0)
+            } else {
+                scale::BODY.line_height
+            })
             .token(move |tok_ctx, _window, _cx| {
                 let tok = tok_ctx.token();
                 let label = tok.label().clone();
+                let has_non_ascii = !label.is_ascii();
                 let token_icon = icon_for_token_key(tok.id().as_ref());
                 let span_range = tok_ctx.range();
                 let ent_click = ent_tok.clone();
                 let rm_id = SharedString::from(format!("inline-token-rm-{}", span_range.start));
                 let rm_label = SharedString::from(format!("移除标记：{label}"));
+                let chip_shadow = vec![gpui::BoxShadow {
+                    color: if palette.mode.is_dark() {
+                        rgba(0x0000_0038).into()
+                    } else {
+                        rgba(0x1A20_240D).into()
+                    },
+                    offset: gpui::point(px(0.0), px(1.0)),
+                    blur_radius: px(2.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                }];
 
                 div()
                     .h(height::COMPACT)
@@ -1543,6 +1905,7 @@ impl Render for ComposerView {
                     .border_1()
                     .border_color(palette.border_hairline)
                     .bg(palette.bg_special)
+                    .shadow(chip_shadow)
                     .flex()
                     .items_center()
                     .gap(space::TIGHT)
@@ -1550,7 +1913,7 @@ impl Render for ComposerView {
                         div()
                             .w(px(20.0))
                             .h(px(20.0))
-                            .rounded(px(4.0))
+                            .rounded(radius::CONTROL)
                             .bg(palette.accent_subtle)
                             .flex()
                             .items_center()
@@ -1558,15 +1921,21 @@ impl Render for ComposerView {
                             .flex_shrink_0()
                             .child(
                                 Icon::new(token_icon)
-                                    .size(px(13.0))
+                                    .size(px(14.0))
                                     .text_color(palette.accent_ink),
                             ),
                     )
-                    .child(
+                    .child(if has_non_ascii {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label(label)),
-                    )
+                            .child(cjk_inline_label(label))
+                            .into_any_element()
+                    } else {
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .text_color(palette.text_primary)
+                            .child(label)
+                            .into_any_element()
+                    })
                     .child(
                         div()
                             .id(rm_id.clone())
@@ -1574,11 +1943,16 @@ impl Render for ComposerView {
                             .a11y_button(rm_id, rm_label)
                             .w(px(18.0))
                             .h(px(18.0))
+                            .ml(px(-2.0))
+                            .mr(px(-4.0))
                             .rounded(radius::CONTROL)
                             .flex()
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .on_click(move |_, w, cx| {
                                 cx.stop_propagation();
                                 ent_click.update(cx, |this, cx| {
@@ -1639,10 +2013,13 @@ impl Render for ComposerView {
 
         // 4. Bottom `28px` action bar (`QG05v`)
         let ent_attach = entity.clone();
+        let (attach_pressed, attach_press) =
+            motion::icon_press_state("composer-attach-btn", window, cx);
         let attach_btn = div()
             .id("composer-attach-btn")
             .test_support()
             .a11y_button("composer-attach-btn", "添加图片附件")
+            .desktop_tooltip("composer-attach-btn", "添加图片附件")
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -1650,6 +2027,7 @@ impl Render for ComposerView {
             .items_center()
             .justify_center()
             .hover(|s| s.bg(palette.bg_item_hover))
+            .on_icon_press(attach_press)
             .on_click(move |_, _, cx| {
                 let rx = cx.prompt_for_paths(PathPromptOptions {
                     files: true,
@@ -1667,11 +2045,15 @@ impl Render for ComposerView {
                 })
                 .detach();
             })
-            .child(
+            .child(motion::animated_icon_press(
+                "composer-attach-btn",
+                attach_pressed,
                 Icon::new(IconName::Plus)
                     .size(px(16.0))
                     .text_color(palette.text_secondary),
-            );
+                window,
+                cx,
+            ));
 
         let ent_ctx_btn = entity.clone();
         let prov_for_ctx = cur_provider.clone();
@@ -1682,11 +2064,20 @@ impl Render for ComposerView {
             move |w, cx| {
                 let p = prov_for_ctx.clone();
                 ent_ctx_btn.update(cx, |this, cx| {
-                    this.picker_open = false;
+                    #[cfg(feature = "test-support")]
+                    crate::ux_probe::mark_input("context_popover");
+                    this.clear_completion();
+                    this.close_picker();
                     this.context_popover_open = !this.context_popover_open;
                     if this.context_popover_open {
                         this.context_prior_focus = w.focused(cx);
+                        this.context_btn_focus.focus(w, cx);
                         this.refresh_quota_for_provider(p, false, cx);
+                        if let DraftKey::Session(ref sid) = this.draft_key {
+                            this.client.refresh_session_usage(sid.clone());
+                        }
+                    } else {
+                        this.context_prior_focus = None;
                     }
                     cx.notify();
                 });
@@ -1694,7 +2085,7 @@ impl Render for ComposerView {
         );
 
         let ent_picker_btn = entity.clone();
-        let model_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
+        let model_btn = apply_scale(div(), scale::CAPTION)
             .id("composer-model-picker-btn")
             .test_support()
             .a11y_toggle_button(
@@ -1715,14 +2106,25 @@ impl Render for ComposerView {
             .items_center()
             .gap(space::XS)
             .hover(|s| s.bg(palette.bg_item_hover))
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
             .on_click(move |_, w, cx| {
                 ent_picker_btn.update(cx, |this, cx| {
+                    #[cfg(feature = "test-support")]
+                    crate::ux_probe::mark_input("model_picker");
+                    this.clear_completion();
                     this.context_popover_open = false;
-                    this.picker_open = !this.picker_open;
+                    this.context_prior_focus = None;
                     if this.picker_open {
-                        this.picker_page = ModelPickerPage::Main;
-                        this.picker_hi_idx = 0;
+                        this.close_picker();
+                    } else {
+                        this.picker_open = true;
+                        this.picker_open_epoch = this.picker_open_epoch.wrapping_add(1);
+                        this.set_picker_page(ModelPickerPage::Main);
                         this.picker_prior_focus = w.focused(cx);
+                        this.model_btn_focus.focus(w, cx);
                     }
                     cx.notify();
                 });
@@ -1732,18 +2134,28 @@ impl Render for ComposerView {
                     .max_w(px(148.0))
                     .truncate()
                     .text_color(palette.text_primary)
-                    .child(SharedString::from(cur_model_label.clone())),
+                    .child(cjk_inline_label(cur_model_label.clone())),
             )
             .child(
                 div()
                     .text_color(palette.text_secondary)
-                    .child(thinking_level_label(&cur_thinking)),
+                    .child(cjk_inline_label(thinking_level_label(&cur_thinking))),
             )
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(px(12.0))
-                    .text_color(palette.text_secondary),
-            );
+            .child(motion::animated_chevron(
+                format!(
+                    "composer-model-{}",
+                    match &self.draft_key {
+                        DraftKey::NewSession => "home",
+                        DraftKey::Session(s) => s.as_str(),
+                    }
+                ),
+                self.picker_open,
+                true,
+                px(12.0),
+                palette.text_secondary,
+                window,
+                cx,
+            ));
 
         // Unified `28×28px` primary button (`composer-send-btn-b0mrik`, `OQrq0`):
         // when session is running AND draft has neither text/tokens nor attached images, displays `12px` white `Square` to abort;
@@ -1759,17 +2171,18 @@ impl Render for ComposerView {
         let is_abort_mode = abort_session_id.is_some();
 
         let ent_send = entity.clone();
+        let (send_pressed, send_press) =
+            motion::icon_press_state("composer-send-btn-b0mrik", window, cx);
+        let send_label = if is_abort_mode {
+            "停止生成"
+        } else {
+            "发送消息"
+        };
         let send_btn = div()
             .id("composer-send-btn-b0mrik")
             .test_support()
-            .a11y_button(
-                "composer-send-btn-b0mrik",
-                if is_abort_mode {
-                    "停止生成"
-                } else {
-                    "发送消息"
-                },
-            )
+            .a11y_button("composer-send-btn-b0mrik", send_label)
+            .desktop_tooltip("composer-send-btn-b0mrik", send_label)
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -1778,6 +2191,7 @@ impl Render for ComposerView {
             .items_center()
             .justify_center()
             .hover(|s| s.bg(palette.accent_hover))
+            .on_icon_press(send_press)
             .on_click(move |_, w, cx| {
                 if let Some(ref sid_abort) = abort_session_id {
                     let s = sid_abort.clone();
@@ -1793,20 +2207,147 @@ impl Render for ComposerView {
                         .detach();
                     });
                 } else {
-                    ent_send.update(cx, |this, cx| this.trigger_submit(w, cx));
+                    ent_send.update(cx, |this, cx| this.trigger_submit_from_button(w, cx));
                 }
             })
-            .child(if is_abort_mode {
-                Icon::new(IconName::Square)
-                    .size(px(12.0))
-                    .text_color(palette.text_on_accent)
-            } else {
-                Icon::new(IconName::ArrowUp)
-                    .size(px(14.0))
-                    .text_color(palette.text_on_accent)
-            });
+            .child(motion::animated_icon_press(
+                "composer-send-btn-b0mrik",
+                send_pressed,
+                if is_abort_mode {
+                    Icon::new(IconName::Square)
+                        .size(px(12.0))
+                        .text_color(palette.text_on_accent)
+                } else {
+                    Icon::new(IconName::ArrowUp)
+                        .size(px(14.0))
+                        .text_color(palette.text_on_accent)
+                },
+                window,
+                cx,
+            ));
+
+        let ctx_open = self.context_popover_open;
+        let ctx_progress = self
+            .context_presence
+            .sample(
+                if ctx_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if ctx_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        let ctx_popover_opt = (ctx_open || ctx_progress > 0.001).then(|| {
+            let ent_retry = entity.clone();
+            let ent_acc = entity.clone();
+            let prov_retry = cur_provider.clone();
+            div()
+                .absolute()
+                .right(px(36.0))
+                .bottom_full()
+                .pb(space::SM)
+                .child(render_context_quota_popover(
+                    ctx_open,
+                    ctx_progress,
+                    &cur_provider,
+                    context_usage,
+                    usage_stats,
+                    self.cached_quota.as_ref().filter(|_| {
+                        self.cached_quota_provider.as_deref() == Some(cur_provider.as_str())
+                    }),
+                    self.quota_loading
+                        && self.cached_quota_provider.as_deref() == Some(cur_provider.as_str()),
+                    mono_family.clone(),
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                    Rc::new(move |_, cx| {
+                        let p = prov_retry.clone();
+                        ent_retry.update(cx, |this, cx| {
+                            this.refresh_quota_for_provider(p, true, cx);
+                        });
+                    }),
+                    Rc::new(move |_, cx| {
+                        ent_acc.update(cx, |this, cx| {
+                            this.context_popover_open = false;
+                            this.context_prior_focus = None;
+                            cx.emit(ComposerHostEvent::OpenAccountPage);
+                            cx.notify();
+                        });
+                    }),
+                ))
+        });
+
+        let picker_open = self.picker_open;
+        let picker_progress = self
+            .picker_presence
+            .sample(
+                if picker_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if picker_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        let picker_popover_opt = (picker_open || picker_progress > 0.001).then(|| {
+            let ent_page = entity.clone();
+            let ent_sel_m = entity.clone();
+            let ent_sel_t = entity.clone();
+            let levels = active_thinking_levels(models_ref, &cur_provider, &cur_model_id);
+            div()
+                .absolute()
+                .right_0()
+                .bottom_full()
+                .pb(space::SM)
+                .flex()
+                .flex_col()
+                .items_end()
+                .justify_end()
+                .child(render_model_picker_popover(
+                    picker_open,
+                    picker_progress,
+                    self.picker_open_epoch,
+                    self.picker_page,
+                    self.picker_hi_idx,
+                    &self.picker_scroll,
+                    &scoped_models,
+                    &cur_provider,
+                    &cur_model_id,
+                    &cur_model_label,
+                    levels,
+                    &cur_thinking,
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                    Rc::new(move |next_page, _, cx| {
+                        ent_page.update(cx, |this, cx| {
+                            this.set_picker_page(next_page);
+                            cx.notify();
+                        });
+                    }),
+                    Rc::new(move |provider, model_id, _, cx| {
+                        ent_sel_m.update(cx, |this, cx| this.select_model(provider, model_id, cx));
+                    }),
+                    Rc::new(move |level, w, cx| {
+                        ent_sel_t.update(cx, |this, cx| this.select_thinking(level, w, cx));
+                    }),
+                    window,
+                    cx,
+                ))
+        });
 
         let right_cluster = div()
+            .relative()
             .flex()
             .items_center()
             .gap(space::SM)
@@ -1816,9 +2357,15 @@ impl Render for ComposerView {
                     .items_center()
                     .gap(space::XS)
                     .child(context_ring)
-                    .child(model_btn),
+                    .child(
+                        div()
+                            .relative()
+                            .child(model_btn)
+                            .children(picker_popover_opt),
+                    ),
             )
-            .child(send_btn);
+            .child(send_btn)
+            .children(ctx_popover_opt);
 
         let action_bar = div()
             .h(height::COMPACT)
@@ -1828,14 +2375,24 @@ impl Render for ComposerView {
             .child(attach_btn)
             .child(right_cluster);
 
-        let is_home_composer = matches!(self.draft_key, DraftKey::NewSession);
-        let card_border_color = if is_home_composer {
-            palette.border_hairline
-        } else if is_focused {
-            palette.border_focus
-        } else {
-            palette.border_strong
-        };
+        let focus_t =
+            motion::animated_state_progress("composer-card-focus", is_focused, window, cx);
+        let card_border_color =
+            motion::lerp_hsla(palette.border_strong, palette.border_focus, focus_t);
+        let card_shadows = motion::lerp_shadows(
+            &palette.composer_shadows(false),
+            &palette.composer_shadows(true),
+            focus_t,
+        );
+        #[cfg(feature = "test-support")]
+        if crate::ux_probe::is_enabled() {
+            let rgba_val = card_border_color.to_rgb();
+            crate::ux_probe::record_composer_style(
+                is_focused,
+                [rgba_val.r, rgba_val.g, rgba_val.b, rgba_val.a],
+                card_shadows.len(),
+            );
+        }
 
         let ent_drop = entity.clone();
         let mut card = div()
@@ -1849,7 +2406,7 @@ impl Render for ComposerView {
             .border_1()
             .border_color(card_border_color)
             .bg(palette.bg_workspace)
-            .shadow(palette.composer_shadows(is_focused))
+            .shadow(card_shadows)
             .flex()
             .flex_col()
             .justify_between()
@@ -1867,7 +2424,46 @@ impl Render for ComposerView {
                     }
                 }),
             )
-            .capture_key_down(cx.listener(Self::handle_capture_key_down))
+            // Bound actions run before raw key-down. Capture at the card so the
+            // input never sees a completion/submit gesture that has been handled.
+            .capture_action(cx.listener(|this, action: &Enter, w, cx| {
+                if !this.focus_handle(cx).is_focused(w) {
+                    return;
+                }
+                if this.is_ime_composing(w, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
+                if action.shift && !action.secondary {
+                    return; // Let Textarea insert the line break.
+                }
+                cx.stop_propagation();
+                if !action.secondary && this.completion.is_some() && this.completion_is_current(cx)
+                {
+                    this.accept_selected_completion(w, cx);
+                } else {
+                    this.trigger_submit(w, cx);
+                }
+            }))
+            .capture_action(
+                cx.listener(|this, _: &MoveUp, w, cx| this.move_completion(false, w, cx)),
+            )
+            .capture_action(
+                cx.listener(|this, _: &MoveDown, w, cx| this.move_completion(true, w, cx)),
+            )
+            .capture_action(
+                cx.listener(|this, _: &IndentInline, w, cx| this.complete_on_tab(w, cx)),
+            )
+            .capture_action(cx.listener(|this, _: &OutdentInline, w, cx| {
+                if !this.focus_handle(cx).is_focused(w) || !this.is_ime_composing(w, cx) {
+                    if this.clear_completion() {
+                        cx.notify();
+                    }
+                } else {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_key_down(cx.listener(Self::handle_picker_key))
             .on_drop(move |paths: &ExternalPaths, _, cx| {
                 let files: Vec<PathBuf> = paths.paths().to_vec();
                 ent_drop.update(cx, |this, cx| {
@@ -1882,14 +2478,25 @@ impl Render for ComposerView {
             card = card.child(th);
         }
         card = card
-            .child(div().w_full().min_h(px(24.0)).child(textarea_element))
+            .child(
+                div()
+                    .w_full()
+                    .min_h(px(24.0))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(textarea_element),
+            )
             .child(action_bar);
+        #[cfg(feature = "test-support")]
+        if let Some(layer) = crate::ux_probe::bounds_probe_layer("composer", None) {
+            card = card.relative().child(layer);
+        }
 
-        // Outer relative wrapper anchoring upward popovers (`p2biT`, `d8zzg`, `h5jG6d`)
-        let mut wrapper = div().relative().w_full();
+        // Outer relative wrapper (`card` first, upward slash/file completion popover `p2biT` painted above `card`;
+        // `d8zzg` and `h5jG6d` anchor directly above their triggers inside `action_bar`).
+        let mut wrapper = div().relative().w_full().child(card);
 
         if let Some(comp_pop) = self.render_completion_popover(
-            mono_family.clone(),
+            mono_family,
             &palette,
             transparency_enabled,
             scale_factor,
@@ -1898,124 +2505,24 @@ impl Render for ComposerView {
             wrapper = wrapper.child(comp_pop);
         }
 
-        if self.context_popover_open {
-            let ent_retry = entity.clone();
-            let ent_acc = entity.clone();
-            let prov_retry = cur_provider.clone();
-            wrapper = wrapper.child(div().absolute().right(px(64.0)).bottom(px(44.0)).child(
-                render_context_quota_popover(
-                    &cur_provider,
-                    context_usage,
-                    models_ref.usage.as_ref(),
-                    self.cached_quota.as_ref(),
-                    self.quota_loading,
-                    mono_family,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    Rc::new(move |_, cx| {
-                        let p = prov_retry.clone();
-                        ent_retry.update(cx, |this, cx| {
-                            this.refresh_quota_for_provider(p, true, cx);
-                        });
-                    }),
-                    Rc::new(move |_, cx| {
-                        ent_acc.update(cx, |this, cx| {
-                            this.context_popover_open = false;
-                            cx.emit(ComposerHostEvent::OpenAccountPage);
-                            cx.notify();
-                        });
-                    }),
-                ),
-            ));
-        }
-
-        if self.picker_open {
-            let ent_page = entity.clone();
-            let ent_sel_m = entity.clone();
-            let ent_sel_t = entity.clone();
-            wrapper = wrapper.child(div().absolute().right(px(36.0)).bottom(px(44.0)).child(
-                render_model_picker_popover(
-                    self.picker_page,
-                    self.picker_hi_idx,
-                    &scoped_models,
-                    &cur_provider,
-                    &cur_model_id,
-                    &cur_model_label,
-                    &models_ref.thinking_levels,
-                    &cur_thinking,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    Rc::new(move |next_page, _, cx| {
-                        ent_page.update(cx, |this, cx| {
-                            this.picker_page = next_page;
-                            this.picker_hi_idx = 0;
-                            cx.notify();
-                        });
-                    }),
-                    Rc::new(move |prov, mid, _, cx| {
-                        ent_sel_m.update(cx, |this, cx| {
-                            let key = this.draft_key.clone();
-                            this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
-                                let d = ws.draft_mut(key.clone());
-                                d.selected_provider = Some(prov.clone());
-                                d.selected_model_id = Some(mid.clone());
-                                ws.draft_edit_revision(&key)
-                            });
-                            let sid = match &this.draft_key {
-                                DraftKey::Session(id) => Some(id.clone()),
-                                DraftKey::NewSession => None,
-                            };
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                let res = c.select_model(sid.clone(), prov, mid).await;
-                                let _ = c.refresh_models(sid).await;
-                                if let Err(e) = res {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                            this.picker_page = ModelPickerPage::Main;
-                            cx.notify();
-                        });
-                    }),
-                    Rc::new(move |lvl, w, cx| {
-                        ent_sel_t.update(cx, |this, cx| {
-                            let key = this.draft_key.clone();
-                            this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
-                                let d = ws.draft_mut(key.clone());
-                                d.selected_thinking_level = Some(lvl.clone());
-                                ws.draft_edit_revision(&key)
-                            });
-                            if let DraftKey::Session(sid) = this.draft_key.clone() {
-                                let c = this.client.clone();
-                                cx.spawn(async move |weak, cx| {
-                                    let res = c.set_session_thinking_level(sid.clone(), lvl).await;
-                                    let _ = c.refresh_models(Some(sid)).await;
-                                    if let Err(e) = res {
-                                        let _ = weak.update(cx, |_, cx| {
-                                            cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                        });
-                                    }
-                                })
-                                .detach();
-                            }
-                            this.picker_open = false;
-                            if let Some(prev) = this.picker_prior_focus.take() {
-                                prev.focus(w, cx);
-                            }
-                            cx.notify();
-                        });
-                    }),
-                ),
-            ));
-        }
-
-        wrapper.child(card)
+        wrapper
     }
+}
+
+fn read_attachment_file(path: &std::path::Path) -> Result<Vec<u8>, ClientError> {
+    const LIMIT: usize = cst_client::workspace::MAX_SUBMISSION_IMAGE_BYTES;
+    let file = std::fs::File::open(path)
+        .map_err(|e| ClientError::InvalidImage(format!("无法读取图片文件：{e}")))?;
+    let mut bytes = Vec::new();
+    file.take(LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| ClientError::InvalidImage(format!("无法读取图片字节：{e}")))?;
+    if bytes.len() > LIMIT {
+        return Err(ClientError::ImageBudgetExceeded(
+            "单张图片原始体积超过 12 MiB 上限。".into(),
+        ));
+    }
+    Ok(bytes)
 }
 
 fn build_input_content_from_draft(draft: &ComposerDraft) -> InputContent {

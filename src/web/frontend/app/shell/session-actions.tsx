@@ -6,6 +6,7 @@ import { apiJson } from "../data/api";
 import { SessionRenameDialog } from "./app-dialogs";
 import { SessionDeleteDialog, SessionDeleteNotice, useSessionManagement } from "./session-management";
 import { useWorkspaceSessions } from "./sessions-context";
+import { useWorkspaceShell } from "./workspace-shell-context";
 
 export type SessionItem = { id: string; title: string; updatedAt?: string };
 export type SessionMenuState = { id: string; title: string; x: number; y: number } | null;
@@ -17,6 +18,7 @@ export function useSessionActions(
 	preview = false,
 ) {
 	const state = useWorkspaceSessions();
+	const shell = useWorkspaceShell();
 	const location = useLocation();
 	const navigate = useNavigate();
 	const [menu, setMenu] = useState<SessionMenuState>(null);
@@ -58,12 +60,21 @@ export function useSessionActions(
 	});
 
 	const finishManagement = management.finish;
+	const cancelDelete = management.cancel;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 路由切换时结束未提交的列表操作
 	useEffect(() => {
 		setMenu(null);
 		setRenaming(null);
 		finishManagement();
 	}, [location.pathname, finishManagement]);
+	// 通道切入软件端待机态时，立刻撤下弹出菜单、重命名框与删除确认弹窗，避免原生 <dialog> 盖在待机遮罩之上。
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		setMenu(null);
+		setRenaming(null);
+		cancelDelete();
+		finishManagement();
+	}, [shell?.appActive, cancelDelete, finishManagement]);
 	useLayoutEffect(() => {
 		if (!menu) return;
 		const element = menuRef.current;
@@ -76,7 +87,11 @@ export function useSessionActions(
 	useEffect(() => {
 		if (!menu) return;
 		const close = (event: Event) => {
-			if (!menuRef.current?.contains(event.target as Node)) setMenu(null);
+			const target = event.target as Element | null;
+			if (menuRef.current?.contains(target)) return;
+			const trigger = target?.closest<HTMLElement>("[data-menu-trigger-id]");
+			if (trigger?.dataset.menuTriggerId === menu.id) return;
+			setMenu(null);
 		};
 		const dismiss = () => setMenu(null);
 		window.addEventListener("pointerdown", close);
@@ -91,7 +106,14 @@ export function useSessionActions(
 	useEffect(() => {
 		if (!menu && !management.managing) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || management.targets) return;
+			if (
+				event.key !== "Escape" ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				management.targets
+			)
+				return;
 			if (menu) {
 				event.preventDefault();
 				setMenu(null);
@@ -105,8 +127,12 @@ export function useSessionActions(
 		window.addEventListener("keydown", closeOnEscape);
 		return () => window.removeEventListener("keydown", closeOnEscape);
 	}, [menu, management.managing, management.targets, management.busy, finishManagement, focusSession]);
-	function openSessionMenu(session: { id: string; title: string }, x: number, y: number) {
+	function openSessionMenu(session: { id: string; title: string }, x: number, y: number, toggle = false) {
 		if (preview || management.busy || (management.managing && !management.count)) return;
+		if (toggle && menu?.id === session.id) {
+			setMenu(null);
+			return;
+		}
 		setMenu({ ...session, x, y });
 	}
 	function rename(id: string, current: string) {
@@ -125,6 +151,10 @@ export function useSessionActions(
 		if (targetId) focusSession(targetId);
 	}
 
+	function clearRenaming() {
+		setRenaming(null);
+	}
+
 	function remove(id: string) {
 		setMenu(null);
 		management.requestDelete(sessions.filter((session) => session.id === id));
@@ -136,6 +166,7 @@ export function useSessionActions(
 		setMenu,
 		renaming,
 		cancelRename,
+		clearRenaming,
 		submitRename,
 		management,
 		openSessionMenu,
@@ -152,12 +183,28 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 			{menu &&
 				createPortal(
 					<div
-						className="session-menu"
+						className="tier-2-glass tier-2-menu session-menu"
 						ref={menuRef}
 						role="menu"
 						aria-label={management.managing ? "批量会话操作" : `会话 ${menu.title}`}
 						style={{ left: menu.x, top: menu.y }}
 						onKeyDown={(event) => {
+							if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+							if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+								const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+								if (!items.length) return;
+								event.preventDefault();
+								const current = items.indexOf(document.activeElement as HTMLElement);
+								const delta = event.shiftKey ? -1 : 1;
+								const index =
+									current < 0
+										? event.shiftKey
+											? items.length - 1
+											: 0
+										: (current + delta + items.length) % items.length;
+								items[index]?.focus();
+								return;
+							}
 							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
 							event.preventDefault();
 							const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
@@ -175,48 +222,48 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 							<button
 								type="button"
 								role="menuitem"
-								className="sidebar-account-item sidebar-menu-delete"
+								className="menu-row danger"
 								onClick={() => {
 									setMenu(null);
 									management.requestDelete();
 								}}
 							>
-								<Trash2 size={18} aria-hidden="true" />
-								删除
+								<Trash2 size={16} aria-hidden="true" />
+								<span>删除</span>
 							</button>
 						) : (
 							<>
 								<button
 									type="button"
 									role="menuitem"
-									className="sidebar-account-item"
+									className="menu-row"
 									onClick={() => void rename(menu.id, menu.title)}
 								>
-									<Pencil size={18} aria-hidden="true" />
-									重命名
+									<Pencil size={16} aria-hidden="true" />
+									<span>重命名</span>
 								</button>
 								<button
 									type="button"
 									role="menuitem"
-									className="sidebar-account-item"
+									className="menu-row"
 									onClick={() => {
 										setMenu(null);
 										management.start(menu.id);
 										actions.focusSession(menu.id);
 									}}
 								>
-									<ListChecks size={18} aria-hidden="true" />
-									管理
+									<ListChecks size={16} aria-hidden="true" />
+									<span>管理</span>
 								</button>
-								<hr className="session-menu-divider" />
+								<hr className="menu-sep" />
 								<button
 									type="button"
 									role="menuitem"
-									className="sidebar-account-item sidebar-menu-delete"
+									className="menu-row danger"
 									onClick={() => remove(menu.id)}
 								>
-									<Trash2 size={18} aria-hidden="true" />
-									删除
+									<Trash2 size={16} aria-hidden="true" />
+									<span>删除</span>
 								</button>
 							</>
 						)}

@@ -1,4 +1,3 @@
-#[cfg(any(not(windows), test))]
 use std::fs;
 use std::path::Path;
 
@@ -14,7 +13,7 @@ pub struct ServerInstanceLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl ServerInstanceLock {
@@ -43,17 +42,17 @@ impl ServerInstanceLock {
         }
         #[cfg(not(windows))]
         {
-            let file = acquire_file_lock(&kit_root.join(".state").join("kernel-locks"), &address)
+            let file = acquire_file_lock(&kit_root.join(".state").join("locks"), &address)
                 .map_err(|error| match error {
-                fs::TryLockError::WouldBlock => {
-                    "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。"
-                        .to_owned()
-                }
-                fs::TryLockError::Error(_) => "无法获取服务单实例文件锁。".to_owned(),
-            })?;
+                    fs::TryLockError::WouldBlock => {
+                        "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。"
+                            .to_owned()
+                    }
+                    fs::TryLockError::Error(_) => "无法获取服务单实例文件锁。".to_owned(),
+                })?;
             Ok(Self {
                 address,
-                _file: file,
+                _file: FileLockGuard(file),
             })
         }
     }
@@ -71,7 +70,7 @@ pub struct SessionOwnerLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl SessionOwnerLock {
@@ -82,6 +81,7 @@ impl SessionOwnerLock {
     }
 
     pub fn acquire(agent_dir: &Path, session_id: &str) -> Result<Self, String> {
+        fs::create_dir_all(agent_dir).map_err(|_| "无法创建会话锁作用域目录。".to_owned())?;
         let address = Self::pipe_address(agent_dir, session_id)?;
         #[cfg(windows)]
         {
@@ -99,17 +99,16 @@ impl SessionOwnerLock {
         }
         #[cfg(not(windows))]
         {
-            let file =
-                acquire_file_lock(&agent_dir.join(".state").join("kernel-locks"), &address)
-                    .map_err(|error| match error {
-                        fs::TryLockError::WouldBlock => {
-                            "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。".to_owned()
-                        }
-                        fs::TryLockError::Error(_) => "无法获取会话单写权文件锁。".to_owned(),
-                    })?;
+            let lock_dir = resolve_non_windows_lock_dir(agent_dir);
+            let file = acquire_file_lock(&lock_dir, &address).map_err(|error| match error {
+                fs::TryLockError::WouldBlock => {
+                    "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。".to_owned()
+                }
+                fs::TryLockError::Error(_) => "无法获取会话单写权文件锁。".to_owned(),
+            })?;
             Ok(Self {
                 address,
-                _file: file,
+                _file: FileLockGuard(file),
             })
         }
     }
@@ -126,7 +125,7 @@ pub struct RunbookDirectoryLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl RunbookDirectoryLock {
@@ -160,9 +159,13 @@ impl RunbookDirectoryLock {
         #[cfg(not(windows))]
         {
             let lock_dir = resolve_non_windows_lock_dir(&canonical);
-            let file = acquire_file_lock(&lock_dir, &address)
-                .map_err(|_| "清单目录正由另一进程写入，请稍后重试。".to_owned())?;
-            Ok(Self { _file: file })
+            let file = acquire_file_lock(&lock_dir, &address).map_err(|err| match err {
+                fs::TryLockError::WouldBlock => "清单目录正由另一进程写入，请稍后重试。".to_owned(),
+                fs::TryLockError::Error(io) => io_error("建立清单目录锁", io),
+            })?;
+            Ok(Self {
+                _file: FileLockGuard(file),
+            })
         }
     }
 }
@@ -173,7 +176,7 @@ pub struct UpdateLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl UpdateLock {
@@ -201,31 +204,46 @@ impl UpdateLock {
         #[cfg(not(windows))]
         {
             let canonical_root = root.canonicalize().map_err(|_| "升级根目录无法读取。")?;
-            let lock_dir = canonical_root.join(".state").join("kernel-locks");
+            let lock_dir = canonical_root.join(".state").join("locks");
             let file = acquire_file_lock(&lock_dir, &name)
                 .map_err(|_| "工具包已有升级或恢复任务进行中。".to_owned())?;
-            Ok(Self { _file: file })
+            Ok(Self {
+                _file: FileLockGuard(file),
+            })
         }
+    }
+}
+
+#[cfg(any(test, not(windows)))]
+struct FileLockGuard(fs::File);
+
+#[cfg(any(test, not(windows)))]
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        // Explicit `LOCK_UN` releases the kernel `flock` on the shared open file description
+        // immediately, even if another thread concurrently `fork()`ed a subprocess that has not
+        // yet called `execve()` to close its inherited `O_CLOEXEC` descriptor.
+        let _ = self.0.unlock();
     }
 }
 
 #[cfg(not(windows))]
 fn resolve_non_windows_lock_dir(canonical_target: &Path) -> std::path::PathBuf {
     for ancestor in canonical_target.ancestors() {
-        if ancestor.join("agent").join("home").is_dir() {
-            return ancestor.join(".state").join("kernel-locks");
+        if ancestor.join("app").is_dir() {
+            return ancestor.join(".state").join("locks");
         }
         if ancestor.file_name().and_then(|n| n.to_str()) == Some("artifacts")
             && let Some(kit_root) = ancestor.parent()
         {
-            return kit_root.join(".state").join("kernel-locks");
+            return kit_root.join(".state").join("locks");
         }
     }
     canonical_target
         .parent()
         .unwrap_or(canonical_target)
         .join(".state")
-        .join("kernel-locks")
+        .join("locks")
 }
 
 #[cfg(any(test, not(windows)))]
@@ -297,21 +315,23 @@ fn acquire_windows_first_pipe(
 
 #[cfg(test)]
 mod tests {
-    use super::acquire_file_lock;
+    use super::{FileLockGuard, acquire_file_lock};
 
     #[test]
     fn file_locks_preserve_full_identity_and_release_on_drop() {
         let root = std::env::temp_dir().join(format!("cst-os-lock-{}", uuid::Uuid::new_v4()));
         let dir = root.join(".state").join("kernel-locks");
         let address = "cst-test";
-        let first = acquire_file_lock(&dir, address).expect("first holder");
+        let first = FileLockGuard(acquire_file_lock(&dir, address).expect("first holder"));
         assert!(matches!(
             acquire_file_lock(&dir, address),
             Err(std::fs::TryLockError::WouldBlock)
         ));
-        let other = acquire_file_lock(&dir, "cst-test-other").expect("distinct identity");
+        let other =
+            FileLockGuard(acquire_file_lock(&dir, "cst-test-other").expect("distinct identity"));
         drop(first);
-        let reacquired = acquire_file_lock(&dir, address).expect("released kernel lock");
+        let reacquired =
+            FileLockGuard(acquire_file_lock(&dir, address).expect("released kernel lock"));
         drop((other, reacquired));
         std::fs::remove_dir_all(root).unwrap();
     }

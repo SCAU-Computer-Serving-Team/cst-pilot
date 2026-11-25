@@ -202,9 +202,17 @@ pub fn run(_: &Path, _: &[OsString], _: &Control, _: usize) -> Result<Vec<u8>, S
 #[cfg(windows)]
 fn quote(value: &std::ffi::OsStr) -> OsString {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let units: Vec<u16> = value.encode_wide().collect();
+    let needs_quotes = units.is_empty()
+        || units
+            .iter()
+            .any(|&u| u == b' ' as u16 || u == b'\t' as u16 || u == b'"' as u16);
+    if !needs_quotes {
+        return value.to_os_string();
+    }
     let mut out = vec![b'"' as u16];
     let mut slashes = 0;
-    for unit in value.encode_wide() {
+    for unit in units {
         if unit == b'\\' as u16 {
             slashes += 1;
             continue;

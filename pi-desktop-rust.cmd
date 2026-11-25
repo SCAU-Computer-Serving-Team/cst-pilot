@@ -1,9 +1,12 @@
 @echo off
 rem Start the Rust GPUI Desktop app (cst-pilot) directly inside the workspace.
+rem Dev repo isolates runtime user data under .\data\ (gitignored).
 rem Keep this entry point ASCII.
 setlocal DisableDelayedExpansion
 set "ROOT=%~dp0"
 chcp 65001 >nul
+
+set "CST_PILOT_ROOT=%ROOT%."
 
 set "CARGO_CMD="
 where cargo >nul 2>nul

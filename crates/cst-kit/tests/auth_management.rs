@@ -22,11 +22,11 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("cst-management-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("agent/home")).unwrap();
+        fs::create_dir_all(root.join("data/config")).unwrap();
         Self(root.canonicalize().unwrap())
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        self.0.join("data/config").join(name)
     }
     fn write(&self, name: &str, value: Value) {
         fs::write(self.file(name), value.to_string()).unwrap();
@@ -35,9 +35,14 @@ impl Fixture {
         serde_json::from_slice(&fs::read(self.file(name)).unwrap()).unwrap()
     }
     fn resources(&self) {
-        fs::write(self.file("APPEND_SYSTEM.md"), "固定诊断规则。").unwrap();
+        fs::create_dir_all(self.0.join("app/prompts")).unwrap();
+        fs::write(
+            self.0.join("app/prompts/APPEND_SYSTEM.md"),
+            "固定诊断规则。",
+        )
+        .unwrap();
         for name in SKILL_NAMES {
-            let dir = self.file(&format!("skills/{name}"));
+            let dir = self.0.join(format!("app/skills/{name}"));
             fs::create_dir_all(&dir).unwrap();
             fs::write(
                 dir.join("SKILL.md"),
@@ -142,6 +147,105 @@ fn profile(id: &str, balance: Value) -> Value {
 }
 fn key(value: &str) -> Value {
     json!({"cstoa":{"type":"api_key","key":value}})
+}
+
+#[tokio::test]
+async fn custom_provider_saved_headers_reach_the_kit_session_request() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+
+    let fixture = Fixture::new();
+    fixture.resources();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = BufReader::new(socket);
+        let mut line = String::new();
+        socket.read_line(&mut line).await.unwrap();
+        assert_eq!(line.trim_end(), "POST /v1/chat/completions HTTP/1.1");
+        let mut headers = std::collections::BTreeMap::new();
+        loop {
+            line.clear();
+            assert_ne!(socket.read_line(&mut line).await.unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.split_once(':').unwrap();
+            headers.insert(name.to_ascii_lowercase(), value.trim().to_owned());
+        }
+        let mut body = vec![0; headers["content-length"].parse().unwrap()];
+        socket.read_exact(&mut body).await.unwrap();
+        let sse = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Local test answer\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{sse}",
+            sse.len()
+        );
+        socket.write_all(reply.as_bytes()).await.unwrap();
+        headers
+    });
+    let provider_headers = json!({"X-Provider-Test":"provider", "X-Level":"provider"});
+    let model_headers = json!({"X-Model-Test":"model", "x-level":"model"});
+    fixture.write(
+        "models.json",
+        json!({"providers":{"local-box":{
+            "name":"原型号", "api":"openai-completions", "baseUrl":base_url,
+            "apiKey":"local-fake-key", "headers":provider_headers,
+            "models":[{"id":"test-model", "name":"原模型", "contextWindow":8192,
+                "maxTokens":1024, "headers":model_headers}]
+        }}}),
+    );
+    let auth = auth(&fixture, Arc::default(), Arc::default()).await;
+    let mut update = input("local-box");
+    update.base_url = base_url;
+    let old = auth.custom_provider("local-box").unwrap().unwrap();
+    update.revision = old["revision"].as_str().map(str::to_owned);
+    auth.save_custom_provider(update).await.unwrap();
+    let disk = fixture.read("models.json");
+    assert_eq!(disk["providers"]["local-box"]["headers"], provider_headers);
+    assert_eq!(
+        disk["providers"]["local-box"]["models"][0]["headers"],
+        model_headers
+    );
+
+    let model = auth.runtime().get_model("local-box", "test-model").unwrap();
+    let kit = Kit::new(&fixture.0)
+        .unwrap()
+        .create_session_with_auth(
+            CreateAgentSessionOptions {
+                model: Some(model),
+                session_manager: Some(
+                    SessionManager::in_memory(fixture.0.to_string_lossy(), None, None).unwrap(),
+                ),
+                ..Default::default()
+            },
+            auth,
+        )
+        .await
+        .unwrap();
+    let session = &kit.created.session;
+    let headers = tokio::time::timeout(Duration::from_secs(10), async {
+        session.prompt("hello", None).await.unwrap();
+        server.await.unwrap()
+    })
+    .await
+    .unwrap();
+    assert_eq!(headers["authorization"], "Bearer local-fake-key");
+    assert_eq!(headers["x-provider-test"], "provider");
+    assert_eq!(headers["x-model-test"], "model");
+    assert_eq!(headers["x-level"], "model");
+    assert!(headers["user-agent"].starts_with("pi/1.5.0 ("));
+    for name in [
+        "x-openrouter-title",
+        "http-referer",
+        "x-openrouter-categories",
+    ] {
+        assert!(!headers.contains_key(name));
+    }
+    kit.shutdown().await.unwrap();
 }
 
 #[tokio::test]
