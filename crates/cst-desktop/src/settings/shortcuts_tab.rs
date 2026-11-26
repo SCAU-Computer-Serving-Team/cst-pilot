@@ -7,6 +7,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{kbd_bracket_color, kbd_rail_color};
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, render_kbd_zcgs3, scale, space};
 
 pub type ShortcutsKeyDownFn = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
@@ -15,6 +16,8 @@ pub fn render_shortcuts_tab(
     mono_family: SharedString,
     palette: &DesktopPalette,
     focus_handle: &FocusHandle,
+    kbd_focused: bool,
+    kbd_style: cst_client::KeyboardFocusStyleDto,
     on_key_down: ShortcutsKeyDownFn,
 ) -> impl IntoElement {
     let global_shortcuts = [
@@ -40,16 +43,32 @@ pub fn render_shortcuts_tab(
 
     let pref_shortcuts = [("Alt + ↑ / ↓", "上下移动已启用模型或排队消息顺序")];
 
+    let focus_bar_color = match kbd_style {
+        cst_client::KeyboardFocusStyleDto::Brackets => kbd_bracket_color(palette),
+        cst_client::KeyboardFocusStyleDto::Rail => kbd_rail_color(palette),
+    };
+
     div()
         .id("settings-shortcuts-tab")
         .test_support()
         .a11y_region("settings-shortcuts-tab", "快捷键列表")
+        .relative()
         .track_focus(focus_handle)
         .on_key_down(move |ev, w, cx| (on_key_down)(ev, w, cx))
         .w_full()
         .flex()
         .flex_col()
         .gap(px(32.0))
+        .children(kbd_focused.then(|| {
+            div()
+                .absolute()
+                .top(px(2.0))
+                .left(px(-7.0))
+                .w(px(3.0))
+                .h(px(20.0))
+                .rounded(px(1.5))
+                .bg(focus_bar_color)
+        }))
         .child(shortcut_group_list(
             "全局与窗口",
             &global_shortcuts,

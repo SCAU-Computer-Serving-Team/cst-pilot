@@ -130,16 +130,16 @@ pub struct SettingsView {
     tab_rects: Rc<[Cell<(f32, f32)>; 4]>,
     tab_bar_focus: FocusHandle,
     tab_kbd_active: bool,
-    suppress_tab_focus_kbd: bool,
+    suppress_focus_kbd_for: Option<FocusHandle>,
     tab_last_pointer: Option<Point<Pixels>>,
     tab_kbd_tracker: KbdDynamicBoundsTracker,
     general_focus: FocusHandle,
     general_row_idx: usize,
     general_kbd_active: bool,
-    suppress_general_focus_kbd: bool,
     general_last_pointer: Option<Point<Pixels>>,
     general_tracker: KbdDynamicBoundsTracker,
     shortcuts_focus: FocusHandle,
+    shortcuts_kbd_active: bool,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
     optimistic_theme: Option<ThemeModeDto>,
@@ -201,9 +201,11 @@ impl SettingsView {
             },
         ));
         subs.push(cx.on_focus(&tab_bar_focus, window, |this, window, cx| {
-            if this.suppress_tab_focus_kbd {
-                this.suppress_tab_focus_kbd = false;
-            } else {
+            let suppressed = this
+                .suppress_focus_kbd_for
+                .take()
+                .is_some_and(|h| h == this.tab_bar_focus);
+            if !suppressed {
                 this.tab_kbd_active = true;
                 this.tab_last_pointer = Some(window.mouse_position());
             }
@@ -216,9 +218,11 @@ impl SettingsView {
             }
         }));
         subs.push(cx.on_focus(&general_focus, window, |this, window, cx| {
-            if this.suppress_general_focus_kbd {
-                this.suppress_general_focus_kbd = false;
-            } else {
+            let suppressed = this
+                .suppress_focus_kbd_for
+                .take()
+                .is_some_and(|h| h == this.general_focus);
+            if !suppressed {
                 this.general_kbd_active = true;
                 this.general_last_pointer = Some(window.mouse_position());
             }
@@ -227,6 +231,22 @@ impl SettingsView {
         subs.push(cx.on_blur(&general_focus, window, |this, _, cx| {
             if this.general_kbd_active {
                 this.general_kbd_active = false;
+                cx.notify();
+            }
+        }));
+        subs.push(cx.on_focus(&shortcuts_focus, window, |this, _, cx| {
+            let suppressed = this
+                .suppress_focus_kbd_for
+                .take()
+                .is_some_and(|h| h == this.shortcuts_focus);
+            if !suppressed {
+                this.shortcuts_kbd_active = true;
+            }
+            cx.notify();
+        }));
+        subs.push(cx.on_blur(&shortcuts_focus, window, |this, _, cx| {
+            if this.shortcuts_kbd_active {
+                this.shortcuts_kbd_active = false;
                 cx.notify();
             }
         }));
@@ -239,16 +259,16 @@ impl SettingsView {
             tab_rects: Rc::new(Default::default()),
             tab_bar_focus,
             tab_kbd_active: false,
-            suppress_tab_focus_kbd: false,
+            suppress_focus_kbd_for: None,
             tab_last_pointer: None,
             tab_kbd_tracker: KbdDynamicBoundsTracker::new(),
             general_focus,
             general_row_idx: 0,
             general_kbd_active: false,
-            suppress_general_focus_kbd: false,
             general_last_pointer: None,
             general_tracker: KbdDynamicBoundsTracker::new(),
             shortcuts_focus,
+            shortcuts_kbd_active: false,
             providers_tab,
             preferences_tab,
             optimistic_theme: None,
@@ -295,21 +315,51 @@ impl SettingsView {
     ) {
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
         self.general_kbd_active = false;
-        self.suppress_tab_focus_kbd = !from_keyboard;
+        self.shortcuts_kbd_active = false;
+        self.suppress_focus_kbd_for = (!from_keyboard && !self.tab_bar_focus.is_focused(window))
+            .then(|| self.tab_bar_focus.clone());
         self.tab_kbd_active = from_keyboard;
         self.tab_last_pointer = from_keyboard.then(|| window.mouse_position());
         self.tab_bar_focus.focus(window, cx);
         cx.notify();
     }
 
+    pub fn focus_on_return(
+        &mut self,
+        from_keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.category == SettingsCategory::Providers {
+            self.providers_tab
+                .update(cx, |pt, cx| pt.focus_return_row(from_keyboard, window, cx));
+            cx.notify();
+            return;
+        }
+        self.focus_on_enter(from_keyboard, window, cx);
+    }
+
     fn focus_tab_bar_from_content(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.general_kbd_active = false;
-        self.suppress_tab_focus_kbd = false;
+        self.shortcuts_kbd_active = false;
+        self.suppress_focus_kbd_for = None;
         self.tab_kbd_active = true;
         self.tab_last_pointer = Some(window.mouse_position());
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
         self.tab_bar_focus.focus(window, cx);
         cx.notify();
+    }
+
+    pub fn is_any_input_composing(&self, window: &mut Window, cx: &mut gpui::App) -> bool {
+        match self.category {
+            SettingsCategory::Providers => self
+                .providers_tab
+                .update(cx, |tab, cx| tab.is_any_input_composing(window, cx)),
+            SettingsCategory::Preferences => self
+                .preferences_tab
+                .update(cx, |tab, cx| tab.is_any_input_composing(window, cx)),
+            SettingsCategory::General | SettingsCategory::Shortcuts => false,
+        }
     }
 
     pub fn consume_composing_escape(&self, window: &mut Window, cx: &mut gpui::App) {
@@ -393,7 +443,9 @@ impl SettingsView {
         }
         #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("settings_tab");
-        self.close_tab_surfaces(cx);
+        // Only dismiss transient popovers when switching between settings tabs; preserve any
+        // in-progress custom provider form so returning to `提供商` never discards unsaved edits.
+        self.dismiss_click_outside_dropdowns(cx);
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
         let old_idx = self.category.index();
         let new_idx = category.index();
@@ -412,12 +464,29 @@ impl SettingsView {
 
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.page_slide = motion::PageSlide::default();
+        self.suppress_focus_kbd_for = None;
+        self.general_tracker.cancel_pending_scroll();
+        self.tab_kbd_tracker.cancel_pending_scroll();
         self.close_tab_surfaces(cx);
     }
 
     fn close_tab_surfaces(&mut self, cx: &mut Context<Self>) {
         self.providers_tab.update(cx, ProvidersTabView::leave);
         self.preferences_tab.update(cx, PreferencesTabView::leave);
+    }
+
+    pub fn dismiss_dropdowns_on_scroll(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let a = self
+            .preferences_tab
+            .update(cx, |pt, cx| pt.dismiss_dropdowns_on_scroll(window, cx));
+        let b = self
+            .providers_tab
+            .update(cx, |pt, cx| pt.dismiss_dropdowns_on_scroll(window, cx));
+        a || b
     }
 
     pub fn has_dropdown(&self, cx: &gpui::App) -> bool {
@@ -442,10 +511,10 @@ impl SettingsView {
 
     fn enter_active_category_content(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.tab_kbd_active = false;
+        self.suppress_focus_kbd_for = None;
         match self.category {
             SettingsCategory::General => {
                 self.general_row_idx = 0;
-                self.suppress_general_focus_kbd = false;
                 self.general_kbd_active = true;
                 self.general_last_pointer = Some(window.mouse_position());
                 self.general_focus.focus(window, cx);
@@ -459,6 +528,7 @@ impl SettingsView {
                     .update(cx, |pt, cx| pt.focus_from_tabbar(window, cx));
             }
             SettingsCategory::Shortcuts => {
+                self.shortcuts_kbd_active = true;
                 self.shortcuts_focus.focus(window, cx);
             }
         }
@@ -1038,6 +1108,8 @@ impl Render for SettingsView {
                     mono_family,
                     &palette,
                     &self.shortcuts_focus,
+                    self.shortcuts_kbd_active && self.shortcuts_focus.is_focused(window),
+                    kbd_style,
                     Rc::new(move |ev, w, cx| {
                         e_short_key.update(cx, |this, cx| this.handle_shortcuts_key(ev, w, cx));
                     }),
@@ -1061,6 +1133,20 @@ impl Render for SettingsView {
             .a11y_region("settings-view", "设置")
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 this.consume_composing_escape(window, cx);
+            }))
+            .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                if ev.keystroke.key.as_str() == "tab"
+                    && !ev.keystroke.modifiers.control
+                    && !ev.keystroke.modifiers.alt
+                    && !ev.keystroke.modifiers.platform
+                {
+                    if this.is_any_input_composing(window, cx) {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                    } else {
+                        this.suppress_focus_kbd_for = None;
+                    }
+                }
             }))
             .size_full()
             .flex()
@@ -1093,8 +1179,8 @@ impl Render for SettingsView {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
-                    .on_scroll(cx.listener(|this, _, _, cx| {
-                        this.dismiss_click_outside_dropdowns(cx);
+                    .on_scroll(cx.listener(|this, _, window, cx| {
+                        this.dismiss_dropdowns_on_scroll(window, cx);
                     }))
                     .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)

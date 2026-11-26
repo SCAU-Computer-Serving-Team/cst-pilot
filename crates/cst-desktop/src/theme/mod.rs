@@ -2495,7 +2495,6 @@ pub fn render_subpage_header_xwjof(
             press_t,
         );
         let fg = motion::lerp_hsla(palette.text_secondary, palette.text_primary, hover_t);
-        let back_cb_key = std::rc::Rc::clone(&back_cb);
         Some(
             gpui_kit::div()
                 .id(back_id_str.clone())
@@ -2516,15 +2515,6 @@ pub fn render_subpage_header_xwjof(
                 .items_center()
                 .justify_center()
                 .on_icon_press(press_state)
-                .on_key_down(move |ev: &gpui::KeyDownEvent, w, cx| {
-                    if !ev.is_held
-                        && ev.keystroke.modifiers == gpui::Modifiers::default()
-                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                    {
-                        cx.stop_propagation();
-                        (back_cb_key)(w, cx);
-                    }
-                })
                 .on_click(move |_, w, cx| (back_cb)(w, cx))
                 .child(motion::animated_icon_press(
                     back_id_str,

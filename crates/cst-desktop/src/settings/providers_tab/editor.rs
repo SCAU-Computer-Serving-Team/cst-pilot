@@ -139,18 +139,10 @@ impl ProvidersTabView {
                                 }
                             })
                             .active(|s| s.bg(palette.bg_active_press))
-                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
-                                if crate::settings::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.search_visible = !this.search_visible;
-                                    if this.search_visible {
-                                        this.search_input.update(cx, |i, cx| i.focus(w, cx));
-                                    }
-                                    cx.notify();
-                                }
-                            }))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.editor_kbd_active = false;
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, w, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.editor_kbd_active = from_kbd;
+                                this.editor_last_pointer = from_kbd.then(|| w.mouse_position());
                                 this.search_visible = !this.search_visible;
                                 if this.search_visible {
                                     this.search_input.update(cx, |i, cx| i.focus(w, cx));
@@ -184,14 +176,10 @@ impl ProvidersTabView {
                                 }
                             })
                             .active(|s| s.bg(palette.bg_active_press))
-                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                if crate::settings::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.trigger_refresh_models(cx);
-                                }
-                            }))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.editor_kbd_active = false;
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, w, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.editor_kbd_active = from_kbd;
+                                this.editor_last_pointer = from_kbd.then(|| w.mouse_position());
                                 this.trigger_refresh_models(cx);
                             }))
                             .on_prepaint(move |bounds, _, _| {
@@ -223,14 +211,10 @@ impl ProvidersTabView {
                                 }
                             })
                             .active(|s| s.bg(palette.bg_active_press))
-                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
-                                if crate::settings::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.append_blank_editable_row(w, cx);
-                                }
-                            }))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.editor_kbd_active = false;
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, w, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.editor_kbd_active = from_kbd;
+                                this.editor_last_pointer = from_kbd.then(|| w.mouse_position());
                                 this.append_blank_editable_row(w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_add.set("ed-hdr-add", bounds))
@@ -299,7 +283,13 @@ impl ProvidersTabView {
                     .w_full()
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.modifiers != gpui::Modifiers::default() {
+                        if event.keystroke.modifiers != gpui::Modifiers::default()
+                            || crate::sessions::input_is_composing(
+                                &this.inline_token_input,
+                                window,
+                                cx,
+                            )
+                        {
                             return;
                         }
                         match event.keystroke.key.as_str() {
@@ -503,8 +493,8 @@ impl ProvidersTabView {
                             this.protocol_dropdown_open = false;
                             this.protocol_kbd_active = false;
                             this.editor_kbd_active = false;
-                            this.suppress_focus_kbd = true;
-                            this.protocol_trigger_focus.focus(window, cx);
+                            let trigger = this.protocol_trigger_focus.clone();
+                            this.focus_handle_silently(&trigger, window, cx);
                             cx.notify();
                             cx.stop_propagation();
                         }))
@@ -834,9 +824,7 @@ impl ProvidersTabView {
                                                         && !ev.keystroke.modifiers.control
                                                         && !ev.keystroke.modifiers.shift
                                                         && !ev.keystroke.modifiers.platform;
-                                                    if crate::settings::activates_button(ev)
-                                                        || alt_down
-                                                    {
+                                                    if alt_down {
                                                         this.commit_inline_token_edit(cx);
                                                         this.protocol_dropdown_open = true;
                                                         this.protocol_kbd_active = true;
@@ -853,26 +841,41 @@ impl ProvidersTabView {
                                                     }
                                                 },
                                             ))
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.commit_inline_token_edit(cx);
-                                                this.editor_kbd_active = false;
-                                                this.protocol_dropdown_open =
-                                                    !this.protocol_dropdown_open;
-                                                this.protocol_kbd_active = false;
-                                                if this.protocol_dropdown_open {
-                                                    this.protocol_dropdown_index =
-                                                        CustomApiProtocol::ALL
-                                                            .iter()
-                                                            .position(|&p| p == this.protocol)
-                                                            .unwrap_or(0);
-                                                    this.protocol_focus.focus(window, cx);
-                                                } else {
-                                                    this.suppress_focus_kbd = true;
-                                                    this.protocol_trigger_focus.focus(window, cx);
-                                                }
-                                                cx.notify();
-                                                cx.stop_propagation();
-                                            }))
+                                            .on_click(cx.listener(
+                                                |this, ev: &gpui::ClickEvent, window, cx| {
+                                                    let from_kbd =
+                                                        matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                                    this.commit_inline_token_edit(cx);
+                                                    this.editor_kbd_active = from_kbd;
+                                                    this.editor_last_pointer =
+                                                        from_kbd.then(|| window.mouse_position());
+                                                    this.protocol_dropdown_open =
+                                                        !this.protocol_dropdown_open;
+                                                    this.protocol_kbd_active =
+                                                        from_kbd && this.protocol_dropdown_open;
+                                                    this.protocol_last_pointer =
+                                                        from_kbd.then(|| window.mouse_position());
+                                                    if this.protocol_dropdown_open {
+                                                        this.protocol_dropdown_index =
+                                                            CustomApiProtocol::ALL
+                                                                .iter()
+                                                                .position(|&p| p == this.protocol)
+                                                                .unwrap_or(0);
+                                                        this.protocol_focus.focus(window, cx);
+                                                    } else if from_kbd {
+                                                        this.protocol_trigger_focus
+                                                            .focus(window, cx);
+                                                    } else {
+                                                        let trigger =
+                                                            this.protocol_trigger_focus.clone();
+                                                        this.focus_handle_silently(
+                                                            &trigger, window, cx,
+                                                        );
+                                                    }
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                },
+                                            ))
                                             .on_prepaint(move |bounds, _, _| {
                                                 tr_proto.set("ed-proto", bounds)
                                             })
@@ -1167,22 +1170,14 @@ impl ProvidersTabView {
                                 SharedString::from(format!("ed-rsn-{idx}")),
                                 self.editor_tracker.clone(),
                                 palette,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.editor_kbd_active = false;
+                                cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
+                                    let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                    this.editor_kbd_active = from_kbd;
+                                    this.editor_last_pointer =
+                                        from_kbd.then(|| window.mouse_position());
                                     if let Some(r) = this.editable_rows.get_mut(idx) {
                                         r.reasoning = !r.reasoning;
                                         cx.notify();
-                                    }
-                                }),
-                                cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
-                                    if crate::settings::activates_button(ev) {
-                                        cx.stop_propagation();
-                                        this.editor_kbd_active = true;
-                                        this.editor_last_pointer = Some(window.mouse_position());
-                                        if let Some(r) = this.editable_rows.get_mut(idx) {
-                                            r.reasoning = !r.reasoning;
-                                            cx.notify();
-                                        }
                                     }
                                 }),
                             )),
@@ -1202,22 +1197,14 @@ impl ProvidersTabView {
                                 SharedString::from(format!("ed-img-{idx}")),
                                 self.editor_tracker.clone(),
                                 palette,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.editor_kbd_active = false;
+                                cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
+                                    let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                    this.editor_kbd_active = from_kbd;
+                                    this.editor_last_pointer =
+                                        from_kbd.then(|| window.mouse_position());
                                     if let Some(r) = this.editable_rows.get_mut(idx) {
                                         r.image = !r.image;
                                         cx.notify();
-                                    }
-                                }),
-                                cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
-                                    if crate::settings::activates_button(ev) {
-                                        cx.stop_propagation();
-                                        this.editor_kbd_active = true;
-                                        this.editor_last_pointer = Some(window.mouse_position());
-                                        if let Some(r) = this.editable_rows.get_mut(idx) {
-                                            r.image = !r.image;
-                                            cx.notify();
-                                        }
                                     }
                                 }),
                             )),
@@ -1251,48 +1238,13 @@ impl ProvidersTabView {
                                         }
                                     })
                                     .active(|s| s.bg(palette.bg_active_press))
-                                    .on_key_down(cx.listener(
-                                        move |this, ev: &KeyDownEvent, window, cx| {
-                                            if crate::settings::activates_button(ev)
-                                                && idx < this.editable_rows.len()
-                                            {
-                                                cx.stop_propagation();
-                                                this.editable_rows.remove(idx);
-                                                if this
-                                                    .inline_token_edit
-                                                    .is_some_and(|(r, _)| r >= idx)
-                                                {
-                                                    this.inline_token_edit = None;
-                                                }
-                                                this.editor_kbd_active = true;
-                                                this.editor_last_pointer =
-                                                    Some(window.mouse_position());
-                                                if let Some(next_row) = this
-                                                    .editable_rows
-                                                    .get(idx)
-                                                    .or_else(|| this.editable_rows.last())
-                                                {
-                                                    next_row
-                                                        .id_input
-                                                        .update(cx, |i, cx| i.focus(window, cx));
-                                                } else {
-                                                    this.hdr_add_model_btn_focus.focus(window, cx);
-                                                }
-                                                cx.notify();
-                                            }
+                                    .on_click(cx.listener(
+                                        move |this, ev: &gpui::ClickEvent, window, cx| {
+                                            let from_kbd =
+                                                matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                            this.remove_editable_row(idx, from_kbd, window, cx);
                                         },
                                     ))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.editor_kbd_active = false;
-                                        if idx < this.editable_rows.len() {
-                                            this.editable_rows.remove(idx);
-                                            if this.inline_token_edit.is_some_and(|(r, _)| r >= idx)
-                                            {
-                                                this.inline_token_edit = None;
-                                            }
-                                            cx.notify();
-                                        }
-                                    }))
                                     .on_prepaint(move |bounds, _, _| {
                                         tr_rm.set(rm_key.clone(), bounds)
                                     })
@@ -1398,10 +1350,7 @@ impl ProvidersTabView {
                             })
                             .active(|s| s.bg(palette.bg_active_press))
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                                if crate::settings::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.return_to_provider_list(true, window, cx);
-                                } else if !ev.is_held
+                                if !ev.is_held
                                     && ev.keystroke.modifiers == gpui::Modifiers::default()
                                     && ev.keystroke.key.as_str() == "right"
                                 {
@@ -1412,8 +1361,9 @@ impl ProvidersTabView {
                                     cx.notify();
                                 }
                             }))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.return_to_provider_list(false, window, cx);
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, window, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.return_to_provider_list(from_kbd, window, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_cancel.set("ed-cancel", bounds))
                             .child(cjk_inline_label("取消")),
@@ -1449,10 +1399,7 @@ impl ProvidersTabView {
                             })
                             .active(|s| s.opacity(0.88))
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
-                                if crate::settings::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.save_inline_provider_form(w, cx);
-                                } else if !ev.is_held
+                                if !ev.is_held
                                     && ev.keystroke.modifiers == gpui::Modifiers::default()
                                     && ev.keystroke.key.as_str() == "left"
                                 {
@@ -1463,8 +1410,10 @@ impl ProvidersTabView {
                                     cx.notify();
                                 }
                             }))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.editor_kbd_active = false;
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, w, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.editor_kbd_active = from_kbd;
+                                this.editor_last_pointer = from_kbd.then(|| w.mouse_position());
                                 this.save_inline_provider_form(w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_save.set("ed-save", bounds))

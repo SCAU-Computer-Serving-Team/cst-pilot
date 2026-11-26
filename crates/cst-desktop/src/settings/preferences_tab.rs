@@ -89,7 +89,7 @@ pub struct PreferencesTabView {
     refresh_btn_focus: FocusHandle,
     expand_btn_focus: FocusHandle,
     controls_kbd_active: bool,
-    suppress_controls_focus_kbd: bool,
+    suppress_controls_focus_kbd_for: Option<FocusHandle>,
     controls_last_pointer: Option<Point<Pixels>>,
     controls_tracker: KbdDynamicBoundsTracker,
     picker_focus: FocusHandle,
@@ -147,9 +147,13 @@ impl PreferencesTabView {
             &refresh_btn_focus,
             &expand_btn_focus,
         ] {
-            subscriptions.push(cx.on_focus(handle, window, |this, window, cx| {
-                if this.suppress_controls_focus_kbd {
-                    this.suppress_controls_focus_kbd = false;
+            let expected = handle.clone();
+            subscriptions.push(cx.on_focus(handle, window, move |this, window, cx| {
+                let suppressed = this
+                    .suppress_controls_focus_kbd_for
+                    .take()
+                    .is_some_and(|h| h == expected);
+                if suppressed {
                     return;
                 }
                 this.controls_kbd_active = true;
@@ -191,7 +195,7 @@ impl PreferencesTabView {
             refresh_btn_focus,
             expand_btn_focus,
             controls_kbd_active: false,
-            suppress_controls_focus_kbd: false,
+            suppress_controls_focus_kbd_for: None,
             controls_last_pointer: None,
             controls_tracker: KbdDynamicBoundsTracker::new(),
             picker_focus: cx.focus_handle(),
@@ -214,8 +218,24 @@ impl PreferencesTabView {
         self.default_dropdown_open || self.filter_dropdown_open
     }
 
+    pub fn is_any_input_composing(&self, window: &mut Window, cx: &mut gpui_kit::App) -> bool {
+        crate::sessions::input_is_composing(&self.search_input, window, cx)
+    }
+
     pub fn consume_composing_escape(&self, window: &mut Window, cx: &mut gpui_kit::App) {
         crate::sessions::consume_composing_escape(&self.search_input, window, cx);
+    }
+
+    fn focus_control_silently(
+        &mut self,
+        handle: &FocusHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !handle.is_focused(window) {
+            self.suppress_controls_focus_kbd_for = Some(handle.clone());
+            handle.focus(window, cx);
+        }
     }
 
     pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -250,8 +270,11 @@ impl PreferencesTabView {
         self.filter_dropdown_open = false;
         self.picker_keyboard_nav = false;
         self.controls_kbd_active = false;
+        self.suppress_controls_focus_kbd_for = None;
         self.list_kbd_active = false;
         self.models_expanded = false;
+        self.controls_tracker.cancel_pending_scroll();
+        self.list_tracker.cancel_pending_scroll();
         cx.notify();
     }
 
@@ -275,14 +298,18 @@ impl PreferencesTabView {
             if !self.search_input.read(cx).value().is_empty() {
                 self.search_input
                     .update(cx, |i, cx| i.set_value("", window, cx));
+            } else if !self.visible_row_ids.is_empty() {
+                let valid = self
+                    .selected_row_id
+                    .as_deref()
+                    .and_then(|id| self.visible_row_ids.iter().position(|v| v == id))
+                    .unwrap_or(0);
+                self.focus_list_at(valid, window, cx);
             } else {
-                self.controls_kbd_active = false;
-                self.list_kbd_active = true;
-                self.list_last_pointer = Some(window.mouse_position());
-                if self.selected_row_id.is_none() {
-                    self.selected_row_id = self.visible_row_ids.first().cloned();
-                }
-                self.focus_handle.focus(window, cx);
+                self.controls_kbd_active = true;
+                self.list_kbd_active = false;
+                self.controls_last_pointer = Some(window.mouse_position());
+                self.default_trigger_focus.focus(window, cx);
             }
             cx.notify();
             return true;
@@ -336,6 +363,8 @@ impl PreferencesTabView {
         self.focus_handle.focus(window, cx);
         self.list_scroll
             .scroll_to_item(clamped, ScrollStrategy::Nearest);
+        self.list_tracker
+            .request_scroll(&self.body_scroll, format!("pref-row-{clamped}"), 16.0);
         cx.notify();
     }
 
@@ -344,17 +373,43 @@ impl PreferencesTabView {
             return false;
         }
         let was_kbd = self.picker_keyboard_nav;
-        self.suppress_controls_focus_kbd = !was_kbd;
-        if self.default_dropdown_open {
-            self.default_trigger_focus.focus(window, cx);
+        let trigger = if self.default_dropdown_open {
+            self.default_trigger_focus.clone()
         } else {
-            self.filter_trigger_focus.focus(window, cx);
+            self.filter_trigger_focus.clone()
+        };
+        if was_kbd {
+            self.suppress_controls_focus_kbd_for = None;
+            trigger.focus(window, cx);
+        } else {
+            self.focus_control_silently(&trigger, window, cx);
         }
         self.dismiss_dropdowns_on_outside_click(cx);
         if was_kbd {
             self.controls_kbd_active = true;
             self.controls_last_pointer = Some(window.mouse_position());
             cx.notify();
+        }
+        true
+    }
+
+    pub fn dismiss_dropdowns_on_scroll(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.has_dropdown() {
+            return false;
+        }
+        let held_focus = self.picker_focus.is_focused(window);
+        let trigger = if self.default_dropdown_open {
+            self.default_trigger_focus.clone()
+        } else {
+            self.filter_trigger_focus.clone()
+        };
+        self.dismiss_dropdowns_on_outside_click(cx);
+        if held_focus {
+            self.focus_control_silently(&trigger, window, cx);
         }
         true
     }
@@ -722,6 +777,11 @@ impl PreferencesTabView {
         self.selected_row_id = selected;
         self.list_scroll
             .scroll_to_item(target_position, ScrollStrategy::Nearest);
+        self.list_tracker.request_scroll(
+            &self.body_scroll,
+            format!("pref-row-{target_position}"),
+            16.0,
+        );
         self.enqueue_scope_save(cx);
     }
 
@@ -874,6 +934,11 @@ impl PreferencesTabView {
                 self.list_last_pointer = Some(window.mouse_position());
                 self.list_scroll
                     .scroll_to_item(next, ScrollStrategy::Nearest);
+                self.list_tracker.request_scroll(
+                    &self.body_scroll,
+                    format!("pref-row-{next}"),
+                    16.0,
+                );
                 cx.stop_propagation();
                 cx.notify();
             }
@@ -1190,15 +1255,17 @@ impl Render for PreferencesTabView {
                                         }
                                     }
                                     if super::activates_button(event) {
-                                        if let Some((provider, model)) =
-                                            choices.get(this.picker_index)
-                                        {
-                                            this.set_default_model(
-                                                provider.clone(),
-                                                model.clone(),
-                                                window,
-                                                cx,
-                                            );
+                                        if !choices.is_empty() {
+                                            let idx = this.picker_index.min(choices.len() - 1);
+                                            this.picker_index = idx;
+                                            if let Some((provider, model)) = choices.get(idx) {
+                                                this.set_default_model(
+                                                    provider.clone(),
+                                                    model.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }
                                         }
                                         cx.stop_propagation();
                                     }
@@ -1255,7 +1322,7 @@ impl Render for PreferencesTabView {
                             && !event.keystroke.modifiers.control
                             && !event.keystroke.modifiers.shift
                             && !event.keystroke.modifiers.platform;
-                        if super::activates_button(event) || alt_down {
+                        if alt_down {
                             this.toggle_dropdown(true, default_index, window, cx);
                             this.picker_keyboard_nav = true;
                             this.picker_last_pointer = Some(window.mouse_position());
@@ -1301,9 +1368,16 @@ impl Render for PreferencesTabView {
                     .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.controls_kbd_active = false;
+                    .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
+                        let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                        this.controls_kbd_active = from_kbd;
+                        this.controls_last_pointer = from_kbd.then(|| window.mouse_position());
                         this.toggle_dropdown(true, default_index, window, cx);
+                        if from_kbd && this.default_dropdown_open {
+                            this.picker_keyboard_nav = true;
+                            this.picker_last_pointer = Some(window.mouse_position());
+                            cx.notify();
+                        }
                     }))
                     .on_prepaint(move |bounds, _, _| tr_default.set("pref-default-trigger", bounds))
                     .child(
@@ -1495,8 +1569,9 @@ impl Render for PreferencesTabView {
                                                 cx.notify();
                                                 cx.stop_propagation();
                                             } else if super::activates_button(event) {
-                                                this.provider_filter = this
-                                                    .picker_index
+                                                let clamped = this.picker_index.min(choices.len());
+                                                this.picker_index = clamped;
+                                                this.provider_filter = clamped
                                                     .checked_sub(1)
                                                     .and_then(|ix| choices.get(ix))
                                                     .cloned();
@@ -1633,6 +1708,18 @@ impl Render for PreferencesTabView {
             self.selected_row_id = self.visible_row_ids.get(clamped).cloned();
             self.list_scroll
                 .scroll_to_item(clamped, ScrollStrategy::Nearest);
+            self.list_tracker.request_scroll(
+                &self.body_scroll,
+                format!("pref-row-{clamped}"),
+                16.0,
+            );
+        }
+        if self
+            .selected_row_id
+            .as_deref()
+            .is_none_or(|id| !self.visible_row_ids.iter().any(|v| v == id))
+        {
+            self.selected_row_id = self.visible_row_ids.first().cloned();
         }
 
         let search_focused = self
@@ -1764,7 +1851,7 @@ impl Render for PreferencesTabView {
                             && !event.keystroke.modifiers.control
                             && !event.keystroke.modifiers.shift
                             && !event.keystroke.modifiers.platform;
-                        if super::activates_button(event) || alt_down {
+                        if alt_down {
                             this.toggle_dropdown(false, filter_index, window, cx);
                             this.picker_keyboard_nav = true;
                             this.picker_last_pointer = Some(window.mouse_position());
@@ -1821,9 +1908,16 @@ impl Render for PreferencesTabView {
                     .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.controls_kbd_active = false;
+                    .on_click(cx.listener(move |this, ev: &gpui::ClickEvent, window, cx| {
+                        let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                        this.controls_kbd_active = from_kbd;
+                        this.controls_last_pointer = from_kbd.then(|| window.mouse_position());
                         this.toggle_dropdown(false, filter_index, window, cx);
+                        if from_kbd && this.filter_dropdown_open {
+                            this.picker_keyboard_nav = true;
+                            this.picker_last_pointer = Some(window.mouse_position());
+                            cx.notify();
+                        }
                     }))
                     .on_prepaint(move |bounds, _, _| tr_filter.set("pref-filter-trigger", bounds))
                     .child(
@@ -1910,56 +2004,49 @@ impl Render for PreferencesTabView {
                                 }
                             })
                             .active(|s| s.bg(palette.bg_active_press))
-                            .on_key_down({
-                                let vis_kbd = vis_for_toggle.clone();
-                                cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
-                                    if super::activates_button(ev) {
-                                        cx.stop_propagation();
-                                        this.controls_kbd_active = true;
-                                        this.controls_last_pointer = Some(window.mouse_position());
-                                        if all_visible_enabled {
-                                            this.clear_visible(vis_kbd.clone(), cx);
-                                        } else {
-                                            this.select_all_visible(vis_kbd.clone(), cx);
+                            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
+                                if ev.keystroke.modifiers == gpui::Modifiers::default() {
+                                    match ev.keystroke.key.as_str() {
+                                        "right" => {
+                                            this.controls_kbd_active = true;
+                                            this.controls_last_pointer =
+                                                Some(window.mouse_position());
+                                            this.refresh_btn_focus.focus(window, cx);
+                                            cx.stop_propagation();
+                                            cx.notify();
                                         }
-                                    } else if ev.keystroke.modifiers == gpui::Modifiers::default() {
-                                        match ev.keystroke.key.as_str() {
-                                            "right" => {
-                                                this.controls_kbd_active = true;
-                                                this.controls_last_pointer =
-                                                    Some(window.mouse_position());
-                                                this.refresh_btn_focus.focus(window, cx);
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            }
-                                            "up" => {
-                                                this.controls_kbd_active = true;
-                                                this.controls_last_pointer =
-                                                    Some(window.mouse_position());
-                                                this.default_trigger_focus.focus(window, cx);
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            }
-                                            "down" => {
-                                                this.controls_kbd_active = false;
-                                                this.search_input
-                                                    .update(cx, |i, cx| i.focus(window, cx));
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            }
-                                            _ => {}
+                                        "up" => {
+                                            this.controls_kbd_active = true;
+                                            this.controls_last_pointer =
+                                                Some(window.mouse_position());
+                                            this.default_trigger_focus.focus(window, cx);
+                                            cx.stop_propagation();
+                                            cx.notify();
                                         }
+                                        "down" => {
+                                            this.controls_kbd_active = false;
+                                            this.search_input
+                                                .update(cx, |i, cx| i.focus(window, cx));
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }
+                                        _ => {}
                                     }
-                                })
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.controls_kbd_active = false;
-                                if all_visible_enabled {
-                                    this.clear_visible(vis_for_toggle.clone(), cx);
-                                } else {
-                                    this.select_all_visible(vis_for_toggle.clone(), cx);
                                 }
                             }))
+                            .on_click(cx.listener(
+                                move |this, ev: &gpui::ClickEvent, window, cx| {
+                                    let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                    this.controls_kbd_active = from_kbd;
+                                    this.controls_last_pointer =
+                                        from_kbd.then(|| window.mouse_position());
+                                    if all_visible_enabled {
+                                        this.clear_visible(vis_for_toggle.clone(), cx);
+                                    } else {
+                                        this.select_all_visible(vis_for_toggle.clone(), cx);
+                                    }
+                                },
+                            ))
                             .on_prepaint(move |bounds, _, _| {
                                 tr_select_all.set("pref-select-all", bounds)
                             })
@@ -1991,12 +2078,7 @@ impl Render for PreferencesTabView {
                             .active(|s| s.bg(palette.bg_active_press))
                             .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                                if super::activates_button(ev) {
-                                    cx.stop_propagation();
-                                    this.controls_kbd_active = true;
-                                    this.controls_last_pointer = Some(window.mouse_position());
-                                    this.refresh_catalog(cx);
-                                } else if ev.keystroke.modifiers == gpui::Modifiers::default() {
+                                if ev.keystroke.modifiers == gpui::Modifiers::default() {
                                     match ev.keystroke.key.as_str() {
                                         "left" => {
                                             this.controls_kbd_active = true;
@@ -2026,8 +2108,11 @@ impl Render for PreferencesTabView {
                                     }
                                 }
                             }))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.controls_kbd_active = false;
+                            .on_click(cx.listener(|this, ev: &gpui::ClickEvent, window, cx| {
+                                let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                                this.controls_kbd_active = from_kbd;
+                                this.controls_last_pointer =
+                                    from_kbd.then(|| window.mouse_position());
                                 this.refresh_catalog(cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_refresh.set("pref-refresh", bounds))
@@ -2131,14 +2216,18 @@ impl Render for PreferencesTabView {
                                             window,
                                             cx,
                                         );
-                                        let hairline_color = motion::hairline_hover_color(
-                                            format!("pref-enabled-{full_id}"),
-                                            hovered && !kbd_active,
-                                            palette.border_subtle,
-                                            palette.accent_solid,
-                                            window,
-                                            cx,
-                                        );
+                                        let hairline_color = if kbd_active {
+                                            palette.border_subtle
+                                        } else {
+                                            motion::hairline_hover_color(
+                                                format!("pref-enabled-{full_id}"),
+                                                hovered,
+                                                palette.border_subtle,
+                                                palette.accent_solid,
+                                                window,
+                                                cx,
+                                            )
+                                        };
                                         div()
                                             .id(row_id.clone())
                                             .test_support()
@@ -2361,14 +2450,18 @@ impl Render for PreferencesTabView {
                                             window,
                                             cx,
                                         );
-                                        let hairline_color = motion::hairline_hover_color(
-                                            format!("pref-unchecked-{full_id}"),
-                                            hovered && !kbd_active,
-                                            palette.border_subtle,
-                                            palette.accent_solid,
-                                            window,
-                                            cx,
-                                        );
+                                        let hairline_color = if kbd_active {
+                                            palette.border_subtle
+                                        } else {
+                                            motion::hairline_hover_color(
+                                                format!("pref-unchecked-{full_id}"),
+                                                hovered,
+                                                palette.border_subtle,
+                                                palette.accent_solid,
+                                                window,
+                                                cx,
+                                            )
+                                        };
                                         div()
                                             .id(unchk_id.clone())
                                             .test_support()
@@ -2473,10 +2566,16 @@ impl Render for PreferencesTabView {
                     window,
                     cx,
                 );
-                let expand_border =
-                    motion::lerp_hsla(palette.border_subtle, palette.accent_solid, expand_t);
+                let any_kbd = controls_kbd || self.list_kbd_active;
+                let expand_border = if any_kbd {
+                    palette.border_subtle
+                } else {
+                    motion::lerp_hsla(palette.border_subtle, palette.accent_solid, expand_t)
+                };
                 let expand_fg = if expand_kbd_focused {
                     palette.text_primary
+                } else if any_kbd {
+                    palette.text_secondary
                 } else {
                     motion::lerp_hsla(palette.text_secondary, palette.text_primary, expand_t)
                 };
@@ -2502,23 +2601,7 @@ impl Render for PreferencesTabView {
                             motion::PointerFlag::set(&expand_hover_state, is_hovered, cx);
                         })
                         .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                            if super::activates_button(ev) {
-                                cx.stop_propagation();
-                                let expanding = !this.models_expanded;
-                                this.models_expanded = expanding;
-                                this.list_scroll = UniformListScrollHandle::new();
-                                if expanding {
-                                    this.pending_scroll_to_index = Some(PREF_COLLAPSED_MODEL_LIMIT);
-                                    this.controls_kbd_active = false;
-                                    this.list_kbd_active = true;
-                                    this.list_last_pointer = Some(window.mouse_position());
-                                    this.focus_handle.focus(window, cx);
-                                } else {
-                                    this.controls_kbd_active = true;
-                                    this.controls_last_pointer = Some(window.mouse_position());
-                                }
-                                cx.notify();
-                            } else if ev.keystroke.modifiers == gpui::Modifiers::default()
+                            if ev.keystroke.modifiers == gpui::Modifiers::default()
                                 && ev.keystroke.key.as_str() == "up"
                                 && !this.visible_row_ids.is_empty()
                             {
@@ -2526,11 +2609,23 @@ impl Render for PreferencesTabView {
                                 cx.stop_propagation();
                             }
                         }))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.controls_kbd_active = false;
-                            this.list_kbd_active = false;
-                            this.models_expanded = !this.models_expanded;
+                        .on_click(cx.listener(|this, ev: &gpui::ClickEvent, window, cx| {
+                            let from_kbd = matches!(ev, gpui::ClickEvent::Keyboard(_));
+                            let expanding = !this.models_expanded;
+                            this.models_expanded = expanding;
                             this.list_scroll = UniformListScrollHandle::new();
+                            if from_kbd && expanding {
+                                this.pending_scroll_to_index = Some(PREF_COLLAPSED_MODEL_LIMIT);
+                                this.controls_kbd_active = false;
+                                this.list_kbd_active = true;
+                                this.list_last_pointer = Some(window.mouse_position());
+                                this.focus_handle.focus(window, cx);
+                            } else {
+                                this.controls_kbd_active = from_kbd;
+                                this.list_kbd_active = false;
+                                this.controls_last_pointer =
+                                    from_kbd.then(|| window.mouse_position());
+                            }
                             cx.notify();
                         }))
                         .on_prepaint(move |bounds, _, _| tr_expand.set("pref-expand-btn", bounds))

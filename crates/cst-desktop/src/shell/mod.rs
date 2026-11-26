@@ -805,6 +805,9 @@ impl AppShell {
         if dest_route == ShellRoute::AllSessions {
             self.all_sessions_view
                 .update(cx, |v, cx| v.focus(window, cx));
+        } else if dest_route == ShellRoute::Settings {
+            self.settings_view
+                .update(cx, |sv, cx| sv.focus_on_return(true, window, cx));
         } else {
             self.root_focus.focus(window, cx);
         }
@@ -3043,6 +3046,13 @@ impl AppShell {
                 cx.notify();
             }
             LoginViewEvent::NavigateToCustomGatewaySettings => {
+                let prev = (ShellRoute::Login, SessionSubView::Chat, None);
+                if self.route_history.last() != Some(&prev) {
+                    self.route_history.push(prev);
+                    if self.route_history.len() > 24 {
+                        self.route_history.remove(0);
+                    }
+                }
                 self.set_route(ShellRoute::Settings, cx);
                 self.settings_view
                     .update(cx, |sv, cx| sv.open_custom_gateway_creator(window, cx));

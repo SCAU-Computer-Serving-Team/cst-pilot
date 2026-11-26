@@ -451,10 +451,20 @@ impl<const N: usize> KbdBoundsTracker<N> {
     }
 }
 
+/// Pending scroll-into-view request resolved on the exact prepaint/paint frame where the
+/// target key's layout bounds become available.
+struct PendingScrollRequest {
+    key: SharedString,
+    scroll: ScrollHandle,
+    margin_px: f32,
+    frames_left: u8,
+}
+
 /// Keyed bounds tracker for dynamic-length menus, lists, toolbars, and settings views.
 #[derive(Clone, Default)]
 pub struct KbdDynamicBoundsTracker {
     slots: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
+    pending_scroll: Rc<RefCell<Option<PendingScrollRequest>>>,
 }
 
 impl KbdDynamicBoundsTracker {
@@ -472,6 +482,51 @@ impl KbdDynamicBoundsTracker {
 
     pub fn get(&self, key: &str) -> Option<Bounds<Pixels>> {
         self.slots.borrow().get(key).copied()
+    }
+
+    /// Arms a pending scroll request consumed once `key` has freshly laid-out bounds.
+    /// Replaces any prior unconsumed request so newer input always wins.
+    pub fn request_scroll(
+        &self,
+        scroll: &ScrollHandle,
+        key: impl Into<SharedString>,
+        margin_px: f32,
+    ) {
+        *self.pending_scroll.borrow_mut() = Some(PendingScrollRequest {
+            key: key.into(),
+            scroll: scroll.clone(),
+            margin_px,
+            frames_left: 4,
+        });
+    }
+
+    /// Cancels any unconsumed scroll request (called on tab leave or pointer override).
+    pub fn cancel_pending_scroll(&self) {
+        *self.pending_scroll.borrow_mut() = None;
+    }
+
+    /// Consumes a pending scroll request once `key` is present in the current frame's layout
+    /// bounds, applying minimal scroll adjustment using same-frame viewport & target geometry.
+    pub fn flush_pending_scroll(&self, window: &mut Window) {
+        let mut pending = self.pending_scroll.borrow_mut();
+        let Some(req) = pending.as_mut() else {
+            return;
+        };
+        if let Some(bounds) = self.slots.borrow().get(req.key.as_ref()).copied() {
+            let scroll = req.scroll.clone();
+            let margin = req.margin_px;
+            *pending = None;
+            drop(pending);
+            if scroll_target_into_view(&scroll, bounds, margin) {
+                window.refresh();
+            }
+            return;
+        }
+        if req.frames_left <= 1 {
+            *pending = None;
+        } else {
+            req.frames_left -= 1;
+        }
     }
 }
 
@@ -534,29 +589,22 @@ pub fn scroll_target_into_view(
     true
 }
 
-/// Scrolls a tracked dynamic control into view, retrying once on the next frame if the target
-/// row was just mounted (e.g. immediately after expanding a collapsed list).
+/// Scrolls a tracked dynamic control into view immediately when its bounds exist, or arms a
+/// prepaint-synced pending request consumed on the exact frame the newly mounted row lays out.
 pub fn scroll_dynamic_target_into_view(
     scroll: &ScrollHandle,
     tracker: &KbdDynamicBoundsTracker,
     key: impl Into<SharedString>,
     margin_px: f32,
-    window: &mut Window,
+    _window: &mut Window,
 ) {
     let key = key.into();
     if let Some(bounds) = tracker.get(key.as_ref()) {
+        tracker.cancel_pending_scroll();
         let _ = scroll_target_into_view(scroll, bounds, margin_px);
         return;
     }
-    let scroll = scroll.clone();
-    let tracker = tracker.clone();
-    window.on_next_frame(move |window, _| {
-        if let Some(bounds) = tracker.get(key.as_ref())
-            && scroll_target_into_view(&scroll, bounds, margin_px)
-        {
-            window.refresh();
-        }
-    });
+    tracker.request_scroll(scroll, key, margin_px);
 }
 
 /// Steps a vertical `ScrollHandle` by `delta_y` (`> 0.0` scrolls up toward top, `< 0.0` scrolls down).
@@ -996,6 +1044,7 @@ pub fn render_gliding_dynamic_indicator(
     canvas(
         |_, _, _| (),
         move |container_bounds, _, window, cx| {
+            tracker.flush_pending_scroll(window);
             let now = Instant::now();
             let resolved = target.as_ref().and_then(|spec| {
                 let ctrl = tracker.get(spec.key.as_ref())?;

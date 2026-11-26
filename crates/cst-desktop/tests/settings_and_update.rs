@@ -2162,6 +2162,15 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
     press(cx, "enter");
     assert!(!has_el(cx, "custom-protocol-popover"));
 
+    // Switching settings tabs from Custom Editor preserves unsaved form (`P1-2`)
+    press(cx, "ctrl-,");
+    press(cx, "left");
+    press(cx, "right");
+    assert!(
+        has_el(cx, "providers-hairline-edit-table"),
+        "Switching tabs and back must preserve unsaved Custom Provider Editor"
+    );
+
     // Exit Custom Editor via Esc -> returns to Configured Providers List (`Q4QFim`)
     press(cx, "escape");
     assert!(has_el(cx, "providers-cstoa-pinned-card"));
@@ -2225,10 +2234,17 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
     press(cx, "enter");
     assert!(
         has_el(cx, "pref-unchecked-deepseek/m7"),
-        "Enter on Preferences expand button must expand full model list"
+        "Enter on Preferences expand button must expand full model list on a single activation"
     );
-
-    // Return to VPWAF: Home (row 0) -> Up (search) -> Up (default trigger) -> Up (VPWAF)
+    // Single-fire collapse check (`P1-1`): End -> Down onto collapse toggle -> Enter collapses cleanly
+    press(cx, "end");
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(
+        !has_el(cx, "pref-unchecked-deepseek/m7"),
+        "Enter on collapse toggle must collapse once without double-toggling back open"
+    );
+    press(cx, "up");
     press(cx, "home");
     press(cx, "up");
     press(cx, "up");
@@ -2237,7 +2253,7 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         assert!(shell.read(cx).settings_view().read(cx).is_tab_kbd_active());
     });
 
-    // 4. Shortcuts tab (`zQxOv`): Down enters body, Up at top returns to VPWAF, top-level Esc navigates back
+    // 4. Shortcuts tab (`zQxOv`): Down enters body, PageDown -> PageUp -> Up returns to VPWAF, top-level Esc navigates back
     press(cx, "right");
     cx.update(|cx| {
         assert_eq!(
@@ -2249,11 +2265,14 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
     cx.update(|cx| {
         assert!(!shell.read(cx).settings_view().read(cx).is_tab_kbd_active());
     });
+    press(cx, "pagedown");
+    press(cx, "pageup");
+    press(cx, "home");
     press(cx, "up");
     cx.update(|cx| {
         assert!(
             shell.read(cx).settings_view().read(cx).is_tab_kbd_active(),
-            "Up at top of Shortcuts tab must return to VPWAF"
+            "Up at top of Shortcuts tab after PageDown/PageUp/Home must return to VPWAF"
         );
     });
 
