@@ -42,7 +42,7 @@ export default function AddModelService() {
 							</div>
 						</div>
 					)}
-					<SettingsSection title="可添加的提供商" summary={available.length}>
+					<SettingsSection title="可添加的提供商">
 						<SettingsSearch label="搜索提供商" value={query} onChange={setQuery} />
 						{available.length ? (
 							<div className="settings-service-card" ref={list} data-expanded={expanded || !!query.trim()}>

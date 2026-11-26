@@ -71,16 +71,24 @@ export function ProviderConfigurationForm({
 	const isConnected = Boolean(provider.type) && !provider.requiresLogin;
 
 	const allModels = modelsResource.data?.models ?? [];
-	const allIds = useMemo(() => allModels.map(fullId), [allModels]);
 	const selection = modelsResource.data?.enabled ?? null;
+	const allProviderModels = useMemo(
+		() => allModels.filter((item) => item.provider === provider.id),
+		[allModels, provider.id],
+	);
+	const enabledProviderCount = useMemo(
+		() =>
+			selection === null
+				? allProviderModels.length
+				: allProviderModels.filter((item) => selection.includes(fullId(item))).length,
+		[allProviderModels, selection],
+	);
 	const providerModels = useMemo(() => {
 		const needle = modelQuery.trim().toLocaleLowerCase();
-		return allModels.filter(
-			(item) =>
-				item.provider === provider.id &&
-				(!needle || `${item.name} ${item.id}`.toLocaleLowerCase().includes(needle)),
+		return allProviderModels.filter(
+			(item) => !needle || `${item.name} ${item.id}`.toLocaleLowerCase().includes(needle),
 		);
-	}, [allModels, modelQuery, provider.id]);
+	}, [allProviderModels, modelQuery]);
 
 	async function refreshCatalog(testLabel = false) {
 		if (catalogBusy || removing) return;
@@ -98,16 +106,21 @@ export function ProviderConfigurationForm({
 	}
 
 	async function toggleProviderModel(modelId: string) {
-		if (!modelsResource.data || modelsResource.working) return;
-		const next = toggleModel(selection, allIds, modelId);
-		const optimistic = { ...modelsResource.data, enabled: next };
-		const ok = await modelsResource.mutate(async (current) => {
-			const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
-				method: "POST",
-				body: { patterns: next ?? [], empty: next !== null && next.length === 0 },
-			});
-			return { ...current, enabled: result.enabled, unavailableEnabled: [] };
-		}, optimistic);
+		if (!modelsResource.data) return;
+		const ok = await modelsResource.mutateLatest(
+			(current) => {
+				const ids = current.models.map(fullId);
+				return { ...current, enabled: toggleModel(current.enabled, ids, modelId) };
+			},
+			async (next) => {
+				const patterns = next.enabled ?? [];
+				const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
+					method: "POST",
+					body: { patterns, empty: next.enabled !== null && next.enabled.length === 0 },
+				});
+				return { ...next, enabled: result.enabled, unavailableEnabled: [] };
+			},
+		);
 		if (ok) feedback();
 	}
 
@@ -389,7 +402,7 @@ export function ProviderConfigurationForm({
 			{isConnected && (
 				<SettingsSection
 					title="可用模型"
-					summary={providerModels.length}
+					summary={`${enabledProviderCount} / ${allProviderModels.length}`}
 					action={
 						<div className="settings-section-actions">
 							<button
@@ -431,15 +444,40 @@ export function ProviderConfigurationForm({
 							</button>
 						</div>
 					)}
-					<div className="settings-flat-list settings-models">
+					<div className="settings-flat-list settings-models" role="listbox" aria-label="可用模型列表">
 						{providerModels.map((item) => {
 							const itemKey = fullId(item);
 							const enabled = selection === null || selection.includes(itemKey);
 							return (
-								<div className="settings-model" key={itemKey} data-enabled={enabled ? "true" : "false"}>
+								<div
+									role="option"
+									aria-selected={enabled}
+									tabIndex={0}
+									className="settings-model"
+									key={itemKey}
+									data-enabled={enabled ? "true" : "false"}
+									onClick={(event) => {
+										if ((event.target as HTMLElement).closest(".settings-check-box, label, input, button"))
+											return;
+										void toggleProviderModel(itemKey);
+									}}
+									onKeyDown={(event) => {
+										if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+										if (
+											!event.altKey &&
+											!event.ctrlKey &&
+											!event.metaKey &&
+											!event.shiftKey &&
+											(event.key === "Enter" || event.key === " ")
+										) {
+											if ((event.target as HTMLElement).closest("button, input")) return;
+											event.preventDefault();
+											void toggleProviderModel(itemKey);
+										}
+									}}
+								>
 									<Checkbox
 										isSelected={enabled}
-										isDisabled={modelsResource.working}
 										aria-label={`启用 ${item.name}`}
 										className="settings-check-box"
 										onChange={() => void toggleProviderModel(itemKey)}

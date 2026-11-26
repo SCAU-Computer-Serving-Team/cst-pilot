@@ -1,4 +1,4 @@
-mod scope;
+pub(super) mod scope;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -62,15 +62,21 @@ pub struct PreferencesTabView {
     filter_dropdown_open: bool,
     models_expanded: bool,
     enabled_scope: ModelScope,
+    confirmed_scope: ModelScope,
     last_ready_models: Vec<ModelChoiceDto>,
     optimistic_default: Option<(String, String)>,
+    confirmed_default: Option<(String, String)>,
     selected_row_id: Option<String>,
     visible_row_ids: Vec<String>,
     visible_enabled_indices: Vec<usize>,
     visible_filter_key: Option<(Option<String>, String)>,
     observed_models: Option<Arc<ModelsSnapshot>>,
-    saving_scope: bool,
-    saving_default: bool,
+    scope_saving: bool,
+    scope_pending: bool,
+    scope_revision: u64,
+    default_saving: bool,
+    pending_default: Option<(String, String)>,
+    default_revision: u64,
     refreshing_catalog: bool,
     default_trigger_focus: FocusHandle,
     filter_trigger_focus: FocusHandle,
@@ -121,15 +127,21 @@ impl PreferencesTabView {
             filter_dropdown_open: false,
             models_expanded: false,
             enabled_scope: ModelScope::default(),
+            confirmed_scope: ModelScope::default(),
             last_ready_models: Vec::new(),
             optimistic_default: None,
+            confirmed_default: None,
             selected_row_id: None,
             visible_row_ids: Vec::new(),
             visible_enabled_indices: Vec::new(),
             visible_filter_key: None,
             observed_models: None,
-            saving_scope: false,
-            saving_default: false,
+            scope_saving: false,
+            scope_pending: false,
+            scope_revision: 0,
+            default_saving: false,
+            pending_default: None,
+            default_revision: 0,
             refreshing_catalog: false,
             default_trigger_focus: cx.focus_handle().tab_stop(true),
             filter_trigger_focus: cx.focus_handle().tab_stop(true),
@@ -213,9 +225,6 @@ impl PreferencesTabView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if default_model && self.saving_default {
-            return;
-        }
         if (default_model && self.default_dropdown_open)
             || (!default_model && self.filter_dropdown_open)
         {
@@ -270,7 +279,7 @@ impl PreferencesTabView {
     }
 
     fn sync_from_snapshot(&mut self) {
-        if self.saving_scope {
+        if self.scope_saving || self.scope_pending {
             return;
         }
         let snap = self.client.snapshot();
@@ -294,6 +303,7 @@ impl PreferencesTabView {
         }
         self.observed_models = Some(models.clone());
         let next_scope = ModelScope::from_snapshot(models);
+        self.confirmed_scope = next_scope.clone();
         if next_scope != self.enabled_scope {
             self.enabled_scope = next_scope;
         }
@@ -307,7 +317,11 @@ impl PreferencesTabView {
         } else if !self.refreshing_catalog {
             self.last_ready_models.clear();
         }
-        if !self.saving_default {
+        if !self.default_saving && self.pending_default.is_none() {
+            self.confirmed_default = models
+                .default_model
+                .as_ref()
+                .map(|d| (d.provider.clone(), d.id.clone()));
             if let Some((ref opt_p, ref opt_m)) = self.optimistic_default
                 && models
                     .default_model
@@ -321,95 +335,160 @@ impl PreferencesTabView {
         }
     }
 
-    fn save_scoped_with_rollback(&mut self, previous: ModelScope, cx: &mut Context<Self>) {
-        self.saving_scope = true;
-        let next = self.enabled_scope.patterns();
-        let snap = self.client.snapshot();
-        let enabled_pairs = self.enabled_ready_pairs_from_snapshot(snap.models.as_deref());
+    fn compute_auto_default(
+        &self,
+        snap_models: Option<&ModelsSnapshot>,
+    ) -> Option<(String, String)> {
+        let enabled_pairs = self.enabled_ready_pairs_from_snapshot(snap_models);
         let current_default = self.optimistic_default.clone().or_else(|| {
-            snap.models
-                .as_ref()
+            snap_models
                 .and_then(|m| m.default_model.as_ref())
                 .map(|d| (d.provider.clone(), d.id.clone()))
         });
-        let auto_next_default = match (current_default, enabled_pairs.first()) {
+        match (current_default, enabled_pairs.first()) {
             (Some(cur), Some(first)) if !enabled_pairs.contains(&cur) => Some(first.clone()),
             (None, Some(first)) => Some(first.clone()),
             _ => None,
-        };
-        let previous_optimistic = self.optimistic_default.clone();
-        if let Some(ref next_def) = auto_next_default {
-            self.optimistic_default = Some(next_def.clone());
         }
+    }
+
+    fn enqueue_scope_save(&mut self, cx: &mut Context<Self>) {
+        let snap = self.client.snapshot();
+        if let Some(next_def) = self.compute_auto_default(snap.models.as_deref()) {
+            self.optimistic_default = Some(next_def);
+        }
+        self.scope_revision = self.scope_revision.wrapping_add(1);
+        self.scope_pending = true;
+        cx.notify();
+
+        if self.scope_saving {
+            return;
+        }
+        self.scope_saving = true;
         let client = self.client.clone();
 
         cx.spawn(async move |weak, cx| {
-            let res = client.set_explicit_model_scope(next).await;
-            let default_res = if res.is_ok() {
-                if let Some((prov, mid)) = auto_next_default {
-                    Some(client.set_default_model(prov, mid).await)
+            loop {
+                let step = weak.update(cx, |this, _| {
+                    if !this.scope_pending {
+                        return None;
+                    }
+                    this.scope_pending = false;
+                    let rev = this.scope_revision;
+                    let scope_snapshot = this.enabled_scope.clone();
+                    let patterns = scope_snapshot.patterns();
+                    let snap = this.client.snapshot();
+                    let auto_default =
+                        this.compute_auto_default(snap.models.as_deref())
+                            .or_else(|| {
+                                let cur = this.optimistic_default.as_ref()?;
+                                let snap_matches = snap
+                                    .models
+                                    .as_ref()
+                                    .and_then(|m| m.default_model.as_ref())
+                                    .is_some_and(|d| d.provider == cur.0 && d.id == cur.1);
+                                (!snap_matches).then(|| cur.clone())
+                            });
+                    Some((rev, scope_snapshot, patterns, auto_default))
+                });
+                let Ok(Some((rev, saved_scope, patterns, auto_default))) = step else {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.scope_saving = false;
+                        cx.notify();
+                    });
+                    break;
+                };
+
+                let res = client.set_explicit_model_scope(patterns).await;
+                let default_res = if res.is_ok() {
+                    if let Some((prov, mid)) = auto_default.clone() {
+                        Some(client.set_default_model(prov, mid).await)
+                    } else {
+                        None
+                    }
                 } else {
                     None
+                };
+
+                let action = weak
+                    .update(cx, |this, cx| {
+                        if res.is_ok() {
+                            this.confirmed_scope = saved_scope;
+                            if let Some(ref def) = auto_default
+                                && matches!(default_res, Some(Ok(_)))
+                            {
+                                this.confirmed_default = Some(def.clone());
+                            }
+                        }
+                        if this.scope_pending || this.scope_revision != rev {
+                            return 1u8; // continue immediately to flush newer edits
+                        }
+                        if let Err(err) = res {
+                            this.enabled_scope = this.confirmed_scope.clone();
+                            this.optimistic_default = this.confirmed_default.clone();
+                            this.scope_saving = false;
+                            cx.emit(PreferencesTabEvent::ErrorMessage(format!(
+                                "保存启用模型范围失败，已自动回滚：{err}"
+                            )));
+                            cx.notify();
+                            return 0u8; // stop after rollback
+                        }
+                        if let Some(Err(err)) = default_res {
+                            this.optimistic_default = this.confirmed_default.clone();
+                            cx.emit(PreferencesTabEvent::ErrorMessage(format!(
+                                "同步默认模型失败：{err}"
+                            )));
+                        }
+                        2u8 // queue drained cleanly, perform single final refresh
+                    })
+                    .unwrap_or(0);
+
+                if action == 1 {
+                    continue;
                 }
-            } else {
-                None
-            };
-            let refreshed = client.refresh_models(None).await.is_ok();
-            let _ = weak.update(cx, |this, cx| {
-                this.saving_scope = false;
-                if let Err(err) = res {
-                    this.enabled_scope = previous;
-                    this.optimistic_default = previous_optimistic;
-                    cx.emit(PreferencesTabEvent::ErrorMessage(format!(
-                        "保存启用模型范围失败，已自动回滚：{err}"
-                    )));
-                } else if let Some(Err(err)) = default_res {
-                    this.optimistic_default = previous_optimistic;
-                    cx.emit(PreferencesTabEvent::ErrorMessage(format!(
-                        "同步默认模型失败：{err}"
-                    )));
+                if action == 0 {
+                    break;
                 }
-                if refreshed {
-                    this.sync_from_snapshot();
+
+                let refreshed = client.refresh_models(None).await.is_ok();
+                let again = weak
+                    .update(cx, |this, cx| {
+                        if this.scope_pending || this.scope_revision != rev {
+                            return true;
+                        }
+                        this.scope_saving = false;
+                        if refreshed {
+                            this.sync_from_snapshot();
+                        }
+                        cx.notify();
+                        false
+                    })
+                    .unwrap_or(false);
+                if !again {
+                    break;
                 }
-                cx.notify();
-            });
+            }
         })
         .detach();
     }
 
     fn toggle_model_enabled(&mut self, full_id: String, cx: &mut Context<Self>) {
-        if self.saving_scope {
-            return;
-        }
-        let prev = self.enabled_scope.clone();
         self.enabled_scope.toggle(full_id);
-        cx.notify();
-        self.save_scoped_with_rollback(prev, cx);
+        self.enqueue_scope_save(cx);
     }
 
     fn select_all_visible(&mut self, visible_full_ids: Vec<String>, cx: &mut Context<Self>) {
-        if self.saving_scope {
-            return;
-        }
-        let prev = self.enabled_scope.clone();
         if self.enabled_scope.select(visible_full_ids) {
-            cx.notify();
-            self.save_scoped_with_rollback(prev, cx);
+            self.enqueue_scope_save(cx);
         }
     }
 
     fn clear_visible(&mut self, visible_full_ids: Vec<String>, cx: &mut Context<Self>) {
-        if self.saving_scope {
-            return;
-        }
-        let prev = self.enabled_scope.clone();
         if self
             .enabled_scope
             .clear(visible_full_ids.iter().map(String::as_str))
         {
-            cx.notify();
-            self.save_scoped_with_rollback(prev, cx);
+            self.enqueue_scope_save(cx);
         }
     }
 
@@ -437,9 +516,6 @@ impl PreferencesTabView {
     }
 
     fn move_enabled_row(&mut self, idx: usize, delta: isize, cx: &mut Context<Self>) {
-        if self.saving_scope {
-            return;
-        }
         let Some(position) = self.visible_enabled_indices.iter().position(|&i| i == idx) else {
             return;
         };
@@ -450,15 +526,13 @@ impl PreferencesTabView {
             return;
         };
         let selected = self.enabled_scope.model_id_at(idx).map(str::to_owned);
-        let prev = self.enabled_scope.clone();
         if !self.enabled_scope.swap(idx, target) {
             return;
         }
         self.selected_row_id = selected;
         self.list_scroll
             .scroll_to_item(target_position, ScrollStrategy::Nearest);
-        cx.notify();
-        self.save_scoped_with_rollback(prev, cx);
+        self.enqueue_scope_save(cx);
     }
 
     fn set_default_model(
@@ -468,27 +542,78 @@ impl PreferencesTabView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.saving_default || !self.dismiss_dropdowns(window, cx) {
+        if !self.dismiss_dropdowns(window, cx) {
             return;
         }
-        self.saving_default = true;
-        let previous_optimistic = self.optimistic_default.clone();
         self.optimistic_default = Some((provider.clone(), model_id.clone()));
+        self.pending_default = Some((provider, model_id));
+        self.default_revision = self.default_revision.wrapping_add(1);
         cx.notify();
+
+        if self.default_saving {
+            return;
+        }
+        self.default_saving = true;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let res = client.set_default_model(provider, model_id).await;
-            let refreshed = client.refresh_models(None).await.is_ok();
-            let _ = weak.update(cx, |this, cx| {
-                this.saving_default = false;
-                if let Err(err) = res {
-                    this.optimistic_default = previous_optimistic;
-                    cx.emit(PreferencesTabEvent::ErrorMessage(err.to_string()));
-                } else if refreshed {
-                    this.sync_from_snapshot();
+            loop {
+                let next = weak.update(cx, |this, _| {
+                    let target = this.pending_default.take()?;
+                    Some((this.default_revision, target))
+                });
+                let Ok(Some((rev, (prov, mid)))) = next else {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.default_saving = false;
+                        cx.notify();
+                    });
+                    break;
+                };
+
+                let res = client.set_default_model(prov.clone(), mid.clone()).await;
+                let action = weak
+                    .update(cx, |this, cx| {
+                        if res.is_ok() {
+                            this.confirmed_default = Some((prov, mid));
+                        }
+                        if this.pending_default.is_some() || this.default_revision != rev {
+                            return 1u8;
+                        }
+                        if let Err(err) = res {
+                            this.optimistic_default = this.confirmed_default.clone();
+                            this.default_saving = false;
+                            cx.emit(PreferencesTabEvent::ErrorMessage(err.to_string()));
+                            cx.notify();
+                            return 0u8;
+                        }
+                        2u8
+                    })
+                    .unwrap_or(0);
+
+                if action == 1 {
+                    continue;
                 }
-                cx.notify();
-            });
+                if action == 0 {
+                    break;
+                }
+
+                let refreshed = client.refresh_models(None).await.is_ok();
+                let again = weak
+                    .update(cx, |this, cx| {
+                        if this.pending_default.is_some() || this.default_revision != rev {
+                            return true;
+                        }
+                        this.default_saving = false;
+                        if refreshed {
+                            this.sync_from_snapshot();
+                        }
+                        cx.notify();
+                        false
+                    })
+                    .unwrap_or(false);
+                if !again {
+                    break;
+                }
+            }
         })
         .detach();
     }
@@ -533,9 +658,6 @@ impl PreferencesTabView {
                 }
             }
             KbdMenuStep::ReorderUp | KbdMenuStep::ReorderDown => {
-                if self.saving_scope {
-                    return;
-                }
                 let Some(idx) = self.visible_enabled_indices.iter().copied().find(|&i| {
                     self.enabled_scope.model_id_at(i) == self.selected_row_id.as_deref()
                 }) else {
@@ -671,7 +793,7 @@ impl Render for PreferencesTabView {
                         .collect(),
                 );
                 let row_count = default_rows.len();
-                let list_h = px((row_count as f32 * 32.0).min(280.0));
+                let list_h = px((row_count as f32 * 34.0).min(280.0));
                 let current_def_pair =
                     effective_default.map(|d| (d.provider.clone(), d.id.clone()));
                 uniform_list(
@@ -694,55 +816,62 @@ impl Render for PreferencesTabView {
                                 let mname_label = SharedString::from(mname.clone());
                                 let prov_label = SharedString::from(prov.clone());
                                 let opt_aria = SharedString::from(format!("{prov} · {mname}"));
-                                apply_scale(div(), scale::UI)
-                                    .id(opt_id.clone())
-                                    .test_support()
-                                    .a11y_listitem(opt_id, opt_aria, is_selected)
-                                    .flex_shrink_0()
-                                    .w_full()
-                                    .h(height::CONTROL)
-                                    .px(space::SM)
-                                    .rounded(radius::CONTROL)
-                                    .text_color(palette.text_primary)
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap(space::SM)
-                                    .hover(move |s| {
-                                        if kbd_nav {
-                                            s
-                                        } else {
-                                            s.bg(palette.bg_item_hover)
-                                        }
-                                    })
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.set_default_model(
-                                            prov_c.clone(),
-                                            mid_c.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }))
-                                    .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
-                                    .child(div().flex_1().min_w_0().truncate().child(mname_label))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::XS)
-                                            .flex_shrink_0()
-                                            .child(
-                                                apply_scale(div(), scale::CAPTION)
-                                                    .text_color(palette.text_muted)
-                                                    .child(prov_label),
-                                            )
-                                            .children(is_selected.then(|| {
-                                                Icon::new(IconName::Check)
-                                                    .size(px(13.0))
-                                                    .text_color(palette.accent_ink)
-                                            })),
-                                    )
+                                div().w_full().h(px(34.0)).py(px(1.0)).child(
+                                    apply_scale(div(), scale::UI)
+                                        .id(opt_id.clone())
+                                        .test_support()
+                                        .a11y_listitem(opt_id, opt_aria, is_selected)
+                                        .flex_shrink_0()
+                                        .w_full()
+                                        .h(height::CONTROL)
+                                        .px(px(10.0))
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_primary)
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap(space::SM)
+                                        .hover(move |s| {
+                                            if kbd_nav {
+                                                s
+                                            } else {
+                                                s.bg(palette.bg_item_hover)
+                                            }
+                                        })
+                                        .active(|s| s.bg(palette.bg_active_press))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.set_default_model(
+                                                prov_c.clone(),
+                                                mid_c.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }))
+                                        .on_prepaint(move |bounds, _, _| {
+                                            tr.set(key.clone(), bounds)
+                                        })
+                                        .child(
+                                            div().flex_1().min_w_0().truncate().child(mname_label),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::TIGHT)
+                                                .flex_shrink_0()
+                                                .child(
+                                                    apply_scale(div(), scale::CAPTION)
+                                                        .text_color(palette.text_muted)
+                                                        .child(prov_label),
+                                                )
+                                                .children(is_selected.then(|| {
+                                                    Icon::new(IconName::Check)
+                                                        .size(px(13.0))
+                                                        .text_color(palette.accent_ink)
+                                                })),
+                                        ),
+                                )
                             })
                             .collect()
                     }),
@@ -759,7 +888,7 @@ impl Render for PreferencesTabView {
                     .test_support()
                     .a11y_dialog("pref-default-model-popover", "选择默认模型")
                     .relative()
-                    .w(px(300.0))
+                    .w(px(320.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
                     .bg(palette.bg_glass)
@@ -851,7 +980,10 @@ impl Render for PreferencesTabView {
                 palette.flat_popover_shadows(),
                 -6.0,
             );
-            dropdown_menu_opt = Some(div().absolute().top(px(46.0)).right_0().child(menu));
+            dropdown_menu_opt = Some(
+                gpui::deferred(div().absolute().top(px(46.0)).right(px(-10.0)).child(menu))
+                    .with_priority(20),
+            );
         }
 
         let default_row = div()
@@ -866,7 +998,7 @@ impl Render for PreferencesTabView {
             .child(
                 apply_scale(div(), scale::BODY)
                     .text_color(palette.text_primary)
-                    .child(cjk_inline_label("新会话默认模型")),
+                    .child("新会话默认模型"),
             )
             .child(
                 div()
@@ -888,12 +1020,19 @@ impl Render for PreferencesTabView {
                         }
                     }))
                     .h(height::COMPACT)
-                    .px(space::SM)
+                    .px(px(10.0))
+                    .mr(px(-10.0))
                     .rounded(radius::CONTROL)
+                    .bg(if self.default_dropdown_open {
+                        palette.bg_item_active
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
                     .flex()
                     .items_center()
                     .gap(space::TIGHT)
                     .hover(|s| s.bg(palette.bg_item_hover))
+                    .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -967,7 +1106,7 @@ impl Render for PreferencesTabView {
                         )
                         .flex_shrink_0()
                         .h(height::CONTROL)
-                        .px(space::SM)
+                        .px(px(10.0))
                         .rounded(radius::CONTROL)
                         .text_color(palette.text_primary)
                         .flex()
@@ -981,6 +1120,7 @@ impl Render for PreferencesTabView {
                                 s.bg(palette.bg_item_hover)
                             }
                         })
+                        .active(|s| s.bg(palette.bg_active_press))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.provider_filter = None;
                             this.dismiss_dropdowns(window, cx);
@@ -1008,7 +1148,7 @@ impl Render for PreferencesTabView {
                         .a11y_listitem(filter_id, prov_label.clone(), is_selected)
                         .flex_shrink_0()
                         .h(height::CONTROL)
-                        .px(space::SM)
+                        .px(px(10.0))
                         .rounded(radius::CONTROL)
                         .text_color(palette.text_primary)
                         .flex()
@@ -1022,6 +1162,7 @@ impl Render for PreferencesTabView {
                                 s.bg(palette.bg_item_hover)
                             }
                         })
+                        .active(|s| s.bg(palette.bg_active_press))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.provider_filter = Some(p_click.clone());
                             this.dismiss_dropdowns(window, cx);
@@ -1036,79 +1177,82 @@ impl Render for PreferencesTabView {
                 );
             }
 
-            div()
-                .absolute()
-                .top(px(42.0))
-                .right_0()
-                .child(motion::animate_popover_enter(
-                    "pref-filter-pop-anim",
-                    div()
-                        .id("pref-filter-popover")
-                        .test_support()
-                        .a11y_dialog("pref-filter-popover", "按提供商筛选")
-                        .relative()
-                        .w(px(220.0))
-                        .p(space::XS)
-                        .rounded(radius::ROW)
-                        .bg(palette.bg_glass)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .occlude()
-                        .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
-                            if this.picker_keyboard_nav
-                                && pointer_moved_past_threshold(
-                                    &mut this.picker_last_pointer,
-                                    ev.position,
-                                )
-                            {
-                                this.picker_keyboard_nav = false;
-                                cx.notify();
-                            }
-                        }))
-                        .child(
-                            div()
-                                .w_full()
-                                .focus_trap("pref-filter-focus", &self.picker_focus)
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if super::move_picker_cursor(
-                                            event,
-                                            &mut this.picker_index,
-                                            choices.len() + 1,
-                                            &this.picker_scroll,
-                                        ) {
-                                            this.picker_keyboard_nav = true;
-                                            this.picker_last_pointer =
-                                                Some(window.mouse_position());
-                                            cx.notify();
-                                            cx.stop_propagation();
-                                        } else if super::activates_button(event) {
-                                            this.provider_filter = this
-                                                .picker_index
-                                                .checked_sub(1)
-                                                .and_then(|ix| choices.get(ix))
-                                                .cloned();
-                                            this.dismiss_dropdowns(window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                ))
-                                .child(items),
-                        )
-                        .child(render_gliding_dynamic_indicator(
-                            "pref-filter-pop",
-                            kbd_style,
-                            active_filter_spec,
-                            self.picker_tracker.clone(),
-                            &palette,
-                            window,
-                            cx,
-                        )),
-                    palette.flat_popover_shadows(),
-                    -6.0,
-                ))
+            gpui::deferred(
+                div().absolute().top(px(42.0)).right(px(-10.0)).child(
+                    motion::animate_popover_enter(
+                        "pref-filter-pop-anim",
+                        div()
+                            .id("pref-filter-popover")
+                            .test_support()
+                            .a11y_dialog("pref-filter-popover", "按提供商筛选")
+                            .relative()
+                            .w(px(220.0))
+                            .p(space::XS)
+                            .rounded(radius::ROW)
+                            .bg(palette.bg_glass)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .occlude()
+                            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation()
+                            })
+                            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                                if this.picker_keyboard_nav
+                                    && pointer_moved_past_threshold(
+                                        &mut this.picker_last_pointer,
+                                        ev.position,
+                                    )
+                                {
+                                    this.picker_keyboard_nav = false;
+                                    cx.notify();
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .focus_trap("pref-filter-focus", &self.picker_focus)
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if super::move_picker_cursor(
+                                                event,
+                                                &mut this.picker_index,
+                                                choices.len() + 1,
+                                                &this.picker_scroll,
+                                            ) {
+                                                this.picker_keyboard_nav = true;
+                                                this.picker_last_pointer =
+                                                    Some(window.mouse_position());
+                                                cx.notify();
+                                                cx.stop_propagation();
+                                            } else if super::activates_button(event) {
+                                                this.provider_filter = this
+                                                    .picker_index
+                                                    .checked_sub(1)
+                                                    .and_then(|ix| choices.get(ix))
+                                                    .cloned();
+                                                this.dismiss_dropdowns(window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
+                                    .child(items),
+                            )
+                            .child(render_gliding_dynamic_indicator(
+                                "pref-filter-pop",
+                                kbd_style,
+                                active_filter_spec,
+                                self.picker_tracker.clone(),
+                                &palette,
+                                window,
+                                cx,
+                            )),
+                        palette.flat_popover_shadows(),
+                        -6.0,
+                    ),
+                ),
+            )
+            .with_priority(20)
         });
 
         let search_q = self.search_input.read(cx).value().trim().to_lowercase();
@@ -1309,13 +1453,24 @@ impl Render for PreferencesTabView {
                         }
                     }))
                     .h(height::COMPACT)
-                    .px(space::SM)
+                    .px(px(10.0))
+                    .mr(px(-10.0))
                     .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
+                    .bg(if self.filter_dropdown_open {
+                        palette.bg_item_active
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
+                    .text_color(if self.filter_dropdown_open {
+                        palette.text_primary
+                    } else {
+                        palette.text_secondary
+                    })
                     .flex()
                     .items_center()
                     .gap(space::XS)
                     .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -1347,16 +1502,16 @@ impl Render for PreferencesTabView {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .items_center()
                     .gap(space::SM)
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label("启用模型")),
+                            .child("启用模型"),
                     )
                     .child(
                         apply_scale(div(), scale::CAPTION)
-                            .pb(px(1.0))
+                            .pt(px(2.0))
                             .text_color(palette.text_muted)
                             .child(SharedString::from(format!(
                                 "{enabled_ready_count} / {}",
@@ -1366,9 +1521,10 @@ impl Render for PreferencesTabView {
             )
             .child(
                 div()
+                    .mr(px(-10.0))
                     .flex()
                     .items_center()
-                    .gap(space::SM)
+                    .gap(space::XS)
                     .child(
                         apply_scale(div(), scale::UI)
                             .id(if all_visible_enabled {
@@ -1391,12 +1547,13 @@ impl Render for PreferencesTabView {
                             )
                             .tab_index(0)
                             .h(height::COMPACT)
-                            .px(space::SM)
+                            .px(px(10.0))
                             .rounded(radius::CONTROL)
                             .text_color(palette.text_secondary)
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_key_down({
                                 let vis_kbd = vis_for_toggle.clone();
                                 cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
@@ -1433,12 +1590,13 @@ impl Render for PreferencesTabView {
                             .a11y_button("pref-refresh-btn", "刷新模型列表")
                             .tab_index(0)
                             .h(height::COMPACT)
-                            .px(space::SM)
+                            .px(px(10.0))
                             .rounded(radius::CONTROL)
                             .text_color(palette.text_secondary)
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
                                 if !ev.is_held
@@ -1468,7 +1626,7 @@ impl Render for PreferencesTabView {
                     self.visible_row_ids
                         .iter()
                         .position(|x| x == id)
-                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(4.0))
+                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(8.0))
                 })
             })
             .flatten();
@@ -1504,338 +1662,389 @@ impl Render for PreferencesTabView {
             let viewport_h = px((display_row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32)
                 * PREF_LIST_ROW_HEIGHT_PX);
             list_body = list_body.child(
-                uniform_list(
-                    "pref-models-virtual-list",
-                    display_row_count,
-                    cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
-                        range
-                            .map(|vis_idx| {
-                                let tr = this.list_tracker.clone();
-                                let row_track_key =
-                                    SharedString::from(format!("pref-row-{vis_idx}"));
-                                let kbd_active = this.list_kbd_active;
-                                match &rows_arc[vis_idx] {
-                                    PrefRowItem::Enabled {
-                                        ordered_idx,
-                                        full_id,
-                                        provider,
-                                        name,
-                                    } => {
-                                        let idx = *ordered_idx;
-                                        let can_move_up = vis_idx > 0;
-                                        let can_move_down =
-                                            vis_idx + 1 < this.visible_enabled_indices.len();
-                                        let fid_chk = full_id.clone();
-                                        let fid_select = full_id.clone();
-                                        let selected =
-                                            this.selected_row_id.as_ref() == Some(full_id);
-                                        let row_id =
-                                            SharedString::from(format!("pref-enabled-row-{idx}"));
-                                        let chk_id = SharedString::from(format!(
-                                            "pref-toggle-enabled-{idx}"
-                                        ));
-                                        let up_id =
-                                            SharedString::from(format!("pref-move-up-{idx}"));
-                                        let down_id =
-                                            SharedString::from(format!("pref-move-down-{idx}"));
-                                        let flip_y = motion::flip_row_offset_y_with_duration(
-                                            "pref-enabled-models",
+                div().mx(px(-12.0)).flex_shrink_0().child(
+                    uniform_list(
+                        "pref-models-virtual-list",
+                        display_row_count,
+                        cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
+                            range
+                                .map(|vis_idx| {
+                                    let tr = this.list_tracker.clone();
+                                    let row_track_key =
+                                        SharedString::from(format!("pref-row-{vis_idx}"));
+                                    let kbd_active = this.list_kbd_active;
+                                    match &rows_arc[vis_idx] {
+                                        PrefRowItem::Enabled {
+                                            ordered_idx,
                                             full_id,
-                                            &flip_scope,
-                                            px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
-                                            motion::FAST,
-                                            window,
-                                            cx,
-                                        );
-                                        let row = div()
-                                            .id(row_id.clone())
-                                            .test_support()
-                                            .relative()
-                                            .top(flip_y)
-                                            .a11y_listitem(
-                                                row_id,
-                                                format!("{name}（{provider}）"),
-                                                selected,
-                                            )
-                                            .w_full()
-                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                            .border_b_1()
-                                            .border_color(palette.border_subtle)
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::MD)
-                                            .hover(move |s| {
-                                                if kbd_active {
-                                                    s
-                                                } else {
-                                                    s.bg(palette.bg_item_hover)
-                                                }
-                                            })
-                                            .on_click(cx.listener(move |this, _, w, cx| {
-                                                this.selected_row_id = Some(fid_select.clone());
-                                                this.list_kbd_active = false;
-                                                this.focus_handle.focus(w, cx);
-                                                cx.notify();
-                                            }))
-                                            .on_prepaint(move |bounds, _, _| {
-                                                tr.set(row_track_key.clone(), bounds);
-                                            })
-                                            .child({
-                                                let chk_mark = motion::animated_checkbox_mark(
-                                                    format!("pref-chk-{full_id}"),
-                                                    true,
-                                                    px(11.0),
-                                                    palette.text_on_accent,
-                                                    window,
-                                                    cx,
-                                                );
-                                                div()
-                                                    .id(chk_id.clone())
-                                                    .test_support()
-                                                    .a11y_checkbox(
-                                                        chk_id,
-                                                        format!("启用模型：{name}"),
+                                            provider,
+                                            name,
+                                        } => {
+                                            let idx = *ordered_idx;
+                                            let can_move_up = vis_idx > 0;
+                                            let can_move_down =
+                                                vis_idx + 1 < this.visible_enabled_indices.len();
+                                            let fid_chk = full_id.clone();
+                                            let fid_select = full_id.clone();
+                                            let selected =
+                                                this.selected_row_id.as_ref() == Some(full_id);
+                                            let row_id = SharedString::from(format!(
+                                                "pref-enabled-row-{idx}"
+                                            ));
+                                            let chk_id = SharedString::from(format!(
+                                                "pref-toggle-enabled-{idx}"
+                                            ));
+                                            let up_id =
+                                                SharedString::from(format!("pref-move-up-{idx}"));
+                                            let down_id =
+                                                SharedString::from(format!("pref-move-down-{idx}"));
+                                            let flip_y = motion::flip_row_offset_y_with_duration(
+                                                "pref-enabled-models",
+                                                full_id,
+                                                &flip_scope,
+                                                px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
+                                                motion::FAST,
+                                                window,
+                                                cx,
+                                            );
+                                            let row = div()
+                                                .id(row_id.clone())
+                                                .test_support()
+                                                .relative()
+                                                .top(flip_y)
+                                                .a11y_listitem(
+                                                    row_id,
+                                                    format!("{name}（{provider}）"),
+                                                    selected,
+                                                )
+                                                .w_full()
+                                                .h(px(PREF_LIST_ROW_HEIGHT_PX - 4.0))
+                                                .my(px(2.0))
+                                                .px(px(12.0))
+                                                .rounded(radius::ROW)
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::MD)
+                                                .hover(move |s| {
+                                                    if kbd_active {
+                                                        s
+                                                    } else {
+                                                        s.bg(palette.bg_item_hover)
+                                                    }
+                                                })
+                                                .active(|s| s.bg(palette.bg_active_press))
+                                                .on_click(cx.listener(move |this, _, w, cx| {
+                                                    this.selected_row_id = Some(fid_select.clone());
+                                                    this.list_kbd_active = false;
+                                                    this.focus_handle.focus(w, cx);
+                                                    cx.notify();
+                                                }))
+                                                .on_prepaint(move |bounds, _, _| {
+                                                    tr.set(row_track_key.clone(), bounds);
+                                                })
+                                                .child({
+                                                    let chk_mark = motion::animated_checkbox_mark(
+                                                        format!("pref-chk-{full_id}"),
                                                         true,
-                                                    )
-                                                    .w(px(16.0))
-                                                    .h(px(16.0))
-                                                    .rounded(radius::CONTROL)
-                                                    .border_1()
-                                                    .border_color(palette.accent_solid)
-                                                    .bg(palette.accent_solid)
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .flex_shrink_0()
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.toggle_model_enabled(
-                                                            fid_chk.clone(),
-                                                            cx,
-                                                        );
-                                                        cx.stop_propagation();
-                                                    }))
-                                                    .children(chk_mark)
-                                            })
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .flex()
-                                                    .items_end()
-                                                    .gap(space::MD)
-                                                    .child(
-                                                        apply_scale(div(), scale::BODY)
-                                                            .truncate()
-                                                            .text_color(palette.text_primary)
-                                                            .child(SharedString::from(
-                                                                name.clone(),
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        apply_scale(div(), scale::CAPTION)
-                                                            .pb(px(1.0))
-                                                            .flex_shrink_0()
-                                                            .text_color(palette.text_muted)
-                                                            .child(SharedString::from(
-                                                                provider.clone(),
-                                                            )),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_shrink_0()
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(space::MICRO)
-                                                    .child(
-                                                        div()
-                                                            .id(up_id.clone())
-                                                            .test_support()
-                                                            .a11y_button(
-                                                                up_id,
-                                                                format!("上移模型：{name}"),
-                                                            )
-                                                            .w(height::COMPACT)
-                                                            .h(height::COMPACT)
-                                                            .rounded(radius::CONTROL)
-                                                            .opacity(if can_move_up {
-                                                                1.0
-                                                            } else {
-                                                                0.35
-                                                            })
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .hover(move |s| {
-                                                                if can_move_up {
-                                                                    s.bg(palette.bg_item_hover)
+                                                        px(11.0),
+                                                        palette.text_on_accent,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                    div()
+                                                        .id(chk_id.clone())
+                                                        .test_support()
+                                                        .a11y_checkbox(
+                                                            chk_id,
+                                                            format!("启用模型：{name}"),
+                                                            true,
+                                                        )
+                                                        .w(px(16.0))
+                                                        .h(px(16.0))
+                                                        .rounded(radius::CONTROL)
+                                                        .border_1()
+                                                        .border_color(palette.accent_solid)
+                                                        .bg(palette.accent_solid)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .flex_shrink_0()
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.toggle_model_enabled(
+                                                                    fid_chk.clone(),
+                                                                    cx,
+                                                                );
+                                                                cx.stop_propagation();
+                                                            },
+                                                        ))
+                                                        .children(chk_mark)
+                                                })
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w_0()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(space::MD)
+                                                        .child(
+                                                            apply_scale(div(), scale::BODY)
+                                                                .truncate()
+                                                                .text_color(palette.text_primary)
+                                                                .child(SharedString::from(
+                                                                    name.clone(),
+                                                                )),
+                                                        )
+                                                        .child(
+                                                            apply_scale(div(), scale::CAPTION)
+                                                                .pt(px(2.0))
+                                                                .flex_shrink_0()
+                                                                .text_color(palette.text_muted)
+                                                                .child(SharedString::from(
+                                                                    provider.clone(),
+                                                                )),
+                                                        ),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_shrink_0()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(space::MICRO)
+                                                        .child(
+                                                            div()
+                                                                .id(up_id.clone())
+                                                                .test_support()
+                                                                .a11y_button(
+                                                                    up_id,
+                                                                    format!("上移模型：{name}"),
+                                                                )
+                                                                .w(height::COMPACT)
+                                                                .h(height::COMPACT)
+                                                                .rounded(radius::CONTROL)
+                                                                .opacity(if can_move_up {
+                                                                    1.0
                                                                 } else {
-                                                                    s
-                                                                }
-                                                            })
-                                                            .on_click(cx.listener(
-                                                                move |this, _, _, cx| {
+                                                                    0.35
+                                                                })
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .hover(move |s| {
                                                                     if can_move_up {
-                                                                        this.move_enabled_row(
-                                                                            idx, -1, cx,
-                                                                        );
+                                                                        s.bg(palette.bg_item_hover)
+                                                                    } else {
+                                                                        s
                                                                     }
-                                                                    cx.stop_propagation();
-                                                                },
-                                                            ))
-                                                            .child(
-                                                                Icon::new(IconName::ArrowUp)
-                                                                    .size(px(13.0))
-                                                                    .text_color(
-                                                                        palette.text_secondary,
-                                                                    ),
-                                                            ),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .id(down_id.clone())
-                                                            .test_support()
-                                                            .a11y_button(
-                                                                down_id,
-                                                                format!("下移模型：{name}"),
-                                                            )
-                                                            .w(height::COMPACT)
-                                                            .h(height::COMPACT)
-                                                            .rounded(radius::CONTROL)
-                                                            .opacity(if can_move_down {
-                                                                1.0
-                                                            } else {
-                                                                0.35
-                                                            })
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .hover(move |s| {
-                                                                if can_move_down {
-                                                                    s.bg(palette.bg_item_hover)
+                                                                })
+                                                                .active(move |s| {
+                                                                    if can_move_up {
+                                                                        s.bg(
+                                                                            palette.bg_active_press,
+                                                                        )
+                                                                    } else {
+                                                                        s
+                                                                    }
+                                                                })
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        if can_move_up {
+                                                                            this.move_enabled_row(
+                                                                                idx, -1, cx,
+                                                                            );
+                                                                        }
+                                                                        cx.stop_propagation();
+                                                                    },
+                                                                ))
+                                                                .child(
+                                                                    Icon::new(IconName::ArrowUp)
+                                                                        .size(px(13.0))
+                                                                        .text_color(
+                                                                            palette.text_secondary,
+                                                                        ),
+                                                                ),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .id(down_id.clone())
+                                                                .test_support()
+                                                                .a11y_button(
+                                                                    down_id,
+                                                                    format!("下移模型：{name}"),
+                                                                )
+                                                                .w(height::COMPACT)
+                                                                .h(height::COMPACT)
+                                                                .rounded(radius::CONTROL)
+                                                                .opacity(if can_move_down {
+                                                                    1.0
                                                                 } else {
-                                                                    s
-                                                                }
-                                                            })
-                                                            .on_click(cx.listener(
-                                                                move |this, _, _, cx| {
+                                                                    0.35
+                                                                })
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .hover(move |s| {
                                                                     if can_move_down {
-                                                                        this.move_enabled_row(
-                                                                            idx, 1, cx,
-                                                                        );
+                                                                        s.bg(palette.bg_item_hover)
+                                                                    } else {
+                                                                        s
                                                                     }
-                                                                    cx.stop_propagation();
-                                                                },
-                                                            ))
-                                                            .child(
-                                                                Icon::new(IconName::ArrowDown)
-                                                                    .size(px(13.0))
-                                                                    .text_color(
-                                                                        palette.text_secondary,
-                                                                    ),
-                                                            ),
-                                                    ),
-                                            );
-                                        div()
-                                            .w_full()
-                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                            .child(row)
-                                            .into_any_element()
-                                    }
-                                    PrefRowItem::Unchecked {
-                                        full_id,
-                                        provider,
-                                        name,
-                                    } => {
-                                        let fid_add = full_id.clone();
-                                        let unchk_id =
-                                            SharedString::from(format!("pref-unchecked-{full_id}"));
-                                        let row = div()
-                                            .id(unchk_id.clone())
-                                            .test_support()
-                                            .a11y_checkbox(
-                                                unchk_id,
-                                                format!("启用模型：{name}（{provider}）"),
-                                                false,
-                                            )
-                                            .w_full()
-                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                            .border_b_1()
-                                            .border_color(palette.border_subtle)
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::MD)
-                                            .hover(move |s| {
-                                                if kbd_active {
-                                                    s
-                                                } else {
-                                                    s.bg(palette.bg_item_hover)
-                                                }
-                                            })
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.toggle_model_enabled(fid_add.clone(), cx);
-                                            }))
-                                            .on_prepaint(move |bounds, _, _| {
-                                                tr.set(row_track_key.clone(), bounds);
-                                            })
-                                            .child({
-                                                let unchk_mark = motion::animated_checkbox_mark(
-                                                    format!("pref-chk-{full_id}"),
-                                                    false,
-                                                    px(11.0),
-                                                    palette.text_on_accent,
-                                                    window,
-                                                    cx,
+                                                                })
+                                                                .active(move |s| {
+                                                                    if can_move_down {
+                                                                        s.bg(
+                                                                            palette.bg_active_press,
+                                                                        )
+                                                                    } else {
+                                                                        s
+                                                                    }
+                                                                })
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        if can_move_down {
+                                                                            this.move_enabled_row(
+                                                                                idx, 1, cx,
+                                                                            );
+                                                                        }
+                                                                        cx.stop_propagation();
+                                                                    },
+                                                                ))
+                                                                .child(
+                                                                    Icon::new(IconName::ArrowDown)
+                                                                        .size(px(13.0))
+                                                                        .text_color(
+                                                                            palette.text_secondary,
+                                                                        ),
+                                                                ),
+                                                        ),
                                                 );
-                                                div()
-                                                    .w(px(16.0))
-                                                    .h(px(16.0))
-                                                    .rounded(radius::CONTROL)
-                                                    .border_1()
-                                                    .border_color(palette.border_strong)
-                                                    .bg(palette.bg_workspace)
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .flex_shrink_0()
-                                                    .children(unchk_mark)
-                                            })
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .flex()
-                                                    .items_end()
-                                                    .gap(space::MD)
-                                                    .child(
-                                                        apply_scale(div(), scale::BODY)
-                                                            .truncate()
-                                                            .text_color(palette.text_secondary)
-                                                            .child(SharedString::from(
-                                                                name.clone(),
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        apply_scale(div(), scale::CAPTION)
-                                                            .pb(px(1.0))
-                                                            .flex_shrink_0()
-                                                            .text_color(palette.text_muted)
-                                                            .child(SharedString::from(
-                                                                provider.clone(),
-                                                            )),
-                                                    ),
-                                            );
-                                        row.into_any_element()
+                                            div()
+                                                .relative()
+                                                .w_full()
+                                                .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                                .child(row)
+                                                .child(
+                                                    div()
+                                                        .absolute()
+                                                        .left(px(12.0))
+                                                        .right(px(12.0))
+                                                        .bottom_0()
+                                                        .h(px(1.0))
+                                                        .bg(palette.border_subtle),
+                                                )
+                                                .into_any_element()
+                                        }
+                                        PrefRowItem::Unchecked {
+                                            full_id,
+                                            provider,
+                                            name,
+                                        } => {
+                                            let fid_add = full_id.clone();
+                                            let unchk_id = SharedString::from(format!(
+                                                "pref-unchecked-{full_id}"
+                                            ));
+                                            let row = div()
+                                                .id(unchk_id.clone())
+                                                .test_support()
+                                                .a11y_checkbox(
+                                                    unchk_id,
+                                                    format!("启用模型：{name}（{provider}）"),
+                                                    false,
+                                                )
+                                                .w_full()
+                                                .h(px(PREF_LIST_ROW_HEIGHT_PX - 4.0))
+                                                .my(px(2.0))
+                                                .px(px(12.0))
+                                                .rounded(radius::ROW)
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::MD)
+                                                .hover(move |s| {
+                                                    if kbd_active {
+                                                        s
+                                                    } else {
+                                                        s.bg(palette.bg_item_hover)
+                                                    }
+                                                })
+                                                .active(|s| s.bg(palette.bg_active_press))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.toggle_model_enabled(fid_add.clone(), cx);
+                                                }))
+                                                .on_prepaint(move |bounds, _, _| {
+                                                    tr.set(row_track_key.clone(), bounds);
+                                                })
+                                                .child({
+                                                    let unchk_mark = motion::animated_checkbox_mark(
+                                                        format!("pref-chk-{full_id}"),
+                                                        false,
+                                                        px(11.0),
+                                                        palette.text_on_accent,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                    div()
+                                                        .w(px(16.0))
+                                                        .h(px(16.0))
+                                                        .rounded(radius::CONTROL)
+                                                        .border_1()
+                                                        .border_color(palette.border_strong)
+                                                        .bg(palette.bg_workspace)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .flex_shrink_0()
+                                                        .children(unchk_mark)
+                                                })
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w_0()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(space::MD)
+                                                        .child(
+                                                            apply_scale(div(), scale::BODY)
+                                                                .truncate()
+                                                                .text_color(palette.text_secondary)
+                                                                .child(SharedString::from(
+                                                                    name.clone(),
+                                                                )),
+                                                        )
+                                                        .child(
+                                                            apply_scale(div(), scale::CAPTION)
+                                                                .pt(px(2.0))
+                                                                .flex_shrink_0()
+                                                                .text_color(palette.text_muted)
+                                                                .child(SharedString::from(
+                                                                    provider.clone(),
+                                                                )),
+                                                        ),
+                                                );
+                                            div()
+                                                .relative()
+                                                .w_full()
+                                                .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                                .child(row)
+                                                .child(
+                                                    div()
+                                                        .absolute()
+                                                        .left(px(12.0))
+                                                        .right(px(12.0))
+                                                        .bottom_0()
+                                                        .h(px(1.0))
+                                                        .bg(palette.border_subtle),
+                                                )
+                                                .into_any_element()
+                                        }
                                     }
-                                }
-                            })
-                            .collect()
-                    }),
-                )
-                .track_scroll(&self.list_scroll)
-                .w_full()
-                .flex_shrink_0()
-                .h(viewport_h),
+                                })
+                                .collect()
+                        }),
+                    )
+                    .track_scroll(&self.list_scroll)
+                    .w_full()
+                    .h(viewport_h),
+                ),
             );
             if can_collapse_models {
                 let expanded = self.models_expanded;
@@ -1845,45 +2054,58 @@ impl Render for PreferencesTabView {
                     SharedString::from(format!("查看全部模型（{total_matching_rows}）"))
                 };
                 list_body = list_body.child(
-                    apply_scale(div(), scale::UI)
-                        .id("pref-toggle-expand-models-btn")
-                        .test_support()
-                        .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
-                        .tab_index(0)
+                    div()
                         .w_full()
                         .h(height::HEADER)
                         .border_b_1()
                         .border_color(palette.border_subtle)
-                        .text_color(palette.text_secondary)
                         .flex()
                         .items_center()
-                        .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                            if !ev.is_held
-                                && ev.keystroke.modifiers == gpui::Modifiers::default()
-                                && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                cx.stop_propagation();
-                                this.models_expanded = !this.models_expanded;
-                                this.list_scroll = UniformListScrollHandle::new();
-                                cx.notify();
-                            }
-                        }))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.models_expanded = !this.models_expanded;
-                            this.list_scroll = UniformListScrollHandle::new();
-                            cx.notify();
-                        }))
-                        .child(cjk_inline_label(toggle_label))
                         .child(
-                            Icon::new(if expanded {
-                                IconName::ChevronUp
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size(px(14.0))
-                            .text_color(palette.text_secondary),
+                            apply_scale(div(), scale::UI)
+                                .id("pref-toggle-expand-models-btn")
+                                .test_support()
+                                .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
+                                .tab_index(0)
+                                .flex_1()
+                                .mx(px(-12.0))
+                                .h(px(40.0))
+                                .px(px(12.0))
+                                .rounded(radius::ROW)
+                                .text_color(palette.text_secondary)
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .hover(|s| {
+                                    s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                                })
+                                .active(|s| s.bg(palette.bg_active_press))
+                                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                                    if !ev.is_held
+                                        && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                                    {
+                                        cx.stop_propagation();
+                                        this.models_expanded = !this.models_expanded;
+                                        this.list_scroll = UniformListScrollHandle::new();
+                                        cx.notify();
+                                    }
+                                }))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.models_expanded = !this.models_expanded;
+                                    this.list_scroll = UniformListScrollHandle::new();
+                                    cx.notify();
+                                }))
+                                .child(cjk_inline_label(toggle_label))
+                                .child(
+                                    Icon::new(if expanded {
+                                        IconName::ChevronUp
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                                ),
                         ),
                 );
             }

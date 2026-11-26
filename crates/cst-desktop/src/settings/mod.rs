@@ -136,6 +136,8 @@ pub struct SettingsView {
     general_tracker: KbdDynamicBoundsTracker,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
+    optimistic_theme: Option<ThemeModeDto>,
+    optimistic_keyboard_style: Option<KeyboardFocusStyleDto>,
     keyboard_style_saving: bool,
     pending_keyboard_style: Option<KeyboardFocusStyleDto>,
     _subscriptions: Vec<Subscription>,
@@ -198,13 +200,23 @@ impl SettingsView {
             general_tracker: KbdDynamicBoundsTracker::new(),
             providers_tab,
             preferences_tab,
+            optimistic_theme: None,
+            optimistic_keyboard_style: None,
             keyboard_style_saving: false,
             pending_keyboard_style: None,
             _subscriptions: subs,
         }
     }
 
+    fn select_theme(&mut self, theme: ThemeModeDto, cx: &mut Context<Self>) {
+        self.optimistic_theme = Some(theme);
+        cx.emit(SettingsViewEvent::ThemeChanged(theme));
+        cx.notify();
+    }
+
     fn save_keyboard_style(&mut self, style: KeyboardFocusStyleDto, cx: &mut Context<Self>) {
+        self.optimistic_keyboard_style = Some(style);
+        cx.notify();
         if self.keyboard_style_saving {
             self.pending_keyboard_style = Some(style);
             return;
@@ -220,11 +232,15 @@ impl SettingsView {
                 .await;
             let _ = weak.update(cx, |this, cx| {
                 this.keyboard_style_saving = false;
-                if let Err(err) = result {
-                    cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
-                }
                 if let Some(next) = this.pending_keyboard_style.take() {
                     this.save_keyboard_style(next, cx);
+                } else {
+                    if let Err(err) = result {
+                        this.optimistic_keyboard_style = None;
+                        cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
+                    } else if this.optimistic_keyboard_style == Some(style) {
+                        this.optimistic_keyboard_style = None;
+                    }
                 }
                 cx.notify();
             });
@@ -442,9 +458,11 @@ impl SettingsView {
                 self.general_last_pointer = Some(window.mouse_position());
                 match self.general_row_idx {
                     0 => {
+                        let effective_theme =
+                            self.optimistic_theme.unwrap_or(snap.desktop_settings.theme);
                         let cur = themes
                             .iter()
-                            .position(|&t| t == snap.desktop_settings.theme)
+                            .position(|&t| t == effective_theme)
                             .unwrap_or(0);
                         let next = if forward {
                             (cur + 1).min(themes.len() - 1)
@@ -452,16 +470,19 @@ impl SettingsView {
                             cur.saturating_sub(1)
                         };
                         if next != cur {
-                            cx.emit(SettingsViewEvent::ThemeChanged(themes[next]));
+                            self.select_theme(themes[next], cx);
                         }
                     }
                     1 => {
+                        let effective_style = self
+                            .optimistic_keyboard_style
+                            .unwrap_or(snap.desktop_settings.keyboard_focus_style);
                         let next = if forward {
                             KeyboardFocusStyleDto::Rail
                         } else {
                             KeyboardFocusStyleDto::Brackets
                         };
-                        if next != snap.desktop_settings.keyboard_focus_style {
+                        if next != effective_style {
                             self.save_keyboard_style(next, cx);
                         }
                     }
@@ -512,7 +533,22 @@ impl Render for SettingsView {
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
-        let kbd_style = snap.desktop_settings.keyboard_focus_style;
+        if self.optimistic_theme == Some(snap.desktop_settings.theme) {
+            self.optimistic_theme = None;
+        }
+        if !self.keyboard_style_saving
+            && self.optimistic_keyboard_style == Some(snap.desktop_settings.keyboard_focus_style)
+        {
+            self.optimistic_keyboard_style = None;
+        }
+        let mut effective_desktop_settings = snap.desktop_settings.clone();
+        if let Some(theme) = self.optimistic_theme {
+            effective_desktop_settings.theme = theme;
+        }
+        if let Some(style) = self.optimistic_keyboard_style {
+            effective_desktop_settings.keyboard_focus_style = style;
+        }
+        let kbd_style = effective_desktop_settings.keyboard_focus_style;
 
         self.tab_kbd_tracker.clear();
 
@@ -578,6 +614,7 @@ impl Render for SettingsView {
             } else {
                 apply_scale(div(), scale::BODY)
                     .text_color(palette.text_secondary)
+                    .hover(move |s| s.text_color(palette.text_primary))
                     .child(cjk_inline_label(cat.label()))
             };
 
@@ -663,7 +700,7 @@ impl Render for SettingsView {
 
         let content_el = match self.category {
             SettingsCategory::General => render_general_tab(
-                &snap.desktop_settings,
+                &effective_desktop_settings,
                 &snap.version,
                 snap.update_state.as_deref(),
                 mono_family,
@@ -695,7 +732,7 @@ impl Render for SettingsView {
                 Rc::new(move |theme: ThemeModeDto, _, cx| {
                     e_theme.update(cx, |this, cx| {
                         this.general_kbd_active = false;
-                        cx.emit(SettingsViewEvent::ThemeChanged(theme));
+                        this.select_theme(theme, cx);
                     });
                 }),
                 Rc::new(move |style: KeyboardFocusStyleDto, _, cx| {

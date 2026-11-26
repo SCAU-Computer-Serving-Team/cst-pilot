@@ -8,30 +8,19 @@ impl ProvidersTabView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         // Strictly 3 icon-only action buttons (`search`, `refresh-cw`, `plus`) on right — ZERO text buttons!
-        let model_count = self.editable_rows.len();
         div()
             .w_full()
             .flex()
             .items_center()
             .justify_between()
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::BODY_SEMIBOLD)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label(title)),
-                    )
-                    .children((self.inline_edit_mode && model_count > 0).then(|| {
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label(format!("{model_count} 个模型")))
-                    })),
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(title),
             )
             .child(
                 div()
+                    .mr(px(-4.0))
                     .flex()
                     .items_center()
                     .gap(space::XS)
@@ -51,6 +40,7 @@ impl ProvidersTabView {
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 this.search_visible = !this.search_visible;
                                 if this.search_visible {
@@ -76,6 +66,7 @@ impl ProvidersTabView {
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.trigger_refresh_models(cx);
                             }))
@@ -97,6 +88,7 @@ impl ProvidersTabView {
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 this.append_blank_editable_row(w, cx);
                             }))
@@ -288,10 +280,14 @@ impl ProvidersTabView {
                         .id(proto_id.clone())
                         .test_support()
                         .a11y_listitem(proto_id, proto.label(), is_selected)
-                        .h(height::CONTROL)
-                        .px(space::SM)
+                        .h(px(34.0))
+                        .px(px(10.0))
                         .rounded(radius::CONTROL)
-                        .text_color(palette.text_primary)
+                        .text_color(if is_selected {
+                            palette.text_primary
+                        } else {
+                            palette.text_secondary
+                        })
                         .flex()
                         .items_center()
                         .justify_between()
@@ -300,9 +296,10 @@ impl ProvidersTabView {
                             if kbd_nav {
                                 s
                             } else {
-                                s.bg(palette.bg_item_hover)
+                                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
                             }
                         })
+                        .active(|s| s.bg(palette.bg_active_press))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.protocol = proto;
@@ -322,7 +319,7 @@ impl ProvidersTabView {
             }
 
             gpui::deferred(
-                div().absolute().top(px(42.0)).left(px(-12.0)).child(
+                div().absolute().top(px(46.0)).left(px(-16.0)).child(
                     motion::animate_popover_enter(
                         "custom-protocol-popover-anim",
                         div()
@@ -330,8 +327,8 @@ impl ProvidersTabView {
                             .test_support()
                             .a11y_dialog("custom-protocol-popover", "选择接口协议")
                             .relative()
-                            .w(px(268.0))
-                            .p(space::XS)
+                            .w(px(276.0))
+                            .p(px(6.0))
                             .rounded(radius::ROW)
                             .bg(palette.bg_glass)
                             .border_1()
@@ -424,7 +421,7 @@ impl ProvidersTabView {
                     ),
                 ),
             )
-            .with_priority(10)
+            .with_priority(20)
         });
 
         // Borderless hairline connection properties group (`Geto8` -> `bB67m` -> `Yop98`)
@@ -577,13 +574,23 @@ impl ProvidersTabView {
                                             )
                                             .track_focus(&self.protocol_trigger_focus)
                                             .tab_index(0)
-                                            .w_full()
-                                            .h_full()
+                                            .mx(px(-10.0))
+                                            .my(px(6.0))
+                                            .h(height::CONTROL)
+                                            .px(px(10.0))
+                                            .rounded(radius::CONTROL)
+                                            .bg(if self.protocol_dropdown_open {
+                                                palette.bg_item_hover
+                                            } else {
+                                                gpui_kit::transparent_black()
+                                            })
                                             .text_color(palette.text_primary)
                                             .flex()
                                             .items_center()
                                             .justify_between()
                                             .gap(space::SM)
+                                            .hover(|s| s.bg(palette.bg_item_hover))
+                                            .active(|s| s.bg(palette.bg_active_press))
                                             .capture_any_mouse_down(
                                                 crate::shell::keep_popover_open_on_mouse_down,
                                             )
@@ -964,6 +971,7 @@ impl ProvidersTabView {
                                     .items_center()
                                     .justify_center()
                                     .hover(|s| s.bg(palette.bg_item_hover))
+                                    .active(|s| s.bg(palette.bg_active_press))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         if idx < this.editable_rows.len() {
                                             this.editable_rows.remove(idx);
@@ -1067,6 +1075,7 @@ impl ProvidersTabView {
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.return_to_provider_list(window, cx);
                             }))
@@ -1094,6 +1103,7 @@ impl ProvidersTabView {
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.accent_hover))
+                            .active(|s| s.opacity(0.88))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 this.save_inline_provider_form(w, cx);
                             }))

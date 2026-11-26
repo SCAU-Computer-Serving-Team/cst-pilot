@@ -39,50 +39,53 @@ export default function GeneralSettings() {
 	}
 
 	async function updateTheme(value: string) {
-		if (!state.data || state.working || !themes.some((item) => item.id === value) || value === state.data.theme)
-			return;
+		if (!state.data || !themes.some((item) => item.id === value) || value === state.data.theme) return;
 		const next = value as Theme;
-		const previous = currentTheme();
-		const kbdStyle = currentKbdStyle;
 		document.documentElement.dataset.theme = next;
-		const ok = await state.mutate(
-			async () => {
+		const ok = await state.mutateLatest(
+			(current) => ({
+				theme: next,
+				keyboardFocusStyle: normalizeKeyboardFocusStyle(current.keyboardFocusStyle),
+			}),
+			async (draft) => {
 				const saved = await apiJson<GeneralSettingsData>("/api/settings", {
 					method: "PATCH",
-					body: { theme: next },
+					body: { theme: draft.theme },
 				});
 				return {
 					theme: saved.theme,
-					keyboardFocusStyle: normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? kbdStyle),
+					keyboardFocusStyle: normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? draft.keyboardFocusStyle),
 				};
 			},
-			{ theme: next, keyboardFocusStyle: kbdStyle },
+			{
+				onRollback: (confirmed) => {
+					document.documentElement.dataset.theme = confirmed.theme || currentTheme();
+				},
+			},
 		);
 		if (ok) feedback();
-		else document.documentElement.dataset.theme = previous;
 	}
 
 	async function updateKbdStyle(value: string) {
-		if (
-			!state.data ||
-			state.working ||
-			!kbdFocusStyles.some((item) => item.id === value) ||
-			value === currentKbdStyle
-		)
-			return;
+		if (!state.data || !kbdFocusStyles.some((item) => item.id === value) || value === currentKbdStyle) return;
 		const next = normalizeKeyboardFocusStyle(value);
-		const theme = state.data.theme;
-		const ok = await state.mutate(
-			async () => {
+		applyKeyboardFocusStyle(next);
+		const ok = await state.mutateLatest(
+			(current) => ({ theme: current.theme, keyboardFocusStyle: next }),
+			async (draft) => {
+				const target = normalizeKeyboardFocusStyle(draft.keyboardFocusStyle);
 				const saved = await apiJson<GeneralSettingsData>("/api/settings", {
 					method: "PATCH",
-					body: { keyboardFocusStyle: next },
+					body: { keyboardFocusStyle: target },
 				});
-				const confirmed = normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? next);
-				applyKeyboardFocusStyle(confirmed);
+				const confirmed = normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? target);
 				return { theme: saved.theme, keyboardFocusStyle: confirmed };
 			},
-			{ theme, keyboardFocusStyle: next },
+			{
+				onRollback: (confirmed) => {
+					applyKeyboardFocusStyle(normalizeKeyboardFocusStyle(confirmed.keyboardFocusStyle));
+				},
+			},
 		);
 		if (ok) feedback();
 	}
@@ -100,7 +103,7 @@ export default function GeneralSettings() {
 							label="界面主题"
 							value={state.data.theme}
 							items={themes}
-							busy={state.working}
+							busy={false}
 							onChange={(value) => void updateTheme(value)}
 							onVerticalNav={(dir) => focusRow(dir < 0 ? -1 : 1)}
 						/>
@@ -113,7 +116,7 @@ export default function GeneralSettings() {
 							label="方向键选中样式"
 							value={currentKbdStyle}
 							items={kbdFocusStyles}
-							busy={state.working}
+							busy={false}
 							onChange={(value) => void updateKbdStyle(value)}
 							onVerticalNav={(dir) => {
 								if (dir < 0) focusRow(0);

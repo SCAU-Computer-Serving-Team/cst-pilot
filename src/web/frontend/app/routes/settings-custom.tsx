@@ -400,7 +400,6 @@ export default function CustomModelService() {
 					</SettingsSection>
 					<SettingsSection
 						title="模型列表"
-						summary={form.models.length}
 						action={
 							<div className="settings-section-actions">
 								<button

@@ -48570,31 +48570,6 @@
                                                       "fontWeight": "600"
                                                     }
                                                   ]
-                                                },
-                                                {
-                                                  "type": "frame",
-                                                  "id": "BGslT",
-                                                  "name": "计数对齐槽",
-                                                  "padding": [
-                                                    0,
-                                                    0,
-                                                    1,
-                                                    0
-                                                  ],
-                                                  "alignItems": "center",
-                                                  "children": [
-                                                    {
-                                                      "type": "text",
-                                                      "id": "Z7QS3",
-                                                      "name": "计数",
-                                                      "fill": "$text-muted",
-                                                      "content": "3",
-                                                      "lineHeight": 1.4286,
-                                                      "fontFamily": "Source Han Sans CN",
-                                                      "fontSize": "$font-ui",
-                                                      "fontWeight": "normal"
-                                                    }
-                                                  ]
                                                 }
                                               ]
                                             },
@@ -49495,31 +49470,6 @@
                                                       "fontFamily": "Source Han Sans CN",
                                                       "fontSize": "$font-body",
                                                       "fontWeight": "600"
-                                                    }
-                                                  ]
-                                                },
-                                                {
-                                                  "type": "frame",
-                                                  "id": "GoEwD",
-                                                  "name": "总数对齐槽",
-                                                  "padding": [
-                                                    0,
-                                                    0,
-                                                    1,
-                                                    0
-                                                  ],
-                                                  "alignItems": "center",
-                                                  "children": [
-                                                    {
-                                                      "type": "text",
-                                                      "id": "JYVIY",
-                                                      "name": "提供商总数",
-                                                      "fill": "$text-muted",
-                                                      "content": "21",
-                                                      "lineHeight": 1.4286,
-                                                      "fontFamily": "Source Han Sans CN",
-                                                      "fontSize": "$font-ui",
-                                                      "fontWeight": "normal"
                                                     }
                                                   ]
                                                 }
@@ -51890,31 +51840,6 @@
                                                       "fontFamily": "Source Han Sans CN",
                                                       "fontSize": "$font-body",
                                                       "fontWeight": "600"
-                                                    }
-                                                  ]
-                                                },
-                                                {
-                                                  "type": "frame",
-                                                  "id": "gv70t",
-                                                  "name": "数量槽",
-                                                  "padding": [
-                                                    0,
-                                                    0,
-                                                    1,
-                                                    0
-                                                  ],
-                                                  "alignItems": "center",
-                                                  "children": [
-                                                    {
-                                                      "type": "text",
-                                                      "id": "ibznG",
-                                                      "name": "模型数量",
-                                                      "fill": "$text-secondary",
-                                                      "content": "4 个模型",
-                                                      "lineHeight": 1.4286,
-                                                      "fontFamily": "Source Han Sans CN",
-                                                      "fontSize": "$font-ui",
-                                                      "fontWeight": "normal"
                                                     }
                                                   ]
                                                 }
