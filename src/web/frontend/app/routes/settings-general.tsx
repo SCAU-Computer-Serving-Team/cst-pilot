@@ -39,7 +39,7 @@ export default function GeneralSettings() {
 	}
 
 	async function updateTheme(value: string) {
-		if (!state.data || !themes.some((item) => item.id === value) || value === state.data.theme) return;
+		if (!state.data || !themes.some((item) => item.id === value)) return;
 		const next = value as Theme;
 		document.documentElement.dataset.theme = next;
 		const ok = await state.mutateLatest(
@@ -47,17 +47,20 @@ export default function GeneralSettings() {
 				theme: next,
 				keyboardFocusStyle: normalizeKeyboardFocusStyle(current.keyboardFocusStyle),
 			}),
-			async (draft) => {
+			async (draft, confirmed) => {
 				const saved = await apiJson<GeneralSettingsData>("/api/settings", {
 					method: "PATCH",
 					body: { theme: draft.theme },
 				});
 				return {
 					theme: saved.theme,
-					keyboardFocusStyle: normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? draft.keyboardFocusStyle),
+					keyboardFocusStyle: normalizeKeyboardFocusStyle(
+						saved.keyboardFocusStyle ?? confirmed.keyboardFocusStyle,
+					),
 				};
 			},
 			{
+				coalesceKey: "theme",
 				onRollback: (confirmed) => {
 					document.documentElement.dataset.theme = confirmed.theme || currentTheme();
 				},
@@ -67,21 +70,22 @@ export default function GeneralSettings() {
 	}
 
 	async function updateKbdStyle(value: string) {
-		if (!state.data || !kbdFocusStyles.some((item) => item.id === value) || value === currentKbdStyle) return;
+		if (!state.data || !kbdFocusStyles.some((item) => item.id === value)) return;
 		const next = normalizeKeyboardFocusStyle(value);
 		applyKeyboardFocusStyle(next);
 		const ok = await state.mutateLatest(
 			(current) => ({ theme: current.theme, keyboardFocusStyle: next }),
-			async (draft) => {
+			async (draft, confirmed) => {
 				const target = normalizeKeyboardFocusStyle(draft.keyboardFocusStyle);
 				const saved = await apiJson<GeneralSettingsData>("/api/settings", {
 					method: "PATCH",
 					body: { keyboardFocusStyle: target },
 				});
-				const confirmed = normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? target);
-				return { theme: saved.theme, keyboardFocusStyle: confirmed };
+				const resolved = normalizeKeyboardFocusStyle(saved.keyboardFocusStyle ?? target);
+				return { theme: confirmed.theme, keyboardFocusStyle: resolved };
 			},
 			{
+				coalesceKey: "kbd",
 				onRollback: (confirmed) => {
 					applyKeyboardFocusStyle(normalizeKeyboardFocusStyle(confirmed.keyboardFocusStyle));
 				},

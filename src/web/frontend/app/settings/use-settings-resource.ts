@@ -8,13 +8,13 @@ import {
 	subscribeSetting,
 } from "./settings-resource-cache";
 
-/** 读请求由设置页共用并预加载；写入支持即时乐观投影与最新态单飞合并，失败恢复已确认值。 */
+/** 读请求由设置页共用并预加载；写入支持即时乐观投影与按键合并单飞队列，失败按项回滚。 */
 type PendingMutation<T> = {
-	rev: number;
-	next: T;
-	commit: (next: T, confirmed: T) => Promise<T>;
+	coalesceKey?: string;
+	updater: (current: T) => T;
+	commit: (draft: T, confirmed: T) => Promise<T>;
 	onRollback?: (confirmed: T) => void;
-	resolve: (ok: boolean) => void;
+	resolvers: Array<(ok: boolean) => void>;
 };
 
 export function useSettingsResource<T>(path: string) {
@@ -29,8 +29,7 @@ export function useSettingsResource<T>(path: string) {
 	const stale = useRef(false);
 	const latestData = useRef<T | null>(initial);
 	const confirmedData = useRef<T | null>(initial);
-	const pending = useRef<PendingMutation<T> | null>(null);
-	const mutationRev = useRef(0);
+	const queue = useRef<PendingMutation<T>[]>([]);
 
 	const applyConfirmed = useCallback((value: T) => {
 		confirmedData.current = value;
@@ -39,9 +38,19 @@ export function useSettingsResource<T>(path: string) {
 		setError("");
 	}, []);
 
+	const projectQueued = useCallback((base: T) => {
+		let projected = base;
+		for (const item of queue.current) {
+			projected = item.updater(projected);
+		}
+		latestData.current = projected;
+		if (mounted.current) setData(projected);
+		return projected;
+	}, []);
+
 	const read = useCallback(
 		async (force: boolean) => {
-			if (locked.current || pending.current !== null) {
+			if (locked.current || queue.current.length > 0) {
 				stale.current = true;
 				return;
 			}
@@ -49,7 +58,7 @@ export function useSettingsResource<T>(path: string) {
 			const revision = ++sequence.current;
 			try {
 				const value = await loadSetting<T>(path);
-				if (mounted.current && revision === sequence.current && !locked.current && pending.current === null) {
+				if (mounted.current && revision === sequence.current && !locked.current && queue.current.length === 0) {
 					applyConfirmed(value);
 				}
 			} catch (cause) {
@@ -66,7 +75,7 @@ export function useSettingsResource<T>(path: string) {
 		mounted.current = true;
 		const unsubscribe = subscribeSetting(path, (value, cause) => {
 			if (!mounted.current) return;
-			if (locked.current || pending.current !== null) {
+			if (locked.current || queue.current.length > 0) {
 				stale.current = true;
 				return;
 			}
@@ -87,43 +96,39 @@ export function useSettingsResource<T>(path: string) {
 		locked.current = true;
 		if (mounted.current) setWorking(true);
 		try {
-			while (pending.current !== null) {
-				const task = pending.current;
-				pending.current = null;
+			while (queue.current.length > 0) {
+				const task = queue.current.shift()!;
 				sequence.current++;
 				const generation = settingGeneration(path);
-				const base = confirmedData.current ?? task.next;
+				const base = confirmedData.current ?? latestData.current;
+				if (base === null) {
+					for (const resolve of task.resolvers) resolve(false);
+					continue;
+				}
+				const draft = task.updater(base);
 				try {
-					const confirmed = await task.commit(task.next, base);
+					const confirmed = await task.commit(draft, base);
 					confirmedData.current = confirmed;
 					if (!cacheSetting(path, confirmed, generation)) stale.current = true;
-					if (pending.current === null && mutationRev.current === task.rev) {
-						latestData.current = confirmed;
-						if (mounted.current) setData(confirmed);
-					}
-					task.resolve(true);
+					projectQueued(confirmed);
+					for (const resolve of task.resolvers) resolve(true);
 				} catch (cause) {
-					if (pending.current !== null || mutationRev.current !== task.rev) {
-						task.resolve(false);
-						continue;
-					}
 					const rollback = confirmedData.current;
 					if (rollback !== null) {
-						latestData.current = rollback;
 						task.onRollback?.(rollback);
-						if (mounted.current) setData(rollback);
+						projectQueued(rollback);
 					}
 					if (mounted.current) {
 						setError(cause instanceof Error ? cause.message : "未能保存，请重试。");
 					}
-					task.resolve(false);
+					for (const resolve of task.resolvers) resolve(false);
 				}
 			}
 		} finally {
 			locked.current = false;
 			if (mounted.current) {
 				setWorking(false);
-				if (stale.current && pending.current === null) {
+				if (stale.current && queue.current.length === 0) {
 					stale.current = false;
 					void refresh();
 				}
@@ -133,30 +138,35 @@ export function useSettingsResource<T>(path: string) {
 
 	function mutateLatest(
 		updater: (current: T) => T,
-		commit: (next: T, confirmed: T) => Promise<T>,
-		options?: { onRollback?: (confirmed: T) => void },
+		commit: (draft: T, confirmed: T) => Promise<T>,
+		options?: { coalesceKey?: string; onRollback?: (confirmed: T) => void },
 	): Promise<boolean> {
 		const current = latestData.current;
 		if (current === null) return Promise.resolve(false);
 		if (confirmedData.current === null) confirmedData.current = current;
 		const next = updater(current);
 		latestData.current = next;
-		const rev = ++mutationRev.current;
 		if (mounted.current) {
 			setData(next);
 			setError("");
 		}
-		if (pending.current !== null) {
-			pending.current.resolve(true);
-		}
 		return new Promise<boolean>((resolve) => {
-			pending.current = {
-				rev,
-				next,
-				commit,
-				onRollback: options?.onRollback,
-				resolve,
-			};
+			const tail = queue.current[queue.current.length - 1];
+			if (options?.coalesceKey && tail && tail.coalesceKey === options.coalesceKey) {
+				const prevUpdater = tail.updater;
+				tail.updater = (base) => updater(prevUpdater(base));
+				tail.commit = commit;
+				tail.onRollback = options.onRollback;
+				tail.resolvers.push(resolve);
+			} else {
+				queue.current.push({
+					coalesceKey: options?.coalesceKey,
+					updater,
+					commit,
+					onRollback: options?.onRollback,
+					resolvers: [resolve],
+				});
+			}
 			void drainQueue();
 		});
 	}

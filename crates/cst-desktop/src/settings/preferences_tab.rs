@@ -352,10 +352,29 @@ impl PreferencesTabView {
         }
     }
 
+    pub(super) fn current_scope(&self) -> Option<ModelScope> {
+        (self.observed_models.is_some() || self.scope_saving || self.scope_pending)
+            .then(|| self.enabled_scope.clone())
+    }
+
+    pub(super) fn mirror_external_scope(&mut self, scope: ModelScope, cx: &mut Context<Self>) {
+        if self.scope_saving || self.scope_pending {
+            return;
+        }
+        if self.enabled_scope != scope {
+            self.enabled_scope = scope;
+            cx.notify();
+        }
+    }
+
     fn enqueue_scope_save(&mut self, cx: &mut Context<Self>) {
         let snap = self.client.snapshot();
-        if let Some(next_def) = self.compute_auto_default(snap.models.as_deref()) {
+        if !self.default_saving
+            && self.pending_default.is_none()
+            && let Some(next_def) = self.compute_auto_default(snap.models.as_deref())
+        {
             self.optimistic_default = Some(next_def);
+            self.default_revision = self.default_revision.wrapping_add(1);
         }
         self.scope_revision = self.scope_revision.wrapping_add(1);
         self.scope_pending = true;
@@ -375,10 +394,13 @@ impl PreferencesTabView {
                     }
                     this.scope_pending = false;
                     let rev = this.scope_revision;
+                    let def_rev = this.default_revision;
                     let scope_snapshot = this.enabled_scope.clone();
                     let patterns = scope_snapshot.patterns();
                     let snap = this.client.snapshot();
-                    let auto_default =
+                    let auto_default = if this.default_saving || this.pending_default.is_some() {
+                        None
+                    } else {
                         this.compute_auto_default(snap.models.as_deref())
                             .or_else(|| {
                                 let cur = this.optimistic_default.as_ref()?;
@@ -388,10 +410,11 @@ impl PreferencesTabView {
                                     .and_then(|m| m.default_model.as_ref())
                                     .is_some_and(|d| d.provider == cur.0 && d.id == cur.1);
                                 (!snap_matches).then(|| cur.clone())
-                            });
-                    Some((rev, scope_snapshot, patterns, auto_default))
+                            })
+                    };
+                    Some((rev, def_rev, scope_snapshot, patterns, auto_default))
                 });
-                let Ok(Some((rev, saved_scope, patterns, auto_default))) = step else {
+                let Ok(Some((rev, def_rev, saved_scope, patterns, auto_default))) = step else {
                     let _ = weak.update(cx, |this, cx| {
                         this.scope_saving = false;
                         cx.notify();
@@ -400,7 +423,15 @@ impl PreferencesTabView {
                 };
 
                 let res = client.set_explicit_model_scope(patterns).await;
-                let default_res = if res.is_ok() {
+                let should_sync_default = res.is_ok()
+                    && weak
+                        .update(cx, |this, _| {
+                            !this.default_saving
+                                && this.pending_default.is_none()
+                                && this.default_revision == def_rev
+                        })
+                        .unwrap_or(false);
+                let default_res = if should_sync_default {
                     if let Some((prov, mid)) = auto_default.clone() {
                         Some(client.set_default_model(prov, mid).await)
                     } else {
@@ -416,6 +447,9 @@ impl PreferencesTabView {
                             this.confirmed_scope = saved_scope;
                             if let Some(ref def) = auto_default
                                 && matches!(default_res, Some(Ok(_)))
+                                && !this.default_saving
+                                && this.pending_default.is_none()
+                                && this.default_revision == def_rev
                             {
                                 this.confirmed_default = Some(def.clone());
                             }
@@ -425,7 +459,9 @@ impl PreferencesTabView {
                         }
                         if let Err(err) = res {
                             this.enabled_scope = this.confirmed_scope.clone();
-                            this.optimistic_default = this.confirmed_default.clone();
+                            if !this.default_saving && this.pending_default.is_none() {
+                                this.optimistic_default = this.confirmed_default.clone();
+                            }
                             this.scope_saving = false;
                             cx.emit(PreferencesTabEvent::ErrorMessage(format!(
                                 "保存启用模型范围失败，已自动回滚：{err}"
@@ -434,7 +470,9 @@ impl PreferencesTabView {
                             return 0u8; // stop after rollback
                         }
                         if let Some(Err(err)) = default_res {
-                            this.optimistic_default = this.confirmed_default.clone();
+                            if !this.default_saving && this.pending_default.is_none() {
+                                this.optimistic_default = this.confirmed_default.clone();
+                            }
                             cx.emit(PreferencesTabEvent::ErrorMessage(format!(
                                 "同步默认模型失败：{err}"
                             )));
@@ -579,7 +617,9 @@ impl PreferencesTabView {
                             return 1u8;
                         }
                         if let Err(err) = res {
-                            this.optimistic_default = this.confirmed_default.clone();
+                            if !this.scope_saving && !this.scope_pending {
+                                this.optimistic_default = this.confirmed_default.clone();
+                            }
                             this.default_saving = false;
                             cx.emit(PreferencesTabEvent::ErrorMessage(err.to_string()));
                             cx.notify();
@@ -1047,6 +1087,7 @@ impl Render for PreferencesTabView {
                     )
                     .children((!default_provider.is_empty()).then(|| {
                         apply_scale(div(), scale::CAPTION)
+                            .pt(px(2.0))
                             .text_color(palette.text_muted)
                             .child(SharedString::from(default_provider))
                     }))
@@ -1771,6 +1812,7 @@ impl Render for PreferencesTabView {
                                                         .flex_shrink_0()
                                                         .on_click(cx.listener(
                                                             move |this, _, _, cx| {
+                                                                this.list_kbd_active = false;
                                                                 this.toggle_model_enabled(
                                                                     fid_chk.clone(),
                                                                     cx,
@@ -1848,6 +1890,8 @@ impl Render for PreferencesTabView {
                                                                 })
                                                                 .on_click(cx.listener(
                                                                     move |this, _, _, cx| {
+                                                                        this.list_kbd_active =
+                                                                            false;
                                                                         if can_move_up {
                                                                             this.move_enabled_row(
                                                                                 idx, -1, cx,
@@ -1901,6 +1945,8 @@ impl Render for PreferencesTabView {
                                                                 })
                                                                 .on_click(cx.listener(
                                                                     move |this, _, _, cx| {
+                                                                        this.list_kbd_active =
+                                                                            false;
                                                                         if can_move_down {
                                                                             this.move_enabled_row(
                                                                                 idx, 1, cx,
@@ -1968,6 +2014,7 @@ impl Render for PreferencesTabView {
                                                 })
                                                 .active(|s| s.bg(palette.bg_active_press))
                                                 .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.list_kbd_active = false;
                                                     this.toggle_model_enabled(fid_add.clone(), cx);
                                                 }))
                                                 .on_prepaint(move |bounds, _, _| {

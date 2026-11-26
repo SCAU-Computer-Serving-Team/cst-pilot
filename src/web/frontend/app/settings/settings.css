@@ -148,7 +148,8 @@
 .settings-workspace .settings-model:not(.settings-model-unavailable):hover { background: var(--bg-hover); }
 .settings-workspace .settings-model:not(.settings-model-unavailable):active { background: var(--bg-active-press); }
 .settings-models[data-kbd-active="true"] .settings-model:hover { background: transparent; }
-.settings-workspace .settings-model:focus-visible { outline: none; }
+.settings-workspace .settings-model:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
+.settings-workspace .settings-models[data-kbd-overlay="true"] .settings-model:focus-visible { box-shadow: none; }
 .settings-model-main { display: flex; align-items: baseline; gap: var(--space-component); flex: 1; min-width: 0; }
 .settings-workspace .settings-model-name { min-width: 0; color: var(--text-primary); font-size: var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: var(--line-body); }
 .settings-model[data-enabled="false"] .settings-model-name { color: var(--text-secondary); }
@@ -263,7 +264,7 @@
   .settings-layout > .sidebar { box-shadow: var(--craft-stack); }
   .settings-workspace .settings-pages { width: calc(100% - 32px); }
   .settings-nav { gap: var(--space-section); flex-wrap: wrap; height: auto; }
-  .settings-flat-row, .settings-default-row { flex-wrap: wrap; padding: 10px 0; }
+  .settings-flat-row, .settings-default-row { flex-wrap: wrap; padding-block: 10px; }
   .settings-custom-field { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; }
   .settings-custom-field-label { width: auto; flex: none; }
   .settings-danger-zone, .settings-custom-remove { flex-wrap: wrap; }

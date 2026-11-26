@@ -578,6 +578,7 @@ impl ProvidersTabView {
         let mut changed = false;
         if self.protocol_dropdown_open {
             self.protocol_dropdown_open = false;
+            self.protocol_kbd_active = false;
             changed = true;
         }
         if self.inline_token_edit.take().is_some() {
@@ -594,6 +595,7 @@ impl ProvidersTabView {
             return false;
         }
         self.protocol_dropdown_open = false;
+        self.protocol_kbd_active = false;
         cx.notify();
         true
     }
@@ -655,6 +657,21 @@ impl ProvidersTabView {
         self.inline_token_edit = None;
         self.key_error = None;
         self.form_error = None;
+    }
+
+    pub(super) fn current_scope(&self) -> Option<ModelScope> {
+        (self.observed_models.is_some() || self.scope_saving || self.scope_pending)
+            .then(|| self.enabled_scope.clone())
+    }
+
+    pub(super) fn mirror_external_scope(&mut self, scope: ModelScope, cx: &mut Context<Self>) {
+        if self.scope_saving || self.scope_pending {
+            return;
+        }
+        if self.enabled_scope != scope {
+            self.enabled_scope = scope;
+            cx.notify();
+        }
     }
 
     fn sync_scope_from_snapshot(&mut self) {
@@ -1276,6 +1293,7 @@ impl Render for ProvidersTabView {
                     gpui::MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
                         this.protocol_dropdown_open = false;
+                        this.protocol_kbd_active = false;
                         cx.notify();
                     }),
                 )
@@ -1377,6 +1395,7 @@ impl Render for ProvidersTabView {
                         })
                         .active(|s| s.bg(palette.bg_active_press))
                         .on_click(cx.listener(|this, _, w, cx| {
+                            this.list_kbd_active = false;
                             this.open_new_custom_provider(w, cx);
                         }))
                         .on_prepaint(move |bounds, _, _| tr_custom.set("add-row-0", bounds))
@@ -1475,6 +1494,7 @@ impl Render for ProvidersTabView {
                                     })
                                     .active(|s| s.bg(palette.bg_active_press))
                                     .on_click(cx.listener(move |this, _, w, cx| {
+                                        this.list_kbd_active = false;
                                         this.select_provider(pid.clone(), w, cx);
                                     }))
                                     .on_prepaint(move |bounds, _, _| {
@@ -1770,20 +1790,13 @@ impl Render for ProvidersTabView {
                 .model_rows()
                 .map(|(_, id)| id.to_owned())
                 .collect();
-            let implicit_all = !is_configured
-                && !self.scope_saving
-                && !self.scope_pending
-                && snap
-                    .models
-                    .as_ref()
-                    .is_some_and(|m| m.enabled.is_none() && m.scope_rules.is_none());
-            let enabled_in_provider = if implicit_all {
-                total_models_count
-            } else {
+            let enabled_in_provider = if is_configured {
                 all_provider_models
                     .iter()
                     .filter(|m| enabled_set.contains(&format!("{}/{}", m.provider, m.id)))
                     .count()
+            } else {
+                0
             };
             let catalog_models: Vec<_> = all_provider_models
                 .into_iter()
@@ -1816,7 +1829,7 @@ impl Render for ProvidersTabView {
             } else {
                 for m in &catalog_models {
                     let full_id = format!("{}/{}", m.provider, m.id);
-                    let is_enabled = implicit_all || enabled_set.contains(&full_id);
+                    let is_enabled = is_configured && enabled_set.contains(&full_id);
                     let fid_row = full_id.clone();
                     let fid_chk = full_id.clone();
                     let row_id = SharedString::from(format!("provider-model-row-{}", m.id));
@@ -1855,10 +1868,24 @@ impl Render for ProvidersTabView {
                                     .items_center()
                                     .justify_between()
                                     .gap(space::MD)
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .active(|s| s.bg(palette.bg_active_press))
+                                    .hover(move |s| {
+                                        if is_configured {
+                                            s.bg(palette.bg_item_hover)
+                                        } else {
+                                            s
+                                        }
+                                    })
+                                    .active(move |s| {
+                                        if is_configured {
+                                            s.bg(palette.bg_active_press)
+                                        } else {
+                                            s
+                                        }
+                                    })
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.toggle_builtin_model_enabled(fid_row.clone(), cx);
+                                        if is_configured {
+                                            this.toggle_builtin_model_enabled(fid_row.clone(), cx);
+                                        }
                                     }))
                                     .child(
                                         div()
@@ -1882,6 +1909,7 @@ impl Render for ProvidersTabView {
                                                     .h(px(16.0))
                                                     .rounded(radius::CONTROL)
                                                     .border_1()
+                                                    .opacity(if is_configured { 1.0 } else { 0.45 })
                                                     .border_color(if is_enabled {
                                                         palette.accent_solid
                                                     } else {
@@ -1897,10 +1925,12 @@ impl Render for ProvidersTabView {
                                                     .justify_center()
                                                     .flex_shrink_0()
                                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.toggle_builtin_model_enabled(
-                                                            fid_chk.clone(),
-                                                            cx,
-                                                        );
+                                                        if is_configured {
+                                                            this.toggle_builtin_model_enabled(
+                                                                fid_chk.clone(),
+                                                                cx,
+                                                            );
+                                                        }
                                                         cx.stop_propagation();
                                                     }))
                                                     .children(chk_mark),
@@ -2374,7 +2404,8 @@ impl Render for ProvidersTabView {
                             }
                         })
                         .active(|s| s.bg(palette.bg_active_press))
-                        .on_click(cx.listener(move |_, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.list_kbd_active = false;
                             cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
                                 signed_in: cstoa_signed_in,
                             });
@@ -2478,6 +2509,7 @@ impl Render for ProvidersTabView {
                             })
                             .active(|s| s.bg(palette.bg_active_press))
                             .on_click(cx.listener(move |this, _, w, cx| {
+                                this.list_kbd_active = false;
                                 this.select_provider(pid.clone(), w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
@@ -2508,6 +2540,7 @@ impl Render for ProvidersTabView {
                                     .gap(space::XS)
                                     .text_color(palette.text_secondary)
                                     .on_click(cx.listener(move |this, _, w, cx| {
+                                        this.list_kbd_active = false;
                                         this.select_provider(pid_btn.clone(), w, cx);
                                         cx.stop_propagation();
                                     }))
@@ -2635,6 +2668,7 @@ impl Render for ProvidersTabView {
                                 }
                             }))
                             .on_click(cx.listener(|this, _, w, cx| {
+                                this.list_kbd_active = false;
                                 this.open_add_provider_catalog(w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_add.set("cfg-row-add", bounds))

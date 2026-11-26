@@ -160,7 +160,7 @@ export function KbdFocusOverlay({
 				} else {
 					const railH = Math.max(16, Math.min(26, h * 0.56));
 					rect = {
-						x: Math.max(2, x + insetX + 3),
+						x: Math.max(x + 2, x + insetX + 3),
 						y: y + (h - railH) / 2,
 						width: 3,
 						height: railH,

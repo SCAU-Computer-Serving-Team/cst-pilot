@@ -112,14 +112,15 @@ export function ProviderConfigurationForm({
 				const ids = current.models.map(fullId);
 				return { ...current, enabled: toggleModel(current.enabled, ids, modelId) };
 			},
-			async (next) => {
-				const patterns = next.enabled ?? [];
+			async (draft, confirmed) => {
+				const patterns = draft.enabled ?? [];
 				const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
 					method: "POST",
-					body: { patterns, empty: next.enabled !== null && next.enabled.length === 0 },
+					body: { patterns, empty: draft.enabled !== null && draft.enabled.length === 0 },
 				});
-				return { ...next, enabled: result.enabled, unavailableEnabled: [] };
+				return { ...confirmed, enabled: result.enabled, unavailableEnabled: [] };
 			},
+			{ coalesceKey: "scope" },
 		);
 		if (ok) feedback();
 	}
@@ -432,16 +433,18 @@ export function ProviderConfigurationForm({
 					}
 				>
 					{modelSearchOpen && <SettingsSearch label="筛选可用模型" value={modelQuery} onChange={setModelQuery} />}
-					{catalogError && (
+					{(catalogError || modelsResource.error) && (
 						<div className="settings-load-error" role="alert">
-							<span>{catalogError}</span>
-							<button
-								type="button"
-								className="settings-inline-action settings-inline-action--primary"
-								onClick={() => void refreshCatalog(false)}
-							>
-								重试
-							</button>
+							<span>{catalogError || modelsResource.error}</span>
+							{catalogError && (
+								<button
+									type="button"
+									className="settings-inline-action settings-inline-action--primary"
+									onClick={() => void refreshCatalog(false)}
+								>
+									重试
+								</button>
+							)}
 						</div>
 					)}
 					<div className="settings-flat-list settings-models" role="listbox" aria-label="可用模型列表">

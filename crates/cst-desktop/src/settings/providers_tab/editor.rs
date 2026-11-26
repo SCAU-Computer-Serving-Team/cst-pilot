@@ -301,10 +301,11 @@ impl ProvidersTabView {
                         })
                         .active(|s| s.bg(palette.bg_active_press))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
                             this.protocol = proto;
                             this.protocol_dropdown_open = false;
                             this.protocol_kbd_active = false;
+                            this.protocol_trigger_focus.focus(window, cx);
                             cx.notify();
                             cx.stop_propagation();
                         }))
@@ -627,6 +628,7 @@ impl ProvidersTabView {
                                                 this.commit_inline_token_edit(cx);
                                                 this.protocol_dropdown_open =
                                                     !this.protocol_dropdown_open;
+                                                this.protocol_kbd_active = false;
                                                 if this.protocol_dropdown_open {
                                                     this.protocol_dropdown_index =
                                                         CustomApiProtocol::ALL
@@ -634,6 +636,8 @@ impl ProvidersTabView {
                                                             .position(|&p| p == this.protocol)
                                                             .unwrap_or(0);
                                                     this.protocol_focus.focus(window, cx);
+                                                } else {
+                                                    this.protocol_trigger_focus.focus(window, cx);
                                                 }
                                                 cx.notify();
                                                 cx.stop_propagation();

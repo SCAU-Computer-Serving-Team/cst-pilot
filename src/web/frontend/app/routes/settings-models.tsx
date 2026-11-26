@@ -94,9 +94,9 @@ export default function ModelPreferences() {
 	}, [allIds.length, byId, canonicalOrder, catalogKey, displayOrderState]);
 	// 外部数据源变更（如刷新、其他端修改或保存失败回滚）时，同步对账到最新确认顺序。
 	const lastSelectionRef = useRef<string[] | null | undefined>(undefined);
-	const pendingReorderRef = useRef(false);
+	const pendingReorderCountRef = useRef(0);
 	useEffect(() => {
-		if (pendingReorderRef.current) return;
+		if (pendingReorderCountRef.current > 0) return;
 		if (lastSelectionRef.current !== selection) {
 			lastSelectionRef.current = selection;
 			setDisplayOrderState((prev) => {
@@ -156,9 +156,8 @@ export default function ModelPreferences() {
 		nextDisplayOrder?: string[],
 	) {
 		if (!state.data) return;
-		const previousOrder = displayOrderState;
 		if (nextDisplayOrder) {
-			pendingReorderRef.current = true;
+			pendingReorderCountRef.current++;
 			const resolvedNext = typeof nextOrFn === "function" ? nextOrFn(state.data) : nextOrFn;
 			setDisplayOrderState({ baseSelection: resolvedNext, baseCatalogKey: catalogKey, order: nextDisplayOrder });
 		}
@@ -167,33 +166,36 @@ export default function ModelPreferences() {
 				const resolved = typeof nextOrFn === "function" ? nextOrFn(current) : nextOrFn;
 				return { ...current, enabled: resolved };
 			},
-			async (next) => {
+			async (draft, confirmed) => {
 				const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
 					method: "POST",
-					body: { patterns: next.enabled ?? [], empty: next.enabled !== null && next.enabled.length === 0 },
+					body: { patterns: draft.enabled ?? [], empty: draft.enabled !== null && draft.enabled.length === 0 },
 				});
-				return { ...next, enabled: result.enabled, unavailableEnabled: [] };
+				return { ...confirmed, enabled: result.enabled, unavailableEnabled: [] };
 			},
 			{
+				coalesceKey: "scope",
 				onRollback: () => {
-					if (nextDisplayOrder) setDisplayOrderState(previousOrder);
+					if (nextDisplayOrder) setDisplayOrderState(null);
 				},
 			},
 		);
-		pendingReorderRef.current = false;
+		if (nextDisplayOrder) pendingReorderCountRef.current = Math.max(0, pendingReorderCountRef.current - 1);
 		if (ok) feedback();
 	}
 
 	async function saveDefault(model: ModelChoice) {
 		const ok = await state.mutateLatest(
 			(current) => ({ ...current, defaultModel: model, selected: model }),
-			async (next) => {
+			async (draft, confirmed) => {
+				const target = draft.defaultModel;
 				await apiJson("/api/models/default", {
 					method: "POST",
-					body: { provider: model.provider, modelId: model.id },
+					body: { provider: target.provider, modelId: target.id },
 				});
-				return { ...next, defaultModel: model, selected: model };
+				return { ...confirmed, defaultModel: target, selected: target };
 			},
+			{ coalesceKey: "default" },
 		);
 		if (ok) feedback("已保存默认模型");
 		return ok;
@@ -434,6 +436,7 @@ export default function ModelPreferences() {
 								role="listbox"
 								aria-label="启用模型列表"
 								ref={listRoot}
+								data-kbd-overlay="true"
 								data-kbd-active={kbdActive && focusedRowId !== null ? "true" : undefined}
 								onBlur={(event) => {
 									if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -470,6 +473,7 @@ export default function ModelPreferences() {
 													)
 												)
 													return;
+												setKbdActive(false);
 												void save((current) =>
 													toggleModel(current.enabled, current.models.map(fullId), id),
 												);
@@ -501,11 +505,12 @@ export default function ModelPreferences() {
 												isSelected={enabled}
 												aria-label={`启用 ${model.name}`}
 												className="settings-check-box"
-												onChange={() =>
+												onChange={() => {
+													setKbdActive(false);
 													void save((current) =>
 														toggleModel(current.enabled, current.models.map(fullId), id),
-													)
-												}
+													);
+												}}
 											>
 												<Checkbox.Content>
 													<Checkbox.Control>
@@ -543,6 +548,7 @@ export default function ModelPreferences() {
 														title="上移（Alt + ↑）"
 														onClick={(event) => {
 															event.stopPropagation();
+															setKbdActive(false);
 															reorderByDelta(id, -1);
 														}}
 													>
@@ -556,6 +562,7 @@ export default function ModelPreferences() {
 														title="下移（Alt + ↓）"
 														onClick={(event) => {
 															event.stopPropagation();
+															setKbdActive(false);
 															reorderByDelta(id, 1);
 														}}
 													>

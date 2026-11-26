@@ -1471,6 +1471,8 @@ impl AppShell {
                         let saved = this.client.snapshot().desktop_settings.theme;
                         this.theme_preference = saved;
                         apply_desktop_theme(saved, Some(window), None, cx);
+                        this.settings_view
+                            .update(cx, |sv, cx| sv.clear_optimistic_theme(cx));
                     }
                 }
                 if let Some(next) = next {
@@ -4116,6 +4118,21 @@ impl Render for AppShell {
                     }),
             )
             .child(main_layout);
+
+        if self.route == ShellRoute::Settings
+            && (self.exit_dialog.is_some()
+                || self.update_dialog.open
+                || self.missing_key_modal.is_some()
+                || self.web_switch_confirm.is_some()
+                || self.command_palette.is_some()
+                || self.account_menu_open
+                || self.snapshot.channel_mode == ChannelModeDto::WebActive)
+            && self.settings_view.read(cx).has_dropdown(cx)
+        {
+            self.settings_view.update(cx, |sv, cx| {
+                sv.dismiss_click_outside_dropdowns(cx);
+            });
+        }
 
         if self.route != ShellRoute::Login {
             let ctx_open = self.sidebar_context_menu.is_some();

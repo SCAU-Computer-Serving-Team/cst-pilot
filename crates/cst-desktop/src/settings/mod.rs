@@ -214,6 +214,12 @@ impl SettingsView {
         cx.notify();
     }
 
+    pub fn clear_optimistic_theme(&mut self, cx: &mut Context<Self>) {
+        if self.optimistic_theme.take().is_some() {
+            cx.notify();
+        }
+    }
+
     fn save_keyboard_style(&mut self, style: KeyboardFocusStyleDto, cx: &mut Context<Self>) {
         self.optimistic_keyboard_style = Some(style);
         cx.notify();
@@ -251,6 +257,21 @@ impl SettingsView {
     pub fn set_category(&mut self, category: SettingsCategory, cx: &mut Context<Self>) {
         if self.category == category {
             return;
+        }
+        match (self.category, category) {
+            (SettingsCategory::Providers, SettingsCategory::Preferences) => {
+                if let Some(scope) = self.providers_tab.read(cx).current_scope() {
+                    self.preferences_tab
+                        .update(cx, |tab, cx| tab.mirror_external_scope(scope, cx));
+                }
+            }
+            (SettingsCategory::Preferences, SettingsCategory::Providers) => {
+                if let Some(scope) = self.preferences_tab.read(cx).current_scope() {
+                    self.providers_tab
+                        .update(cx, |tab, cx| tab.mirror_external_scope(scope, cx));
+                }
+            }
+            _ => {}
         }
         #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("settings_tab");
@@ -801,6 +822,9 @@ impl Render for SettingsView {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
+                    .on_scroll(cx.listener(|this, _, _, cx| {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }))
                     .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)
                     .flex()
