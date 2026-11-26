@@ -1,49 +1,80 @@
 ---
 name: sys
-description: sys 工具的参数与返回字段说明。覆盖 scope 枚举含义、参数定义、五个 scope 的数据来源、采样方式、耗时与字段语义、CPU 核心温度不可得的原因。
+description: sys 实时系统状态：整机负载（overview）、进程排行（proc）、显卡与显存（gpu）、磁盘读写（io）、传感器与频率（sensor）。
 ---
 
-# sys 工具说明
+# sys
 
-只读系统检查工具，按 `scope` 参数返回运行时状态，不做任何修改。不传 `scope` 时默认 `overview`。五个 scope 均可在普通权限下调用；缺失能力和权限限制通过结果说明。
+只读实时系统检查工具，普通权限可调用。返回结构为 `{ "<scope>": { ... }, "elapsedMs": N }`。
+
+## 场景选择
+
+| 现象 | 调用 | 结束条件 |
+|---|---|---|
+| 卡顿、内存高或需看机型与开机时间 | `sys({ scope: "overview" })` | 列出有读数支持的异常项，或标明尚未定位 |
+| CPU 或内存占用高 | `sys({ scope: "proc", top? })` | 列出前 N 进程与路径，可与 `startup` 交叉核验 |
+| 画面掉帧、显存满或显卡异常 | `sys({ scope: "gpu", top? })` | 列出引擎负载、显存与各卡状态，核对计数错误 |
+| 磁盘读写高或卡顿伴随 IO | `sys({ scope: "io", top? })` | 列出各物理盘与进程 IO，必要时联查 `disk(health)` 与 `eventlog(disk)` |
+| 发烫、风扇异常或疑似降频 | `sys({ scope: "sensor" })` | 结合 CPU 负载判读温度、热区与频率，标明缺失项 |
 
 ## 参数
 
-1. `scope`（可选）：`overview` / `proc` / `gpu` / `sensor` / `io`，不传默认 `overview`
-2. `top`（可选）：Top N 条数，默认 10，上限 50，仅对 `proc` / `gpu` / `io` 生效
+| 参数 | 约束与默认值 |
+|---|---|
+| `scope` | 可选：`overview`（默认）、`proc`、`gpu`、`io`、`sensor` |
+| `top` | 可选，默认 `10`，上限 `50`；作用于 `proc`（`byCpu`/`byMem`）、`gpu`（`byGpuPct`/`byDedicatedMB`）与 `io`（仅截断 `byIo`，不截断 `disks`） |
 
-## scope=overview：整机负载快照
+## 各 scope 返回字段与口径
 
-1. 数据来源：CPU 总占用率取 `Win32_PerfFormattedData_PerfOS_Processor`（格式化计数器类，读两次取第二次，类名不随系统语言本地化）；内存取 `Win32_OperatingSystem`；页面文件取 `Win32_PageFileUsage`；内核内存池取 `Win32_PerfFormattedData_PerfOS_Memory`；机型取 `Win32_ComputerSystem` / `Win32_BIOS` / `Win32_Processor`；开机时长取 `LastBootUpTime` 与当前时间差
-2. 字段：`cpuTotalPct`（近 1 秒差分值）/ `logicalCores` / `mem`（totalMB / usedMB / freeMB / usedPct）/ `pagefile`（allocMB / usedMB / peakMB）/ `pool`（nonpagedMB / pagedMB）/ `machine`（vendor / model / cpu / physicalCores / bios / biosDate）/ `uptime`（bootTime / text / totalHours）
-3. 判读：进程工作集无法解释的内存占用，可继续核查 `pool.nonpagedMB`。内核内存池持续增长可作为驱动泄漏线索，单次高值不能确认原因。机型与 BIOS 版本用于核对厂商资料
+### overview
 
-## scope=proc：进程盘点
+| 字段 | 含义与口径 |
+|---|---|
+| `cpuTotalPct` / `logicalCores` | 原生采集为 200 ms 短窗双采均值，回退路径为格式化计数器当前值 / 逻辑核数 |
+| `mem` | `totalMB`、`freeMB`、`usedMB`、`usedPct`（内存单位 MiB） |
+| `pagefile[]` | `name`、`allocMB`、`usedMB`、`peakMB` |
+| `pool` | `nonpagedMB`、`pagedMB`（单位 MiB）。进程工作集无法解释的内存占用可查 `nonpagedMB`，单次高值不能单独定性驱动泄漏 |
+| `machine` | `vendor`、`model`、`cpu`、`physicalCores`、`bios`、`biosDate` |
+| `uptime` | `bootTime`（本机时区 `YYYY-MM-DD HH:MM`）、`text`、`totalHours` |
 
-1. 数据来源：pwsh 单命令内 1.2 秒双采样差分——两次 `Get-Process` 取 `TotalProcessorTime`，按 Stopwatch 计的实际间隔与逻辑核数折算
-2. 字段：`byCpu`（CPU 占用率 Top N）/ `byMem`（内存 Top N）；每项含 `name` / `pid` / `wsMB` / `cpuPct` / `path`
-3. 字段语义：`wsMB` 是工作集，需与任务管理器相同口径的列对照；`cpuPct` 是采样窗口内的平均值，瞬时突发会低估；单进程吃满全部逻辑核时显示 100%；`path` 是可执行文件路径，系统进程或权限不足时为 null，可用于就地验证进程身份（与 startup 的自启项交叉核对）
+### proc
 
-## scope=gpu：GPU 状态
+| 字段 | 含义与口径 |
+|---|---|
+| `cores` / `totalProcs` / `intervalSec` | 逻辑核数 / 进入本次双采差分的进程数 / 约 1.2 秒实际采样间隔 |
+| `byCpu[]` / `byMem[]` | `name`、`pid`、`wsMB`（工作集 MiB）、`cpuPct`（窗口均值，全核满载为 100%，瞬时突发会被低估）、`path`（无权限时为 `null`）。窗口内新建、退出或 PID 复用进程不参与差分 |
 
-1. 数据来源：`GPU Engine` 与 `GPU Process Memory` 性能计数器按 pid 聚合（通过 Windows PDH 将英文路径转换为本地化路径；偶发无效采样会自动重试 1 次）；适配器清单取 `Win32_VideoController`；检测到 `nvidia-smi`（系统驱动自带）时并行附带显卡状态
-2. 字段：`byGpuPct`（每进程 GPU 利用率 Top N，`engtypes` 为该进程用到的引擎类型清单，如 3d / copy / videodecode / videoencode）/ `byDedicatedMB`（每进程专用显存 Top N）/ `adapters`（显卡适配器清单：name / vendor / driver / status / bus）/ `nvidia`（每张 NVIDIA 卡的状态数组，含 uuid / pciBusId / 温度 / 功耗 / 显存 / 利用率 / 驱动版本；程序不存在为 null，调用失败保留 error）/ `engineSamples`（聚合前原始实例数）/ `lhmGpu`（nvidia-smi 不存在或失败时出现，LHM 用户态读的核显 / 其他卡原始传感器）
-3. 字段语义：`gpuPct` 是该进程跨适配器最繁忙引擎的瞬时利用率，不累加并行引擎；`engines` 保留适配器和引擎样本；`nvidia: null` 只说明 nvidia-smi 不存在，不代表没有显卡；`adapters.bus` 是设备 ID 的总线前缀，需结合设备名、厂商与机型识别，USB 也可能是实体显示设备；`lhmGpu.hardware` 为空仅表示未枚举到可读硬件，不能代替 adapters 判断。每进程利用率是否可用还需检查计数器错误
+### gpu
 
-## scope=io：磁盘 IO 定位
+| 字段 | 含义与口径 |
+|---|---|
+| `engineSamples` | 聚合前的输入引擎样本总数，不是正负载进程数 |
+| `byGpuPct[]` | `pid`、`name`、`gpuPct`（取跨适配器最繁忙单一引擎，不累加并行引擎）、`engtypes`、`engines[]: { adapter, type, gpuPct }`（仅保留大于 0 的引擎样本） |
+| `byDedicatedMB[]` | `pid`、`name`、`dedicatedMB`（仅聚合大于 1 MiB 的专用显存实例） |
+| `adapters[]` | `name`、`vendor`、`driver`、`status`、`bus`（总线前缀，USB 也可能是外接显示设备） |
+| `nvidia` | 各 NVIDIA 显卡数组（`name`、`uuid`、`pciBusId`、`tempC`、`powerW`、`vramUsedMB`、`vramTotalMB`、`utilPct`、`driver`）；无 `nvidia-smi` 为 `null`，调用失败为 `{ error }` |
+| `lhmGpu?` | 适配器查询失败或检测到非 NVIDIA 物理显卡时提前并行采集，否则仅在 `nvidia` 不是数组时事后补查。含 `hardware`、`sensors[]: { hw, name, type, unit, value }` 及可选 `error`、`degraded`、`collectionErrors`。不保证双显卡都有读数，`hardware` 为空仅表示未枚举到可读传感器 |
 
-1. 适用：检查卡顿是否伴随磁盘或进程 IO 活动。一条 pwsh 命令内两路数据共用同一采样窗口（Stopwatch 计真实间隔）：每进程 IO 取 `Win32_Process` 的 `Read/WriteTransferCount` 两次快照差分（进程启动以来累计值，不走 PerfProc 慢路径）；每盘取 `Win32_PerfFormattedData_PerfDisk_PhysicalDisk` 格式化计数器类双读（首读丢弃）
-2. 字段：`disks`（每物理盘：`disk` / `queueLen` 队列深度 / `busyPct` 忙碌百分比 / `readKBs` / `writeKBs`，按忙碌度降序）/ `byIo`（每进程读+写 IO 速率 Top N：`name` / `pid` / `ioKBs`）/ `intervalSec` / `totalProcs`
-3. 判读：持续高忙碌度与排队可提示 IO 瓶颈。低吞吐不能单独证明碎片或坏盘，需结合访问模式、SMART 与事件日志。进程 IO 和物理盘吞吐口径不同；byIo 空数组在无活动且采集成功时合法。首次调用可能包含计数器预热
+### io
 
-## scope=sensor：温度 / 风扇 / 电压 / 降频
+| 字段 | 含义与口径 |
+|---|---|
+| `intervalSec` / `totalProcs` | 约 1.2 秒采样间隔 / 第二次快照进程总数 |
+| `disks[]` | `disk`、`queueLen`（队列深度）、`busyPct`（%）、`readKBs`、`writeKBs`（读写吞吐单位 KiB/s，按 `busyPct` 降序，不含 `_Total`） |
+| `byIo[]` | `name`、`pid`、`ioKBs`（读写总速率，单位 KiB/s）。物理盘吞吐与进程 IO 统计口径不同，不可相加。`byIo` 为空表示本次未取得可比较的非零读写差分（新建、退出、无法配对或计数缺失的进程不入榜） |
 
-1. 数据来源（一条 pwsh 命令内顺序取三路）：LibreHardwareMonitorLib 用户态读取（DLL 随仓库 `lhm\` 分发，GPU 类传感器免管理员）；`Thermal Zone Information` 性能计数器（热区温度，开尔文已转摄氏度）；`Processor Information` 的 `% of Maximum Frequency` 计数器
-2. 字段：`sensors`（hw / name / type / value，type 为 Temperature / Fan / Voltage）/ `thermalZones`（zone / tempC / passivePct）/ `frequency`（cores / minPctOfMax / avgPctOfMax）/ `admin` / `pawnio` / `hardware`（检测到的硬件名）/ `counterErrors`（仅计数器读取失败时出现：thermal / frequency 附原因）
-3. 字段语义：`passivePct` < 100 表示该热区正在被动降热；`minPctOfMax` 是各核当前频率占最大频率的最低百分比——过热降频与省电降频都表现为低值，该值需结合 CPU 负载解读；`counterErrors` 出现时，对应字段为空是读取失败，不代表机器没有热区 / 降频计数器
-4. 能力边界：工具包不安装内核驱动，不保证 CPU 核心温度、主板风扇和电压可读。目标机已有 PawnIO 且权限足够时，可能返回更多传感器。低频率即使伴随高负载，也不能单独确认过热
+### sensor
 
-## 通用约定
+| 字段 | 含义与口径 |
+|---|---|
+| `admin` / `pawnio` | 当前进程管理员状态 / PawnIO 注册项探测结果；探测失败时均可为 `null` |
+| `hardware[]` / `sensorCount` / `sensors[]` | 硬件名 / 传感器数量 / `hw`、`name`、`type`、`unit`、`value`（Temperature °C、Fan RPM、Voltage V，上限 200 项） |
+| `thermalZones[]` | `zone`、`tempC`（-50～150°C）、`passivePct`（`% Passive Limit` 读数，不能单独作为正在过热或被动降热的判据） |
+| `frequency` | `cores`（有效频率样本数）、`minPctOfMax`、`avgPctOfMax`（睿频可超 100%）。低频率既可能来自省电空闲也可能来自限频，须结合 CPU 负载判读 |
 
-1. `notice` 用于理解数据口径和采集限制
-2. `error` 字段表示该路数据取数失败并附原因，如实转达
+工具不安装内核驱动，不保证 CPU 核心温度、主板风扇与电压一定可读。
+
+## 错误与超时规则
+
+1. 超时上限 30 秒（`proc`、`gpu`、`io` 含约 1.2 秒采样窗口）。超时或全部采集源失败返回 `isError: true`（`{"error", "elapsedMs"}`）。
+2. 部分采集失败在对应 `[scope]` 内置 `degraded: true`，并附 `collectionErrors` 或 `counterErrors`；缺失字段或空数组须结合错误项判读，不可推断为正常。

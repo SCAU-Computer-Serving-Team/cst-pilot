@@ -1923,10 +1923,12 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
             "/skill:disk",
             "/skill:driver",
             "/skill:eventlog",
+            "/skill:files",
             "/skill:ls",
             "/skill:runbook",
             "/skill:startup",
             "/skill:sys",
+            "/skill:web-search",
         ])
     );
 

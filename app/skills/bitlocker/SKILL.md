@@ -1,51 +1,60 @@
 ---
 name: bitlocker
-description: 查询 BitLocker 状态，使用恢复密码解锁卷，或经本地确认关闭加密。说明 status、unlock、decrypt 的参数、TUI / Web 凭据输入、恢复密钥查找、异步进度与失败处理。
+description: bitlocker 卷加密状态查询、48 位恢复密码解锁、完整解密与恢复密钥指引。
 ---
 
-# BitLocker 工具说明
+# bitlocker
 
-status 只读；unlock 解锁文件访问并保留加密；decrypt 关闭 BitLocker，发起完整解密。执行操作支持 TUI 和 Web，用户确认或输入之前不会提交 Windows 操作。
+实时查询与受控操作 BitLocker 卷，不使用缓存快照。返回结构为 `{ "bitlocker": { ... }, "elapsedMs": N }`。
 
-## 参数与调用
+## 操作步骤与完成判据
 
-| 参数 | 说明 |
+### 解锁卷（unlock）
+
+1. 先查 `bitlocker({ scope: "status", drive })` 确认目标卷锁定（`lockStatus: 1`）。已解锁跳过，不索取凭据。
+2. 仅在用户明确要求解锁时调用 `bitlocker({ scope: "unlock", drive })`。默认省略 `recoveryPassword`，由本地界面隐藏输入（等待上限 180 秒）。
+3. **完成判据**：分开核对 `operation.status` 与实时复查后的 `lockStatus`：
+   - `operation.status === "accepted"` 且 `lockStatus === 0`：确认本次解锁成功（不代表关闭加密）。
+   - `operation.status === "skipped"` 且 `lockStatus === 0`：报告该卷原已处于解锁状态，不可称本次执行了解锁。
+   - `operation.status === "accepted"` 但复查失败（`lockStatus: null`）：结果未确认，立即再调 `status` 核实。
+
+### 完整解密（decrypt）
+
+1. 不将关闭加密作为常规排障手段，仅在用户明确要求解除保护时调用。默认传用户明确指定的 `drive`；仅在用户明确要求解密全部卷时省略 `drive`。
+2. 省略 `drive` 时工具评估全部可枚举卷，只将符合条件的卷送入本地确认界面（等待上限 180 秒）；已解密或正在解密的卷直接跳过，锁定或状态不明的卷直接拒绝。
+3. 锁定卷被拒绝时，先安排单独的 `unlock` 调用。仅在返回 `error` 或 `returnCode` 明确指向自动解锁密钥依赖、权限不足等原因时如实点明，不自动删保护器或改策略。
+4. 批量操作逐卷报告资格、操作状态与复查状态。
+5. **完成判据**：请求接受后由 Windows 后台执行，后续用 `status` 跟踪进度；仅 `conversionStatus === 0` 确认完全解密，`encryptionPercentage === 0` 不能单独证明完成。
+
+## 条件分支
+
+- **缺少恢复密码**：
+  - 查哪里：指引用户自行打开 <https://aka.ms/myrecoverykey> 登录相关微软账户。
+  - 按什么匹配：对照工具返回的恢复密码保护器 `keyProtectors[].id` 匹配 48 位数字恢复密码。账户登录密码、Windows PIN、启动 PIN 均无效，管理员权限不能替代有效凭据。
+  - 查不到怎么办：微软账户未备份记录时，检查其他关联账户、单位 IT、已保存文件或打印件。
+- **用户已主动在聊天提供恢复密码**：禁止主动索要密码发进聊天。若用户已主动提供并明确要求代填，先告知密码已进入模型上下文且可能发给模型服务商（该告知不消除已发送文本的风险），再决定是否传 `recoveryPassword`；工具仍要求本地确认且不回显密码。
+
+## 参数
+
+| 参数 | 约束与默认值 |
 |---|---|
-| scope | status（默认）、unlock、decrypt |
-| drive | C 或 C: 等盘符；unlock 必填，其他 scope 省略时处理全部可枚举卷 |
-| recoveryPassword | unlock 可选，八组六位数字用连字符分隔；默认省略，交给 TUI / Web 隐藏输入 |
+| `scope` | `status`（默认）、`unlock`、`decrypt` |
+| `drive` | 单盘符如 `C` 或 `C:`；`unlock` 必填，`status` 与 `decrypt` 省略时评估全部可枚举卷 |
+| `recoveryPassword` | 仅 `unlock` 可选，8 组 6 位 ASCII 数字用 `-` 分隔；其他 `scope` 禁止传入 |
 
-```js
-bitlocker({})
-bitlocker({ scope: "unlock", drive: "D:" })
-bitlocker({ scope: "decrypt", drive: "D:" })
-```
+## 返回字段与枚举
 
-## 解锁与恢复密钥
+| 字段 | 结构与说明 |
+|---|---|
+| 查询级字段 | `scope`、`collectedAt`、`admin`、`source`、`volumes[]`、`notice`，可选 `degraded`、`collectionErrors`、`operation`（异常中断重启后的自动复查；复查失败时可仅返回最小对象与 `degraded: true`） |
+| `volumes[]` | `volumeId`、`drive`、`volumeType`、`conversionStatus`、`encryptionPercentage`（%）、`encryptionMethod`、`protectionStatus`、`lockStatus`、`autoUnlockEnabled`（仅数据卷）、`autoUnlockKeysStored`（仅当前系统卷）、`keyProtectors[]: { id, type }`，可选 `collectionErrors`、`operation` |
+| `conversionStatus` | `0` 完全解密、`1` 完全加密、`2` 加密中、`3` 解密中、`4` 加密暂停、`5` 解密暂停 |
+| `lockStatus` | `0` 已解锁、`1` 已锁定 |
+| `operation` | `status`（`accepted` / `rejected` / `skipped` / `cancelled` / `unknown`）、`reason`、`returnCode`（可为 `null`）、`error`（可为 `null`）、可选 `credentialSource`（`localInput` / `toolParameter`，未用凭据时省略） |
 
-1. 确认目标盘，先查询是否锁定。卷已解锁时无需索取凭据。
-2. 用户明确要求解锁后调用 unlock，默认省略 recoveryPassword，让用户在 TUI / Web 独立输入。Enter 提交，Esc 取消，等待最多三分钟。
-3. 用户缺少密钥时，引导打开 <https://aka.ms/myrecoverykey>，自行登录相关微软账户，并按工具返回的恢复保护器 ID 匹配记录。初版不自动打开浏览器、不登录账户、不读取网页中的密钥。
-4. 微软账户必须已备份对应的 48 位恢复密码。有账户不保证有记录；没有记录时检查其他相关账户、单位 IT、保存的文件或打印件。
-5. 恢复密钥 ID 只能用于匹配记录。账户登录密码、Windows PIN 和启动 PIN 均不能充当 recoveryPassword；管理员权限不能替代有效凭据。
-6. 用户明确选择 AI 填参时，先说明恢复密码会进入模型上下文并可能发送给模型服务商，再使用 recoveryPassword。不要主动要求用户把密钥发进聊天；工具会再进行本地确认，返回值不回显密码。
+## 异常、互斥与限制
 
-解锁结果同时检查 operation 与 lockStatus。只有实时复查成功且 lockStatus=0，才能确认已解锁；解锁成功不表示关闭加密。
-
-## 完整解密
-
-1. 仅在用户明确要求解除加密保护时调用 decrypt。指定盘符仅操作该卷；省略 drive 将处理全部可枚举卷。
-2. 工具在本地界面展示固定目标清单、当前转换状态及影响，并要求确认。缺少本地交互通道或用户取消时不执行，不使用其他工具绕过确认。
-3. 锁定卷报告阻塞，先安排独立的 unlock 调用。系统卷自动解锁密钥依赖、权限不足和其他失败分别报告，不自动清除密钥或改策略。
-4. 请求接受后，Windows 在后台执行。后续用 status 查询进度；仅 conversionStatus=0 表示完全解密，百分比为 0 不能单独证明完成。
-5. 批量操作逐卷报告。accepted 表示请求接受，rejected 表示拒绝，skipped 表示无需操作，cancelled 表示提交前取消，unknown 表示请求结果未确认。
-6. unknown 时先查状态，不盲目重试。不承诺已提交的操作可以通过关闭输入框或停止 Agent 撤销。
-
-## 返回与限制
-
-- 结果位于 bitlocker 对象中，包含采集时间、管理员权限、volumes、notice 和 collectionErrors。
-- 每卷含 volumeId、drive、转换状态与百分比、算法、保护状态、锁定状态、自动解锁信息，以及保护器 ID 和类型。状态值保留 Windows 原始枚举；null 须结合错误判断。
-- 转换状态：0 完全解密、1 完全加密、2 加密中、3 解密中、4 加密暂停、5 解密暂停。锁定状态：0 已解锁、1 已锁定。
-- Windows 方法返回码和采集错误保留在工具结果中，用于核查。答复只补充影响当前判断或操作的失败；无法查询不表示未加密，接口调用成功不保证已经完成数据转换。
-- 初版仅支持数值恢复密码解锁，不使用数据卷密码、外部密钥或证书，不执行 repair-bde。
-- 不把关闭加密作为常规故障排查步骤。解密会解除保护，完成后移除保护器；硬件加密盘需结合算法解释状态。
+1. `operation.status === "unknown"`（超时、调用异常或进程中断重启复查）严禁自动重试，须立即用 `status` 复查真实状态；不承诺已提交的 Windows 操作可通过关闭界面或停止对话撤销。
+2. 写操作要求管理员权限与本地交互界面；同卷并发操作会被跨进程锁拒绝。业务拒绝或取消时整次调用仍可能返回 `isError: false`，须逐卷核对 `operation.status`。
+3. 仅支持 48 位数值恢复密码解锁，不支持数据卷密码、外部密钥、证书或 `repair-bde`；硬件加密盘结合 `encryptionMethod` 解读。
+4. 整次查询失败或指定盘符未找到唯一卷返回 `isError: true`；部分采集错误置 `degraded: true`，未枚举到卷或字段 `null` 均不能判定为未加密。底层单次查询或执行阶段各有 60 秒预算，加上本地交互最长 180 秒等待。

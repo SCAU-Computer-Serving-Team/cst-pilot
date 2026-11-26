@@ -1,42 +1,58 @@
 ---
 name: eventlog
-description: eventlog 工具的参数与返回字段说明。八个 scope 的查询范围与字段定义、counts 折叠计数表、ID 白名单边界、security 管理员要求、与 sys 的实时/历史分工。
+description: eventlog 事件日志查询：近期告警、开关机与蓝屏、应用崩溃、服务故障、磁盘事件、登录审计、自定义查询与单条原文。
 ---
 
-# eventlog 工具说明
+# eventlog
 
-只读事件日志工具，读取 Windows 记录的历史故障线索，按 `scope` 选择子功能，不传默认 `recent`。除 `security`（登录审计，需管理员）外各 scope 免管理员。与 sys 的分工：sys 看实时负载，eventlog 看历史痕迹。
+只读 Windows 事件日志工具，排查历史记录（实时负载归 `sys`）。返回结构为 `{ "<scope>": { ... }, "elapsedMs": N }`。
+
+## 场景选择
+
+| 现象 | 调用 | 结束条件 |
+|---|---|---|
+| 故障方向不明 | `eventlog({ scope: "recent" })` | 找到异常事件或确认无命中，标明是否截断 |
+| 意外重启、蓝屏、崩溃、服务异常、磁盘错误、登录审计 | 选对应预设 `scope`（`boot`、`crash`、`service`、`disk`、`security`） | 列出关键事件与频次，对照 `provider` 与 `msg` 核验原因 |
+| 需查看单条日志完整原文 | 取列表中的 `logName` 与 `recordId`，调 `eventlog({ scope: "detail", logName, recordId })` | 读到完整正文，或标明 `msgTruncated` / `outputTruncated` |
+| 预设场景未覆盖通道或需加 `ids` 过滤 | `eventlog({ scope: "query", logName, ids?, provider?, level?, msg? })` | 拿到目标记录或明确无命中与权限限制 |
 
 ## 参数
 
-1. `scope`（可选）：`recent` / `boot` / `crash` / `service` / `disk` / `security` / `query` / `detail`，不传默认 `recent`
-2. `hours`（可选）：时间窗（小时），默认 24，上限 720；`top`（可选）：事件列表条数上限，默认 100（硬上限 100）；两者除 detail 外通用
-3. 分支参数：`level`（recent 默认 warn，包含 Warning 及更严重；query 省略时不限级别）/ `kind`（boot）/ `type`（security）/ `app`（crash）/ `name`（service）/ `ids`+`provider`+`msg`+`logName`（query）/ `recordId` 或 `id` + `logName`（detail，二选一必填）——每支自含全部参数，`logName` 不是全局覆盖参数
+| 参数 | 适用 `scope` | 约束与默认值 |
+|---|---|---|
+| `scope` | 全部 | `recent`（默认）、`boot`、`crash`、`service`、`disk`、`security`、`query`、`detail` |
+| `hours` / `top` | 除 `detail` 外 | 正整数，至少为 `1`。`hours` 默认 `24`、上限 `720`；`top` 默认与上限均为 `100` |
+| `level` | `recent`、`query` | `warn`（Critical/Error/Warning，`recent` 默认）或 `error`（Critical/Error）。`query` 省略时不限级别；其他 `scope` 传入非法值也会触发校验错误 |
+| `kind` | `boot` | `all`（默认）、`unexpected`、`bluescreen` |
+| `type` | `security` | `all`（默认）、`logonFail`、`lockout` |
+| `app` / `name` / `msg` | `crash` / `service` / `query` | 消息字面子串（1–200 字符，忽略大小写） |
+| `provider` | 全部列表类 `scope` | 提供程序正则（1–128 字节，忽略大小写），校验正则语法与复杂度 |
+| `logName` | `query`、`detail` | 通道名（`query` 默认 `"System"` 单通道；`detail` 必填）。非空且不超过 100 字节，首字符为 ASCII 字母或数字，其余仅允许 ASCII 字母、数字、空格及 `./_-`；任意 `scope` 传入均会先校验 |
+| `ids` | 仅 `query` | 最多 16 个 `0–65535` 整数，空数组不限定 ID |
+| `recordId` / `id` | `detail` | 二选一必填，须配 `logName`。`recordId` 为非负整数精确匹配，`id` 取该 ID 最新一条 |
 
-## 查询类 scope 的公共返回字段
+## 各 scope 覆盖范围
 
-1. `logs`（实际查询通道）/ `hours` / `top` / `total`（时间窗内命中总数，含未显示的更早记录）/ `truncated`（total > top 时 true）/ `firstTime` / `lastTime`（事件样本的最早 / 最新时间，空列表时无此字段）/ `unreadable`（消息资源损坏被跳过的记录数）/ `noMatch`（条件级零命中提示码）/ `admin`（查询进程是否管理员）/ `events`（最新 top 条，时间倒序）/ `counts`（来源/ID 折叠计数表）/ `notice`
-2. `events` 每条：`logName` / `time`（本地时区）/ `recordId`（detail 直取用）/ `level` 数字与 `levelName`（英文固定映射）/ `provider` / `id` / `msg`（≤200 字符简述，无渲染模板的系统事件为 null）
-3. `counts` 每项：`key`（provider/id）/ `n`（出现次数）/ `last`（最近一次时间），n 降序最多 100 组，超出标记 `countsTruncated=true`；仅在 `countsTruncated=false` 时要求 `sum(counts.n) === total`
-4. `noMatch` 固定码：`provider-not-found` = 提供程序名在本机不存在，`provider-log-mismatch` = 提供程序不写往所查通道
+| `scope` | 通道与内置条件 |
+|---|---|
+| `recent` | `System` 与 `Application` 通道的 `warn` 或 `error` 事件 |
+| `boot`（`kind: "all"`） | `System` 通道事件 ID 12、13、6005、6006、6009、41、6008、1001、1074、19、7045，或提供程序 `Microsoft-Windows-WHEA-Logger` 全部事件。该条件按 ID 过滤，不限制所有 ID 的提供程序，须结合 `provider` 与 `msg` 判读（如 7045 为新服务安装，19 可能来自更新或硬件错误） |
+| `boot`（`kind: "unexpected"`） | `System` 通道事件 ID 41、6008 |
+| `boot`（`kind: "bluescreen"`） | `System` 通道事件 ID 1001 或 `Microsoft-Windows-WHEA-Logger` 全部事件 |
+| `crash` | `Application` 通道：`Application Error` 1000 与 `.NET Runtime` 1026（限 Error），加不限级别的 `Windows Error Reporting` 1001、`Application Hang` 1002、`SideBySide` 的 33 和 35 号事件 |
+| `service` | `System` 通道 `Service Control Manager` 的 18 个故障 ID（7000–7003、7009、7011、7013、7022–7026、7031、7032、7034、7038、7041、7043） |
+| `disk` | `System` 通道事件 ID 7、11、50、51、55、98、129、140、153、157 |
+| `security` | `Security` 通道事件 ID 4624（登录成功）、4625（`logonFail`）、4740（`lockout`）。需管理员权限；非管理员不查日志，返回 `admin: false`、`degraded: true`（不含 `collectionErrors`） |
+| `query` | 自选通道与过滤条件（可查预设 ID），受目标通道实际权限约束 |
+| `detail` | 按 `logName` 与 `recordId` 或 `id` 读单条原文（保留换行，上限 20,000 字符） |
 
-## 各 scope 的查询范围
+## 返回字段与截断判读
 
-1. `recent`：System + Application 通道的 warn/error 汇总，开场查询
-2. `boot`：`kind=all`（默认）查官方重启排查清单（启停标记 12/13/6005/6006/6009、意外重启 41/6008、蓝屏 1001、重启原因 1074/19/7045）∪ WHEA-Logger 硬件错误；`kind=unexpected` 只查 41/6008；`kind=bluescreen` 查 1001 + WHEA-Logger。ID 19 可能来自 WindowsUpdateClient 或 WHEA-Logger，以 `provider` 字段区分
-3. `crash`：Application 通道按提供程序与 ID 配对：Application Error 1000 / .NET Runtime 1026 限 Error；Windows Error Reporting 1001 / Application Hang 1002 / SideBySide 33·35 不限级别，避免漏掉 Information 级 WER 报告。`app` 对全部分组按消息子串过滤。
-4. `service`：System 通道 SCM 白名单 18 个 Error 级 ID（启动失败 / 挂起超时 / 意外终止 / 依赖失败等）；7045（新服务安装，Information 级）不在本通道，归 `boot` 白名单；`name` 按服务名子串过滤
-5. `disk`：System 通道 7/11/51（坏块/控制器/分页错误）、129/153（IO 超时重试）、55/98/50/140（NTFS 损坏/写失败）、157（掉盘）
-6. `security`：Security 通道 4624（成功登录）/ 4625（登录失败）/ 4740（账户锁定）；`type` 可选 all / logonFail / lockout。非管理员时**不执行查询**，返回 `admin:false` + `degraded:true` + notice；仅覆盖本地/工作组，域环境 Kerberos 失败（4771）不在范围
-7. `query`：白名单外的自定义查询——`ids`（数组，下推过滤）+ `level` + `provider`（正则，1 秒超时保护）+ `msg`（子串）+ `logName`（单通道，默认 System+Application）；省略 `level` = 全级别；过滤词过宽时耗时随命中量增长（30 秒超时兜底）
-8. `detail`：`recordId`（直取记录号，取 events 样本里的值）或 `id`（取该 ID 最近一条）二选一，`logName` 必传（样本里的 `logName` 字段）；返回完整原文（保留换行，20k 字符封顶并标记截断），查无此记录时 notice 说明
-
-## 白名单边界
-
-各 scope 的 ID 清单是「相关事件」清单而非全部故障事件，覆盖不到的冷门故障走 `query`。
-
-## 通用约定
-
-1. `notice` 说明命中概况、截断、采集限制与字段含义
-2. `error` 表示查询失败并附原因，如实转达；`unreadable > 0` 不是失败，其余记录正常返回
-3. 消息文本随系统语言本地化（中文系统出中文消息）；`levelName` 固定英文映射不受影响
+1. **列表类字段**：`logs`、`hours`、`top`、`total`（本次扫描命中数）、`truncated`、`events[]`、`counts[]`、`countsTruncated`、`unreadable`、`firstTime`、`lastTime`、`admin`（探测失败时可为 `null`）、`notice`，可选 `noMatch: true`、`scanTruncated: true`、`degraded: true`、`collectionErrors`。
+2. **`events[]` 与时区**：每条含 `logName`、`time`（本机带偏移 RFC3339，与 `sys(overview).uptime.bootTime` 同为本机时区）、`recordId`、`level`、`levelName`（固定英文）、`provider`、`id`、`msg`（上限 200 字符，未读到消息时为 `null`）。
+3. **`counts[]` 统计口径**：扫描时先收录遇到的至多 100 个不同 `(provider, id)` 组，再将已收录的组按 `n` 降序排列。`countsTruncated: true` 时不保证已收录全量最频繁的 100 组，须缩小 `hours` 或补充条件重查。
+4. **`detail` 字段**：`found`、`logName`，命中时附事件字段与 `machine`。超 20,000 字符置 `msgTruncated: true` 与 `originalChars`；`msg` 未读到时为 `null` 且 `degraded: true`。出现 `msgTruncated` 或顶层 `outputTruncated` 时，不可声称已核验完整原文。
+5. **完整性与超时**：
+   - `noMatch: true` 仅在无错误、无不可读、未截断且 `total === 0` 时出现。
+   - 单通道触及 100,000 条扫描上限置 `scanTruncated: true` 与 `degraded: true`；`unreadable > 0` 也会置 `degraded: true`。
+   - 请求通道全部失败或超 30 秒返回 `isError: true`（`{"error", "elapsedMs"}`）；部分失败置 `degraded: true`。超限时缩小 `hours`，或切到 `query` 显式指定通道与 `ids` 重查。

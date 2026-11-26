@@ -18,23 +18,12 @@ pub mod shaders {
 use std::path::{Path, PathBuf};
 
 use cst_client::{BootstrapOptions, ClientBootstrapResult, ClientHandle, CstClient};
-use cst_os::{RestartUi, Storage, parse_local_json};
+use cst_os::{REQUIRED_SKILL_NAMES, RestartUi, Storage, parse_local_json};
 use gpui_kit::{App, AppContext as _, Entity, Global};
 
 use crate::shell::window_bounds::{collect_app_displays, resolve_startup_window_geometry};
 use crate::shell::{AppShell, register_shell_keys};
 use crate::theme::{FontLoadReport, load_bundled_fonts, motion};
-
-const REQUIRED_SKILL_NAMES: &[&str] = &[
-    "disk",
-    "ls",
-    "sys",
-    "startup",
-    "eventlog",
-    "driver",
-    "runbook",
-    "bitlocker",
-];
 
 const REQUIRED_FONT_NAMES: &[&str] = &[
     "SourceHanSansCN-VF.otf",

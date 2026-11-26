@@ -716,7 +716,10 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
             .collect::<BTreeSet<_>>(),
         expected
     );
-    assert_eq!(created.resource_loader.get_skills().skills.len(), 8);
+    assert_eq!(
+        created.resource_loader.get_skills().skills.len(),
+        SKILL_NAMES.len()
+    );
     assert!(
         created
             .resource_loader
@@ -848,4 +851,144 @@ fn offline_and_reparse_files_are_skipped_without_opening_in_read_and_ffgrep() {
     assert!(result["skipped"].as_u64().unwrap() >= 1);
 
     let _ = unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_NORMAL) };
+}
+
+#[tokio::test]
+async fn real_repo_skills_and_prompt_load_cleanly_across_different_cwd() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let repo_skills_dir = repo_root.join("app/skills");
+    let mut disk_skill_dirs = BTreeSet::new();
+    for entry in std::fs::read_dir(&repo_skills_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            disk_skill_dirs.insert(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    let expected_skill_names: BTreeSet<String> =
+        SKILL_NAMES.iter().map(|s| (*s).to_owned()).collect();
+    assert_eq!(
+        disk_skill_dirs, expected_skill_names,
+        "app/skills/ directory set must match SKILL_NAMES exactly"
+    );
+
+    let fixture = Fixture::new();
+    std::fs::create_dir_all(fixture.path("app/prompts")).unwrap();
+    std::fs::copy(
+        repo_root.join("app/prompts/APPEND_SYSTEM.md"),
+        fixture.path("app/prompts/APPEND_SYSTEM.md"),
+    )
+    .unwrap();
+    for name in SKILL_NAMES {
+        let dst = fixture.path(&format!("app/skills/{name}/SKILL.md"));
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::copy(repo_skills_dir.join(format!("{name}/SKILL.md")), &dst).unwrap();
+    }
+
+    // Use a separate working directory outside `app/` to regress P0-01 relative path lookups.
+    let separate_cwd = fixture.path("owner_workspace");
+    std::fs::create_dir_all(&separate_cwd).unwrap();
+
+    let faux = create_faux_provider();
+    let runtime = ModelRuntime::create(CreateModelRuntimeOptions {
+        include_builtins: Some(false),
+        refresh_on_create: Some(false),
+        ..Default::default()
+    })
+    .await;
+    runtime.register_provider(faux.provider.clone());
+    let options = Kit::new(&fixture.0)
+        .unwrap()
+        .session_options(CreateAgentSessionOptions {
+            cwd: Some(separate_cwd.clone()),
+            model_runtime: Some(runtime),
+            model: Some(faux.model.clone()),
+            session_manager: Some(
+                SessionManager::in_memory(separate_cwd.to_string_lossy(), None, None).unwrap(),
+            ),
+            ..Default::default()
+        })
+        .unwrap();
+    let created = create_agent_session(options).await.unwrap();
+    let loaded = created.resource_loader.get_skills();
+    assert!(
+        loaded.diagnostics.is_empty(),
+        "real app/skills/ must load with zero diagnostics: {:?}",
+        loaded.diagnostics
+    );
+    assert_eq!(loaded.skills.len(), SKILL_NAMES.len());
+
+    let loaded_names: BTreeSet<String> = loaded.skills.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(loaded_names, expected_skill_names);
+
+    for skill in &loaded.skills {
+        assert!(!skill.disable_model_invocation);
+        assert!(!skill.description.trim().is_empty());
+        assert!(
+            std::path::Path::new(&skill.file_path).is_absolute(),
+            "skill {} location must be absolute: {}",
+            skill.name,
+            skill.file_path
+        );
+    }
+
+    let prompt = created.session.system_prompt();
+    assert!(prompt.contains("<available_skills>"));
+    assert!(prompt.contains("<name>files</name>"));
+    assert!(prompt.contains("<name>web-search</name>"));
+    assert!(prompt.contains("<location>"));
+    assert!(
+        !prompt.contains("app/skills/<技能名>/SKILL.md"),
+        "APPEND_SYSTEM.md must direct model to <location> absolute path, not cwd-relative path"
+    );
+
+    // Reading a skill via its absolute `<location>` from a different `cwd` must succeed.
+    let files_skill = loaded.skills.iter().find(|s| s.name == "files").unwrap();
+    let tools = created.session.get_callable_tools();
+    let read_tool = tools.iter().find(|t| t.name == "read").unwrap();
+    let read_res = (read_tool.execute)(
+        "read-skill-abs".into(),
+        json!({ "path": files_skill.file_path }),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(!read_res.is_error);
+    assert!(read_res.content.iter().any(|block| matches!(
+        block,
+        UserContentBlock::Text(text) if text.text.contains("ffgrep") && text.text.contains("fffind")
+    )));
+
+    // `/skill:files` and `/skill:ls` must expand real skill bodies during prompt execution.
+    faux.set_responses([
+        faux_text_message("已读取 files 技能。").into(),
+        faux_text_message("已读取 ls 技能。").into(),
+    ]);
+    created.session.prompt("/skill:files", None).await.unwrap();
+    created.session.prompt("/skill:ls", None).await.unwrap();
+    let joined_user: String = created
+        .session
+        .state()
+        .messages
+        .iter()
+        .filter_map(|m| serde_json::to_value(m).ok())
+        .filter(|v| v["role"] == "user")
+        .filter_map(|v| {
+            v["content"].as_str().map(str::to_owned).or_else(|| {
+                v["content"].as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|b| b["text"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined_user.contains("<skill name=\"files\""));
+    assert!(joined_user.contains("ffgrep"));
+    assert!(joined_user.contains("<skill name=\"ls\""));
+    assert!(joined_user.contains("native-index"));
+
+    created.session.shutdown().await.unwrap();
 }
