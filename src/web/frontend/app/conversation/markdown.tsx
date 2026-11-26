@@ -1,13 +1,14 @@
-import { memo, useMemo, useRef } from "react";
+import { memo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "../shell/code-block";
-import { splitStreamingMarkdownBlocks } from "./markdown-blocks";
 import { rehypeStreamWords } from "./stream-words";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
+// 已开始流式显示的文本在定稿后保留逐词结构与整篇单解析树，避免切块破坏列表/引用链接或卸载选区。
+const markdownRehypeStreamPlugins = [rehypeHighlight, rehypeStreamWords];
 const markdownRehypeLivePlugins = [rehypeStreamWords];
 const markdownComponents: Components = {
 	a: ({ children, ...props }) => (
@@ -25,52 +26,16 @@ const markdownComponents: Components = {
 	),
 };
 
-const StaticMarkdownBlock = memo(function StaticMarkdownBlock({ text }: { text: string }) {
-	return (
-		<ReactMarkdown
-			remarkPlugins={markdownRemarkPlugins}
-			rehypePlugins={markdownRehypePlugins}
-			components={markdownComponents}
-		>
-			{text}
-		</ReactMarkdown>
-	);
-});
-
-const LiveMarkdownTail = memo(function LiveMarkdownTail({ text }: { text: string }) {
-	return (
-		<ReactMarkdown
-			remarkPlugins={markdownRemarkPlugins}
-			rehypePlugins={markdownRehypeLivePlugins}
-			components={markdownComponents}
-		>
-			{text}
-		</ReactMarkdown>
-	);
-});
-
-/** 已定稿前缀块缓存复用不重排不重播，仅末尾活跃块增量逐词显现；历史消息单次解析。 */
+/** 同一解析树按块序号更新，追加段落和定稿不搬移已读内容、不替换容器。 */
 export const Markdown = memo(function Markdown({ text, live = false }: { text: string; live?: boolean }) {
-	const wasLiveRef = useRef(live);
-	if (live) wasLiveRef.current = true;
-
-	const split = useMemo(() => (live || wasLiveRef.current ? splitStreamingMarkdownBlocks(text) : null), [text, live]);
-
-	if (!split) {
-		return (
-			<div className="markdown">
-				<StaticMarkdownBlock text={text} />
-			</div>
-		);
-	}
-
+	const [streamed, setStreamed] = useState(live);
+	if (live && !streamed) setStreamed(true);
+	const plugins = live ? markdownRehypeLivePlugins : streamed ? markdownRehypeStreamPlugins : markdownRehypePlugins;
 	return (
 		<div className="markdown" data-streaming={live || undefined}>
-			{split.settled.map((block, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: 追加式定稿块按块序固定，前缀不变时 React 跳过重渲染。
-				<StaticMarkdownBlock key={`b-${index}`} text={block} />
-			))}
-			{split.tail && (live ? <LiveMarkdownTail text={split.tail} /> : <StaticMarkdownBlock text={split.tail} />)}
+			<ReactMarkdown remarkPlugins={markdownRemarkPlugins} rehypePlugins={plugins} components={markdownComponents}>
+				{text}
+			</ReactMarkdown>
 		</div>
 	);
 });

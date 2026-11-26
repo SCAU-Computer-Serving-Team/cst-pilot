@@ -474,7 +474,11 @@
   position: absolute;
   inset: 0;
   z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 0;
   border-radius: var(--radius-control);
+  background: transparent;
   cursor: default;
 }
 .sidebar-session-hit:focus-visible {
@@ -488,7 +492,7 @@
 .sidebar-recent-list .sidebar-session-row:hover {
   background: var(--bg-hover);
 }
-.sidebar-recent-list .sidebar-session-row:hover .sidebar-session {
+.sidebar-recent-list .sidebar-session-row:hover .sidebar-session-visual {
   color: var(--text-primary);
 }
 .sidebar-recent-list .sidebar-session-row[data-active="true"] {
@@ -514,9 +518,9 @@
   opacity: 1;
   pointer-events: auto;
 }
-.sidebar-session-row:hover .sidebar-session:not(.sidebar-session-select),
-.sidebar-session-row:focus-within .sidebar-session:not(.sidebar-session-select),
-.sidebar-session-row[data-menu-open="true"] .sidebar-session:not(.sidebar-session-select) {
+.sidebar-session-row:hover .sidebar-session-visual:not(.sidebar-session-visual--select),
+.sidebar-session-row:focus-within .sidebar-session-visual:not(.sidebar-session-visual--select),
+.sidebar-session-row[data-menu-open="true"] .sidebar-session-visual:not(.sidebar-session-visual--select) {
   padding-right: 34px;
 }
 @media (hover: none) {
@@ -524,7 +528,7 @@
     opacity: 1;
     pointer-events: auto;
   }
-  .sidebar-session-row .sidebar-session:not(.sidebar-session-select) {
+  .sidebar-session-row .sidebar-session-visual:not(.sidebar-session-visual--select) {
     padding-right: 34px;
   }
 }
@@ -558,9 +562,8 @@
 .session-list-content:not([data-kbd-active]) .session-list-item:hover { background: var(--bg-hover); }
 .session-list-item:has(.sidebar-session-select[data-selected]) { background: var(--bg-item-active); }
 .session-list-item .sidebar-session-row { flex: 1; min-width: 0; }
-.session-list-item .sidebar-session { height: var(--h-header); padding: 0 var(--space-component); font-size: var(--font-body); color: var(--text-primary); line-height: var(--line-body); background: transparent; }
-.session-list-item .sidebar-session:hover { background: transparent; }
-.session-list-item .sidebar-session:focus-visible { background: var(--bg-hover); }
+.session-list-item .sidebar-session-visual { height: var(--h-header); padding: 0 var(--space-component); font-size: var(--font-body); color: var(--text-primary); line-height: var(--line-body); background: transparent; }
+.session-list-item:has(.sidebar-session-hit:focus-visible) { background: var(--bg-hover); }
 .session-list-content:focus-visible { outline: none; }
 .session-list-item .session-check-control { left: var(--space-component); }
 .session-list-main[data-managing] .session-check-control { opacity: 1; }

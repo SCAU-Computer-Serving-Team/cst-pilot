@@ -25,6 +25,7 @@ export function useSessionActions(
 	const [menu, setMenu] = useState<SessionMenuState>(null);
 	const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
+	const clampedMenuPosRef = useRef<{ rawX: number; rawY: number; x: number; y: number } | null>(null);
 	const deletionRoute = useRef<{ id: string; from: string; homeKey?: string } | null>(null);
 	const management = useSessionManagement(sessions, {
 		onStart: async (targets) => {
@@ -81,8 +82,11 @@ export function useSessionActions(
 		const element = menuRef.current;
 		if (!element) return;
 		const bounds = element.getBoundingClientRect();
-		element.style.left = `${Math.max(16, Math.min(menu.x, window.innerWidth - bounds.width - 16))}px`;
-		element.style.top = `${Math.max(16, Math.min(menu.y, window.innerHeight - bounds.height - 16))}px`;
+		const x = Math.max(16, Math.min(menu.x, window.innerWidth - bounds.width - 16));
+		const y = Math.max(16, Math.min(menu.y, window.innerHeight - bounds.height - 16));
+		clampedMenuPosRef.current = { rawX: menu.x, rawY: menu.y, x, y };
+		element.style.left = `${x}px`;
+		element.style.top = `${y}px`;
 		element.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 	}, [menu]);
 	useEffect(() => {
@@ -164,6 +168,7 @@ export function useSessionActions(
 	return {
 		menu,
 		menuRef,
+		clampedMenuPosRef,
 		setMenu,
 		renaming,
 		cancelRename,
@@ -178,131 +183,126 @@ export function useSessionActions(
 }
 
 export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof useSessionActions> }) {
-	const { menu, menuRef, setMenu, management, rename, remove } = actions;
+	const { menu, menuRef, clampedMenuPosRef, setMenu, management, rename, remove } = actions;
 	const menuPresence = usePresenceExit(menu);
 	const activeMenu = menuPresence.value;
+	const clamped = clampedMenuPosRef.current;
+	const menuLeft =
+		activeMenu && clamped && clamped.rawX === activeMenu.x && clamped.rawY === activeMenu.y
+			? clamped.x
+			: activeMenu?.x;
+	const menuTop =
+		activeMenu && clamped && clamped.rawX === activeMenu.x && clamped.rawY === activeMenu.y
+			? clamped.y
+			: activeMenu?.y;
 	return (
 		<>
 			{menuPresence.mounted &&
 				activeMenu &&
 				createPortal(
-					menuPresence.exiting ? (
-						<div
-							className="tier-2-glass tier-2-menu session-menu-exiting"
-							aria-hidden="true"
-							style={{ left: activeMenu.x, top: activeMenu.y }}
-						>
-							{management.managing ? (
-								<div className="menu-row danger">
-									<Trash2 size={16} aria-hidden="true" />
-									<span>删除</span>
-								</div>
-							) : (
-								<>
-									<div className="menu-row">
-										<Pencil size={16} aria-hidden="true" />
-										<span>重命名</span>
-									</div>
-									<div className="menu-row">
-										<ListChecks size={16} aria-hidden="true" />
-										<span>管理</span>
-									</div>
-									<hr className="menu-sep" />
-									<div className="menu-row danger">
-										<Trash2 size={16} aria-hidden="true" />
-										<span>删除</span>
-									</div>
-								</>
-							)}
-						</div>
-					) : (
-						<div
-							className="tier-2-glass tier-2-menu session-menu"
-							ref={menuRef}
-							role="menu"
-							aria-label={management.managing ? "批量会话操作" : `会话 ${activeMenu.title}`}
-							style={{ left: activeMenu.x, top: activeMenu.y }}
-							onKeyDown={(event) => {
-								if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-								if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
-									const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-									if (!items.length) return;
-									event.preventDefault();
-									const current = items.indexOf(document.activeElement as HTMLElement);
-									const delta = event.shiftKey ? -1 : 1;
-									const index =
-										current < 0
-											? event.shiftKey
-												? items.length - 1
-												: 0
-											: (current + delta + items.length) % items.length;
-									items[index]?.focus();
-									return;
-								}
-								if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-								event.preventDefault();
-								const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-								const current = items.indexOf(document.activeElement as HTMLElement);
-								const index =
-									event.key === "Home"
-										? 0
-										: event.key === "End"
-											? items.length - 1
-											: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-								items[index]?.focus();
-							}}
-						>
-							{management.managing ? (
+					<div
+						className={`tier-2-glass tier-2-menu session-menu-surface${menuPresence.exiting ? "" : " session-menu"}`}
+						ref={menuRef}
+						role="menu"
+						aria-label={management.managing ? "批量会话操作" : `会话 ${activeMenu.title}`}
+						aria-hidden={menuPresence.exiting || undefined}
+						data-exiting={menuPresence.exiting ? "true" : undefined}
+						inert={menuPresence.exiting || undefined}
+						style={{ left: menuLeft, top: menuTop }}
+						onKeyDown={
+							menuPresence.exiting
+								? undefined
+								: (event) => {
+										if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+										if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+											const items = [
+												...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+											];
+											if (!items.length) return;
+											event.preventDefault();
+											const current = items.indexOf(document.activeElement as HTMLElement);
+											const delta = event.shiftKey ? -1 : 1;
+											const index =
+												current < 0
+													? event.shiftKey
+														? items.length - 1
+														: 0
+													: (current + delta + items.length) % items.length;
+											items[index]?.focus();
+											return;
+										}
+										if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+										event.preventDefault();
+										const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+										const current = items.indexOf(document.activeElement as HTMLElement);
+										const index =
+											event.key === "Home"
+												? 0
+												: event.key === "End"
+													? items.length - 1
+													: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+										items[index]?.focus();
+									}
+						}
+					>
+						{management.managing ? (
+							<button
+								type="button"
+								role="menuitem"
+								className="menu-row danger"
+								onClick={() => {
+									if (menuPresence.exiting) return;
+									setMenu(null);
+									management.requestDelete();
+								}}
+							>
+								<Trash2 size={16} aria-hidden="true" />
+								<span>删除</span>
+							</button>
+						) : (
+							<>
+								<button
+									type="button"
+									role="menuitem"
+									className="menu-row"
+									onClick={() => {
+										if (menuPresence.exiting) return;
+										void rename(activeMenu.id, activeMenu.title);
+									}}
+								>
+									<Pencil size={16} aria-hidden="true" />
+									<span>重命名</span>
+								</button>
+								<button
+									type="button"
+									role="menuitem"
+									className="menu-row"
+									onClick={() => {
+										if (menuPresence.exiting) return;
+										setMenu(null);
+										management.start(activeMenu.id);
+										actions.focusSession(activeMenu.id);
+									}}
+								>
+									<ListChecks size={16} aria-hidden="true" />
+									<span>管理</span>
+								</button>
+								<hr className="menu-sep" />
 								<button
 									type="button"
 									role="menuitem"
 									className="menu-row danger"
 									onClick={() => {
-										setMenu(null);
-										management.requestDelete();
+										if (menuPresence.exiting) return;
+										remove(activeMenu.id);
 									}}
 								>
 									<Trash2 size={16} aria-hidden="true" />
 									<span>删除</span>
 								</button>
-							) : (
-								<>
-									<button
-										type="button"
-										role="menuitem"
-										className="menu-row"
-										onClick={() => void rename(activeMenu.id, activeMenu.title)}
-									>
-										<Pencil size={16} aria-hidden="true" />
-										<span>重命名</span>
-									</button>
-									<button
-										type="button"
-										role="menuitem"
-										className="menu-row"
-										onClick={() => {
-											setMenu(null);
-											management.start(activeMenu.id);
-											actions.focusSession(activeMenu.id);
-										}}
-									>
-										<ListChecks size={16} aria-hidden="true" />
-										<span>管理</span>
-									</button>
-									<hr className="menu-sep" />
-									<button
-										type="button"
-										role="menuitem"
-										className="menu-row danger"
-										onClick={() => remove(activeMenu.id)}
-									>
-										<Trash2 size={16} aria-hidden="true" />
-										<span>删除</span>
-									</button>
-								</>
-							)}
-						</div>
-					),
+							</>
+						)}
+					</div>,
 					document.body,
 				)}
 			{actions.renaming && (

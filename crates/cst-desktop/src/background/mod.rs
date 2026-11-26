@@ -313,7 +313,9 @@ pub fn render_frosted_surface(
     let is_elevated_card = spec.specular > 0.0;
     let is_light_tint = spec.tint_rgb[0] > 0.5;
     let opacity = spec.opacity.clamp(0.0, 1.0);
-    let shadow_factor = opacity * opacity * opacity;
+    // Container opacity already scales elevated card children by `opacity`, so scaling
+    // shadow alpha by `opacity^2` yields the exact `opacity^3` ramp (`ADR-008`).
+    let shadow_factor = opacity * opacity;
     let mut shadow_contact: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_110F
     } else {
@@ -406,6 +408,8 @@ pub fn render_frosted_surface(
 
     let _ = (spec, transparency_enabled, scale_factor);
     let mut bg = fallback_bg;
-    bg.a *= opacity;
+    if !is_elevated_card {
+        bg.a *= opacity;
+    }
     container.bg(bg)
 }

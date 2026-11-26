@@ -864,6 +864,7 @@ export function Sidebar({
 												managing={management.managing}
 												selected={management.selection?.has(session.id) ?? false}
 												disabled={management.busy}
+												inactive={!recentOpen || inactive}
 												preview={preview}
 												showMoreButton
 												menuOpen={actions.menu?.id === session.id}

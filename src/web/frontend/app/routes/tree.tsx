@@ -644,77 +644,72 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 					insetY={1}
 				/>
 			</ul>
-			{choicePresence.mounted &&
-				(choicePresence.exiting ? (
-					<div className="summary-scrim-exiting tier-3-scrim" aria-hidden="true">
-						<div className="summary-dialog-exiting tier-3-dialog">
-							<div className="summary-dialog-head">
-								<h2>选择</h2>
-								<span className="btn-icon sm-28" aria-hidden="true">
-									<X size={16} aria-hidden="true" />
-								</span>
-							</div>
-							<div className="summary-dialog-options">
-								{[
-									{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
-									{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
-									{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
-								].map((option, index) => (
-									<div
-										key={option.mode}
-										className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
-									>
-										<option.icon size={16} aria-hidden="true" />
-										<span>{option.label}</span>
-									</div>
-								))}
-							</div>
+			{choicePresence.mounted && (
+				<div
+					className="summary-layer"
+					data-exiting={choicePresence.exiting ? "true" : undefined}
+					inert={choicePresence.exiting || undefined}
+					aria-hidden={choicePresence.exiting || undefined}
+				>
+					<div
+						className={
+							choicePresence.exiting
+								? "summary-backdrop tier-3-scrim"
+								: "summary-scrim summary-backdrop tier-3-scrim"
+						}
+						role="none"
+						onMouseDown={choicePresence.exiting ? undefined : () => setChoice("")}
+					/>
+					<div
+						ref={choiceDialogRef}
+						tabIndex={choicePresence.exiting ? undefined : -1}
+						className="summary-dialog tier-3-dialog"
+						role="dialog"
+						aria-modal="true"
+						aria-label="选择"
+						onMouseDown={(event) => event.stopPropagation()}
+					>
+						<div className="summary-dialog-head">
+							<h2>选择</h2>
+							<button
+								type="button"
+								className="btn-icon sm-28"
+								aria-label="关闭"
+								onClick={() => {
+									if (!choicePresence.exiting) setChoice("");
+								}}
+							>
+								<X size={16} aria-hidden="true" />
+							</button>
 						</div>
-					</div>
-				) : (
-					<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
-						<div
-							ref={choiceDialogRef}
-							tabIndex={-1}
-							className="summary-dialog tier-3-dialog"
-							role="dialog"
-							aria-modal="true"
-							aria-label="选择"
-							onMouseDown={(event) => event.stopPropagation()}
-						>
-							<div className="summary-dialog-head">
-								<h2>选择</h2>
+						<div className="summary-dialog-options">
+							{[
+								{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
+								{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
+								{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
+							].map((option, index) => (
 								<button
 									type="button"
-									className="btn-icon sm-28"
-									aria-label="关闭"
-									onClick={() => setChoice("")}
+									key={option.mode}
+									className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									onFocus={() => {
+										if (!choicePresence.exiting) setChoiceIndex(index);
+									}}
+									onMouseEnter={() => {
+										if (!choicePresence.exiting) setChoiceIndex(index);
+									}}
+									onClick={() => {
+										if (!choicePresence.exiting) void choose(option.mode);
+									}}
 								>
-									<X size={16} aria-hidden="true" />
+									<option.icon size={16} aria-hidden="true" />
+									<span>{option.label}</span>
 								</button>
-							</div>
-							<div className="summary-dialog-options">
-								{[
-									{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
-									{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
-									{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
-								].map((option, index) => (
-									<button
-										type="button"
-										key={option.mode}
-										className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
-										onFocus={() => setChoiceIndex(index)}
-										onMouseEnter={() => setChoiceIndex(index)}
-										onClick={() => void choose(option.mode)}
-									>
-										<option.icon size={16} aria-hidden="true" />
-										<span>{option.label}</span>
-									</button>
-								))}
-							</div>
+							))}
 						</div>
 					</div>
-				))}
+				</div>
+			)}
 			{toast && (
 				<Notification
 					key={toast}

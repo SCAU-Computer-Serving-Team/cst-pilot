@@ -178,7 +178,8 @@ pub mod motion {
     }
 
     /// Applies single-signal interruptible modal motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
-    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` shadow ramp.
+    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp
+    /// (`p^2` shadow alpha × container `opacity(p)`).
     pub fn apply_modal_motion<E: Styled>(el: E, progress: f32, shadows: Vec<BoxShadow>) -> E {
         let p = progress.clamp(0.0, 1.0);
         let dy = (6.0 * (1.0 - p)).round();
@@ -186,12 +187,12 @@ pub mod motion {
         if shadows.is_empty() {
             el
         } else {
-            el.shadow(scale_shadows(shadows, p * p * p))
+            el.shadow(scale_shadows(shadows, p * p))
         }
     }
 
     /// Applies single-signal interruptible popover motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
-    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` shadow ramp.
+    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp.
     pub fn apply_popover_motion<E: Styled>(
         el: E,
         progress: f32,
@@ -204,7 +205,7 @@ pub mod motion {
         if shadows.is_empty() {
             el
         } else {
-            el.shadow(scale_shadows(shadows, p * p * p))
+            el.shadow(scale_shadows(shadows, p * p))
         }
     }
 

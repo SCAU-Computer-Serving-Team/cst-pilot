@@ -653,6 +653,7 @@ impl MessageListView {
         self.copy_tracker = CopyFeedbackTracker::default();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
+        self.live_elapsed_timer_task = None;
         self.grouped_turn_cache = None;
         self.prepared_session_cache = None;
         self.attachment_cache.clear();
@@ -3138,10 +3139,12 @@ impl Render for MessageListView {
 
         let snap = self.client.snapshot();
         let Some(ref sid) = self.session_id.clone() else {
+            self.live_elapsed_timer_task = None;
             return div().size_full().into_any_element();
         };
 
         let Some(session) = snap.loaded_sessions.get(sid).cloned() else {
+            self.live_elapsed_timer_task = None;
             self.grouped_turn_cache = None;
             self.prepared_session_cache = None;
             // Session data was not ready immediately; animate once it finishes loading.
@@ -3277,12 +3280,28 @@ impl Render for MessageListView {
         let live_turn_idx = active_prepared_turn_index(turns, session.running);
         if live_turn_idx.is_some() {
             if self.live_elapsed_timer_task.is_none() {
+                let win_handle = window.window_handle();
                 self.live_elapsed_timer_task = Some(cx.spawn(async move |weak, cx| {
                     loop {
                         cx.background_executor().timer(Duration::from_secs(1)).await;
                         let keep_going = weak
-                            .update(cx, |_, cx| {
-                                cx.notify();
+                            .update(cx, |this, cx| {
+                                if this.session_id.is_none() {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                }
+                                let active = win_handle
+                                    .update(cx, |_, window, _| {
+                                        let vp = window.viewport_size();
+                                        window.is_window_active()
+                                            && window.is_visible()
+                                            && f32::from(vp.width) > 1.0
+                                            && f32::from(vp.height) > 1.0
+                                    })
+                                    .unwrap_or(false);
+                                if active {
+                                    cx.notify();
+                                }
                                 true
                             })
                             .unwrap_or(false);
@@ -3651,13 +3670,10 @@ impl MessageListView {
             ConversationPart::Text(txt) => {
                 let stream_key = format!("proc:{turn_key}:{seg_key}:{}:{part_idx}", tp.entry_key);
                 let md_entity = self.markdown_store.sync_entry(&stream_key, txt, cx);
-                super::markdown_view::render_assistant_markdown_with_copy_notice(
+                super::markdown_view::render_assistant_markdown_inert(
                     &md_entity,
-                    false,
-                    true,
                     palette,
                     markdown_style.clone(),
-                    None,
                 )
                 .into_any_element()
             }

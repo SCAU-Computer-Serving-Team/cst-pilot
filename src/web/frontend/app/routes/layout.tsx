@@ -41,11 +41,12 @@ function useMediaQuery(query: string) {
 }
 
 /** 通道待机全屏遮罩 + 居中 384px 卡片（对齐 cst-pilot-web.pen `sYHwZ` / `WO6NQ`）。 */
-function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> | void }) {
+function ChannelStandbyOverlay({ exiting, onRefresh }: { exiting: boolean; onRefresh: () => Promise<void> | void }) {
 	const cardRef = useRef<HTMLDivElement>(null);
 	const actionRef = useRef<HTMLButtonElement>(null);
 	const [checking, setChecking] = useState(false);
 	useEffect(() => {
+		if (exiting) return;
 		const previous = document.activeElement;
 		actionRef.current?.focus({ preventScroll: true });
 		// 原生顶层 <dialog> 在同一提交中关闭时可能竞争焦点，下一任务兜底确保待机主按钮持焦。
@@ -90,9 +91,9 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 				if (document.activeElement !== previous) window.setTimeout(restore, 0);
 			}
 		};
-	}, []);
+	}, [exiting]);
 	async function handleRefresh() {
-		if (checking) return;
+		if (checking || exiting) return;
 		setChecking(true);
 		try {
 			await onRefresh();
@@ -101,7 +102,16 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 		}
 	}
 	return (
-		<div className="standby-scrim tier-3-scrim">
+		<div
+			className="standby-layer"
+			data-exiting={exiting ? "true" : undefined}
+			inert={exiting || undefined}
+			aria-hidden={exiting || undefined}
+		>
+			<div
+				className={exiting ? "standby-backdrop tier-3-scrim" : "standby-scrim standby-backdrop tier-3-scrim"}
+				aria-hidden="true"
+			/>
 			<div
 				ref={cardRef}
 				className="standby-card tier-3-dialog"
@@ -109,7 +119,7 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 				aria-modal="true"
 				aria-labelledby="channel-standby-title"
 				aria-describedby="channel-standby-desc"
-				tabIndex={-1}
+				tabIndex={exiting ? undefined : -1}
 			>
 				<div className="dialog-title-row dialog-title-row--info">
 					<Globe size={16} aria-hidden="true" />
@@ -121,7 +131,7 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 						ref={actionRef}
 						type="button"
 						className="tier-1-btn-primary"
-						disabled={checking}
+						disabled={checking || exiting}
 						onClick={() => void handleRefresh()}
 					>
 						{checking ? "正在检查…" : "重新检查"}
@@ -767,23 +777,9 @@ function WorkspaceShell({
 							onDismiss={() => setPaletteMode(null)}
 						/>
 					)}
-					{standbyPresence.mounted &&
-						(standbyPresence.exiting ? (
-							<div className="standby-scrim-exiting tier-3-scrim" aria-hidden="true">
-								<div className="standby-card-exiting tier-3-dialog">
-									<div className="dialog-title-row dialog-title-row--info">
-										<Globe size={16} aria-hidden="true" />
-										<h2>软件端正在使用中</h2>
-									</div>
-									<p>Web 界面处于待机状态，草稿已保留。从软件端打开 Web 后可继续操作。</p>
-									<div className="standby-actions">
-										<div className="tier-1-btn-primary">重新检查</div>
-									</div>
-								</div>
-							</div>
-						) : (
-							<ChannelStandbyOverlay onRefresh={() => sessionsState.refresh()} />
-						))}
+					{standbyPresence.mounted && (
+						<ChannelStandbyOverlay exiting={standbyPresence.exiting} onRefresh={() => sessionsState.refresh()} />
+					)}
 				</NotificationRegion>
 			</WorkspaceShellProvider>
 		</AccountProvider>

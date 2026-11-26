@@ -7,41 +7,45 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * 轻量退场状态原语：关闭时保留最后快照播放 150ms 无交互退场动画，
- * 中途重新打开立即取消定时器并无缝衔接；减少动态下 0ms 瞬退。
+ * 轻量退场状态原语：关闭首帧即保持同一节点挂载并切入 150ms 无交互退场，
+ * 中途重新打开立即取消定时器并反向衔接；开启减少动态时立即卸载。
  */
 export function usePresenceExit<T>(value: T | null | undefined, durationMs = EXIT_DURATION_MS) {
 	const open = value !== null && value !== undefined && value !== false;
 	const [snapshot, setSnapshot] = useState<T | null>(open ? (value as T) : null);
-	const [exiting, setExiting] = useState(false);
 
 	if (open && value !== snapshot) {
 		setSnapshot(value as T);
 	}
-	if (open && exiting) {
-		setExiting(false);
-	}
+
+	const canAnimateExit = durationMs > 0 && !prefersReducedMotion();
+	const exiting = !open && snapshot !== null && canAnimateExit;
 
 	useEffect(() => {
-		if (open) return;
-		if (snapshot === null) return;
-		if (durationMs <= 0 || prefersReducedMotion()) {
-			setExiting(false);
+		if (open || snapshot === null) return;
+		if (!canAnimateExit) {
 			setSnapshot(null);
 			return;
 		}
-		setExiting(true);
-		const timer = window.setTimeout(() => {
-			setExiting(false);
+		const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const finish = () => {
 			setSnapshot(null);
-		}, durationMs);
-		return () => window.clearTimeout(timer);
-	}, [open, snapshot, durationMs]);
+		};
+		const onMotionChange = () => {
+			if (media.matches) finish();
+		};
+		media.addEventListener("change", onMotionChange);
+		const timer = window.setTimeout(finish, durationMs);
+		return () => {
+			window.clearTimeout(timer);
+			media.removeEventListener("change", onMotionChange);
+		};
+	}, [open, snapshot, durationMs, canAnimateExit]);
 
 	return {
 		open,
-		exiting: !open && exiting && snapshot !== null,
-		mounted: open || (exiting && snapshot !== null),
+		exiting,
+		mounted: open || exiting,
 		value: open ? (value as T) : snapshot,
 	};
 }

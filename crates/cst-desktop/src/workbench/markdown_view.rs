@@ -997,6 +997,119 @@ pub fn render_assistant_markdown_with_copy_notice(
         )
 }
 
+/// Visual-only inert Markdown snapshot used during `150ms` process-drawer collapse exit:
+/// non-selectable, no link click handler, no copy buttons, and no accessibility/test hooks.
+pub fn render_assistant_markdown_inert(
+    state: &Entity<TextViewState>,
+    palette: &DesktopPalette,
+    style: TextViewStyle,
+) -> impl IntoElement {
+    let palette_copy = *palette;
+    let extensions = MarkdownExtensions::default()
+        .parser_revision(1)
+        .block_parser(|node, parse_cx| {
+            let markdown_ast::Node::Code(code) = node else {
+                return None;
+            };
+            let span_start = node
+                .position()
+                .map(|p| parse_cx.offset() + p.start.offset)
+                .unwrap_or(0);
+            let lang = code
+                .lang
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| SharedString::from(s.to_owned()));
+            let code_text = SharedString::from(code.value.clone());
+            let raw_md = parse_cx
+                .node_source(node)
+                .map(str::to_owned)
+                .unwrap_or_else(|| wrap_fenced_code_markdown(&code.value));
+            Some(
+                MarkdownNode::new(
+                    "cst-code-block",
+                    FencedCodeData {
+                        code: code_text.clone(),
+                        lang,
+                        span_start,
+                    },
+                )
+                .text(code_text)
+                .markdown(raw_md),
+            )
+        })
+        .block_renderer("cst-code-block", move |node, _window, cx| {
+            let Some(data) = node.data::<FencedCodeData>() else {
+                return div().into_any_element();
+            };
+            let mono_family = cx
+                .try_global::<crate::theme::DesktopThemeGlobal>()
+                .map(|g| g.mono_font_family.clone())
+                .unwrap_or_else(|| SharedString::from(typography::MONO_FONT_FAMILY));
+            let header = div()
+                .w_full()
+                .h(px(36.0))
+                .pl(px(14.0))
+                .pr(space::SM)
+                .border_b_1()
+                .border_color(palette_copy.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::SM)
+                .child(
+                    div()
+                        .font_family(mono_family.clone())
+                        .text_size(scale::CAPTION.font_size)
+                        .line_height(scale::CAPTION.line_height)
+                        .text_color(palette_copy.text_muted)
+                        .child(data.lang.clone().unwrap_or_default()),
+                );
+            div()
+                .w_full()
+                .min_w_0()
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette_copy.border_subtle)
+                .bg(palette_copy.bg_surface)
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(header)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .px(px(14.0))
+                        .py(space::MD)
+                        .font_family(mono_family)
+                        .text_size(scale::CAPTION.font_size)
+                        .line_height(scale::CAPTION.line_height)
+                        .text_color(palette_copy.text_secondary)
+                        .child(data.code.clone()),
+                )
+                .into_any_element()
+        });
+
+    div()
+        .text_size(scale::BODY.font_size)
+        .line_height(px(26.0))
+        .font_weight(scale::BODY.weight)
+        .w_full()
+        .min_w_0()
+        .text_color(palette.text_primary)
+        .child(
+            TextView::new(state)
+                .style(style)
+                .selectable(false)
+                .scrollable(false)
+                .motion(TextViewMotion::default())
+                .markdown_extensions(extensions)
+                .shared_code_block_highlighter(shared_markdown_code_highlighter(palette.mode)),
+        )
+}
+
 /// Renders a `12px/16px` (`$font-caption`) monospace or plain block (`$bg-surface`) with a
 /// persistent top-right `32×32px` copy button (`copy` -> 1.6s `check` swap) and right padding
 /// so text is never occluded.

@@ -54,10 +54,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-brand-actions { display: inline-flex; align-items: center; gap: var(--space-detail); flex-shrink: 0; }
 .sidebar-icon, .sidebar-new { transition: opacity var(--fast) var(--ease-out), background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out), transform var(--duration-press) var(--ease-out); }
 .app-layout.sidebar-collapsed .sidebar-icon { opacity: 0; }
-.sidebar-session { display: flex; align-items: center; gap: var(--space-inline); height: 36px; padding: 0 var(--space-component); min-width: 0; flex: 1; border-radius: var(--radius-control); font-size: var(--font-body); line-height: var(--line-body); color: var(--text-secondary); background-color: transparent; cursor: default; transition: background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out); }
-.sidebar-session:hover { color: var(--text-primary); }
-.sidebar-session.selected { color: var(--text-primary); font-weight: 500; }
-.sidebar-session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-session-visual { position: relative; display: flex; align-items: center; gap: var(--space-inline); height: 36px; padding: 0 var(--space-component); min-width: 0; flex: 1; border-radius: var(--radius-control); font-size: var(--font-body); line-height: var(--line-body); color: var(--text-secondary); background-color: transparent; pointer-events: none; transition: background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out); }
+.sidebar-session-visual.selected, .sidebar-session-visual[data-selected] { color: var(--text-primary); font-weight: 500; }
+.sidebar-session-visual[data-disabled] { opacity: 0.45; }
+.sidebar-session-visual span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-empty { padding: var(--space-inline) var(--space-component); margin: 0; color: var(--text-secondary); font-size: var(--font-ui); line-height: var(--line-ui); }
 /* 侧栏底栏 fMdf9：高 36px，整行统一作为账号与设置菜单触发器 */
 .sidebar-footer { flex-shrink: 0; padding-top: var(--space-inline); border-top: 1px solid var(--border-subtle); }
@@ -74,28 +74,27 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .chat-more-popover { width: 200px; max-width: calc(100vw - 24px); }
 .sidebar-account-identity { display: flex; min-width: 0; padding: var(--space-inline); }
 .sidebar-account-identity strong { color: var(--text-primary); font-size: var(--font-ui); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: var(--line-ui); }
-.session-menu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: var(--space-micro); width: 200px; max-width: calc(100vw - 24px); animation: menu-enter var(--duration-open) var(--ease-out) both; }
-.session-menu-exiting { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: var(--space-micro); width: 200px; max-width: calc(100vw - 24px); pointer-events: none; animation: menu-exit var(--fast) var(--ease-out) both; }
+.session-menu-surface { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: var(--space-micro); width: 200px; max-width: calc(100vw - 24px); opacity: 1; transform: translateY(0) scale(1); transition: opacity var(--duration-open) var(--ease-out), transform var(--duration-open) var(--ease-out); }
+@starting-style { .session-menu-surface { opacity: 0; transform: translateY(-4px) scale(var(--scale-press)); } }
+.session-menu-surface[data-exiting="true"] { opacity: 0; transform: translateY(-4px) scale(var(--scale-press)); pointer-events: none; transition: opacity var(--fast) var(--ease-out), transform var(--fast) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .session-menu-surface, .session-menu-surface[data-exiting="true"] { transition: none; } }
 .session-management-toolbar { min-width: 0; margin: 0; border: 0; display: inline-flex; align-items: center; gap: var(--space-tight); height: var(--h-compact); padding: 0; color: var(--text-secondary); font-size: var(--font-caption); opacity: 0; pointer-events: none; transition: opacity var(--fast) var(--ease-out); line-height: var(--line-caption); }
 .sidebar[data-managing] .session-management-toolbar { opacity: 1; pointer-events: auto; }
 .session-management-toolbar button { appearance: none; flex: none; white-space: nowrap; height: var(--h-inline); padding: 0 var(--space-tight); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-secondary); font-size: var(--font-caption); line-height: var(--line-caption); cursor: default; transition: color var(--fast) var(--ease-out), background-color var(--fast) var(--ease-out); }
 .session-management-toolbar button:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
 .session-management-toolbar .session-management-delete { color: var(--status-danger); }
 .session-management-toolbar .session-management-delete:hover:not(:disabled) { color: var(--status-danger); background: var(--status-danger-tint); }
-.session-management-toolbar button:disabled, .sidebar-session-select[data-disabled] { opacity: 0.45; cursor: not-allowed; }
+.session-management-toolbar button:disabled, .sidebar-session-select[data-disabled] { cursor: not-allowed; }
 .sidebar-selection-text { display: block; transform: translateX(0); transition: transform var(--normal) var(--ease-out); }
-.sidebar-session .sidebar-selection-text { width: 100%; }
+.sidebar-session-visual .sidebar-selection-text { width: 100%; }
 .sidebar[data-managing] .sidebar-selection-text { transform: translateX(calc(var(--icon-body) + var(--space-inline))); }
-.sidebar[data-managing] .sidebar-session .sidebar-selection-text { width: calc(100% - var(--icon-body) - var(--space-inline)); }
-.sidebar-session { position: relative; }
+.sidebar[data-managing] .sidebar-session-visual .sidebar-selection-text { width: calc(100% - var(--icon-body) - var(--space-inline)); }
 .sidebar-session-select { cursor: default; }
-.sidebar-session-select[data-selected] { color: var(--text-primary); font-weight: 500; }
 .session-check-control { display: inline-flex; align-items: center; justify-content: center; position: absolute; left: var(--space-component); top: calc(50% - 8px); width: 16px; height: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--bg-workspace); opacity: 0; pointer-events: none; transition: opacity var(--normal) var(--ease-out), background-color var(--check-box) var(--ease-out), border-color var(--check-box) var(--ease-out); }
 .sidebar[data-managing] .session-check-control { opacity: 1; }
 .session-check-control svg { color: var(--text-on-accent); opacity: 0; }
-.sidebar-session-select[data-selected] .session-check-control { border-color: var(--accent-solid); background: var(--accent-solid); }
-.sidebar-session-select[data-selected] .session-check-control svg { opacity: 1; }
-.sidebar-session-select:has(input:focus-visible) .session-check-control { border-color: var(--border-focus); box-shadow: var(--focus-shadow); }
+.sidebar-session-visual[data-selected] .session-check-control { border-color: var(--accent-solid); background: var(--accent-solid); }
+.sidebar-session-visual[data-selected] .session-check-control svg { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .sidebar-selection-text, .session-check-control, .session-management-toolbar { transition: none; } }
 .session-delete-copy { flex: 1; min-width: 0; }
 .session-delete-copy p { margin: 0; font-size: var(--font-ui); line-height: var(--line-ui); overflow-wrap: anywhere; }
@@ -591,11 +590,16 @@ a.context-more[target="_blank"] { cursor: pointer; }
 .back-to-bottom:is(:active, [data-pressed="true"]):not([data-hiding]) { transform: translateX(-50%) scale(var(--scale-press)); }
 .back-to-bottom[data-hiding] { opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .back-to-bottom { transition: none; scroll-behavior: auto; } }
-/* 分支总结 · 确认：Tier 3 遮罩 + 424px 卡片（对齐 bliwY `c1wymw` / Tier 3 模态材质） */
-.summary-scrim { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: var(--space-section); animation: standby-scrim-in var(--normal) var(--ease-out) both; }
-.summary-dialog { display: flex; flex-direction: column; gap: var(--space-component); width: min(424px, 100%); padding: 20px; color: var(--text-primary); animation: standby-card-in var(--normal) var(--ease-out) both; }
-.summary-scrim-exiting { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: var(--space-section); pointer-events: none; animation: standby-scrim-out var(--fast) var(--ease-out) both; }
-.summary-dialog-exiting { display: flex; flex-direction: column; gap: var(--space-component); width: min(424px, 100%); padding: 20px; color: var(--text-primary); pointer-events: none; animation: standby-card-out var(--fast) var(--ease-out) both; }
+/* 分支总结 · 确认：Tier 3 遮罩 + 424px 卡片（对齐 bliwY `c1wymw` / Tier 3 模态材质；兄弟分层独立淡入淡出） */
+.summary-layer { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: var(--space-section); }
+.summary-layer[data-exiting="true"] { pointer-events: none; }
+.summary-backdrop { position: absolute; inset: 0; opacity: 1; transition: opacity var(--normal) var(--ease-out); }
+@starting-style { .summary-backdrop { opacity: 0; } }
+.summary-layer[data-exiting="true"] .summary-backdrop { opacity: 0; transition: opacity var(--fast) var(--ease-out); }
+.summary-dialog { position: relative; z-index: 1; display: flex; flex-direction: column; gap: var(--space-component); width: min(424px, 100%); padding: 20px; color: var(--text-primary); opacity: 1; transform: scale(1); transition: opacity var(--normal) var(--ease-out), transform var(--normal) var(--ease-out); }
+@starting-style { .summary-dialog { opacity: 0; transform: scale(var(--scale-modal)); } }
+.summary-layer[data-exiting="true"] .summary-dialog { opacity: 0; transform: scale(var(--scale-modal)); pointer-events: none; transition: opacity var(--fast) var(--ease-out), transform var(--fast) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) { .summary-backdrop, .summary-dialog, .summary-layer[data-exiting="true"] .summary-backdrop, .summary-layer[data-exiting="true"] .summary-dialog { transition: none; } }
 .summary-dialog-head { display: flex; align-items: center; gap: var(--space-inline); }
 .summary-dialog-head h2 { margin: 0; color: var(--text-primary); font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); }
 .summary-dialog-head button { margin-left: auto; color: var(--text-secondary); }

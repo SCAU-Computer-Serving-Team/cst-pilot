@@ -392,28 +392,35 @@ impl LoginView {
                             break;
                         }
                     }
-                    let _ = weak.update(cx, |this, cx| {
-                        if generation != this.qr_generation {
-                            return;
-                        }
-                        let window_active = this
-                            .window
-                            .update(cx, |_, window, _| {
-                                let vp = window.viewport_size();
-                                window.is_window_active()
-                                    && window.is_visible()
-                                    && f32::from(vp.width) > 1.0
-                                    && f32::from(vp.height) > 1.0
-                            })
-                            .unwrap_or(false);
-                        let rem_sec = this.qr_expires_at_ms.saturating_sub(now_epoch_ms()) / 1000;
-                        if window_active && last_remaining_sec != Some(rem_sec) {
-                            last_remaining_sec = Some(rem_sec);
-                            cx.notify();
-                        }
-                    });
+                    let window_active = weak
+                        .update(cx, |this, cx| {
+                            if generation != this.qr_generation {
+                                return false;
+                            }
+                            let active = this
+                                .window
+                                .update(cx, |_, window, _| {
+                                    let vp = window.viewport_size();
+                                    window.is_window_active()
+                                        && window.is_visible()
+                                        && f32::from(vp.width) > 1.0
+                                        && f32::from(vp.height) > 1.0
+                                })
+                                .unwrap_or(false);
+                            let rem_sec = this
+                                .qr_expires_at_ms
+                                .saturating_sub(now_epoch_ms())
+                                .div_ceil(1000);
+                            if active && last_remaining_sec != Some(rem_sec) {
+                                last_remaining_sec = Some(rem_sec);
+                                cx.notify();
+                            }
+                            active
+                        })
+                        .unwrap_or(false);
+                    let poll_interval_ms = if window_active { 250 } else { 1500 };
                     cx.background_executor()
-                        .timer(Duration::from_millis(250))
+                        .timer(Duration::from_millis(poll_interval_ms))
                         .await;
                 }
             }
@@ -930,19 +937,7 @@ impl Render for LoginView {
                 );
                 let provider_interactive = self.provider_dropdown_open;
                 provider_menu_opt = (provider_interactive || provider_menu_p > 0.001).then(|| {
-                    let mut list = div()
-                        .id(if provider_interactive {
-                            "login-apikey-provider-menu-scroll"
-                        } else {
-                            "login-apikey-provider-menu-scroll-exit"
-                        })
-                        .track_scroll(&self.provider_scroll)
-                        .w_full()
-                        .max_h(px(220.0))
-                        .overflow_y_scroll()
-                        .flex()
-                        .flex_col()
-                        .gap(space::MICRO);
+                    let mut list_rows = div().w_full().flex().flex_col().gap(space::MICRO);
 
                     for (idx, (pid, pname)) in key_providers.iter().enumerate() {
                         let active = self.provider_index == idx;
@@ -988,8 +983,27 @@ impl Render for LoginView {
                         } else {
                             base_item.into_any_element()
                         };
-                        list = list.child(item);
+                        list_rows = list_rows.child(item);
                     }
+
+                    let list = if provider_interactive {
+                        div()
+                            .id("login-apikey-provider-menu-scroll")
+                            .track_scroll(&self.provider_scroll)
+                            .w_full()
+                            .max_h(px(220.0))
+                            .overflow_y_scroll()
+                            .child(list_rows)
+                            .into_any_element()
+                    } else {
+                        let offset_y = self.provider_scroll.offset().y;
+                        div()
+                            .w_full()
+                            .max_h(px(220.0))
+                            .overflow_hidden()
+                            .child(div().relative().top(offset_y).child(list_rows))
+                            .into_any_element()
+                    };
 
                     let popover_panel = render_frosted_surface(
                         if provider_interactive {

@@ -2137,6 +2137,7 @@ impl BranchTreeView {
     fn render_summary_mode_modal_inert(
         scrim_progress: f32,
         in_custom: bool,
+        custom_prompt_text: &str,
         sel: usize,
         palette: &DesktopPalette,
         transparency_enabled: bool,
@@ -2145,6 +2146,99 @@ impl BranchTreeView {
         let modal_body = if in_custom {
             render_frosted_surface(
                 "branch-custom-prompt-modal-exit",
+                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .w(px(440.0))
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("自定义提示词总结")),
+                    )
+                    .child(
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .w_full()
+                    .h(px(96.0))
+                    .px(space::MD)
+                    .py(px(10.0))
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(if custom_prompt_text.is_empty() {
+                        palette.text_muted
+                    } else {
+                        palette.text_primary
+                    })
+                    .overflow_hidden()
+                    .child(SharedString::from(custom_prompt_text.to_owned())),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("取消")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.accent_solid)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("执行总结")),
+                    ),
+            )
+            .into_any_element()
+        } else {
+            render_frosted_surface(
+                "branch-summary-modal-c1wymw-exit",
                 FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
                 palette.bg_modal,
                 transparency_enabled,
@@ -2159,46 +2253,29 @@ impl BranchTreeView {
             .flex_col()
             .gap(space::MD)
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child(cjk_inline_label("自定义提示词总结")),
-            )
-            .child(
                 div()
-                    .w_full()
-                    .h(px(84.0))
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(palette.bg_workspace),
-            )
-            .into_any_element()
-        } else {
-            render_frosted_surface(
-                "branch-summary-modal-c1wymw-exit",
-                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
-                palette.bg_modal,
-                transparency_enabled,
-                scale_factor,
-            )
-            .w(px(360.0))
-            .p(space::MD)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .flex()
-            .flex_col()
-            .gap(space::XS)
-            .child(
-                div()
-                    .h(height::CONTROL)
-                    .px(space::MD)
+                    .relative()
                     .flex()
                     .items_center()
+                    .justify_between()
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .pl(space::MD)
                             .text_color(palette.text_primary)
                             .child(cjk_inline_label("选择")),
+                    )
+                    .child(
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
                     ),
             )
             .child(
@@ -3071,9 +3148,11 @@ impl Render for BranchTreeView {
                 cx,
             ))
         } else if summary_scrim_p > 0.001 {
+            let custom_text = self.custom_prompt_input.read(cx).value().to_string();
             Some(Self::render_summary_mode_modal_inert(
                 summary_scrim_p,
                 self.last_summary_custom_mode,
+                &custom_text,
                 self.summary_selected_idx,
                 &palette,
                 transparency_enabled,

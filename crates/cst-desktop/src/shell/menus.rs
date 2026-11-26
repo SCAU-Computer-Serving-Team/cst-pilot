@@ -61,10 +61,11 @@ impl AppShell {
                 "sidebar-session-context-menu-exit"
             })
             .opacity(0.01 + 0.99 * progress)
-            .mt(px(-4.0 * (1.0 - progress)))
+            .relative()
+            .top(px((-4.0 * (1.0 - progress)).round()))
             .shadow(motion::scale_shadows(
                 palette.flat_popover_shadows(),
-                progress.powi(3),
+                progress * progress,
             ))
             .w(px(200.0))
             .p(space::XS)
@@ -541,12 +542,13 @@ impl AppShell {
                             "account-popover-menu-exit"
                         })
                         .opacity(0.01 + 0.99 * progress)
-                        .mt(px(
-                            if self.sidebar_collapsed { -6.0 } else { 6.0 } * (1.0 - progress),
-                        ))
+                        .relative()
+                        .top(px((if self.sidebar_collapsed { -6.0 } else { 6.0 }
+                            * (1.0 - progress))
+                            .round()))
                         .shadow(motion::scale_shadows(
                             palette.flat_popover_shadows(),
-                            progress * progress * progress,
+                            progress * progress,
                         ))
                         .w(px(224.0))
                         .p(space::XS)
@@ -869,10 +871,11 @@ impl AppShell {
                 "topbar-session-more-menu-exit"
             })
             .opacity(0.01 + 0.99 * progress)
-            .mt(px(-6.0 * (1.0 - progress)))
+            .relative()
+            .top(px((-6.0 * (1.0 - progress)).round()))
             .shadow(motion::scale_shadows(
                 palette.flat_popover_shadows(),
-                progress.powi(3),
+                progress * progress,
             ))
             .w(px(200.0))
             .p(space::XS)
