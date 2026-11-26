@@ -112,6 +112,102 @@ pub async fn handle_settings_route(
         }
     }
 
+    if pathname == "/api/settings/web-search" {
+        if *method == Method::GET || *method == Method::HEAD {
+            let masked = state
+                .web_search_settings
+                .read_masked()
+                .await
+                .map_err(ApiError::from)?;
+            return Ok(Some(json_response(StatusCode::OK, &masked, method)));
+        }
+        if *method == Method::PATCH {
+            let body = read_json_body(raw_body, cst_kit::tools::web_access::MAX_CONFIG_BYTES)?;
+            let patch_body = body.clone();
+            let result = state
+                .write_once(
+                    caller,
+                    method.as_str(),
+                    pathname,
+                    &body,
+                    Some(headers),
+                    || async move {
+                        let saved = state
+                            .web_search_settings
+                            .patch(patch_body)
+                            .await
+                            .map_err(ApiError::from)?;
+                        state.pool.global_events.publish(
+                            "state",
+                            &json!({
+                                "type": "settings_changed",
+                                "scope": "web-search",
+                            }),
+                        );
+                        Ok(saved)
+                    },
+                )
+                .await?;
+            return Ok(Some(json_response(StatusCode::OK, &result, method)));
+        }
+    }
+
+    if pathname == "/api/settings/web-search/test" && *method == Method::POST {
+        let body = read_json_body(raw_body, cst_kit::tools::web_access::MAX_CONFIG_BYTES)?;
+        let provider = match body.get("provider").and_then(Value::as_str) {
+            Some("deepseek") => cst_kit::tools::web_access::WebSearchProvider::Deepseek,
+            Some("exa") => cst_kit::tools::web_access::WebSearchProvider::Exa,
+            None => {
+                state
+                    .web_search_settings
+                    .read_config()
+                    .await
+                    .map_err(ApiError::from)?
+                    .default_provider
+            }
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "不支持的联网检索提供商",
+                ));
+            }
+        };
+        let candidate_key = match body.get("apiKey") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "apiKey 必须为字符串",
+                ));
+            }
+        };
+        let candidate_base = match body.get("baseUrl") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "baseUrl 必须为字符串",
+                ));
+            }
+        };
+        let probed = state
+            .web_search_settings
+            .probe(
+                provider,
+                candidate_key,
+                candidate_base,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .map_err(ApiError::from)?;
+        return Ok(Some(json_response(StatusCode::OK, &probed, method)));
+    }
+
     if pathname == "/api/ui-hints" && (*method == Method::GET || *method == Method::HEAD) {
         let hints = state.ui_hints.read().await;
         return Ok(Some(json_response(

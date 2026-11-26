@@ -26,7 +26,9 @@ use crate::project_files::ProjectFileCache;
 use crate::runbook::{RunbookOpenerFn, default_runbook_opener};
 use crate::session::receipts::{ReceiptError, compute_request_signature};
 use crate::session::{DEFAULT_MAX_IDLE_SESSIONS, SessionPool};
-use crate::settings::{DesktopSettingsStore, UiHintsStore, WebSettingsStore};
+use crate::settings::{
+    DesktopSettingsStore, UiHintsStore, WebSearchSettingsStore, WebSettingsStore,
+};
 
 pub const DEFAULT_SERVER_PORT: u16 = 52831;
 
@@ -81,6 +83,7 @@ pub struct ServerState {
     pub locks: KeyedLocks,
     pub pool: SessionPool,
     pub web_settings: WebSettingsStore,
+    pub web_search_settings: WebSearchSettingsStore,
     pub desktop_settings: DesktopSettingsStore,
     pub ui_hints: UiHintsStore,
     pub oauth_flows: OAuthFlowManager,
@@ -131,6 +134,7 @@ impl ServerState {
         let locks = KeyedLocks::new();
         let pool = SessionPool::with_max_idle(host.clone(), cwd, config.max_idle_sessions);
         let web_settings = WebSettingsStore::new(&config_dir);
+        let web_search_settings = WebSearchSettingsStore::new(&config_dir);
         let desktop_settings = DesktopSettingsStore::new(&config_dir);
         let ui_hints = UiHintsStore::new(&kit_root);
 
@@ -217,6 +221,7 @@ impl ServerState {
             locks,
             pool,
             web_settings,
+            web_search_settings,
             desktop_settings,
             ui_hints,
             oauth_flows,

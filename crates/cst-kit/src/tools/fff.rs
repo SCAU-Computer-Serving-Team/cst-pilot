@@ -811,6 +811,7 @@ struct GrepShared {
     remaining_bytes: AtomicUsize,
     skipped: AtomicUsize,
     skipped_large_files: AtomicUsize,
+    read_budget_exceeded: AtomicBool,
     truncated: AtomicBool,
     stop: AtomicBool,
     error: Mutex<Option<String>>,
@@ -959,10 +960,11 @@ impl GrepWorker {
                 return WalkState::Continue;
             }
             None => {
-                if !self.shared.stop.swap(true, AtomicOrdering::Relaxed) {
-                    self.shared
-                        .set_error("内容检索超过 256 MiB，请缩小检索范围。");
-                }
+                self.shared
+                    .read_budget_exceeded
+                    .store(true, AtomicOrdering::Relaxed);
+                self.shared.truncated.store(true, AtomicOrdering::Relaxed);
+                self.shared.stop.store(true, AtomicOrdering::Relaxed);
                 return WalkState::Quit;
             }
         }
@@ -1143,6 +1145,7 @@ fn run_grep(
         remaining_bytes: AtomicUsize::new(MAX_TOTAL_READ_BYTES),
         skipped: AtomicUsize::new(0),
         skipped_large_files: AtomicUsize::new(0),
+        read_budget_exceeded: AtomicBool::new(false),
         truncated: AtomicBool::new(false),
         stop: AtomicBool::new(false),
         error: Mutex::new(None),
@@ -1180,20 +1183,29 @@ fn run_grep(
 
     let skipped = shared.skipped.load(AtomicOrdering::Relaxed);
     let skipped_large = shared.skipped_large_files.load(AtomicOrdering::Relaxed);
+    let budget_exceeded = shared.read_budget_exceeded.load(AtomicOrdering::Relaxed);
     let mut obj = Map::new();
     obj.insert(
         "truncated".into(),
-        Value::Bool(shared.truncated.load(AtomicOrdering::Relaxed)),
+        Value::Bool(shared.truncated.load(AtomicOrdering::Relaxed) || budget_exceeded),
     );
     obj.insert("skipped".into(), json!(skipped));
+    let mut notices = Vec::new();
+    if budget_exceeded {
+        obj.insert("degraded".into(), Value::Bool(true));
+        notices.push(
+            "内容检索已达到 256 MiB 读取上限，已保留此前命中的结果；请缩小 path 或补充 include 过滤。"
+                .to_owned(),
+        );
+    }
     if skipped_large > 0 {
         obj.insert("skippedLargeFiles".into(), json!(skipped_large));
-        obj.insert(
-            "notice".into(),
-            Value::String(format!(
-                "已跳过 {skipped_large} 个超过 10 MiB 的大文件，可通过 read 分段查看指定文件。"
-            )),
-        );
+        notices.push(format!(
+            "已跳过 {skipped_large} 个超过 10 MiB 的大文件，可通过 read 分段查看指定文件。"
+        ));
+    }
+    if !notices.is_empty() {
+        obj.insert("notice".into(), Value::String(notices.join(" ")));
     }
     Ok(bounded_output(
         obj,

@@ -453,7 +453,9 @@ fn finish(snapshot: Snapshot, scope: Scope) -> Result<Value, String> {
     let object = value.as_object_mut().ok_or("BitLocker 状态编码失败。")?;
     object.insert("scope".into(), json!(scope));
     object.insert("source".into(), json!("Win32_EncryptableVolume"));
-    object.insert("degraded".into(), json!(degraded));
+    if degraded {
+        object.insert("degraded".into(), json!(true));
+    }
     object.insert("notice".into(), json!("状态来自 Win32_EncryptableVolume 本次枚举与实时方法查询；未出现的卷不代表未加密。encryptionPercentage 单位为 %；完成以 conversionStatus=0 为准。autoUnlockEnabled 仅适用于数据卷，autoUnlockKeysStored 仅适用于当前运行的系统卷。字段 null 须结合 collectionErrors 判断；请求结果与当前卷状态分别记录。"));
     // Defense at the native boundary: provider messages may contain arbitrary text.
     let safe = redact(&value.to_string());

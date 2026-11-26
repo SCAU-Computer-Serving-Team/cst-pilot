@@ -1,5 +1,6 @@
 use super::win_native::{
-    CIMV2, Control, DiagnosticSource, add_errors, collect, number, rounded, selected,
+    CIMV2, Control, DiagnosticSource, add_errors, collect, format_dmtf_date, number, rounded,
+    selected,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -80,41 +81,129 @@ pub fn run(
             )
         }
         DriverScope::Core => {
-            let net = collect(
-                source,
+            let mut succeeded = 0usize;
+            let net = match source.query(
                 CIMV2,
                 "SELECT Name,NetConnectionID,PhysicalAdapter,NetConnectionStatus FROM Win32_NetworkAdapter WHERE NetConnectionID IS NOT NULL",
                 control,
-                &mut errors,
-            );
-            let pnp = collect(
-                source,
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
+            let pnp = match source.query(
                 CIMV2,
                 "SELECT Name,PNPClass,Status,ConfigManagerErrorCode FROM Win32_PnPEntity WHERE PNPClass='Bluetooth' OR PNPClass='MEDIA'",
                 control,
-                &mut errors,
-            );
-            let display = collect(
-                source,
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
+            let display = match source.query(
                 CIMV2,
                 "SELECT Name,AdapterCompatibility,DriverVersion,Status,PNPDeviceID FROM Win32_VideoController",
                 control,
-                &mut errors,
-            );
-            let services = collect(
-                source,
-                CIMV2,
-                "SELECT Name,State FROM Win32_Service WHERE Name='bthserv' OR Name='Audiosrv'",
-                control,
-                &mut errors,
-            );
-            let drivers = collect(
-                source,
-                CIMV2,
-                "SELECT DeviceClass,DeviceName,DriverVersion,DriverDate,DriverProviderName FROM Win32_PnPSignedDriver WHERE DeviceClass='NET' OR DeviceClass='BLUETOOTH' OR DeviceClass='MEDIA' OR DeviceClass='DISPLAY'",
-                control,
-                &mut errors,
-            );
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
+            let services = match source.native_services_by_name(&["bthserv", "Audiosrv"], control) {
+                Ok(Some(rows)) => {
+                    succeeded += 1;
+                    rows
+                }
+                Ok(None) => match source.query(
+                    CIMV2,
+                    "SELECT Name,State FROM Win32_Service WHERE Name='bthserv' OR Name='Audiosrv'",
+                    control,
+                ) {
+                    Ok(rows) => {
+                        succeeded += 1;
+                        rows
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        Vec::new()
+                    }
+                },
+                Err(e) => {
+                    errors.push(e);
+                    match source.query(
+                        CIMV2,
+                        "SELECT Name,State FROM Win32_Service WHERE Name='bthserv' OR Name='Audiosrv'",
+                        control,
+                    ) {
+                        Ok(rows) => {
+                            succeeded += 1;
+                            rows
+                        }
+                        Err(e2) => {
+                            errors.push(e2);
+                            Vec::new()
+                        }
+                    }
+                }
+            };
+            let drivers = match source
+                .native_signed_drivers(&["NET", "BLUETOOTH", "MEDIA", "DISPLAY"], control)
+            {
+                Ok(Some(rows)) => {
+                    succeeded += 1;
+                    rows
+                }
+                Ok(None) => match source.query(
+                    CIMV2,
+                    "SELECT DeviceClass,DeviceName,DriverVersion,DriverDate,DriverProviderName FROM Win32_PnPSignedDriver WHERE DeviceClass='NET' OR DeviceClass='BLUETOOTH' OR DeviceClass='MEDIA' OR DeviceClass='DISPLAY'",
+                    control,
+                ) {
+                    Ok(rows) => {
+                        succeeded += 1;
+                        rows
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        Vec::new()
+                    }
+                },
+                Err(e) => {
+                    errors.push(e);
+                    match source.query(
+                        CIMV2,
+                        "SELECT DeviceClass,DeviceName,DriverVersion,DriverDate,DriverProviderName FROM Win32_PnPSignedDriver WHERE DeviceClass='NET' OR DeviceClass='BLUETOOTH' OR DeviceClass='MEDIA' OR DeviceClass='DISPLAY'",
+                        control,
+                    ) {
+                        Ok(rows) => {
+                            succeeded += 1;
+                            rows
+                        }
+                        Err(e2) => {
+                            errors.push(e2);
+                            Vec::new()
+                        }
+                    }
+                }
+            };
+            control.check()?;
+            if succeeded == 0 && !errors.is_empty() {
+                return Err("设备与驱动信息采集全部失败，请检查 WMI 服务状态。".into());
+            }
             let group = |class: &str| {
                 pnp.iter()
                     .filter(|r| {
@@ -136,7 +225,7 @@ pub fn run(
             };
             (
                 "core",
-                json!({"net":net.iter().filter(|r|r["NetConnectionID"].as_str().is_some_and(|s|!s.is_empty())).map(|r|{let mut v=selected(r,&[("name","Name"),("connId","NetConnectionID"),("connStatus","NetConnectionStatus")]);v["physical"]=json!(r["PhysicalAdapter"].as_bool().unwrap_or(false));v}).collect::<Vec<_>>(),"bluetooth":group("Bluetooth"),"audio":group("MEDIA"),"display":display.iter().map(|r|{let mut v=selected(r,&[("name","Name"),("vendor","AdapterCompatibility"),("driver","DriverVersion"),("status","Status")]);v["bus"]=json!(r["PNPDeviceID"].as_str().and_then(|s|s.split('\\').next()));v}).collect::<Vec<_>>(),"services":services.iter().map(|r|selected(r,&[("name","Name"),("state","State")])).collect::<Vec<_>>(),"drivers":drivers.iter().map(|r|selected(r,&[("class","DeviceClass"),("device","DeviceName"),("version","DriverVersion"),("date","DriverDate"),("provider","DriverProviderName")])).collect::<Vec<_>>(),"notice":"网卡含虚拟适配器；蓝牙、音频、显示设备及四类签名驱动均来自原生 WMI。空结果需结合 collectionErrors 判读。"}),
+                json!({"net":net.iter().filter(|r|r["NetConnectionID"].as_str().is_some_and(|s|!s.is_empty())).map(|r|{let mut v=selected(r,&[("name","Name"),("connId","NetConnectionID"),("connStatus","NetConnectionStatus")]);v["physical"]=json!(r["PhysicalAdapter"].as_bool().unwrap_or(false));v}).collect::<Vec<_>>(),"bluetooth":group("Bluetooth"),"audio":group("MEDIA"),"display":display.iter().map(|r|{let mut v=selected(r,&[("name","Name"),("vendor","AdapterCompatibility"),("driver","DriverVersion"),("status","Status")]);v["bus"]=json!(r["PNPDeviceID"].as_str().and_then(|s|s.split('\\').next()));v}).collect::<Vec<_>>(),"services":services.iter().map(|r|selected(r,&[("name","Name"),("state","State")])).collect::<Vec<_>>(),"drivers":drivers.iter().map(|r|{let mut v=selected(r,&[("class","DeviceClass"),("device","DeviceName"),("version","DriverVersion"),("date","DriverDate"),("provider","DriverProviderName")]);if let Some(raw)=v["date"].as_str() && let Some(fmt)=format_dmtf_date(raw){v["date"]=json!(fmt);}v}).collect::<Vec<_>>(),"notice":"网卡含虚拟适配器；蓝牙、音频、显示设备、关键服务及四类签名驱动均来自原生 Windows 接口。空结果需结合 collectionErrors 判读。"}),
             )
         }
         DriverScope::External => {
@@ -162,7 +251,7 @@ pub fn run(
     };
     control.check()?;
     let sources = match scope {
-        "core" => 5,
+        "core" => usize::MAX,
         "external" => 2,
         _ => 1,
     };

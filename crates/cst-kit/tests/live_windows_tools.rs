@@ -25,7 +25,7 @@ use cst_kit::diagnostics::walk::WalkLimits;
 use cst_kit::diagnostics::win_native::{Control, WindowsSource};
 use cst_kit::diagnostics::{disk, driver, eventlog, ls, startup, sys};
 use cst_kit::runbook::RunbookStore;
-use cst_kit::runbook::model::{DeliverInput, Level, PlanInput, RunbookInput, RunbookItem, Shell};
+use cst_kit::runbook::model::{DeliverInput, Level, PlanInput, RunbookItem, Shell};
 use cst_kit::tools::fff::{SearchInput, search as fff_search};
 use cst_kit::tools::path_guard::{GuardedReadOperations, PathGuard};
 use cst_kit::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
@@ -481,6 +481,32 @@ fn live_sys_all_five_scopes() {
         s["counterErrors"],
         s.get("collectionErrors")
     );
+
+    // 6. Native micro-timings (single NtQuerySystemInformation snapshot + warm PDH sys(io))
+    let t_snap = Instant::now();
+    let snap = cst_kit::diagnostics::win_native::DiagnosticSource::processes(&source, &control(10))
+        .expect("native processes snapshot");
+    let snap_ms = t_snap.elapsed().as_millis();
+    let t_io_warm = Instant::now();
+    let io_warm = sys::run_with(
+        &source,
+        &hw,
+        sys::SysInput {
+            scope: sys::SysScope::Io,
+            top: Some(10),
+        },
+        &control(30),
+    )
+    .expect("sys(io) warm");
+    let io_warm_ms = t_io_warm.elapsed().as_millis();
+    println!(
+        "[live] native_proc_snapshot: {}ms ({} procs); sys(io) warm: {}ms (intervalSec={}, disks={})",
+        snap_ms,
+        snap.len(),
+        io_warm_ms,
+        io_warm["io"]["intervalSec"],
+        io_warm["io"]["disks"].as_array().map_or(0, Vec::len),
+    );
 }
 
 #[test]
@@ -540,6 +566,7 @@ fn live_startup_and_driver_all_scopes() {
         Some(prob["problem"]["devices"].as_array().unwrap().len() as u64)
     );
 
+    let t_core = Instant::now();
     let core = driver::run(
         &source,
         driver::DriverInput {
@@ -549,8 +576,16 @@ fn live_startup_and_driver_all_scopes() {
         &control(30),
     )
     .expect("driver(core)");
+    let core_ms = t_core.elapsed().as_millis();
     assert!(!core["core"]["display"].as_array().unwrap().is_empty());
     assert!(!core["core"]["drivers"].as_array().unwrap().is_empty());
+    println!(
+        "[live] driver(core): {}ms, drivers={}, services={:?}, first_date={:?}",
+        core_ms,
+        core["core"]["drivers"].as_array().unwrap().len(),
+        core["core"]["services"],
+        core["core"]["drivers"][0]["date"]
+    );
 
     let ext = driver::run(
         &source,
@@ -639,12 +674,32 @@ fn live_eventlog_all_scopes_and_detail() {
         assert_eq!(sum, r["total"].as_u64().unwrap(), "sum(counts.n) != total");
     }
     println!(
-        "[live] eventlog(recent, 24h): {}ms, total={}, shown={}, unreadable={}, scanTruncated={:?}",
+        "[live] eventlog(recent, 24h): {}ms, total={}, shown={}, unreadable={}, scanTruncated={:?}, firstTime={:?}",
         recent_ms,
         r["total"],
         events.len(),
         r["unreadable"],
-        r.get("scanTruncated")
+        r.get("scanTruncated"),
+        events.first().and_then(|e| e["time"].as_str())
+    );
+    let t_720 = Instant::now();
+    let q720 = eventlog::run(
+        &source,
+        eventlog::EventInput {
+            scope: eventlog::EventScope::Query,
+            log_name: Some("System".into()),
+            hours: Some(720),
+            top: Some(20),
+            ..Default::default()
+        },
+        &control(30),
+    )
+    .expect("eventlog(query System 720h)");
+    println!(
+        "[live] eventlog(query System 720h): {}ms, total={}, firstTime={:?}",
+        t_720.elapsed().as_millis(),
+        q720["query"]["total"],
+        q720["query"]["events"][0]["time"].as_str()
     );
 
     // Other built-in scopes
@@ -983,6 +1038,7 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
                 date: Some("2026-11-23".into()),
                 runbook_id: None,
                 base_version: None,
+                export_txt: false,
                 items: vec![RunbookItem {
                     summary: "刷新 DNS 缓存".into(),
                     command: "ipconfig /flushdns".into(),
@@ -993,9 +1049,10 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
             cancel.clone(),
         )
         .await
-        .expect("command_plan v1");
+        .expect("runbook plan v1");
     let rb_id = v1["runbook"]["runbookId"].as_str().unwrap().to_owned();
     assert_eq!(v1["runbook"]["version"].as_u64(), Some(1));
+    assert_eq!(v1["runbook"]["sequence"].as_u64(), Some(1));
 
     let delivered = store
         .deliver(
@@ -1006,7 +1063,7 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
             cancel.clone(),
         )
         .await
-        .expect("runbook_deliver v1");
+        .expect("runbook export v1");
     let file_path = PathBuf::from(delivered["runbook"]["file"].as_str().unwrap());
     let raw = fs::read(&file_path).unwrap();
     assert!(raw.starts_with(&[0xEF, 0xBB, 0xBF]), "missing UTF-8 BOM");
@@ -1014,12 +1071,14 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
     assert!(text.contains("\r\n"), "missing CRLF");
 
     let standalone = store
-        .write(
-            RunbookInput {
+        .plan(
+            PlanInput {
                 title: "即时清理".into(),
                 level: Level::Safe,
-                sequence: None,
                 date: Some("2026-11-23".into()),
+                runbook_id: None,
+                base_version: None,
+                export_txt: true,
                 items: vec![RunbookItem {
                     summary: "查看当前目录".into(),
                     command: "Get-Location".into(),
@@ -1030,14 +1089,14 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
             cancel.clone(),
         )
         .await
-        .expect("runbook standalone");
-    assert_eq!(standalone["runbook"]["sequence"].as_u64(), Some(1));
+        .expect("runbook exportTxt=true");
+    assert_eq!(standalone["runbook"]["sequence"].as_u64(), Some(2));
     assert_eq!(
         standalone["runbook"]["commands"][0]["shell"].as_str(),
-        Some("PowerShell")
+        Some("powershell")
     );
     println!(
-        "[live] runbook: plan/deliver/standalone OK ({})",
+        "[live] runbook: plan/export/exportTxt OK ({})",
         file_path.display()
     );
 
@@ -1108,9 +1167,8 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
         .search(
             WebSearchInput {
                 query: Some("Win11 诊断".into()),
-                claim: None,
-                queries: vec![],
                 num_results: Some(3),
+                ..Default::default()
             },
             cancel.clone(),
         )
@@ -1131,25 +1189,25 @@ async fn live_runbook_bitlocker_status_and_web_contract() {
         .fetch(
             FetchInput {
                 url: Some("https://example.com/page".into()),
-                urls: vec![],
+                ..Default::default()
             },
             cancel.clone(),
         )
         .await
-        .expect("fetch_content");
+        .expect("web_fetch");
     assert!(
-        fetched["urls"][0]["preview"]
+        fetched["urls"][0]["content"]
             .as_str()
             .unwrap()
             .contains("Hello Web")
     );
     assert!(
-        !fetched["urls"][0]["preview"]
+        !fetched["urls"][0]["content"]
             .as_str()
             .unwrap()
             .contains("evil")
     );
-    assert_eq!(OPEN_TOOL_NAMES.len(), 17);
+    assert_eq!(OPEN_TOOL_NAMES.len(), 14);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

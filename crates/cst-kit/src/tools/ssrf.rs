@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pi_agent::BoxFuture;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
+const DEFAULT_TIMEOUT_MS: u64 = 15_000;
 
 #[derive(Clone, Default)]
 pub struct NetworkPolicy {
@@ -104,12 +105,13 @@ impl DnsResolver for SystemDns {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct HttpRequest {
     pub url: String,
     pub body: Option<serde_json::Value>,
     /// Secret values are never included in Debug or transport errors.
     pub headers: Vec<(String, String)>,
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -168,6 +170,24 @@ impl SafeHttpClient {
         Ok((url, addresses))
     }
 
+    pub async fn preflight_url(
+        &self,
+        value: &str,
+        cancel: CancellationToken,
+        timeout_ms: u64,
+    ) -> Result<Url, String> {
+        let clamped = timeout_ms.clamp(1_000, 180_000);
+        let timeout = Duration::from_millis(clamped);
+        let (url, _) = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err("请求已取消。".into()),
+            res = tokio::time::timeout(timeout, self.resolve_target(value)) => {
+                res.map_err(|_| format!("域名解析超过 {} 秒。", clamped.div_ceil(1000)))??
+            }
+        };
+        Ok(url)
+    }
+
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
         let mut target = request.url.clone();
         for hop in 0..=MAX_REDIRECTS {
@@ -203,12 +223,17 @@ impl HttpTransport for SafeHttpClient {
         request: HttpRequest,
         cancel: CancellationToken,
     ) -> BoxFuture<'_, Result<HttpResponse, String>> {
+        let timeout_ms = request
+            .timeout_ms
+            .unwrap_or(DEFAULT_TIMEOUT_MS)
+            .clamp(1_000, 180_000);
+        let timeout = Duration::from_millis(timeout_ms);
         Box::pin(async move {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => Err("请求已取消。".into()),
-                result = tokio::time::timeout(Duration::from_secs(10), self.send(request)) => {
-                    result.map_err(|_| "网络请求超过 10 秒。".to_owned())?
+                result = tokio::time::timeout(timeout, self.send(request)) => {
+                    result.map_err(|_| format!("网络请求超过 {} 秒。", timeout_ms.div_ceil(1000)))?
                 }
             }
         })
@@ -230,6 +255,68 @@ trait Connector: Send + Sync {
     ) -> BoxFuture<'_, Result<HttpHop, String>>;
 }
 
+fn is_binary_content_type(content_type: Option<&str>) -> bool {
+    let Some(raw) = content_type else {
+        return false;
+    };
+    let mime = raw
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if mime.is_empty() {
+        return false;
+    }
+    mime.starts_with("image/")
+        || mime.starts_with("audio/")
+        || mime.starts_with("video/")
+        || mime.starts_with("font/")
+        || matches!(
+            mime.as_str(),
+            "application/pdf"
+                | "application/octet-stream"
+                | "application/zip"
+                | "application/gzip"
+                | "application/x-gzip"
+                | "application/x-tar"
+                | "application/x-rar-compressed"
+                | "application/x-7z-compressed"
+                | "application/wasm"
+                | "application/msword"
+        )
+        || mime.starts_with("application/vnd.")
+}
+
+pub(crate) fn decode_http_body(bytes: &[u8], content_type: Option<&str>) -> Result<String, String> {
+    if is_binary_content_type(content_type) {
+        return Err("网络响应为不支持的二进制或媒体类型。".into());
+    }
+    if memchr::memchr(0, bytes).is_some() {
+        return Err("网络正文不是支持的文本编码。".into());
+    }
+    let prefer_gb = content_type.is_some_and(|ct| {
+        let lower = ct.to_ascii_lowercase();
+        lower.contains("charset=gb")
+            || lower.contains("charset=\"gb")
+            || lower.contains("gbk")
+            || lower.contains("gb2312")
+            || lower.contains("gb18030")
+    });
+    if !prefer_gb && let Ok(text) = std::str::from_utf8(bytes) {
+        return Ok(text.to_owned());
+    }
+    if let Some(decoded) =
+        encoding_rs::GB18030.decode_without_bom_handling_and_without_replacement(bytes)
+    {
+        return Ok(decoded.into_owned());
+    }
+    if prefer_gb && let Ok(text) = std::str::from_utf8(bytes) {
+        return Ok(text.to_owned());
+    }
+    Err("网络正文不是 UTF-8 或 GB18030 文本。".into())
+}
+
 struct ReqwestConnector;
 impl Connector for ReqwestConnector {
     fn send(
@@ -238,13 +325,19 @@ impl Connector for ReqwestConnector {
         addresses: Vec<SocketAddr>,
         request: HttpRequest,
     ) -> BoxFuture<'_, Result<HttpHop, String>> {
+        let timeout = Duration::from_millis(
+            request
+                .timeout_ms
+                .unwrap_or(DEFAULT_TIMEOUT_MS)
+                .clamp(1_000, 180_000),
+        );
         Box::pin(async move {
             let host = url.host_str().ok_or("URL 缺少主机。")?;
             // Pin validated DNS results; proxies and automatic redirects stay disabled.
             let client = reqwest::Client::builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(10))
+                .timeout(timeout)
                 .resolve_to_addrs(host, &addresses)
                 .build()
                 .map_err(|_| "网络客户端初始化失败。")?;
@@ -266,12 +359,20 @@ impl Connector for ReqwestConnector {
                 .get(reqwest::header::LOCATION)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned);
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
                 return Ok(HttpHop {
                     status,
                     location,
                     body: String::new(),
                 });
+            }
+            if (200..300).contains(&status) && is_binary_content_type(content_type.as_deref()) {
+                return Err("网络响应为不支持的二进制或媒体类型。".into());
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| "网络正文读取失败。")?
@@ -281,7 +382,7 @@ impl Connector for ReqwestConnector {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            let body = String::from_utf8(bytes).map_err(|_| "网络正文不是 UTF-8 文本。")?;
+            let body = decode_http_body(&bytes, content_type.as_deref())?;
             Ok(HttpHop {
                 status,
                 location,
@@ -295,9 +396,24 @@ impl Connector for ReqwestConnector {
 #[path = "ssrf_tests.rs"]
 mod tests;
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SsrfConfig {
-    #[serde(default)]
+pub struct SsrfConfig {
+    #[serde(default = "default_allow_ranges")]
     pub allow_ranges: Vec<String>,
+    #[serde(default)]
+    pub trust_env_proxy: bool,
+}
+
+fn default_allow_ranges() -> Vec<String> {
+    vec!["198.18.0.0/15".to_owned()]
+}
+
+impl Default for SsrfConfig {
+    fn default() -> Self {
+        Self {
+            allow_ranges: default_allow_ranges(),
+            trust_env_proxy: false,
+        }
+    }
 }

@@ -180,19 +180,36 @@ function Runbook({
 }) {
 	const [busy, setBusy] = useState(false);
 	const [feedback, setFeedback] = useState("");
+	const [exportedDelivery, setExportedDelivery] = useState<typeof view.delivery>(undefined);
 	const key = useRef<string | undefined>(undefined);
+	const delivery = view.delivery ?? exportedDelivery;
+	const wasUiExported = !view.delivery && !!exportedDelivery;
 	async function open() {
 		if (!sessionId || !entryId || busy) return;
 		setBusy(true);
 		setFeedback("");
 		key.current ??= crypto.randomUUID();
 		try {
-			await apiJson(sessionPath(sessionId, "/runbook/open"), {
-				method: "POST",
-				body: { entryId, toolCallId: callId },
-				idempotencyKey: key.current,
-			});
-			setFeedback("已发起打开");
+			if (wasUiExported) {
+				const res = await apiJson<{ launched?: boolean; launchError?: string }>(
+					sessionPath(sessionId, "/runbook/export"),
+					{
+						method: "POST",
+						body: { entryId, toolCallId: callId, open: true },
+						idempotencyKey: key.current,
+					},
+				);
+				setFeedback(
+					res.launched === false ? (res.launchError ?? "无法启动记事本，请手动打开清单。") : "已发起打开",
+				);
+			} else {
+				await apiJson(sessionPath(sessionId, "/runbook/open"), {
+					method: "POST",
+					body: { entryId, toolCallId: callId },
+					idempotencyKey: key.current,
+				});
+				setFeedback("已发起打开");
+			}
 			key.current = undefined;
 		} catch (cause) {
 			if (cause instanceof ApiFailure && cause.code?.startsWith("runbook_")) {
@@ -206,6 +223,47 @@ function Runbook({
 			setBusy(false);
 		}
 	}
+	async function exportAndOpen() {
+		if (!sessionId || !entryId || busy) return;
+		setBusy(true);
+		setFeedback("");
+		key.current ??= crypto.randomUUID();
+		try {
+			const res = await apiJson<{
+				launched?: boolean;
+				launchError?: string;
+				runbook?: { file?: string; name?: string; levelLabel?: string; items?: number };
+			}>(sessionPath(sessionId, "/runbook/export"), {
+				method: "POST",
+				body: { entryId, toolCallId: callId, open: true },
+				idempotencyKey: key.current,
+			});
+			if (res.runbook?.file) {
+				setExportedDelivery({
+					file: res.runbook.file,
+					name: res.runbook.name ?? "命令清单.txt",
+					level: res.runbook.levelLabel ?? view.level,
+					count: typeof res.runbook.items === "number" ? res.runbook.items : view.count,
+				});
+			}
+			setFeedback(
+				res.launched === false
+					? (res.launchError ?? "已导出清单，但无法启动记事本，可点击上方文件名重试。")
+					: "已导出并打开",
+			);
+			key.current = undefined;
+		} catch (cause) {
+			if (cause instanceof ApiFailure && cause.code?.startsWith("runbook_")) {
+				key.current = undefined;
+				setFeedback(cause.message);
+			} else if (cause instanceof ApiFailure && (cause.status === 400 || cause.status === 409)) {
+				key.current = undefined;
+				setFeedback("导出失败，请核对方案版本后重试。");
+			} else setFeedback("导出结果未确认。请检查清单目录或重试。");
+		} finally {
+			setBusy(false);
+		}
+	}
 	return (
 		<>
 			{view.status === "success" && (
@@ -213,7 +271,7 @@ function Runbook({
 					<span>{view.level}</span>
 					<span>{view.count ?? "未知"} 条命令</span>
 					{view.version !== null && <span>版本 {view.version}</span>}
-					<span>{view.planned ? "待核对，尚未导出文本" : "手动执行"}</span>
+					<span>{view.planned && !delivery ? "待核对，尚未导出文本" : "手动执行"}</span>
 				</div>
 			)}
 			<ol className="special-tool-commands">
@@ -233,7 +291,7 @@ function Runbook({
 					</li>
 				))}
 			</ol>
-			{view.delivery && (
+			{delivery ? (
 				<div className="special-tool-delivery">
 					<FileText size={14} aria-hidden="true" />
 					<button
@@ -242,13 +300,32 @@ function Runbook({
 						disabled={!sessionId || !entryId || busy}
 						onClick={() => void open()}
 					>
-						<span>{view.delivery.name}</span>
+						<span>{delivery.name}</span>
 						<span>
 							{busy ? "打开中" : "打开"}
 							<ExternalLink size={12} aria-hidden="true" />
 						</span>
 					</button>
 				</div>
+			) : (
+				view.planned &&
+				view.status === "success" && (
+					<div className="special-tool-delivery">
+						<FileText size={14} aria-hidden="true" />
+						<button
+							type="button"
+							className="special-tool-file-link"
+							disabled={!sessionId || !entryId || busy}
+							onClick={() => void exportAndOpen()}
+						>
+							<span>核对无误后导出纯文本清单</span>
+							<span>
+								{busy ? "导出中" : "导出并用记事本打开 TXT"}
+								<ExternalLink size={12} aria-hidden="true" />
+							</span>
+						</button>
+					</div>
+				)
 			)}
 			<output className={feedback ? "special-tool-feedback" : "visually-hidden"}>{feedback}</output>
 		</>

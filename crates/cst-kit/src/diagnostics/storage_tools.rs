@@ -178,6 +178,7 @@ pub fn run_usage_with_filter(
                 filter,
             )?;
             value["degradedFrom"] = serde_json::json!(format!("native-mft: {reason}"));
+            value["degraded"] = serde_json::json!(true);
             Ok(value)
         }
     }

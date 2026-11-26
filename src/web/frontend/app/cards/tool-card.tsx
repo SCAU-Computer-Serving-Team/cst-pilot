@@ -239,9 +239,25 @@ export const ToolCard = memo(function ToolCard({
 		.join(
 			", ",
 		)}${Array.isArray(call.arguments.items) ? `${Object.keys(argumentSummary).length ? ", " : ""}items: ${call.arguments.items.length}` : ""})`;
-	const elapsed =
+	const detailsObj =
+		details && typeof details === "object" && !Array.isArray(details)
+			? (details as Record<string, unknown>)
+			: undefined;
+	const fallbackMs =
+		typeof result?.durationMs === "number"
+			? result.durationMs
+			: typeof detailsObj?.elapsedMs === "number"
+				? detailsObj.elapsedMs
+				: typeof detailsObj?.durationMs === "number"
+					? detailsObj.durationMs
+					: undefined;
+	const elapsedMs =
 		startedAt !== undefined && (endedAt !== undefined || (live && !result))
-			? `${(Math.max(0, (endedAt ?? now) - startedAt) / 1000).toFixed(1)}s`
+			? Math.max(0, (endedAt ?? now) - startedAt)
+			: fallbackMs;
+	const elapsed =
+		elapsedMs !== undefined && Number.isFinite(elapsedMs)
+			? `${(Math.max(0, elapsedMs) / 1000).toFixed(1)}s`
 			: undefined;
 	const heading = (
 		<>

@@ -12,7 +12,10 @@ use crate::routes::{
     ApiError, MaybeOmitted, SseOrBytesBody, bytes_response, json_response, read_json_body,
     sse_response,
 };
-use crate::runbook::{resolve_runbook_file_from_slot, validate_and_open_runbook};
+use crate::runbook::{
+    export_and_maybe_open_runbook, resolve_runbook_file_from_slot, resolve_runbook_plan_from_slot,
+    validate_and_open_runbook,
+};
 use crate::session::attachments::{is_valid_session_id_key, is_valid_sha256_hex};
 use crate::session::events::browser_json_value;
 use crate::session::inbox::{Delivery, QueueEdit};
@@ -303,6 +306,91 @@ pub async fn handle_sessions_route(
             "invalid_request",
             "请求的会话 ID 无效",
         ));
+    }
+
+    if suffix == "runbook/export" && *method == Method::POST {
+        let body = read_json_body(raw_body, 4096)?;
+        let Some(obj) = body.as_object() else {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求须指定命令方案记录",
+            ));
+        };
+        if obj
+            .keys()
+            .any(|k| !matches!(k.as_str(), "entryId" | "toolCallId" | "open"))
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求参数包含不支持的字段",
+            ));
+        }
+        let Some(entry_id) = obj
+            .get("entryId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求须指定命令方案记录",
+            ));
+        };
+        let Some(tool_call_id) = obj
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求须指定命令方案记录",
+            ));
+        };
+        let open = match obj.get("open") {
+            None => true,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "open 参数必须为布尔值",
+                ));
+            }
+        };
+        let id_owned = id.to_owned();
+        let result = state
+            .write_once_for_session(
+                caller,
+                method.as_str(),
+                pathname,
+                &body,
+                headers,
+                id,
+                || async move {
+                    let slot = state
+                        .pool
+                        .open_saved(&id_owned)
+                        .await
+                        .map_err(ApiError::from)?;
+                    let (runbook_id, version) =
+                        resolve_runbook_plan_from_slot(&slot, &entry_id, &tool_call_id)?;
+                    export_and_maybe_open_runbook(
+                        state.kit_root(),
+                        state.artifacts_root(),
+                        runbook_id,
+                        version,
+                        open,
+                        &state.open_runbook,
+                    )
+                    .await
+                    .map_err(ApiError::from)
+                },
+            )
+            .await?;
+        return Ok(Some(json_response(StatusCode::OK, &result, method)));
     }
 
     if suffix == "runbook/open" && *method == Method::POST {

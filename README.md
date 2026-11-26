@@ -53,7 +53,7 @@
 
 支持终端和本机 Web 界面。启动后执行 `/web`，即可在浏览器中聊天、查看历史会话、切换模型和管理授权。后续迭代与发行验证见[待办与议题](doc/TASKS.md)。
 
-具体用法与权限、硬件限制见 [诊断工具规格](doc/diagnostics/SPEC.md) 与 [工具接口](doc/diagnostics/API.md)。
+具体用法与权限、硬件限制见 [工具规格](doc/tools/SPEC.md) 与 [工具接口](doc/tools/API.md)。
 
 ## 开发轨道与目录结构
 

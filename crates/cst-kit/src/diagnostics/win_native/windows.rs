@@ -1,6 +1,6 @@
 use super::{
     Control, DiagnosticSource, EventQuery, EventRead, EventVisitor, LazyEventVisitor, NativeError,
-    NativeHealthRow, ProcessSample, SpaceSnapshot, StartupSnapshot, VolumeSnapshot,
+    NativeHealthRow, NativeOverview, ProcessSample, SpaceSnapshot, StartupSnapshot, VolumeSnapshot,
 };
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -15,6 +15,7 @@ mod events;
 mod process;
 mod registry;
 mod storage;
+mod system;
 
 pub struct WindowsSource;
 pub(super) fn wide(text: &str) -> Vec<u16> {
@@ -193,6 +194,35 @@ impl DiagnosticSource for WindowsSource {
     }
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError> {
         process::snapshot(control)
+    }
+    fn fill_process_paths(&self, pids: &mut [(u32, u64, Option<String>)]) {
+        process::fill_paths(pids);
+    }
+    fn native_overview(&self, control: &Control) -> Result<Option<NativeOverview>, NativeError> {
+        system::overview(control).map(Some)
+    }
+    fn native_process_names(
+        &self,
+        control: &Control,
+    ) -> Result<Option<HashMap<u64, String>>, NativeError> {
+        process::process_names(control).map(Some)
+    }
+    fn native_auto_services(&self, control: &Control) -> Result<Option<Vec<Value>>, NativeError> {
+        system::auto_services(control).map(Some)
+    }
+    fn native_services_by_name(
+        &self,
+        names: &[&str],
+        control: &Control,
+    ) -> Result<Option<Vec<Value>>, NativeError> {
+        system::services_by_name(names, control).map(Some)
+    }
+    fn native_signed_drivers(
+        &self,
+        classes: &[&str],
+        control: &Control,
+    ) -> Result<Option<Vec<Value>>, NativeError> {
+        system::signed_drivers(classes, control).map(Some)
     }
     fn space(&self, drive: Option<&str>, control: &Control) -> Result<SpaceSnapshot, NativeError> {
         storage::space(drive, control)

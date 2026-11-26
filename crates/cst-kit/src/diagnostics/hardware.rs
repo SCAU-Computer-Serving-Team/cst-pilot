@@ -10,6 +10,7 @@ mod pdh;
 pub enum CounterSet {
     Gpu,
     Sensor,
+    DiskIo,
 }
 #[derive(Clone, Debug)]
 pub struct CounterSample {

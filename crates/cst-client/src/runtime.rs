@@ -963,6 +963,21 @@ impl ClientHandle {
         .await
     }
 
+    pub async fn export_session_runbook(
+        &self,
+        session_id: String,
+        entry_id: String,
+        tool_call_id: String,
+        open: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.export_session_runbook(&session_id, &entry_id, &tool_call_id, open)
+                .await
+        })
+        .await
+    }
+
     pub async fn open_session_runbook(
         &self,
         session_id: String,

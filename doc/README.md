@@ -23,7 +23,7 @@
 |---|---|---|
 | [pi-core](pi-core/SPEC.md) | `crates/pi-{ai,agent,session,runtime}` | [SPEC](pi-core/SPEC.md) · [ARCHITECTURE](pi-core/ARCHITECTURE.md) · [API](pi-core/API.md) |
 | [server](server/SPEC.md) | `crates/cst-server`、`pi-web-rust.cmd` | [SPEC](server/SPEC.md) · [ARCHITECTURE](server/ARCHITECTURE.md) · [API](server/API.md) |
-| [diagnostics](diagnostics/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/` | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) · [工具设计评估与测试规范](diagnostics/test/tools-test-spec.md) |
+| [tools](tools/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/` | [SPEC](tools/SPEC.md) · [ARCHITECTURE](tools/ARCHITECTURE.md) · [API](tools/API.md) · [工具评估与测试规范](tools/test/tools-test-spec.md) |
 | [auth](auth/SPEC.md) | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | [telemetry](telemetry/SPEC.md) | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [web](web/SPEC.md) | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) · [路由广度 E2E](web/test/bsk-e2e.md) · [深度状态机 E2E](web/test/bsk-deep-e2e.md) · [UX 量化 E2E](web/test/ux-e2e.md) |
