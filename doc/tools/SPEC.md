@@ -42,9 +42,9 @@
 
 ### fffind 与 ffgrep
 
-- **单次基线与并发边界**：每次检索建立瞬态 `PathGuardSession`，不跨调用缓存。遍历禁用符号链接与目录联接跟随（`follow_links(false)`），工作线程上限 8 线程（预留 2 个逻辑核余量），打开文件后在同一句柄上复核规范路径、硬链接数与文件标识。
-- **路径排序与跨盘过滤**：`fffind` 按相关性排序（精确文件名与前缀高于分散子序列），支持空格多词交集，全为弱匹配时附 `notice`。`path` 通配过滤与 `exclude` 统一按正斜杠路径匹配（不接受 `include` 字段），跨盘符绝对路径与相对路径行为一致。
-- **多编码解码与资源护栏**：`ffgrep` 依次处理 UTF-16 LE/BE BOM、UTF-8 BOM、无 BOM 含 `0x00` 二进制跳过、UTF-8 零拷贝与 GB18030 回退解码。单文件上限 `10 MiB`（超限跳过并记入 `skippedLargeFiles` 与 `notice`），单行上限 `8 KiB`，单次总读取上限 `256 MiB`（达到上限保留已有命中并置 `truncated: true` 与 `degraded: true`），最多遍历 50 万项，超时 30 秒，输出超 `50 KiB` 前受控截断并置 `truncated: true`。
+- **独立契约与路径边界**：两工具采用各自独立入参且 `path` 均必填，不接受 `path` 内嵌通配符，首版在触发 I/O 前拒绝 UNC、网络映射盘与经链接导向的网络路径。关闭宿主 `.gitignore` 与 `.ignore` 过滤，固定跳过 `.git`、重解析目录与云端未驻留占位目录。顶层 `root` 与每条 `matches[].path` 统一输出正斜杠规范绝对路径（全电脑模式 `root: "*"`）。
+- **`fffind` 全电脑双模检索**：`path: "*"` 自动枚举并并发扫描本机可见且可访问的固定盘与可移动盘（按卷去重并抑制介质弹窗，跳过光驱与网络盘记入 `skippedRoots`）。`pattern` 支持完整精确名、通配符与多词模糊匹配，可省略并配合 `kind`、`ext`、`maxDepth`、`modifiedWithinHours`、`minSizeMiB`/`maxSizeMiB` 与 `sortBy` 筛选，取消 50 万条目上限。提权且启用 USN 的本地 NTFS 卷使用对象与名称边分离的内存索引加 USN V2 增量同步（先读 `U0` 再扫 `$MFT` 并重放 `[U0, U1)`，受 `CST_DISABLE_MFT=1` 统一禁用，进程缓存总上限 `384 MiB`，空闲 `180 s` 定时回收）；其余卷走双梯队并行 Win32 `FileIdBothDirectoryInfo` 遍历。仅对可能入榜候选执行搜索专用守卫单句柄核验，敏感拦截不占堆槽且不计入 `skipped`。
+- **`ffgrep` 流式解码与资源护栏**：`pattern` 与 `path` 双必填，目录模式支持 `include`、`exclude` 与 `modifiedWithinHours`（单文件上限 `10 MiB`，超限独立计入 `skippedLargeFiles`），单文件模式解除 `10 MiB` 限制改为 `256 KiB` 持久化解码器流式扫描。依次支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030（不支持无 BOM UTF-16），按解码后 NUL 整文件撤销二进制，单行上限 `8 KiB`（归入 `line_limit`），总读取上限 `256 MiB`，30 秒返回期限内保留已提交高分/命中结果。两工具注入 `elapsedMs` 后按整条 `matches` 原子裁剪 `50 KiB`，并注册 `output_schema` 填充 `structured_content`。
 
 ## 系统诊断工具
 

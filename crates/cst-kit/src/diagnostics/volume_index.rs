@@ -16,6 +16,123 @@ const MAX_CACHED_VOLUMES: usize = 4;
 const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CONCURRENT_MFT_SCANS: usize = 2;
 
+/// Process-wide accounting of bytes currently held by `VolumeIndex` storage snapshots,
+/// shared with `fffind`'s search index manager under the unified 384 MiB process ceiling.
+static STORAGE_SNAPSHOT_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn storage_cache_bytes() -> usize {
+    STORAGE_SNAPSHOT_BYTES.load(Ordering::Relaxed)
+}
+
+/// Process-level memory reservation ledger shared across storage and search caches.
+/// Reservations remain charged until the `MemoryReservation` guard (bound to an `Arc`) drops,
+/// ensuring evicted generations still held by active readers count against the 384 MiB ceiling.
+pub(crate) struct ProcessMemoryLedger {
+    reserved: AtomicUsize,
+    max_process_bytes: usize,
+    max_search_bytes: usize,
+    include_storage_global: bool,
+}
+
+pub(crate) struct MemoryReservation {
+    ledger: Arc<ProcessMemoryLedger>,
+    bytes: usize,
+}
+
+impl Drop for MemoryReservation {
+    fn drop(&mut self) {
+        if self.bytes > 0 {
+            self.ledger.reserved.fetch_sub(self.bytes, Ordering::AcqRel);
+        }
+    }
+}
+
+impl std::fmt::Debug for MemoryReservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryReservation")
+            .field("bytes", &self.bytes)
+            .finish()
+    }
+}
+
+impl ProcessMemoryLedger {
+    pub(crate) fn global() -> Arc<Self> {
+        static GLOBAL: std::sync::OnceLock<Arc<ProcessMemoryLedger>> = std::sync::OnceLock::new();
+        Arc::clone(GLOBAL.get_or_init(|| {
+            Arc::new(Self {
+                reserved: AtomicUsize::new(0),
+                max_process_bytes: 384 * 1024 * 1024,
+                max_search_bytes: 256 * 1024 * 1024,
+                include_storage_global: true,
+            })
+        }))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_isolated(max_process_bytes: usize, max_search_bytes: usize) -> Arc<Self> {
+        Arc::new(Self {
+            reserved: AtomicUsize::new(0),
+            max_process_bytes,
+            max_search_bytes,
+            include_storage_global: false,
+        })
+    }
+
+    pub(crate) fn reserved_bytes(&self) -> usize {
+        self.reserved.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn search_cap(&self) -> usize {
+        let storage = if self.include_storage_global {
+            storage_cache_bytes()
+        } else {
+            0
+        };
+        self.max_process_bytes
+            .saturating_sub(storage)
+            .min(self.max_search_bytes)
+    }
+
+    pub(crate) fn try_reserve(self: &Arc<Self>, bytes: usize) -> Option<MemoryReservation> {
+        if bytes == 0 {
+            return Some(MemoryReservation {
+                ledger: Arc::clone(self),
+                bytes: 0,
+            });
+        }
+        let cap = self.search_cap();
+        let mut cur = self.reserved.load(Ordering::Acquire);
+        loop {
+            let next = cur.checked_add(bytes)?;
+            if next > cap {
+                return None;
+            }
+            match self.reserved.compare_exchange_weak(
+                cur,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(MemoryReservation {
+                        ledger: Arc::clone(self),
+                        bytes,
+                    });
+                }
+                Err(actual) => cur = actual,
+            }
+        }
+    }
+}
+
+fn update_storage_cache_bytes(snapshots: &HashMap<String, Arc<ScanSnapshot>>) {
+    let total: usize = snapshots
+        .values()
+        .map(|s| s.estimated_bytes())
+        .fold(0usize, usize::saturating_add);
+    STORAGE_SNAPSHOT_BYTES.store(total, Ordering::Relaxed);
+}
+
 struct MftScanSlot {
     counter: Arc<AtomicUsize>,
 }
@@ -363,6 +480,7 @@ fn refresh_inner(inner: &VolumeIndexInner, drive: &str) -> Result<VolumeIdentity
     }
     if state.identity(drive) != observed {
         state.snapshots.remove(drive);
+        update_storage_cache_bytes(&state.snapshots);
         state.failed.remove(drive);
         state.pending.retain(|(pending_drive, _), flight| {
             if pending_drive == drive {
@@ -454,6 +572,7 @@ fn purge_expired(state: &mut State, failed_ttl: Duration) {
         .snapshots
         .retain(|_, snap| snap.captured_at.elapsed() < VOLUME_CACHE_TTL);
     state.failed.retain(|_, (at, _)| at.elapsed() < failed_ttl);
+    update_storage_cache_bytes(&state.snapshots);
 }
 
 fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes: usize) {
@@ -463,6 +582,7 @@ fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes
             .map(|s| s.estimated_bytes())
             .fold(0usize, usize::saturating_add);
         if snapshots.len() <= MAX_CACHED_VOLUMES && total_bytes <= max_bytes {
+            STORAGE_SNAPSHOT_BYTES.store(total_bytes, Ordering::Relaxed);
             break;
         }
         let Some(oldest) = snapshots
@@ -470,6 +590,7 @@ fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes
             .min_by_key(|(_, snap)| snap.captured_at)
             .map(|(k, _)| k.clone())
         else {
+            STORAGE_SNAPSHOT_BYTES.store(0, Ordering::Relaxed);
             break;
         };
         snapshots.remove(&oldest);

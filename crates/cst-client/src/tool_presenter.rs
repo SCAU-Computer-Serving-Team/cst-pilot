@@ -657,6 +657,14 @@ fn base_field_title(key: &str) -> Option<&'static str> {
         "matched" => "命中行",
         "skipped" => "已跳过",
         "skippedLargeFiles" => "跳过大文件",
+        "scannedRoots" => "扫描卷",
+        "partialRoots" => "部分完成卷",
+        "skippedRoots" => "跳过卷",
+        "truncatedReason" => "截断原因",
+        "indexStatus" => "索引状态",
+        "sizeBytes" => "字节大小",
+        "kind" => "类型",
+        "reason" => "原因",
         "degradedFrom" => "降级来源",
         "truncation" => "截断",
         "truncatedBy" => "截断方式",
@@ -725,6 +733,61 @@ fn measure(key: &str, val: Option<&Value>) -> String {
             Some(Value::Bool(b)) => if *b { yes } else { no }.into(),
             Some(other) => if is_js_truthy(other) { yes } else { no }.into(),
         };
+    }
+    if key == "truncatedReason"
+        && let Some(Value::String(s)) = val
+    {
+        return match s.as_str() {
+            "timeout" => "超时",
+            "read_budget" => "读取预算上限",
+            "visited_limit" => "遍历条目上限",
+            "output_bytes" => "输出体积上限",
+            "limit" => "结果条数上限",
+            "line_limit" => "长行上限",
+            other => other,
+        }
+        .to_owned();
+    }
+    if let Some(Value::String(s)) = val {
+        match key {
+            "kind" => {
+                return match s.as_str() {
+                    "file" => "文件",
+                    "dir" => "目录",
+                    other => other,
+                }
+                .to_owned();
+            }
+            "reason" => {
+                return match s.as_str() {
+                    "network_drive_skipped" => "网络映射盘已跳过",
+                    "cdrom_skipped" => "光驱已跳过",
+                    "not_ready" => "卷未就绪",
+                    "locked" => "卷已锁定",
+                    "access_denied" => "无权限访问",
+                    "duplicate_volume_alias" => "重复卷别名已跳过",
+                    "unsupported_drive_type" => "不支持的驱动器类型",
+                    "timeout" => "探活超时",
+                    "unavailable" => "卷不可用",
+                    other => other,
+                }
+                .to_owned();
+            }
+            "method" => {
+                return match s.as_str() {
+                    "mft-index" => "MFT 内存索引",
+                    "native-walk" => "原生并行遍历",
+                    "mixed" => "混合引擎",
+                    other => other,
+                }
+                .to_owned();
+            }
+            _ => match s.as_str() {
+                "cold-built" => return "冷建完成".to_owned(),
+                "usn-synced" => return "USN 增量同步".to_owned(),
+                _ => {}
+            },
+        }
     }
     match val {
         None | Some(Value::Null) => "未知".into(),
@@ -928,6 +991,7 @@ fn group_heading(key: &str, entry: &Map<String, Value>, index: usize) -> Option<
         ),
         "thermalZones" => format!("热区 · {}", first_non_empty(&[entry.get("zone")], &idx1)),
         "drivers" => format!("驱动 · {}", first_non_empty(&[entry.get("device")], &idx1)),
+        "skippedRoots" => format!("跳过卷 · {}", first_non_empty(&[entry.get("root")], &idx1)),
         _ => return None,
     })
 }
@@ -1370,6 +1434,20 @@ fn append_group(
             continue;
         }
         if let Some(arr) = value.as_array() {
+            if matches!(key.as_str(), "scannedRoots" | "partialRoots") {
+                if !arr.is_empty() {
+                    let joined = arr
+                        .iter()
+                        .map(|item| words(Some(item)))
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    rows.push(FieldRow {
+                        label: label(key),
+                        value: joined,
+                    });
+                }
+                continue;
+            }
             if arr.is_empty() {
                 blocks.push(ToolBlock::Notice {
                     id: format!("{id}-{key}-empty"),

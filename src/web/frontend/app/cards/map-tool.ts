@@ -41,10 +41,46 @@ const endSuffixes: [string, string][] = [
 	["MB", " MB"],
 	["GB", " GB"],
 ];
+const truncatedReasons: Record<string, string> = {
+	timeout: "超时",
+	read_budget: "读取预算上限",
+	visited_limit: "遍历条目上限",
+	output_bytes: "输出体积上限",
+	limit: "结果条数上限",
+	line_limit: "长行上限",
+};
+const kindLabels: Record<string, string> = { file: "文件", dir: "目录" };
+const skipReasons: Record<string, string> = {
+	network_drive_skipped: "网络映射盘已跳过",
+	cdrom_skipped: "光驱已跳过",
+	not_ready: "卷未就绪",
+	locked: "卷已锁定",
+	access_denied: "无权限访问",
+	duplicate_volume_alias: "重复卷别名已跳过",
+	unsupported_drive_type: "不支持的驱动器类型",
+	timeout: "探活超时",
+	unavailable: "卷不可用",
+};
+const methodLabels: Record<string, string> = {
+	"mft-index": "MFT 内存索引",
+	"native-walk": "原生并行遍历",
+	mixed: "混合引擎",
+};
+const indexStatusLabels: Record<string, string> = {
+	"cold-built": "冷建完成",
+	"usn-synced": "USN 增量同步",
+};
 const measure = (key: string, value: unknown): string => {
 	if (key in booleans) {
 		const [yes, no] = booleans[key];
 		return value == null ? "状态未知" : value ? yes : no;
+	}
+	if (typeof value === "string") {
+		if (key === "truncatedReason") return truncatedReasons[value] ?? value;
+		if (key === "kind") return kindLabels[value] ?? value;
+		if (key === "reason") return skipReasons[value] ?? value;
+		if (key === "method") return methodLabels[value] ?? value;
+		if (value in indexStatusLabels) return indexStatusLabels[value];
 	}
 	if (value == null) return "未知";
 	if (typeof value === "boolean") return value ? "是" : "否";
@@ -96,6 +132,7 @@ const groupHeadings: Record<string, (entry: Record<string, unknown>, index: numb
 	pagefile: (entry, index) => `页面文件 · ${firstOf([entry.name], String(index + 1))}`,
 	thermalZones: (entry, index) => `热区 · ${firstOf([entry.zone], String(index + 1))}`,
 	drivers: (entry, index) => `驱动 · ${firstOf([entry.device], String(index + 1))}`,
+	skippedRoots: (entry, index) => `跳过卷 · ${firstOf([entry.root], String(index + 1))}`,
 };
 // 这些键缺值时不出字段行（画布用提示条或什么都不显示）。
 const nullableKeys = new Set([
@@ -369,6 +406,10 @@ export function mapTool(call: Call, result: Message): CardView {
 			}
 			if (key === "stats" && record(value)) continue;
 			if (Array.isArray(value)) {
+				if (key === "scannedRoots" || key === "partialRoots") {
+					if (value.length) rows.push({ label: label(key), value: value.map(words).join("、") });
+					continue;
+				}
 				if (!value.length) {
 					notice(`${id}-${key}-empty`, `${label(key)}：本次没有结果`, "default");
 					continue;

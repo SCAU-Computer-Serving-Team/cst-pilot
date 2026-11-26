@@ -30,6 +30,12 @@ fn is_identity_key(key: &str) -> bool {
             | "responseId"
             | "provider"
             | "mode"
+            | "root"
+            | "scannedRoots"
+            | "partialRoots"
+            | "skippedRoots"
+            | "truncated"
+            | "truncatedReason"
     )
 }
 
@@ -175,6 +181,89 @@ pub fn error_result(message: impl Into<String>, elapsed_ms: u64) -> AgentToolRes
     }
 }
 
+/// Tool result where model-facing text and `structured_content` share an already
+/// atomically bounded JSON object while local `details` carries extra UI/diagnostic fields.
+pub fn structured_search_result(
+    model_value: Value,
+    details_value: Value,
+) -> Result<AgentToolResult, String> {
+    let text = serde_json::to_string(&model_value).map_err(|_| "检索结果无法编码。")?;
+    Ok(AgentToolResult {
+        content: vec![UserContentBlock::Text(TextContent::new(text))],
+        details: details_value,
+        structured_content: Some(model_value),
+        usage: None,
+        is_error: false,
+        terminate: None,
+    })
+}
+
+fn truncation_reason_rank(reason: &str) -> u8 {
+    match reason {
+        "timeout" => 6,
+        "read_budget" => 5,
+        "visited_limit" => 4,
+        "output_bytes" => 3,
+        "limit" => 2,
+        "line_limit" => 1,
+        _ => 0,
+    }
+}
+
+/// Ensures an object with a `matches` array stays strictly within `MAX_OUTPUT_BYTES`
+/// by popping whole rows from `matches` (trimming `matched: false` context rows before
+/// `matched: true` rows) without stripping identity/volume fields.
+/// Returns `Err` if required metadata fields alone exceed `MAX_OUTPUT_BYTES`.
+pub fn enforce_atomic_matches_bound(obj: &mut Map<String, Value>) -> Result<String, String> {
+    let mut text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    if text.len() <= MAX_OUTPUT_BYTES {
+        return Ok(text);
+    }
+    while text.len() > MAX_OUTPUT_BYTES {
+        let Some(matches) = obj.get_mut("matches").and_then(Value::as_array_mut) else {
+            break;
+        };
+        if matches.is_empty() {
+            break;
+        }
+        // Prefer dropping trailing context rows (`matched == false`) before any matched row.
+        if let Some(ctx_idx) = matches
+            .iter()
+            .rposition(|row| row.get("matched").and_then(Value::as_bool) == Some(false))
+        {
+            matches.remove(ctx_idx);
+        } else {
+            matches.pop();
+        }
+        obj.insert("truncated".into(), json!(true));
+        let keep_existing = obj
+            .get("truncatedReason")
+            .and_then(Value::as_str)
+            .is_some_and(|cur| {
+                truncation_reason_rank(cur) > truncation_reason_rank("output_bytes")
+            });
+        if !keep_existing {
+            obj.insert("truncatedReason".into(), json!("output_bytes"));
+        }
+        text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    }
+    if text.len() <= MAX_OUTPUT_BYTES {
+        return Ok(text);
+    }
+    // Extreme case: even with empty `matches`, trim `notice` before checking final bound.
+    if let Some(notice) = obj.get("notice").and_then(Value::as_str).map(str::to_owned) {
+        obj.insert(
+            "notice".into(),
+            json!(clip_chars_with_ellipsis(&notice, 256)),
+        );
+        text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    }
+    if text.len() > MAX_OUTPUT_BYTES {
+        return Err("检索结果基础字段超出 50 KiB 输出上限。".into());
+    }
+    Ok(text)
+}
+
 pub fn inject_elapsed_ms(mut result: AgentToolResult, elapsed_ms: u64) -> AgentToolResult {
     match &mut result.details {
         Value::Object(obj) => {
@@ -184,6 +273,31 @@ pub fn inject_elapsed_ms(mut result: AgentToolResult, elapsed_ms: u64) -> AgentT
             result.details = json!({ "elapsedMs": elapsed_ms });
         }
         _ => {}
+    }
+
+    if let Some(Value::Object(mut structured)) = result.structured_content.take() {
+        structured.insert("elapsedMs".into(), json!(elapsed_ms));
+        match enforce_atomic_matches_bound(&mut structured) {
+            Ok(bounded_text) => {
+                if let Some(UserContentBlock::Text(first)) = result.content.first_mut() {
+                    first.text = bounded_text;
+                }
+                if let Value::Object(details) = &mut result.details {
+                    for key in ["matches", "truncated", "truncatedReason", "notice"] {
+                        if let Some(v) = structured.get(key) {
+                            details.insert(key.into(), v.clone());
+                        } else {
+                            details.remove(key);
+                        }
+                    }
+                }
+                result.structured_content = Some(Value::Object(structured));
+                return result;
+            }
+            Err(msg) => {
+                return error_result(msg, elapsed_ms);
+            }
+        }
     }
 
     if let Some(UserContentBlock::Text(first)) = result.content.first_mut() {

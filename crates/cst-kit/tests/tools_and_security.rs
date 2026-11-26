@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use cst_kit::tools::fff::{SearchInput as FileSearchInput, search};
+use cst_kit::tools::fff::{FffindInput, FfgrepInput, find_paths, grep_files};
 use cst_kit::tools::path_guard::{GuardedReadOperations, PathGuard};
 use cst_kit::tools::ssrf::{
     DnsResolver, HttpRequest, HttpResponse, HttpTransport, NetworkPolicy, SafeHttpClient,
@@ -57,8 +57,15 @@ impl Drop for Fixture {
     }
 }
 
-fn file_input(pattern: &str) -> FileSearchInput {
-    serde_json::from_value(json!({"pattern":pattern})).unwrap()
+fn find_input(path: &std::path::Path, pattern: Option<&str>) -> FffindInput {
+    let mut obj = json!({"path": path.to_string_lossy()});
+    if let Some(p) = pattern {
+        obj["pattern"] = json!(p);
+    }
+    serde_json::from_value(obj).unwrap()
+}
+fn grep_input(path: &std::path::Path, pattern: &str) -> FfgrepInput {
+    serde_json::from_value(json!({"path": path.to_string_lossy(), "pattern": pattern})).unwrap()
 }
 fn query_input(query: &str) -> SearchInput {
     serde_json::from_value(json!({"query":query})).unwrap()
@@ -218,18 +225,25 @@ fn state_hard_links_are_hidden_from_read_and_both_search_modes() {
         ops.read_bytes(&fixture.path("public-alias.txt")).unwrap(),
         b"public-content"
     );
-    for (pattern, content) in [("", false), ("synthetic-state-marker", true)] {
-        let found = search(
-            &guard,
-            &fixture.0,
-            file_input(pattern),
-            content,
-            &CancellationToken::new(),
-        )
-        .unwrap();
-        assert!(!found.to_string().contains("state-alias"));
-        assert!(!found.to_string().contains("synthetic-state-marker"));
-    }
+    let found = find_paths(
+        &guard,
+        &fixture.0,
+        find_input(&fixture.0, None),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert!(!found.to_string().contains("state-alias"));
+    assert!(!found.to_string().contains("synthetic-state-marker"));
+
+    let grepped = grep_files(
+        &guard,
+        &fixture.0,
+        grep_input(&fixture.0, "synthetic-state-marker"),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert!(!grepped.to_string().contains("state-alias"));
+    assert!(!grepped.to_string().contains("synthetic-state-marker"));
     // Re-check protection when an ordinary file gains a protected hard link later.
     assert!(guard.open(fixture.path("public-alias.txt")).is_ok());
     std::fs::hard_link(
@@ -262,7 +276,7 @@ fn symbolic_links_to_credentials_and_state_are_blocked() {
 }
 
 #[test]
-fn native_search_honors_ignores_filters_context_and_secret_exclusion() {
+fn native_search_skips_gitignore_filters_context_and_excludes_secrets() {
     let fixture = Fixture::new();
     fixture.write(".gitignore", "ignored/\n");
     fixture.write("ignored/private.txt", "needle");
@@ -272,19 +286,43 @@ fn native_search_honors_ignores_filters_context_and_secret_exclusion() {
     fixture.write(".state/log.txt", "needle-state");
     let guard = fixture.guard();
     let cancel = CancellationToken::new();
-    let found = search(&guard, &fixture.0, file_input("pwr sts"), false, &cancel).unwrap();
-    assert_eq!(found["matches"][0]["path"], "src/power_status.rs");
-    let input =
-        serde_json::from_value(json!({"pattern":"needle","path":"src/*.rs","context":1})).unwrap();
-    let found = search(&guard, &fixture.0, input, true, &cancel).unwrap();
+    let found = find_paths(
+        &guard,
+        &fixture.0,
+        find_input(&fixture.0, Some("pwr sts")),
+        &cancel,
+    )
+    .unwrap();
+    assert!(
+        found["matches"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("/src/power_status.rs")
+    );
+    let input: FfgrepInput = serde_json::from_value(json!({
+        "pattern": "needle",
+        "path": fixture.path("src").to_string_lossy(),
+        "include": ["*.rs"],
+        "context": 1
+    }))
+    .unwrap();
+    let found = grep_files(&guard, &fixture.0, input, &cancel).unwrap();
     assert_eq!(found["matches"].as_array().unwrap().len(), 3);
     assert_eq!(found["matches"][1]["line"], 2);
-    let found = search(&guard, &fixture.0, file_input("needle"), true, &cancel).unwrap();
-    assert_eq!(found["matches"].as_array().unwrap().len(), 1);
+    let found = grep_files(
+        &guard,
+        &fixture.0,
+        grep_input(&fixture.0, "needle"),
+        &cancel,
+    )
+    .unwrap();
+    // Both `ignored/private.txt` (not hidden by `.gitignore`) and `src/power_status.rs` match,
+    // while `auth.json` and `.state/log.txt` remain excluded.
+    assert_eq!(found["matches"].as_array().unwrap().len(), 2);
     assert!(!found.to_string().contains("secret"));
-    let all = search(&guard, &fixture.0, file_input(""), false, &cancel).unwrap();
+    let all = find_paths(&guard, &fixture.0, find_input(&fixture.0, None), &cancel).unwrap();
     assert!(!all.to_string().contains("auth.json"));
-    assert!(!all.to_string().contains("ignored"));
+    assert!(all.to_string().contains("ignored/private.txt"));
     assert!(!all.to_string().contains(".state"));
 }
 
@@ -292,25 +330,29 @@ fn native_search_honors_ignores_filters_context_and_secret_exclusion() {
 fn search_bounds_long_lines_output_and_respects_cancellation() {
     let fixture = Fixture::new();
     fixture.write("huge.txt", &format!("{}\nneedle", "x".repeat(1024 * 1024)));
-    let result = search(
+    let result = grep_files(
         &fixture.guard(),
         &fixture.0,
-        file_input("needle"),
-        true,
+        grep_input(&fixture.0, "needle"),
         &CancellationToken::new(),
     )
     .unwrap();
     assert_eq!(result["matches"][0]["line"], 2);
-    assert_eq!(result["skipped"], 1);
+    assert_eq!(result["truncated"], true);
+    assert_eq!(result["truncatedReason"], "line_limit");
     for i in 0..100 {
         fixture.write(&format!("data/{i}.txt"), "needle");
     }
-    let input = serde_json::from_value(json!({"pattern":"needle","limit":2})).unwrap();
-    let result = search(
+    let input: FfgrepInput = serde_json::from_value(json!({
+        "path": fixture.0.to_string_lossy(),
+        "pattern": "needle",
+        "limit": 2
+    }))
+    .unwrap();
+    let result = grep_files(
         &fixture.guard(),
         &fixture.0,
         input,
-        true,
         &CancellationToken::new(),
     )
     .unwrap();
@@ -320,21 +362,19 @@ fn search_bounds_long_lines_output_and_respects_cancellation() {
     let cancelled = CancellationToken::new();
     cancelled.cancel();
     assert!(
-        search(
+        grep_files(
             &fixture.guard(),
             &fixture.0,
-            file_input("needle"),
-            true,
+            grep_input(&fixture.0, "needle"),
             &cancelled
         )
         .is_err()
     );
     assert!(
-        search(
+        grep_files(
             &fixture.guard(),
             &fixture.0,
-            file_input("["),
-            true,
+            grep_input(&fixture.0, "["),
             &CancellationToken::new()
         )
         .is_err()
@@ -348,22 +388,23 @@ fn ffgrep_50kib_truncation_stays_valid_and_does_not_fail_json_limit() {
     for i in 0..80 {
         fixture.write(&format!("bulk/file_{i:02}.log"), &payload.repeat(3));
     }
-    let input = serde_json::from_value(json!({
+    let input: FfgrepInput = serde_json::from_value(json!({
+        "path": fixture.0.to_string_lossy(),
         "pattern": "match_line",
         "literal": true,
         "limit": 1000,
         "context": 1
     }))
     .unwrap();
-    let result = search(
+    let result = grep_files(
         &fixture.guard(),
         &fixture.0,
         input,
-        true,
         &CancellationToken::new(),
     )
     .unwrap();
     assert_eq!(result["truncated"], true);
+    assert_eq!(result["truncatedReason"], "output_bytes");
     assert!(result["matches"].as_array().unwrap().len() >= 10);
     assert!(serde_json::to_string(&result).unwrap().len() <= 50 * 1024);
 }
@@ -391,22 +432,28 @@ fn windows_junction_to_state_is_not_traversed_by_fff() {
     assert!(guard.check(&junction).is_err());
     assert!(guard.open(junction.join("hidden.txt")).is_err());
 
-    for (pattern, content) in [("hidden", false), ("JUNCTION_SECRET_MARKER", true)] {
-        let found = search(
-            &guard,
-            &fixture.0,
-            file_input(pattern),
-            content,
-            &CancellationToken::new(),
-        )
-        .unwrap();
-        let text = found.to_string();
-        assert!(!text.contains("hidden.txt"), "leaked via junction: {text}");
-        assert!(
-            !text.contains("JUNCTION_SECRET_MARKER"),
-            "leaked content via junction: {text}"
-        );
-    }
+    let found = find_paths(
+        &guard,
+        &fixture.0,
+        find_input(&fixture.0, Some("hidden")),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let text = found.to_string();
+    assert!(!text.contains("hidden.txt"), "leaked via junction: {text}");
+
+    let grepped = grep_files(
+        &guard,
+        &fixture.0,
+        grep_input(&fixture.0, "JUNCTION_SECRET_MARKER"),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let gtext = grepped.to_string();
+    assert!(
+        !gtext.contains("JUNCTION_SECRET_MARKER"),
+        "leaked content via junction: {gtext}"
+    );
     let _ = std::fs::remove_dir(&junction);
 }
 
@@ -837,18 +884,21 @@ fn offline_and_reparse_files_are_skipped_without_opening_in_read_and_ffgrep() {
             .is_err()
     );
 
-    let result = search(
+    let result = grep_files(
         &guard,
         &fixture.0,
-        file_input("OFFLINE_CLOUD_NEEDLE"),
-        true,
+        grep_input(&fixture.0, "OFFLINE_CLOUD_NEEDLE"),
         &CancellationToken::new(),
     )
     .unwrap();
     let matches = result["matches"].as_array().unwrap();
     assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0]["path"], "notes/local.log");
-    assert!(result["skipped"].as_u64().unwrap() >= 1);
+    assert!(
+        matches[0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("/notes/local.log")
+    );
 
     let _ = unsafe { SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_ATTRIBUTE_NORMAL) };
 }

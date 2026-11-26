@@ -499,13 +499,41 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     assert!(!grep_json.contains("skippedLargeFiles"));
 
     let empty_find = map_tool(
-        &make_call("fffind", json!({ "pattern": "none" })),
+        &make_call("fffind", json!({ "path": "*", "pattern": "none" })),
         &make_result(
-            Some(json!({ "truncated": false, "skipped": 0, "matches": [] })),
+            Some(json!({
+                "root": "*",
+                "scannedRoots": ["C:/", "D:/"],
+                "partialRoots": ["E:/"],
+                "skippedRoots": [{ "root": "Z:/", "reason": "network_drive_skipped" }],
+                "truncated": true,
+                "truncatedReason": "timeout",
+                "skipped": 0,
+                "method": "mft-index",
+                "matches": []
+            })),
             "",
             false,
         ),
     );
     let empty_json = serde_json::to_string(&empty_find.blocks).unwrap();
-    assert!(empty_json.contains("匹配结果：本次没有结果"));
+    for expected_label in [
+        "匹配结果：本次没有结果",
+        "扫描卷",
+        "部分完成卷",
+        "跳过卷 · Z:/",
+        "网络映射盘已跳过",
+        "MFT 内存索引",
+        "截断原因",
+        "超时",
+        "原因",
+    ] {
+        assert!(
+            empty_json.contains(expected_label),
+            "missing `{expected_label}` in {empty_json}"
+        );
+    }
+    assert!(!empty_json.contains("scannedRoots"));
+    assert!(!empty_json.contains("truncatedReason"));
+    assert!(!empty_json.contains("network_drive_skipped"));
 }
