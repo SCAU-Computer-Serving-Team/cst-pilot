@@ -8,6 +8,7 @@ pub mod service;
 pub mod verify;
 
 pub use cst_updater::{applier, layout, lock, manifest, process};
+pub use network::UpdateError;
 
 use std::{path::Path, sync::Arc};
 use tokio_util::sync::CancellationToken;
@@ -29,14 +30,6 @@ impl UpdateClient {
         Self::with_fetcher(source, key, Arc::new(NativeFetcher::default()))
     }
 
-    pub fn compiled(oa_host: &str) -> Result<Self, String> {
-        let host = network::release_url(oa_host)?;
-        let source = host
-            .join("/api/agent/releases/latest")
-            .map_err(|_| "升级源无效。")?;
-        Self::new(source.as_str(), ReleaseKey::compiled()?)
-    }
-
     /// Injection is restricted to trusted hosts; it does not change manifest verification.
     pub fn with_fetcher(
         source: &str,
@@ -55,11 +48,11 @@ impl UpdateClient {
         &self.key
     }
 
-    pub async fn check(
+    pub(crate) async fn check_detailed(
         &self,
         current: &str,
         cancel: CancellationToken,
-    ) -> Result<Option<VerifiedRelease>, String> {
+    ) -> Result<Option<VerifiedRelease>, UpdateError> {
         let body = network::read(
             self.fetcher.as_ref(),
             &self.source,
@@ -67,10 +60,73 @@ impl UpdateClient {
             cancel,
         )
         .await?;
-        let release = self.key.verify(&body)?;
+        let release = self.key.verify(&body).map_err(|_| {
+            if network::looks_like_html_body(&body) {
+                UpdateError::PortalOrCrossOriginRedirect { status: Some(200) }
+            } else {
+                UpdateError::VerificationFailed {
+                    stage: "manifest_verify",
+                }
+            }
+        })?;
         release
             .available_from(current)
             .map(|available| available.then_some(release))
+            .map_err(|err| {
+                if err.contains("最低版本") {
+                    UpdateError::BelowMinUpgradable
+                } else {
+                    UpdateError::VerificationFailed {
+                        stage: "version_compare",
+                    }
+                }
+            })
+    }
+
+    pub async fn check(
+        &self,
+        current: &str,
+        cancel: CancellationToken,
+    ) -> Result<Option<VerifiedRelease>, String> {
+        self.check_detailed(current, cancel)
+            .await
+            .map_err(|err| err.ui_message(false))
+    }
+
+    pub(crate) async fn prepare_detailed<F>(
+        &self,
+        root: &Path,
+        release: &VerifiedRelease,
+        cancel: CancellationToken,
+        on_progress: F,
+    ) -> Result<VerifiedPackage, UpdateError>
+    where
+        F: FnMut(u64) + Send,
+    {
+        // A release received from a different trusted client must still match this client's key.
+        let checked =
+            self.key
+                .verify(release.envelope())
+                .map_err(|_| UpdateError::VerificationFailed {
+                    stage: "manifest_reverify",
+                })?;
+        let current = layout::read_version(root).map_err(|_| UpdateError::Other)?;
+        let available = checked.available_from(&current).map_err(|err| {
+            if err.contains("最低版本") {
+                UpdateError::BelowMinUpgradable
+            } else {
+                UpdateError::VerificationFailed {
+                    stage: "version_compare",
+                }
+            }
+        })?;
+        if !available {
+            return Err(UpdateError::VerificationFailed {
+                stage: "version_not_newer",
+            });
+        }
+        verify::prepare_with_progress(root, checked, self.fetcher.as_ref(), cancel, on_progress)
+            .await
     }
 
     pub async fn prepare(
@@ -79,11 +135,8 @@ impl UpdateClient {
         release: &VerifiedRelease,
         cancel: CancellationToken,
     ) -> Result<VerifiedPackage, String> {
-        // A release received from a different trusted client must still match this client's key.
-        let checked = self.key.verify(release.envelope())?;
-        if !checked.available_from(&layout::read_version(root)?)? {
-            return Err("目标版本未高于当前工具包版本。".into());
-        }
-        verify::prepare(root, checked, self.fetcher.as_ref(), cancel).await
+        self.prepare_detailed(root, release, cancel, |_| {})
+            .await
+            .map_err(|err| err.ui_message(true))
     }
 }
