@@ -40,7 +40,13 @@
 .settings-service-row { min-height: 64px; background: transparent; transition: border-color var(--fast) var(--ease-out); }
 .settings-service-row:hover { border-bottom-color: var(--accent-solid); }
 .settings-service-row:active { border-bottom-color: var(--accent-solid-hover); }
+.settings-service-row .settings-inline-action { padding-right: 0; }
+.settings-service-row .settings-inline-action:hover:not(:disabled),
+.settings-service-row .settings-inline-action:active:not(:disabled) { background: transparent; }
+.settings-service-row:hover .settings-inline-action,
+.settings-service-row:active .settings-inline-action { color: var(--text-primary); }
 .settings-services[data-kbd-active="true"] .settings-service-row:hover { border-bottom-color: var(--border-subtle); }
+.settings-services[data-kbd-active="true"] .settings-service-row:hover .settings-inline-action { color: var(--text-secondary); }
 .settings-service-row--compact { min-height: 48px; }
 .settings-row-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; color: var(--text-primary); font-size: var(--font-body); line-height: var(--line-body); }
 .settings-row-inline { display: flex; align-items: baseline; gap: var(--space-component); min-width: 0; flex: 1; }

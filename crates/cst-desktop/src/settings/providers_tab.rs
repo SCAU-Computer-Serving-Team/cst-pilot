@@ -1235,8 +1235,19 @@ impl ProvidersTabView {
     fn render_back_bar(
         &self,
         palette: &DesktopPalette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let (hovered, hover_state) =
+            motion::hairline_hover_state("providers-back-to-list", window, cx);
+        let fg = motion::hairline_hover_color(
+            "providers-back-to-list",
+            hovered,
+            palette.text_secondary,
+            palette.text_primary,
+            window,
+            cx,
+        );
         div().w_full().flex().items_center().child(
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("providers-back-to-list-btn")
@@ -1246,20 +1257,22 @@ impl ProvidersTabView {
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
-                .text_color(palette.text_secondary)
+                .text_color(fg)
                 .flex()
                 .items_center()
                 .gap(space::XS)
-                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                .active(|s| s.bg(palette.bg_active_press))
+                .hover(|s| s.bg(palette.bg_item_hover))
+                .active(|s| {
+                    s.bg(palette.bg_active_press)
+                        .text_color(palette.text_primary)
+                })
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&hover_state, is_hovered, cx);
+                })
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.return_to_provider_list(window, cx);
                 }))
-                .child(
-                    Icon::new(IconName::ArrowLeft)
-                        .size(px(14.0))
-                        .text_color(palette.text_secondary),
-                )
+                .child(Icon::new(IconName::ArrowLeft).size(px(14.0)).text_color(fg))
                 .child(cjk_inline_label("提供商")),
         )
     }
@@ -1303,7 +1316,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             apply_scale(div(), scale::TITLE)
                                 .text_color(palette.text_primary)
@@ -1367,14 +1380,16 @@ impl Render for ProvidersTabView {
             let tr_custom = self.list_tracker.clone();
             let (custom_hovered, custom_hover_state) =
                 motion::hairline_hover_state("providers-add-custom", window, cx);
-            let custom_border = motion::hairline_hover_color(
+            let custom_t = motion::hairline_hover_progress(
                 "providers-add-custom",
                 custom_hovered && !kbd_active,
-                palette.border_subtle,
-                palette.accent_solid,
                 window,
                 cx,
             );
+            let custom_border =
+                motion::lerp_hsla(palette.border_subtle, palette.accent_solid, custom_t);
+            let custom_action_fg =
+                motion::lerp_hsla(palette.text_secondary, palette.text_primary, custom_t);
             let custom_row = div()
                 .id("providers-add-custom-row")
                 .test_support()
@@ -1424,9 +1439,13 @@ impl Render for ProvidersTabView {
                         .items_center()
                         .gap(space::XS)
                         .flex_shrink_0()
-                        .text_color(palette.text_secondary)
+                        .text_color(custom_action_fg)
                         .child(apply_scale(div(), scale::UI).child(cjk_inline_label("配置")))
-                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(px(14.0))
+                                .text_color(custom_action_fg),
+                        ),
                 );
 
             let mut avail_rows = div().w_full().flex().flex_col();
@@ -1452,14 +1471,16 @@ impl Render for ProvidersTabView {
                     };
                     let (row_hovered, row_hover_state) =
                         motion::hairline_hover_state(format!("providers-add-{pid}"), window, cx);
-                    let row_border = motion::hairline_hover_color(
+                    let row_t = motion::hairline_hover_progress(
                         format!("providers-add-{pid}"),
                         row_hovered && !kbd_active,
-                        palette.border_subtle,
-                        palette.accent_solid,
                         window,
                         cx,
                     );
+                    let row_border =
+                        motion::lerp_hsla(palette.border_subtle, palette.accent_solid, row_t);
+                    let row_action_fg =
+                        motion::lerp_hsla(palette.text_secondary, palette.text_primary, row_t);
                     avail_rows = avail_rows.child(
                         div()
                             .id(row_id.clone())
@@ -1508,12 +1529,16 @@ impl Render for ProvidersTabView {
                                     .items_center()
                                     .gap(space::XS)
                                     .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
+                                    .text_color(row_action_fg)
                                     .child(
                                         apply_scale(div(), scale::UI)
                                             .child(cjk_inline_label("连接")),
                                     )
-                                    .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(row_action_fg),
+                                    ),
                             ),
                     );
                 }
@@ -1526,14 +1551,16 @@ impl Render for ProvidersTabView {
                     };
                     let (exp_hovered, exp_hover_state) =
                         motion::hairline_hover_state("providers-add-expand", window, cx);
-                    let exp_border = motion::hairline_hover_color(
+                    let exp_t = motion::hairline_hover_progress(
                         "providers-add-expand",
                         exp_hovered,
-                        palette.border_subtle,
-                        palette.accent_solid,
                         window,
                         cx,
                     );
+                    let exp_border =
+                        motion::lerp_hsla(palette.border_subtle, palette.accent_solid, exp_t);
+                    let exp_fg =
+                        motion::lerp_hsla(palette.text_secondary, palette.text_primary, exp_t);
                     avail_rows = avail_rows.child(
                         apply_scale(div(), scale::UI)
                             .id("providers-toggle-expand-btn")
@@ -1543,11 +1570,10 @@ impl Render for ProvidersTabView {
                             .h(height::HEADER)
                             .border_b_1()
                             .border_color(exp_border)
-                            .text_color(palette.text_secondary)
+                            .text_color(exp_fg)
                             .flex()
                             .items_center()
                             .gap(space::SM)
-                            .hover(|s| s.text_color(palette.text_primary))
                             .active(|s| {
                                 s.border_color(palette.accent_hover)
                                     .text_color(palette.text_primary)
@@ -1567,7 +1593,7 @@ impl Render for ProvidersTabView {
                                     IconName::ChevronRight
                                 })
                                 .size(px(14.0))
-                                .text_color(palette.text_secondary),
+                                .text_color(exp_fg),
                             ),
                     );
                 }
@@ -1628,7 +1654,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             div()
                                 .w_full()
@@ -1955,7 +1981,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             div()
                                 .flex()
@@ -2333,14 +2359,15 @@ impl Render for ProvidersTabView {
         let tr_cstoa = self.list_tracker.clone();
         let (cstoa_hovered, cstoa_hover_state) =
             motion::hairline_hover_state("providers-cstoa-row", window, cx);
-        let cstoa_border = motion::hairline_hover_color(
+        let cstoa_t = motion::hairline_hover_progress(
             "providers-cstoa-row",
             cstoa_hovered && !kbd_active,
-            palette.border_subtle,
-            palette.accent_solid,
             window,
             cx,
         );
+        let cstoa_border = motion::lerp_hsla(palette.border_subtle, palette.accent_solid, cstoa_t);
+        let cstoa_action_fg =
+            motion::lerp_hsla(palette.text_secondary, palette.text_primary, cstoa_t);
 
         let mut rows_list = div().w_full().flex().flex_col().child(
             div()
@@ -2397,7 +2424,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .items_center()
                         .gap(space::XS)
-                        .text_color(palette.text_secondary)
+                        .text_color(cstoa_action_fg)
                         .child(apply_scale(div(), scale::UI).child(cjk_inline_label(
                             if cstoa_signed_in {
                                 "管理"
@@ -2405,7 +2432,11 @@ impl Render for ProvidersTabView {
                                 "扫码登录"
                             },
                         )))
-                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(px(14.0))
+                                .text_color(cstoa_action_fg),
+                        ),
                 ),
         );
 
@@ -2423,14 +2454,15 @@ impl Render for ProvidersTabView {
             let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
             let (row_hovered, row_hover_state) =
                 motion::hairline_hover_state(format!("provider-cfg-{pid}"), window, cx);
-            let row_border = motion::hairline_hover_color(
+            let row_t = motion::hairline_hover_progress(
                 format!("provider-cfg-{pid}"),
                 row_hovered && !kbd_active,
-                palette.border_subtle,
-                palette.accent_solid,
                 window,
                 cx,
             );
+            let row_border = motion::lerp_hsla(palette.border_subtle, palette.accent_solid, row_t);
+            let row_action_fg =
+                motion::lerp_hsla(palette.text_secondary, palette.text_primary, row_t);
             rows_list = rows_list.child(
                 div()
                     .id(row_id.clone())
@@ -2478,7 +2510,7 @@ impl Render for ProvidersTabView {
                             .flex()
                             .items_center()
                             .gap(space::XS)
-                            .text_color(palette.text_secondary)
+                            .text_color(row_action_fg)
                             .on_click(cx.listener(move |this, _, w, cx| {
                                 this.list_kbd_active = false;
                                 this.select_provider(pid_btn.clone(), w, cx);
@@ -2487,7 +2519,11 @@ impl Render for ProvidersTabView {
                             .child(
                                 apply_scale(div(), scale::UI).child(cjk_inline_label(action_label)),
                             )
-                            .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size(px(14.0))
+                                    .text_color(row_action_fg),
+                            ),
                     ),
             );
         }

@@ -3991,6 +3991,27 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     background: transparent;
     border-bottom-color: var(--accent-solid-hover);
   }
+  .settings-hairline-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: color var(--fast) var(--ease-out);
+  }
+  .settings-hairline-row:hover .settings-hairline-action,
+  .settings-hairline-row[data-force="hover"] .settings-hairline-action,
+  .settings-hairline-row:active .settings-hairline-action,
+  .settings-hairline-row[data-force="active"] .settings-hairline-action {
+    color: var(--text-primary);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .settings-hairline-row,
+    .settings-hairline-action,
+    .info-row-master {
+      transition: none;
+    }
+  }
 
   /* 消息输入框 ZWAs1 + 叠栈实底质感 */
   .composer-card {
@@ -6741,14 +6762,14 @@ const STORIES = [
               <span style="font-size:15px;color:var(--text-primary);">计维CSTOA</span>
               <span style="font-size:12px;color:var(--text-secondary);">账号授权 · 已登录</span>
             </span>
-            <span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);">管理 ${icon("chevron-right", 14)}</span>
+            <span class="settings-hairline-action">管理 ${icon("chevron-right", 14)}</span>
           </button>
           <button type="button" class="settings-hairline-row">
             <span style="display:flex;flex-direction:column;gap:2px;">
               <span style="font-size:15px;color:var(--text-primary);">DeepSeek</span>
               <span style="font-size:12px;color:var(--text-secondary);">已连接</span>
             </span>
-            <span style="display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);">管理 ${icon("chevron-right", 14)}</span>
+            <span class="settings-hairline-action">管理 ${icon("chevron-right", 14)}</span>
           </button>
         </div>`,
         `<div class="settings-hairline-list">
@@ -6846,16 +6867,16 @@ const STORIES = [
     states: [
       { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },
       { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` },
-      { name: "直线行悬停", sub: "无灰底 · 1px 底线 -> $accent-solid", html: `<div class="settings-hairline-row settings-hairline-row--compact" data-force="hover" style="width:240px;"><span style="font-size:14px;color:var(--text-primary);">DeepSeek</span><span style="font-size:12px;color:var(--text-secondary);">管理 ›</span></div>` },
+      { name: "直线行悬停", sub: "无灰底 · 底线主色 + 动作高亮", html: `<div class="settings-hairline-row settings-hairline-row--compact" data-force="hover" style="width:240px;"><span style="font-size:14px;color:var(--text-primary);">DeepSeek</span><span class="settings-hairline-action" style="font-size:12px;">管理 ›</span></div>` },
       { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<div class="vp-tab-kbd-pill">模型偏好</div>` }
     ],
     hosts: {
-      gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动；下方直线列表行悬停时底线平滑过渡至 $accent-solid，不铺灰底。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
-      web: { note: "保持 16px 字号与 24px 间距，支持左右方向键切换焦点；直线列表行采用 border-color 150ms ease-out 过渡，减弱动态下 0ms 瞬切。", html: `<span class="mono" style="font-size:12px;">role='tablist' 键盘导航</span>` }
+      gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动；下方直线列表行悬停时底线平滑过渡至 $accent-solid，跳转动作字样与箭头同步由 $text-secondary 高亮至 $text-primary。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
+      web: { note: "保持 16px 字号与 24px 间距，支持左右方向键切换焦点；直线列表行底线与跳转动作采用 150ms ease-out 同步过渡，减弱动态下 0ms 瞬切。", html: `<span class="mono" style="font-size:12px;">role='tablist' 键盘导航</span>` }
     },
     contracts: [
       ["底线连续插值", "底部 2px $accent-solid 指示条按目标项宽度与偏移量平滑滑动，半程反向点击原位折返", "脏表单切换时先弹确认"],
-      ["直线行悬停规则", "无框直线列表行保持 0..816px 脊线对齐，悬停不铺灰色背景，仅将底部 1px 细线沿 150ms ease-out 过渡至 $accent-solid（按下 $accent-solid-hover）", "键盘导航态下遵循键鼠互斥，减弱动态下 0ms 瞬切"]
+      ["直线行与跳转动作悬停", "无框直线列表行保持 0..816px 脊线对齐，悬停不铺灰色背景，底部 1px 细线沿 150ms ease-out 过渡至 $accent-solid，行内跳转/展开字样及箭头同步由 $text-secondary 高亮至 $text-primary", "键盘导航态下遵循键鼠互斥，减弱动态下 0ms 瞬切"]
     ]
   },
 

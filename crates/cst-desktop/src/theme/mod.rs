@@ -793,6 +793,25 @@ pub mod motion {
         (state.read(cx).active, state)
     }
 
+    /// Interruptible `150ms ease_out` hover progress (`0.0..=1.0`) shared by a hairline row's
+    /// bottom accent border and its paired jump/expand action text & chevron (`0ms` under `reduce_motion`).
+    pub fn hairline_hover_progress(
+        id: impl Into<SharedString>,
+        hovered: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> f32 {
+        let tid: TransitionId = SharedString::from(format!("hairline-hover-{}", id.into())).into();
+        transition(
+            tid,
+            if hovered { 1.0_f32 } else { 0.0 },
+            Transition::new(FAST).ease(ease_out()),
+            window,
+            cx,
+        )
+        .clamp(0.0, 1.0)
+    }
+
     /// Interruptible `150ms ease_out` hairline bottom-border accent color (`$border-subtle` <-> `$accent-solid`).
     /// Snaps in `0ms` when `reduce_motion` is enabled and requests zero idle frames once settled.
     pub fn hairline_hover_color(
@@ -803,15 +822,7 @@ pub mod motion {
         window: &mut Window,
         cx: &mut App,
     ) -> Hsla {
-        let tid: TransitionId = SharedString::from(format!("hairline-hover-{}", id.into())).into();
-        let prog = transition(
-            tid,
-            if hovered { 1.0_f32 } else { 0.0 },
-            Transition::new(FAST).ease(ease_out()),
-            window,
-            cx,
-        )
-        .clamp(0.0, 1.0);
+        let prog = hairline_hover_progress(id, hovered, window, cx);
         lerp_hsla(rest_color, hover_color, prog)
     }
 

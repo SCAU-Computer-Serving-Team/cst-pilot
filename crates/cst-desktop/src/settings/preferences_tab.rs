@@ -2086,14 +2086,16 @@ impl Render for PreferencesTabView {
                 };
                 let (expand_hovered, expand_hover_state) =
                     motion::hairline_hover_state("pref-expand-models", window, cx);
-                let expand_border = motion::hairline_hover_color(
+                let expand_t = motion::hairline_hover_progress(
                     "pref-expand-models",
                     expand_hovered,
-                    palette.border_subtle,
-                    palette.accent_solid,
                     window,
                     cx,
                 );
+                let expand_border =
+                    motion::lerp_hsla(palette.border_subtle, palette.accent_solid, expand_t);
+                let expand_fg =
+                    motion::lerp_hsla(palette.text_secondary, palette.text_primary, expand_t);
                 list_body = list_body.child(
                     apply_scale(div(), scale::UI)
                         .id("pref-toggle-expand-models-btn")
@@ -2104,11 +2106,10 @@ impl Render for PreferencesTabView {
                         .h(height::HEADER)
                         .border_b_1()
                         .border_color(expand_border)
-                        .text_color(palette.text_secondary)
+                        .text_color(expand_fg)
                         .flex()
                         .items_center()
                         .gap(space::SM)
-                        .hover(|s| s.text_color(palette.text_primary))
                         .active(|s| {
                             s.border_color(palette.accent_hover)
                                 .text_color(palette.text_primary)
@@ -2140,7 +2141,7 @@ impl Render for PreferencesTabView {
                                 IconName::ChevronRight
                             })
                             .size(px(14.0))
-                            .text_color(palette.text_secondary),
+                            .text_color(expand_fg),
                         ),
                 );
             }
