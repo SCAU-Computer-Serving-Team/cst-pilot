@@ -55,6 +55,7 @@ pub struct LoginView {
     generation: u64,
     qr_generation: u64,
     qr_running: bool,
+    qr_poll_task: Option<gpui::Task<()>>,
     active_qr_flow_id: Option<String>,
     oauth_pending: bool,
     window: gpui::AnyWindowHandle,
@@ -116,6 +117,7 @@ impl LoginView {
             generation: 0,
             qr_generation: 0,
             qr_running: false,
+            qr_poll_task: None,
             active_qr_flow_id: None,
             oauth_pending: false,
             window: window.window_handle(),
@@ -246,6 +248,10 @@ impl LoginView {
 
     fn reset_qr(&mut self, cx: &mut Context<Self>) {
         self.qr_generation += 1;
+        // Dropping the poll task immediately cancels any sleeping 1500ms background wait
+        // so refreshes and tab switches never stall behind an old generation.
+        self.qr_poll_task = None;
+        self.qr_running = false;
         // Cancel any active server-side QR flow immediately when leaving or switching tabs
         // so existing CSTOA credentials remain untouched and provider locks release at once.
         if let Some(flow_id) = self.active_qr_flow_id.take() {
@@ -286,7 +292,7 @@ impl LoginView {
 
         let client = self.client.clone();
         let generation = self.qr_generation;
-        cx.spawn(async move |weak, cx| {
+        self.qr_poll_task = Some(cx.spawn(async move |weak, cx| {
             let started = client
                 .start_auth_flow("cstoa".into(), "oauth".into(), None)
                 .await;
@@ -392,10 +398,10 @@ impl LoginView {
                             break;
                         }
                     }
-                    let window_active = weak
+                    let (window_active, rem_ms) = weak
                         .update(cx, |this, cx| {
                             if generation != this.qr_generation {
-                                return false;
+                                return (false, 0u64);
                             }
                             let active = this
                                 .window
@@ -407,18 +413,21 @@ impl LoginView {
                                         && f32::from(vp.height) > 1.0
                                 })
                                 .unwrap_or(false);
-                            let rem_sec = this
-                                .qr_expires_at_ms
-                                .saturating_sub(now_epoch_ms())
-                                .div_ceil(1000);
+                            let remaining_ms = this.qr_expires_at_ms.saturating_sub(now_epoch_ms());
+                            let rem_sec = remaining_ms.div_ceil(1000);
                             if active && last_remaining_sec != Some(rem_sec) {
                                 last_remaining_sec = Some(rem_sec);
                                 cx.notify();
                             }
-                            active
+                            (active, remaining_ms)
                         })
-                        .unwrap_or(false);
-                    let poll_interval_ms = if window_active { 250 } else { 1500 };
+                        .unwrap_or((false, 0));
+                    let base_ms = if window_active { 250 } else { 1500 };
+                    let poll_interval_ms = if rem_ms > 0 {
+                        base_ms.min(rem_ms.max(50))
+                    } else {
+                        base_ms
+                    };
                     cx.background_executor()
                         .timer(Duration::from_millis(poll_interval_ms))
                         .await;
@@ -443,17 +452,18 @@ impl LoginView {
                     .await;
             }
             let _ = weak.update(cx, |this, cx| {
+                if this.qr_generation != generation {
+                    return;
+                }
                 this.qr_running = false;
+                this.qr_poll_task = None;
                 this.active_qr_flow_id = None;
-                if succeeded && this.qr_generation == generation {
+                if succeeded {
                     cx.emit(LoginViewEvent::NavigateToAccount);
-                } else if this.qr_generation != generation {
-                    this.start_cstoa_qr_flow(cx);
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn start_provider_oauth(&mut self, provider_id: String, cx: &mut Context<Self>) {
@@ -1070,6 +1080,7 @@ impl Render for LoginView {
                             div().rounded(radius::ROW).child(popover_panel),
                             provider_menu_p,
                             -6.0,
+                            scale_factor,
                             palette.craft_stack_shadows(),
                         ),
                     )

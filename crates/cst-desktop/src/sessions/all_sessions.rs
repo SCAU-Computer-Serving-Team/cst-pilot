@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{
     DialogActionNav, KbdRowTarget, KbdTone, pointer_moved_past_threshold,
     render_gliding_row_indicator, use_dialog_action_nav,
@@ -807,7 +807,7 @@ impl AllSessionsView {
         top: Pixels,
         palette: &DesktopPalette,
         _transparency_enabled: bool,
-        _scale_factor: f32,
+        scale_factor: f32,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let sid_rename = menu.session_id.clone();
@@ -971,6 +971,7 @@ impl AllSessionsView {
                             div().rounded(radius::ROW).child(menu_box),
                             progress,
                             -6.0,
+                            scale_factor,
                             palette.flat_popover_shadows(),
                         ),
                     )),
@@ -1208,10 +1209,11 @@ impl AllSessionsView {
             .child(motion::apply_modal_motion(
                 modal_card,
                 scrim_progress,
+                scale_factor,
                 palette.craft_stack_shadows(),
             ));
 
-        render_frosted_surface(
+        render_frosted_scrim(
             "all-sessions-rename-scrim",
             FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
@@ -1316,7 +1318,7 @@ impl AllSessionsView {
                 ),
         );
 
-        render_frosted_surface(
+        render_frosted_scrim(
             "all-sessions-rename-scrim-exit",
             FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
@@ -1335,6 +1337,7 @@ impl AllSessionsView {
         .child(motion::apply_modal_motion(
             modal_card,
             scrim_progress,
+            scale_factor,
             palette.craft_stack_shadows(),
         ))
         .into_any_element()

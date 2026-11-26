@@ -303,12 +303,51 @@ pub fn render_login_9_stop_fade(palette: &DesktopPalette) -> Div {
 /// Builds a frosted-glass container (`H2p2z` popover, `K3x72` modal, or `DZ0Fp` scrim) backed by
 /// same-window D3D11 `CopySubresourceRegion` + `Rgba16Float` SDF + `frosted-glass.glsl`,
 /// automatically degrading to solid `$bg-elevated` / `$bg-scrim` when system transparency is disabled or `< 11_0`.
+/// Preserves solid fallback alpha as-is so containers that already apply `.opacity(p)` (including unmigrated
+/// dialogs such as `update_dialog.rs`) fade linearly without double-fading.
 pub fn render_frosted_surface(
     id: impl Into<ElementId>,
     spec: FrostedGlassSpec,
     fallback_bg: Hsla,
     transparency_enabled: bool,
     scale_factor: f32,
+) -> Stateful<Div> {
+    render_frosted_surface_inner(
+        id,
+        spec,
+        fallback_bg,
+        transparency_enabled,
+        scale_factor,
+        false,
+    )
+}
+
+/// Builds a migrated frosted scrim (`DZ0Fp`) whose container does NOT wrap `.opacity(p)` around the
+/// scrim/modal subtree: D3D11 uses `spec.opacity` directly and solid fallback scales `fallback_bg.a *= opacity` once.
+pub fn render_frosted_scrim(
+    id: impl Into<ElementId>,
+    spec: FrostedGlassSpec,
+    fallback_bg: Hsla,
+    transparency_enabled: bool,
+    scale_factor: f32,
+) -> Stateful<Div> {
+    render_frosted_surface_inner(
+        id,
+        spec,
+        fallback_bg,
+        transparency_enabled,
+        scale_factor,
+        true,
+    )
+}
+
+fn render_frosted_surface_inner(
+    id: impl Into<ElementId>,
+    spec: FrostedGlassSpec,
+    fallback_bg: Hsla,
+    transparency_enabled: bool,
+    scale_factor: f32,
+    fade_fallback_bg: bool,
 ) -> Stateful<Div> {
     let is_elevated_card = spec.specular > 0.0;
     let is_light_tint = spec.tint_rgb[0] > 0.5;
@@ -408,7 +447,7 @@ pub fn render_frosted_surface(
 
     let _ = (spec, transparency_enabled, scale_factor);
     let mut bg = fallback_bg;
-    if !is_elevated_card {
+    if fade_fallback_bg && !is_elevated_card {
         bg.a *= opacity;
     }
     container.bg(bg)

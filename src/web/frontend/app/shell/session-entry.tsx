@@ -184,7 +184,6 @@ export function SessionEntry({
 					<Link
 						className={`sidebar-session sidebar-session-hit ${active ? "selected" : ""}`}
 						data-session-id={session.id}
-						aria-label={title}
 						aria-current={active ? "page" : undefined}
 						to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
 						viewTransition={viewTransition}
@@ -208,7 +207,9 @@ export function SessionEntry({
 							}
 							onNavigate?.(event);
 						}}
-					/>
+					>
+						<span className="sidebar-session-sr">{title}</span>
+					</Link>
 					{showMoreButton && !preview && (
 						<button
 							type="button"

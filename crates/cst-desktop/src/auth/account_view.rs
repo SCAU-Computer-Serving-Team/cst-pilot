@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::login_view::LoginMethodTab;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{KbdTone, use_dialog_action_nav};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius,
@@ -513,7 +513,7 @@ impl Render for AccountView {
                         .child(kbd_overlay),
                 );
 
-                render_frosted_surface(
+                render_frosted_scrim(
                     "account-logout-confirm-scrim",
                     FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
                     palette.bg_scrim,
@@ -559,6 +559,7 @@ impl Render for AccountView {
                         .child(motion::apply_modal_motion(
                             card,
                             logout_scrim_p,
+                            scale_factor,
                             palette.craft_stack_shadows(),
                         )),
                 )
@@ -639,7 +640,7 @@ impl Render for AccountView {
                                     .child(cjk_inline_label("退出 CSTOA")),
                             ),
                     );
-                    render_frosted_surface(
+                    render_frosted_scrim(
                         "account-logout-confirm-scrim-exit",
                         FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
                         palette.bg_scrim,
@@ -658,6 +659,7 @@ impl Render for AccountView {
                     .child(motion::apply_modal_motion(
                         card,
                         logout_scrim_p,
+                        scale_factor,
                         palette.craft_stack_shadows(),
                     ))
                 })

@@ -184,13 +184,11 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	choiceIndexRef.current = choiceIndex;
 	const chooseRef = useRef(choose);
 	chooseRef.current = choose;
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!choice) return;
 		const previous = document.activeElement;
 		const list = listRef.current;
-		const frame = requestAnimationFrame(() => {
-			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
-		});
+		choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
 		const onKey = (event: KeyboardEvent) => {
 			const dialog = choiceDialogRef.current;
 			if (
@@ -245,9 +243,8 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 		};
 		window.addEventListener("keydown", onKey, true);
 		return () => {
-			cancelAnimationFrame(frame);
 			window.removeEventListener("keydown", onKey, true);
-			if (document.querySelector(".standby-scrim")) return;
+			if (document.querySelector("dialog[open], .standby-scrim, .palette-scrim")) return;
 			if (
 				previous instanceof HTMLElement &&
 				previous !== document.body &&
@@ -646,7 +643,9 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 			</ul>
 			{choicePresence.mounted && (
 				<div
+					ref={choicePresence.surfaceRef}
 					className="summary-layer"
+					data-state={choicePresence.state}
 					data-exiting={choicePresence.exiting ? "true" : undefined}
 					inert={choicePresence.exiting || undefined}
 					aria-hidden={choicePresence.exiting || undefined}

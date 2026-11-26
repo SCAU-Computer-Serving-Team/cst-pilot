@@ -28,7 +28,7 @@ impl AppShell {
         viewport_size: gpui_kit::Size<Pixels>,
         palette: &DesktopPalette,
         _transparency_enabled: bool,
-        _scale_factor: f32,
+        scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let sid_rename = sid.to_owned();
@@ -62,7 +62,10 @@ impl AppShell {
             })
             .opacity(0.01 + 0.99 * progress)
             .relative()
-            .top(px((-4.0 * (1.0 - progress)).round()))
+            .top(px(motion::snap_device_px(
+                -4.0 * (1.0 - progress),
+                scale_factor,
+            )))
             .shadow(motion::scale_shadows(
                 palette.flat_popover_shadows(),
                 progress * progress,
@@ -277,7 +280,7 @@ impl AppShell {
         active_session_id: Option<&str>,
         palette: &DesktopPalette,
         _transparency_enabled: bool,
-        _scale_factor: f32,
+        scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let mut sorted: Vec<_> = self.snapshot.sessions.as_ref().clone();
@@ -396,10 +399,13 @@ impl AppShell {
                         })
                         .opacity(0.01 + 0.99 * progress)
                         .relative()
-                        .top(px((-8.0 * (1.0 - progress)).round()))
+                        .top(px(motion::snap_device_px(
+                            -8.0 * (1.0 - progress),
+                            scale_factor,
+                        )))
                         .shadow(motion::scale_shadows(
                             palette.flat_popover_shadows(),
-                            progress.powi(3),
+                            progress * progress,
                         ))
                         .w(width)
                         .p(space::XS)
@@ -480,7 +486,7 @@ impl AppShell {
         progress: f32,
         palette: &DesktopPalette,
         _transparency_enabled: bool,
-        _scale_factor: f32,
+        scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let logged_in = self.snapshot.account.as_ref().is_some_and(|a| a.signed_in);
@@ -543,9 +549,10 @@ impl AppShell {
                         })
                         .opacity(0.01 + 0.99 * progress)
                         .relative()
-                        .top(px((if self.sidebar_collapsed { -6.0 } else { 6.0 }
-                            * (1.0 - progress))
-                            .round()))
+                        .top(px(motion::snap_device_px(
+                            if self.sidebar_collapsed { -6.0 } else { 6.0 } * (1.0 - progress),
+                            scale_factor,
+                        )))
                         .shadow(motion::scale_shadows(
                             palette.flat_popover_shadows(),
                             progress * progress,
@@ -854,7 +861,7 @@ impl AppShell {
         session_id: &str,
         palette: &DesktopPalette,
         _transparency_enabled: bool,
-        _scale_factor: f32,
+        scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let sid_tree = session_id.to_owned();
@@ -872,7 +879,10 @@ impl AppShell {
             })
             .opacity(0.01 + 0.99 * progress)
             .relative()
-            .top(px((-6.0 * (1.0 - progress)).round()))
+            .top(px(motion::snap_device_px(
+                -6.0 * (1.0 - progress),
+                scale_factor,
+            )))
             .shadow(motion::scale_shadows(
                 palette.flat_popover_shadows(),
                 progress * progress,

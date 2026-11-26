@@ -429,22 +429,20 @@ a.menu-row[target="_blank"] {
   justify-content: center;
   padding: var(--space-section);
 }
-.standby-layer[data-exiting="true"] {
+.standby-layer[data-state="exiting"] {
   pointer-events: none;
 }
 
 .standby-backdrop {
   position: absolute;
   inset: 0;
+  opacity: 0;
+}
+.standby-layer[data-state="open"] .standby-backdrop {
   opacity: 1;
   transition: opacity var(--normal) var(--ease-out);
 }
-@starting-style {
-  .standby-backdrop {
-    opacity: 0;
-  }
-}
-.standby-layer[data-exiting="true"] .standby-backdrop {
+.standby-layer[data-state="exiting"] .standby-backdrop {
   opacity: 0;
   transition: opacity var(--fast) var(--ease-out);
 }
@@ -458,17 +456,15 @@ a.menu-row[target="_blank"] {
   flex-direction: column;
   gap: var(--space-component);
   color: var(--text-primary);
+  opacity: 0;
+  transform: scale(var(--scale-modal));
+}
+.standby-layer[data-state="open"] .standby-card {
   opacity: 1;
   transform: scale(1);
   transition: opacity var(--normal) var(--ease-out), transform var(--normal) var(--ease-out);
 }
-@starting-style {
-  .standby-card {
-    opacity: 0;
-    transform: scale(var(--scale-modal));
-  }
-}
-.standby-layer[data-exiting="true"] .standby-card {
+.standby-layer[data-state="exiting"] .standby-card {
   opacity: 0;
   transform: scale(var(--scale-modal));
   pointer-events: none;
@@ -493,8 +489,8 @@ a.menu-row[target="_blank"] {
 @media (prefers-reduced-motion: reduce) {
   .standby-backdrop,
   .standby-card,
-  .standby-layer[data-exiting="true"] .standby-backdrop,
-  .standby-layer[data-exiting="true"] .standby-card {
+  .standby-layer[data-state] .standby-backdrop,
+  .standby-layer[data-state] .standby-card {
     transition: none;
   }
 }

@@ -641,138 +641,14 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                         right_col = right_col.child(raw_section);
                     }
                 } else {
-                    for block in &card_view.blocks {
-                        match block {
-                            ToolBlock::Image {
-                                mime_type, data, ..
-                            } => {
-                                if let Ok(bytes) =
-                                    base64::engine::general_purpose::STANDARD.decode(data.trim())
-                                    && !bytes.is_empty()
-                                {
-                                    let gpui_img = gpui_image_from_bytes(mime_type, bytes);
-                                    right_col = right_col.child(
-                                        div()
-                                            .w(px(300.0))
-                                            .h(px(132.0))
-                                            .rounded(radius::CONTROL)
-                                            .border_1()
-                                            .border_color(palette.border_subtle)
-                                            .bg(palette.bg_surface)
-                                            .overflow_hidden()
-                                            .child(
-                                                img(ImageSource::Image(gpui_img))
-                                                    .size_full()
-                                                    .object_fit(ObjectFit::Contain),
-                                            ),
-                                    );
-                                }
-                            }
-                            ToolBlock::Fields { title, rows, .. } => {
-                                let mut group = div().w_full().flex().flex_col().gap(space::MICRO);
-                                if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
-                                    group = group.child(
-                                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                                            .text_color(palette.text_secondary)
-                                            .child(SharedString::from(t.to_owned())),
-                                    );
-                                }
-                                for row in rows {
-                                    group = group.child(render_aligned_field_row(
-                                        row,
-                                        label_col_px,
-                                        mono_family.clone(),
-                                        palette,
-                                    ));
-                                }
-                                right_col = right_col.child(group);
-                            }
-                            ToolBlock::Listing { items, .. } => {
-                                right_col = right_col.child(render_listing_table(
-                                    items,
-                                    mono_family.clone(),
-                                    palette,
-                                ));
-                            }
-                            ToolBlock::Commands { items, .. } => {
-                                right_col = right_col.child(render_inline_commands_list_inert(
-                                    items,
-                                    mono_family.clone(),
-                                    palette,
-                                ));
-                            }
-                            ToolBlock::Notice { text, status, .. } => {
-                                let (icon, color) = match status {
-                                    NoticeStatus::Danger => {
-                                        (IconName::CircleAlert, palette.status_danger)
-                                    }
-                                    NoticeStatus::Warning => {
-                                        (IconName::TriangleAlert, palette.status_warning)
-                                    }
-                                    NoticeStatus::Default => {
-                                        (IconName::Info, palette.text_secondary)
-                                    }
-                                };
-                                right_col = right_col.child(super::render_tool_notice_line(
-                                    icon,
-                                    color,
-                                    text.clone(),
-                                    palette,
-                                ));
-                            }
-                            ToolBlock::Text { text, .. } => {
-                                right_col = right_col.child(render_copyable_text_block_inert(
-                                    text.clone(),
-                                    true,
-                                    mono_family.clone(),
-                                    palette,
-                                ));
-                            }
-                        }
-                    }
-
-                    if !card_view.raw.trim().is_empty() {
-                        let mut raw_section =
-                            div().w_full().flex().flex_col().gap(space::TIGHT).child(
-                                apply_scale(div(), scale::CAPTION)
-                                    .w_full()
-                                    .h(height::INLINE)
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .text_color(palette.text_secondary)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::SM)
-                                            .child(
-                                                Icon::new(IconName::Braces)
-                                                    .size(px(12.0))
-                                                    .text_color(palette.text_secondary),
-                                            )
-                                            .child(cjk_inline_label("原始数据")),
-                                    )
-                                    .child(
-                                        Icon::new(if is_raw_expanded {
-                                            IconName::ChevronDown
-                                        } else {
-                                            IconName::ChevronRight
-                                        })
-                                        .size(px(12.0))
-                                        .text_color(palette.text_secondary),
-                                    ),
-                            );
-                        if is_raw_expanded {
-                            raw_section = raw_section.child(render_copyable_text_block_inert(
-                                card_view.raw.clone(),
-                                true,
-                                mono_family.clone(),
-                                palette,
-                            ));
-                        }
-                        right_col = right_col.child(raw_section);
-                    }
+                    right_col = append_normal_tool_card_inert_blocks(
+                        right_col,
+                        card_view,
+                        label_col_px,
+                        is_raw_expanded,
+                        mono_family.clone(),
+                        palette,
+                    );
                 }
             }
 
@@ -806,16 +682,165 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
     card_shell.into_any_element()
 }
 
-/// Visual-only inert clone of a collapsed normal tool status row, used during the parent process
-/// drawer's `150ms` close animation so rows shrink cleanly without hard-cutting to bare names.
+fn append_normal_tool_card_inert_blocks(
+    mut right_col: gpui::Div,
+    card_view: &ToolCardView,
+    label_col_px: f32,
+    is_raw_expanded: bool,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+) -> gpui::Div {
+    // Match active-branch ordering: render image thumbnails first, then non-image blocks.
+    let mut ordered_blocks: Vec<&ToolBlock> = Vec::with_capacity(card_view.blocks.len());
+    for blk in &card_view.blocks {
+        if matches!(blk, ToolBlock::Image { .. }) {
+            ordered_blocks.push(blk);
+        }
+    }
+    for blk in &card_view.blocks {
+        if !matches!(blk, ToolBlock::Image { .. }) {
+            ordered_blocks.push(blk);
+        }
+    }
+
+    for block in ordered_blocks {
+        match block {
+            ToolBlock::Image {
+                mime_type, data, ..
+            } => {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data.trim())
+                    && !bytes.is_empty()
+                {
+                    let gpui_img = gpui_image_from_bytes(mime_type, bytes);
+                    right_col = right_col.child(
+                        div()
+                            .w(px(300.0))
+                            .h(px(132.0))
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_surface)
+                            .overflow_hidden()
+                            .child(
+                                img(ImageSource::Image(gpui_img))
+                                    .size_full()
+                                    .object_fit(ObjectFit::Contain),
+                            ),
+                    );
+                }
+            }
+            ToolBlock::Fields { title, rows, .. } => {
+                let mut group = div().w_full().flex().flex_col().gap(space::MICRO);
+                if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
+                    group = group.child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .text_color(palette.text_secondary)
+                            .child(SharedString::from(t.to_owned())),
+                    );
+                }
+                for row in rows {
+                    group = group.child(render_aligned_field_row(
+                        row,
+                        label_col_px,
+                        mono_family.clone(),
+                        palette,
+                    ));
+                }
+                right_col = right_col.child(group);
+            }
+            ToolBlock::Listing { items, .. } => {
+                right_col =
+                    right_col.child(render_listing_table(items, mono_family.clone(), palette));
+            }
+            ToolBlock::Commands { items, .. } => {
+                right_col = right_col.child(render_inline_commands_list_inert(
+                    items,
+                    mono_family.clone(),
+                    palette,
+                ));
+            }
+            ToolBlock::Notice { text, status, .. } => {
+                let (icon, color) = match status {
+                    NoticeStatus::Danger => (IconName::CircleAlert, palette.status_danger),
+                    NoticeStatus::Warning => (IconName::TriangleAlert, palette.status_warning),
+                    NoticeStatus::Default => (IconName::Info, palette.text_secondary),
+                };
+                right_col = right_col.child(super::render_tool_notice_line(
+                    icon,
+                    color,
+                    text.clone(),
+                    palette,
+                ));
+            }
+            ToolBlock::Text { text, .. } => {
+                right_col = right_col.child(render_copyable_text_block_inert(
+                    text.clone(),
+                    true,
+                    mono_family.clone(),
+                    palette,
+                ));
+            }
+        }
+    }
+
+    if !card_view.raw.trim().is_empty() {
+        let mut raw_section = div().w_full().flex().flex_col().gap(space::TIGHT).child(
+            apply_scale(div(), scale::CAPTION)
+                .w_full()
+                .h(height::INLINE)
+                .flex()
+                .items_center()
+                .justify_between()
+                .text_color(palette.text_secondary)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .child(
+                            Icon::new(IconName::Braces)
+                                .size(px(12.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("原始数据")),
+                )
+                .child(
+                    Icon::new(if is_raw_expanded {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .size(px(12.0))
+                    .text_color(palette.text_secondary),
+                ),
+        );
+        if is_raw_expanded {
+            raw_section = raw_section.child(render_copyable_text_block_inert(
+                card_view.raw.clone(),
+                true,
+                mono_family,
+                palette,
+            ));
+        }
+        right_col = right_col.child(raw_section);
+    }
+
+    right_col
+}
+
+/// Visual-only inert clone of a normal tool card (preserving its expanded details when `is_expanded`
+/// is true), used during the parent process drawer's `150ms` close animation so frame 1 never swaps content.
 #[allow(clippy::too_many_arguments)]
 pub fn render_normal_tool_row_inert(
     tool_name: &str,
     call_args: Option<&Value>,
+    card_view: Option<&ToolCardView>,
     duration_ms: Option<u64>,
     has_result: bool,
     is_error_result: bool,
     live: bool,
+    is_expanded: bool,
+    is_raw_expanded: bool,
     mono_family: SharedString,
     palette: &DesktopPalette,
 ) -> gpui_kit::AnyElement {
@@ -845,12 +870,12 @@ pub fn render_normal_tool_row_inert(
 
     let duration_badge = duration_ms.filter(|&ms| ms > 0).map(|ms| {
         apply_scale(div(), scale::CAPTION)
-            .font_family(mono_family)
+            .font_family(mono_family.clone())
             .text_color(palette.text_muted)
             .child(SharedString::from(format_duration_en_sec(ms)))
     });
 
-    apply_scale(div(), scale::UI)
+    let header_row = apply_scale(div(), scale::UI)
         .w_full()
         .h(height::COMPACT)
         .px(px(0.0))
@@ -885,10 +910,98 @@ pub fn render_normal_tool_row_inert(
                 .flex_shrink_0()
                 .children(duration_badge)
                 .child(
-                    Icon::new(IconName::ChevronRight)
-                        .size(px(16.0))
-                        .text_color(palette.text_secondary),
+                    Icon::new(if is_expanded {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .size(px(16.0))
+                    .text_color(palette.text_secondary),
                 ),
+        );
+
+    if !is_expanded {
+        return header_row.into_any_element();
+    }
+
+    let call_capsule_str = format_call_capsule(tool_name, call_args);
+    let label_col_px = super::aligned_label_col_px(
+        card_view
+            .into_iter()
+            .flat_map(|view| view.blocks.iter())
+            .flat_map(|block| match block {
+                ToolBlock::Fields { rows, .. } => rows.as_slice(),
+                _ => &[],
+            }),
+    );
+
+    let call_capsule_row = div().w_full().flex().items_center().child(
+        apply_scale(div(), scale::CAPTION)
+            .h(height::INLINE)
+            .px(space::SM)
+            .rounded(radius::CONTROL)
+            .bg(palette.bg_surface)
+            .font_family(mono_family.clone())
+            .text_color(palette.text_secondary)
+            .max_w_full()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .child(SharedString::from(call_capsule_str)),
+            ),
+    );
+
+    let mut right_col = div()
+        .flex_1()
+        .min_w_0()
+        .pt(space::MICRO)
+        .pb(space::MICRO)
+        .flex()
+        .flex_col()
+        .gap(space::SM)
+        .child(call_capsule_row);
+
+    if let Some(view) = card_view {
+        right_col = append_normal_tool_card_inert_blocks(
+            right_col,
+            view,
+            label_col_px,
+            is_raw_expanded,
+            mono_family,
+            palette,
+        );
+    }
+
+    let guide_rail = div()
+        .w(px(16.0))
+        .flex_shrink_0()
+        .flex()
+        .justify_center()
+        .pt(px(2.0))
+        .pb(px(4.0))
+        .child(
+            div()
+                .w(px(2.0))
+                .h_full()
+                .rounded(radius::FULL)
+                .bg(palette.border_subtle),
+        );
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .child(header_row)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .gap(space::SM)
+                .child(guide_rail)
+                .child(right_col),
         )
         .into_any_element()
 }

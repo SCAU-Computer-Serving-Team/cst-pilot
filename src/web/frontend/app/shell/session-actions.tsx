@@ -10,7 +10,7 @@ import { usePresenceExit } from "./use-presence-exit";
 import { useWorkspaceShell } from "./workspace-shell-context";
 
 export type SessionItem = { id: string; title: string; updatedAt?: string };
-export type SessionMenuState = { id: string; title: string; x: number; y: number } | null;
+export type SessionMenuState = { id: string; title: string; x: number; y: number; managing: boolean } | null;
 
 /** 会话列表共用操作与删除恢复，列表外观由调用方决定。 */
 export function useSessionActions(
@@ -81,9 +81,13 @@ export function useSessionActions(
 		if (!menu) return;
 		const element = menuRef.current;
 		if (!element) return;
-		const bounds = element.getBoundingClientRect();
-		const x = Math.max(16, Math.min(menu.x, window.innerWidth - bounds.width - 16));
-		const y = Math.max(16, Math.min(menu.y, window.innerHeight - bounds.height - 16));
+		// 用未受缩放影响的 offsetWidth/offsetHeight 夹紧位置，避免首次入场缩放低估尺寸导致贴边裁切。
+		const width = element.offsetWidth || element.getBoundingClientRect().width;
+		const height = element.offsetHeight || element.getBoundingClientRect().height;
+		const marginX = Math.min(16, Math.max(8, (window.innerWidth - width) / 2));
+		const marginY = Math.min(16, Math.max(8, (window.innerHeight - height) / 2));
+		const x = Math.max(marginX, Math.min(menu.x, window.innerWidth - width - marginX));
+		const y = Math.max(marginY, Math.min(menu.y, window.innerHeight - height - marginY));
 		clampedMenuPosRef.current = { rawX: menu.x, rawY: menu.y, x, y };
 		element.style.left = `${x}px`;
 		element.style.top = `${y}px`;
@@ -98,7 +102,11 @@ export function useSessionActions(
 			if (trigger?.dataset.menuTriggerId === menu.id) return;
 			setMenu(null);
 		};
-		const dismiss = () => setMenu(null);
+		const dismiss = () => {
+			const focusInside = Boolean(menuRef.current?.contains(document.activeElement));
+			setMenu(null);
+			if (focusInside) focusSession(menu.id);
+		};
 		window.addEventListener("pointerdown", close);
 		window.addEventListener("scroll", dismiss, true);
 		window.addEventListener("resize", dismiss);
@@ -107,7 +115,7 @@ export function useSessionActions(
 			window.removeEventListener("scroll", dismiss, true);
 			window.removeEventListener("resize", dismiss);
 		};
-	}, [menu]);
+	}, [menu, focusSession]);
 	useEffect(() => {
 		if (!menu && !management.managing) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
@@ -138,7 +146,7 @@ export function useSessionActions(
 			setMenu(null);
 			return;
 		}
-		setMenu({ ...session, x, y });
+		setMenu({ ...session, x, y, managing: management.managing });
 	}
 	function rename(id: string, current: string) {
 		setMenu(null);
@@ -202,10 +210,14 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 				createPortal(
 					<div
 						className={`tier-2-glass tier-2-menu session-menu-surface${menuPresence.exiting ? "" : " session-menu"}`}
-						ref={menuRef}
+						ref={(node) => {
+							menuRef.current = node;
+							menuPresence.surfaceRef(node);
+						}}
 						role="menu"
-						aria-label={management.managing ? "批量会话操作" : `会话 ${activeMenu.title}`}
+						aria-label={activeMenu.managing ? "批量会话操作" : `会话 ${activeMenu.title}`}
 						aria-hidden={menuPresence.exiting || undefined}
+						data-state={menuPresence.state}
 						data-exiting={menuPresence.exiting ? "true" : undefined}
 						inert={menuPresence.exiting || undefined}
 						style={{ left: menuLeft, top: menuTop }}
@@ -245,7 +257,7 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 									}
 						}
 					>
-						{management.managing ? (
+						{activeMenu.managing ? (
 							<button
 								type="button"
 								role="menuitem"

@@ -11,7 +11,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
@@ -81,7 +81,7 @@ pub fn render_missing_key_dialog(
 
     let click_cancel = Rc::clone(&on_cancel);
     let click_cfg = Rc::clone(&on_configure);
-    render_frosted_surface(
+    render_frosted_scrim(
         "missing-key-scrim-ywnbk",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
@@ -214,6 +214,7 @@ pub fn render_missing_key_dialog(
                         .child(kbd_overlay),
                 ),
                 scrim_progress,
+                scale_factor,
                 palette.craft_stack_shadows(),
             )),
     )
@@ -313,7 +314,7 @@ pub fn render_missing_key_dialog_inert(
             ),
     );
 
-    render_frosted_surface(
+    render_frosted_scrim(
         "missing-key-scrim-ywnbk-exit",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
@@ -331,6 +332,7 @@ pub fn render_missing_key_dialog_inert(
     .child(motion::apply_modal_motion(
         card,
         scrim_progress,
+        scale_factor,
         palette.craft_stack_shadows(),
     ))
 }

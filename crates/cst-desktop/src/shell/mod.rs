@@ -36,7 +36,7 @@ use crate::auth::missing_key::{
 };
 use crate::background::{
     FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, has_active_hardware_diagnostic,
-    render_frosted_surface, render_sky_background_rounded,
+    render_frosted_scrim, render_frosted_surface, render_sky_background_rounded,
 };
 use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget, PaletteMode};
 use crate::sessions::all_sessions::{AllSessionsEvent, AllSessionsView};
@@ -4282,7 +4282,7 @@ impl Render for AppShell {
             let click_confirm = Rc::clone(&on_confirm_rc);
 
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "rename-session-scrim",
                     FrostedGlassSpec::scrim(&palette).with_opacity(rename_scrim_p),
                     palette.bg_scrim,
@@ -4477,6 +4477,7 @@ impl Render for AppShell {
                     .tab_stop(false)
                     .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
                     rename_scrim_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );
@@ -4554,7 +4555,7 @@ impl Render for AppShell {
                     ),
             );
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "rename-session-scrim-exit",
                     FrostedGlassSpec::scrim(&palette).with_opacity(rename_scrim_p),
                     palette.bg_scrim,
@@ -4572,6 +4573,7 @@ impl Render for AppShell {
                 .child(motion::apply_modal_motion(
                     inert_card,
                     rename_scrim_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );
@@ -4759,7 +4761,7 @@ impl Render for AppShell {
             let click_proceed = Rc::clone(&on_proceed_rc);
 
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "web-switch-confirm-scrim",
                     FrostedGlassSpec::scrim(&palette).with_opacity(web_confirm_p),
                     palette.bg_scrim,
@@ -4888,6 +4890,7 @@ impl Render for AppShell {
                             .child(kbd_overlay),
                     ),
                     web_confirm_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );
@@ -4956,7 +4959,7 @@ impl Render for AppShell {
                     ),
             );
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "web-switch-confirm-scrim-exit",
                     FrostedGlassSpec::scrim(&palette).with_opacity(web_confirm_p),
                     palette.bg_scrim,
@@ -4974,6 +4977,7 @@ impl Render for AppShell {
                 .child(motion::apply_modal_motion(
                     inert_card,
                     web_confirm_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );

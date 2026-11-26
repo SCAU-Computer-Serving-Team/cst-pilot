@@ -619,8 +619,22 @@ impl MarkdownStreamStore {
 }
 
 pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
+    build_markdown_style_with_scroll(palette, true)
+}
+
+/// Visual-only Markdown style for `150ms` inert collapse snapshots: disables horizontal table
+/// scrolling and hover highlights while keeping identical typography, borders, and spacing.
+pub fn build_markdown_style_inert(palette: &DesktopPalette) -> TextViewStyle {
+    build_markdown_style_with_scroll(palette, false)
+}
+
+fn build_markdown_style_with_scroll(palette: &DesktopPalette, interactive: bool) -> TextViewStyle {
     let mut table_style = StyleRefinement::default().rounded(radius::ROW);
-    table_style.overflow.x = Some(Overflow::Scroll);
+    table_style.overflow.x = Some(if interactive {
+        Overflow::Scroll
+    } else {
+        Overflow::Hidden
+    });
 
     let table_head_style = StyleRefinement::default()
         .font_weight(FontWeight::MEDIUM)
@@ -715,7 +729,11 @@ pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
         .with_table(table_style)
         .with_table_head(table_head_style)
         .with_table_cell(table_cell_style)
-        .with_table_row_hover(palette.bg_item_hover)
+        .with_table_row_hover(if interactive {
+            palette.bg_item_hover
+        } else {
+            gpui::transparent_black()
+        })
         .with_code_block(code_block_style)
         .with_dark(palette.mode.is_dark())
 }
@@ -998,13 +1016,15 @@ pub fn render_assistant_markdown_with_copy_notice(
 }
 
 /// Visual-only inert Markdown snapshot used during `150ms` process-drawer collapse exit:
-/// non-selectable, no link click handler, no copy buttons, and no accessibility/test hooks.
+/// non-selectable, no-op link click handler (suppressing gpui-base's default `cx.open_url`),
+/// non-scrolling tables, syntax-highlighted code bodies without copy buttons, and no a11y/test hooks.
 pub fn render_assistant_markdown_inert(
     state: &Entity<TextViewState>,
     palette: &DesktopPalette,
     style: TextViewStyle,
 ) -> impl IntoElement {
     let palette_copy = *palette;
+    let state_entity_id = state.entity_id();
     let extensions = MarkdownExtensions::default()
         .parser_revision(1)
         .block_parser(|node, parse_cx| {
@@ -1039,14 +1059,44 @@ pub fn render_assistant_markdown_inert(
                 .markdown(raw_md),
             )
         })
-        .block_renderer("cst-code-block", move |node, _window, cx| {
+        .block_renderer("cst-code-block", move |node, window, cx| {
             let Some(data) = node.data::<FencedCodeData>() else {
                 return div().into_any_element();
             };
+            let span_start = node
+                .source_range()
+                .map(|r| r.start)
+                .unwrap_or(data.span_start);
+            let code_str = data.code.clone();
+            let lang_label = data.lang.clone();
             let mono_family = cx
                 .try_global::<crate::theme::DesktopThemeGlobal>()
                 .map(|g| g.mono_font_family.clone())
                 .unwrap_or_else(|| SharedString::from(typography::MONO_FONT_FAMILY));
+            let fenced_source = wrap_fenced_code_markdown(code_str.as_ref());
+
+            let body_cache = window.use_keyed_state(
+                SharedString::from(format!("md-code-body-{state_entity_id:?}-{span_start}")),
+                cx,
+                |_, cx| {
+                    let initial = fenced_source.clone();
+                    let body_state = cx.new(|cx| {
+                        TextViewState::markdown(&initial, cx)
+                            .selectable(false)
+                            .selection_format(SelectionFormat::Plain)
+                    });
+                    CodeBodyCache {
+                        fenced_source: initial,
+                        state: body_state,
+                    }
+                },
+            );
+            let body_state = body_cache.read(cx).state.clone();
+            let lang_for_hl = lang_label.clone();
+            let body_highlighter: SharedHighlighter = Arc::new(move |block: &CodeBlock| {
+                highlight_code_block(block.code().as_ref(), lang_for_hl.as_deref(), &palette_copy)
+            });
+
             let header = div()
                 .w_full()
                 .h(px(36.0))
@@ -1064,7 +1114,7 @@ pub fn render_assistant_markdown_inert(
                         .text_size(scale::CAPTION.font_size)
                         .line_height(scale::CAPTION.line_height)
                         .text_color(palette_copy.text_muted)
-                        .child(data.lang.clone().unwrap_or_default()),
+                        .child(lang_label.unwrap_or_default()),
                 );
             div()
                 .w_full()
@@ -1081,13 +1131,15 @@ pub fn render_assistant_markdown_inert(
                     div()
                         .w_full()
                         .min_w_0()
-                        .px(px(14.0))
-                        .py(space::MD)
-                        .font_family(mono_family)
-                        .text_size(scale::CAPTION.font_size)
-                        .line_height(scale::CAPTION.line_height)
-                        .text_color(palette_copy.text_secondary)
-                        .child(data.code.clone()),
+                        .font_family(mono_family.clone())
+                        .child(
+                            TextView::new(&body_state)
+                                .style(build_code_body_style(&palette_copy, &mono_family))
+                                .selectable(false)
+                                .scrollable(false)
+                                .shared_code_block_highlighter(body_highlighter)
+                                .on_link_click(|_, _, _, _| {}),
+                        ),
                 )
                 .into_any_element()
         });
@@ -1106,7 +1158,8 @@ pub fn render_assistant_markdown_inert(
                 .scrollable(false)
                 .motion(TextViewMotion::default())
                 .markdown_extensions(extensions)
-                .shared_code_block_highlighter(shared_markdown_code_highlighter(palette.mode)),
+                .shared_code_block_highlighter(shared_markdown_code_highlighter(palette.mode))
+                .on_link_click(|_, _, _, _| {}),
         )
 }
 

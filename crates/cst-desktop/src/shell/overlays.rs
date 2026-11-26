@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
@@ -154,7 +154,7 @@ pub fn render_web_active_lock_overlay(
         cx,
     );
 
-    let scrim = render_frosted_surface(
+    let scrim = render_frosted_scrim(
         "web-active-scrim",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
@@ -297,6 +297,7 @@ pub fn render_web_active_lock_overlay(
             .child(motion::apply_modal_motion(
                 card,
                 scrim_progress,
+                scale_factor,
                 palette.craft_stack_shadows(),
             ))
             .focus_trap("web-active-focus-trap", trap_focus),
@@ -388,7 +389,7 @@ pub fn render_web_active_lock_overlay_inert(
             ),
     );
 
-    render_frosted_surface(
+    render_frosted_scrim(
         "web-active-scrim-exit",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
@@ -406,6 +407,7 @@ pub fn render_web_active_lock_overlay_inert(
     .child(motion::apply_modal_motion(
         card,
         scrim_progress,
+        scale_factor,
         palette.craft_stack_shadows(),
     ))
 }
@@ -436,10 +438,13 @@ pub fn render_workspace_error_bar(
     )
     .opacity(0.01 + 0.99 * progress)
     .relative()
-    .top(px((-8.0 * (1.0 - progress)).round()))
+    .top(px(motion::snap_device_px(
+        -8.0 * (1.0 - progress),
+        scale_factor,
+    )))
     .shadow(motion::scale_shadows(
         palette.craft_stack_shadows(),
-        progress.powi(3),
+        progress * progress,
     ))
     .h(height::FIELD)
     .max_w(px(640.0))
@@ -541,10 +546,13 @@ pub fn render_top_notice_banner(
     )
     .opacity(0.01 + 0.99 * progress)
     .relative()
-    .top(px((-8.0 * (1.0 - progress)).round()))
+    .top(px(motion::snap_device_px(
+        -8.0 * (1.0 - progress),
+        scale_factor,
+    )))
     .shadow(motion::scale_shadows(
         palette.craft_stack_shadows(),
-        progress.powi(3),
+        progress * progress,
     ))
     .h(height::FIELD)
     .max_w(px(520.0))

@@ -2549,6 +2549,8 @@ impl MessageListView {
                                             ));
                                     }
                                 } else {
+                                    let inert_md_style =
+                                        super::markdown_view::build_markdown_style_inert(palette);
                                     for (part_idx, tp) in segment.parts.iter().enumerate() {
                                         expanded_col =
                                             expanded_col.child(self.render_process_part_inert(
@@ -2557,9 +2559,10 @@ impl MessageListView {
                                                 part_idx,
                                                 tp,
                                                 tool_results,
+                                                messages_generation,
                                                 is_live_turn,
                                                 mono_family.clone(),
-                                                markdown_style,
+                                                &inert_md_style,
                                                 palette,
                                                 cx,
                                             ));
@@ -3286,19 +3289,30 @@ impl Render for MessageListView {
                         cx.background_executor().timer(Duration::from_secs(1)).await;
                         let keep_going = weak
                             .update(cx, |this, cx| {
-                                if this.session_id.is_none() {
+                                let Some(ref sid) = this.session_id else {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                };
+                                let still_running = this
+                                    .client
+                                    .snapshot()
+                                    .loaded_sessions
+                                    .get(sid)
+                                    .is_some_and(|s| s.running);
+                                if !still_running {
                                     this.live_elapsed_timer_task = None;
                                     return false;
                                 }
-                                let active = win_handle
-                                    .update(cx, |_, window, _| {
-                                        let vp = window.viewport_size();
-                                        window.is_window_active()
-                                            && window.is_visible()
-                                            && f32::from(vp.width) > 1.0
-                                            && f32::from(vp.height) > 1.0
-                                    })
-                                    .unwrap_or(false);
+                                let Ok(active) = win_handle.update(cx, |_, window, _| {
+                                    let vp = window.viewport_size();
+                                    window.is_window_active()
+                                        && window.is_visible()
+                                        && f32::from(vp.width) > 1.0
+                                        && f32::from(vp.height) > 1.0
+                                }) else {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                };
                                 if active {
                                     cx.notify();
                                 }
@@ -3618,6 +3632,7 @@ impl MessageListView {
         part_idx: usize,
         tp: &TurnPart,
         tool_results: &BTreeMap<String, Value>,
+        result_revision: u64,
         live: bool,
         mono_family: SharedString,
         markdown_style: &TextViewStyle,
@@ -3691,13 +3706,41 @@ impl MessageListView {
                         .and_then(|v| v.get("isError"))
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
+                    let standalone = is_standalone_tool(call, tool_result_val);
+                    let is_expanded = self
+                        .tool_card_expansion
+                        .get(&format!("tool-card-{}", call.id))
+                        .copied()
+                        .unwrap_or(standalone);
+                    let is_raw_expanded = self
+                        .expanded_tool_raw
+                        .contains(&format!("tool-raw-{}", call.id));
+                    let card_view = if is_expanded {
+                        tool_result_val.map(|res_val| {
+                            self.client.with_presenter_cache(|cache| {
+                                if let Some(hit) =
+                                    cache.get_cached_normal(&call.id, result_revision)
+                                {
+                                    return hit;
+                                }
+                                let input = to_tool_call_input(call);
+                                let parsed_res = ToolResultInput::from_message_json(res_val);
+                                cache.get_or_map_normal(&input, &parsed_res, result_revision)
+                            })
+                        })
+                    } else {
+                        None
+                    };
                     group_col = group_col.child(render_normal_tool_row_inert(
                         &call.name,
                         Some(&call.arguments),
+                        card_view.as_deref(),
                         duration_ms,
                         tool_result_val.is_some(),
                         is_err,
                         live,
+                        is_expanded,
+                        is_raw_expanded,
                         mono_family.clone(),
                         palette,
                     ));

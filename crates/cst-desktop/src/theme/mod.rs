@@ -177,12 +177,28 @@ pub mod motion {
         shadows
     }
 
+    /// Snaps a logical pixel offset to the nearest physical device pixel at the window's scale factor
+    /// (`125%`, `150%`, `200%`, etc.) so ClearType glyph stems stay crisp across heterogeneous DPI monitors (`ADR-008`).
+    pub fn snap_device_px(logical_px: f32, scale_factor: f32) -> f32 {
+        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+            scale_factor
+        } else {
+            1.0
+        };
+        (logical_px * scale).round() / scale
+    }
+
     /// Applies single-signal interruptible modal motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
-    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp
+    /// Uses physical-pixel-snapped relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp
     /// (`p^2` shadow alpha × container `opacity(p)`).
-    pub fn apply_modal_motion<E: Styled>(el: E, progress: f32, shadows: Vec<BoxShadow>) -> E {
+    pub fn apply_modal_motion<E: Styled>(
+        el: E,
+        progress: f32,
+        scale_factor: f32,
+        shadows: Vec<BoxShadow>,
+    ) -> E {
         let p = progress.clamp(0.0, 1.0);
-        let dy = (6.0 * (1.0 - p)).round();
+        let dy = snap_device_px(6.0 * (1.0 - p), scale_factor);
         let el = el.relative().top(px(dy)).opacity(0.01 + 0.99 * p);
         if shadows.is_empty() {
             el
@@ -192,15 +208,16 @@ pub mod motion {
     }
 
     /// Applies single-signal interruptible popover motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
-    /// Uses integer-pixel relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp.
+    /// Uses physical-pixel-snapped relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp.
     pub fn apply_popover_motion<E: Styled>(
         el: E,
         progress: f32,
         slide_y_px: f32,
+        scale_factor: f32,
         shadows: Vec<BoxShadow>,
     ) -> E {
         let p = progress.clamp(0.0, 1.0);
-        let dy = (slide_y_px * (1.0 - p)).round();
+        let dy = snap_device_px(slide_y_px * (1.0 - p), scale_factor);
         let el = el.relative().top(px(dy)).opacity(0.01 + 0.99 * p);
         if shadows.is_empty() {
             el

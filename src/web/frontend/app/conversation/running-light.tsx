@@ -4,6 +4,8 @@ import { glyphLightFrames, lightGlyphs } from "./running-light-timing";
 const ASCII_DIGIT = /^[0-9]$/;
 
 type DigitRun = { start: number; end: number };
+type DigitSlotMeta = { slotKey: string; digit: string };
+type DigitTransition = { prev: string; next: string; tick: number };
 
 function findDigitRuns(glyphs: readonly string[]): DigitRun[] {
 	const runs: DigitRun[] = [];
@@ -18,6 +20,52 @@ function findDigitRuns(glyphs: readonly string[]): DigitRun[] {
 		runs.push({ start, end: i });
 	}
 	return runs;
+}
+
+/** 将字素列表映射为稳定的结构键：数字按「段序号 + 右起十进制位」编号，避免 9s → 10s 时复用错位。 */
+function buildGlyphTokens(glyphs: readonly string[]): Array<{ key: string; glyph: string; digitSlot?: DigitSlotMeta }> {
+	const runs = findDigitRuns(glyphs);
+	const out: Array<{ key: string; glyph: string; digitSlot?: DigitSlotMeta }> = [];
+	let runCursor = 0;
+	let staticCursor = 0;
+	let i = 0;
+	while (i < glyphs.length) {
+		const run = runs[runCursor];
+		if (run && i === run.start) {
+			const len = run.end - run.start;
+			for (let pos = 0; pos < len; pos++) {
+				const place = len - 1 - pos;
+				const slotKey = `d-${runCursor}-p-${place}`;
+				const glyph = glyphs[run.start + pos];
+				out.push({ key: slotKey, glyph, digitSlot: { slotKey, digit: glyph } });
+			}
+			i = run.end;
+			runCursor++;
+		} else {
+			out.push({ key: `t-${runCursor}-${staticCursor}`, glyph: glyphs[i] });
+			staticCursor++;
+			i++;
+		}
+	}
+	return out;
+}
+
+function collectDigitMap(glyphs: readonly string[]): Map<string, string> {
+	const map = new Map<string, string>();
+	const runs = findDigitRuns(glyphs);
+	for (let r = 0; r < runs.length; r++) {
+		const run = runs[r];
+		const len = run.end - run.start;
+		for (let pos = 0; pos < len; pos++) {
+			const place = len - 1 - pos;
+			map.set(`d-${r}-p-${place}`, glyphs[run.start + pos]);
+		}
+	}
+	return map;
+}
+
+function prefersReducedMotion(): boolean {
+	return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function useLight(active: boolean) {
@@ -42,42 +90,51 @@ function useLight(active: boolean) {
 	return { ref, "data-running": active || undefined, "data-paused": !visible || undefined };
 }
 
-/** 每个字素独立改变颜色；状态数字变化时沿用当前扫光进度，仅运行可见态下变动数字位按位对齐滚动。 */
+/** 每个字素独立改变颜色；状态数字变化时沿用当前扫光进度，仅运行可见态下为真实变动的数字位配对起播 ±6px 滚动。 */
 export function RunningLight({ active, children }: { active: boolean; children: string }) {
 	const light = useLight(active);
 	const glyphs = lightGlyphs(children);
+	const tokens = buildGlyphTokens(glyphs);
 	const count = glyphs.length;
 	const animations = useRef<Animation[]>([]);
 	const phase = useRef(0);
-	const prevGlyphsRef = useRef<string[]>(glyphs);
-	const digitVersionsRef = useRef<number[]>(glyphs.map(() => 0));
-	const canTick = active && !light["data-paused"];
+	const committedTextRef = useRef(children);
+	const tickCounterRef = useRef(0);
+	const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion);
+	const [digitTransitions, setDigitTransitions] = useState<Record<string, DigitTransition>>({});
+	const paused = Boolean(light["data-paused"]);
+	const canTick = active && !paused && !reducedMotion;
 
-	const prev = prevGlyphsRef.current;
-	const nextVersions = glyphs.map((_, i) => digitVersionsRef.current[i] ?? 0);
-	if (canTick) {
-		const prevRuns = findDigitRuns(prev);
-		const nextRuns = findDigitRuns(glyphs);
-		if (prevRuns.length === nextRuns.length) {
-			for (let r = 0; r < nextRuns.length; r++) {
-				const pr = prevRuns[r];
-				const nr = nextRuns[r];
-				const pLen = pr.end - pr.start;
-				const nLen = nr.end - nr.start;
-				for (let pos = 0; pos < nLen; pos++) {
-					const place = nLen - 1 - pos;
-					const nextIdx = nr.start + pos;
-					const prevIdx = pLen - 1 - place;
-					const prevDigit = prevIdx >= 0 ? prev[pr.start + prevIdx] : undefined;
-					if (prevDigit !== glyphs[nextIdx]) {
-						nextVersions[nextIdx] = (digitVersionsRef.current[nextIdx] ?? 0) + 1;
-					}
-				}
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const sync = () => setReducedMotion(media.matches);
+		sync();
+		media.addEventListener("change", sync);
+		return () => media.removeEventListener("change", sync);
+	}, []);
+
+	// 仅在提交后的 layout 阶段比对基线，确保被放弃的渲染不污染比较基线；暂停或减少动态时消费当前值并清空动画。
+	useLayoutEffect(() => {
+		const prevText = committedTextRef.current;
+		committedTextRef.current = children;
+		if (!canTick) {
+			setDigitTransitions((prev) => (Object.keys(prev).length ? {} : prev));
+			return;
+		}
+		if (prevText === children) return;
+		const prevMap = collectDigitMap(lightGlyphs(prevText));
+		const nextMap = collectDigitMap(lightGlyphs(children));
+		const nextTransitions: Record<string, DigitTransition> = {};
+		for (const [slotKey, nextDigit] of nextMap) {
+			const prevDigit = prevMap.get(slotKey);
+			if (prevDigit !== nextDigit) {
+				tickCounterRef.current += 1;
+				nextTransitions[slotKey] = { prev: prevDigit ?? "", next: nextDigit, tick: tickCounterRef.current };
 			}
 		}
-	}
-	digitVersionsRef.current = nextVersions;
-	prevGlyphsRef.current = glyphs;
+		setDigitTransitions(nextTransitions);
+	}, [children, canTick]);
 
 	useLayoutEffect(() => {
 		const element = light.ref.current;
@@ -121,17 +178,23 @@ export function RunningLight({ active, children }: { active: boolean; children: 
 	}, [light["data-paused"]]);
 	return (
 		<span className="running-light" {...light}>
-			{glyphs.map((glyph, index) => {
-				const tick = nextVersions[index] ?? 0;
+			{tokens.map((item) => {
+				const transition = canTick && item.digitSlot ? digitTransitions[item.digitSlot.slotKey] : undefined;
 				return (
-					// biome-ignore lint/suspicious/noArrayIndexKey: 字位固定，状态数字更新保持原字位节点和光照进度。
-					<span className="running-glyph" key={index}>
-						{canTick && tick > 0 && ASCII_DIGIT.test(glyph) ? (
-							<span className="running-digit-tick" key={tick}>
-								{glyph}
+					<span className="running-glyph" key={item.key}>
+						{transition && transition.next === item.glyph ? (
+							<span className="running-digit-slot">
+								{transition.prev && (
+									<span className="running-digit-out" key={`out-${transition.tick}`} aria-hidden="true">
+										{transition.prev}
+									</span>
+								)}
+								<span className="running-digit-in" key={`in-${transition.tick}`}>
+									{item.glyph}
+								</span>
 							</span>
 						) : (
-							glyph
+							item.glyph
 						)}
 					</span>
 				);

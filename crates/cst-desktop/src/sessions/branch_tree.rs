@@ -17,7 +17,7 @@ use gpui_kit::{
 use serde_json::{Map, Value, json};
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{
     KbdRowTarget, pointer_moved_past_threshold, render_gliding_row_indicator,
 };
@@ -2005,7 +2005,7 @@ impl BranchTreeView {
             .into_any_element()
         };
 
-        render_frosted_surface(
+        render_frosted_scrim(
             "branch-summary-scrim-dz0fp",
             FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
@@ -2128,6 +2128,7 @@ impl BranchTreeView {
                 .child(motion::apply_modal_motion(
                     div().child(modal_body),
                     scrim_progress,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
         )
@@ -2313,7 +2314,7 @@ impl BranchTreeView {
             .into_any_element()
         };
 
-        render_frosted_surface(
+        render_frosted_scrim(
             "branch-summary-scrim-dz0fp-exit",
             FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
@@ -2332,6 +2333,7 @@ impl BranchTreeView {
         .child(motion::apply_modal_motion(
             div().child(modal_body),
             scrim_progress,
+            scale_factor,
             palette.craft_stack_shadows(),
         ))
         .into_any_element()
@@ -3097,6 +3099,7 @@ impl Render for BranchTreeView {
                 div().rounded(radius::ROW).child(menu),
                 filter_p,
                 -6.0,
+                scale_factor,
                 palette.flat_popover_shadows(),
             );
             let wrap = div()
