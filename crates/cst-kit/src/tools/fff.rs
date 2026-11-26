@@ -1194,7 +1194,7 @@ fn run_grep(
     if budget_exceeded {
         obj.insert("degraded".into(), Value::Bool(true));
         notices.push(
-            "内容检索已达到 256 MiB 读取上限，已保留此前命中的结果；请缩小 path 或补充 include 过滤。"
+            "内容检索已达到 256 MiB 读取上限，已保留此前命中的结果；请缩小 path 的目录或通配范围。"
                 .to_owned(),
         );
     }

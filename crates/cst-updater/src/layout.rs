@@ -11,16 +11,7 @@ pub const BUILD_INFO_PATH: &str = "app/BUILD-INFO.json";
 pub const SERVER_EXE_PATH: &str = "app/cst-server.exe";
 pub const UPDATER_EXE_PATH: &str = "app/cst-updater.exe";
 
-pub const REQUIRED_SKILL_NAMES: &[&str] = &[
-    "disk",
-    "ls",
-    "sys",
-    "startup",
-    "eventlog",
-    "driver",
-    "runbook",
-    "bitlocker",
-];
+pub use cst_os::REQUIRED_SKILL_NAMES;
 
 pub const REQUIRED_FONT_FILES: &[&str] = &[
     "app/fonts/SourceHanSansCN-VF.otf",

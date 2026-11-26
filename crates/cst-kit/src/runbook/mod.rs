@@ -124,7 +124,7 @@ pub fn definitions(root: &Path) -> Result<Vec<ToolDefinition>, String> {
             .into(),
     );
     runbook.prompt_guidelines = Some(vec![
-        "生成或修订修复命令前先阅读 app/skills/runbook/SKILL.md；合并同风险档命令，不写入诊断采集或破坏系统的操作，工具绝不自动执行命令。".into(),
+        "生成或修订修复命令前先按 <available_skills> 中 runbook 的 <location> 绝对路径调用 read 阅读技能规范；合并同风险档命令，不写入诊断采集或破坏系统的操作，工具绝不自动执行命令。".into(),
         "统一通过唯一工具 runbook 管理方案：新增或修订用 action=\"plan\"（修订须传 runbookId、baseVersion 与完整 items，默认 exportTxt=false 便于队员先核对并在卡片一键导出 TXT）；需立即导出时传 exportTxt=true 或调用 action=\"export\"（传 runbookId 与 version）。".into(),
     ]);
     Ok(vec![runbook])

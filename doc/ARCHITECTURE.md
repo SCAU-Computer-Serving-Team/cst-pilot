@@ -69,7 +69,7 @@ Rust 主线按 `app/`（只读程序区）、`data/`（用户持久数据区，�
 | 路径 | 内容 | 读写规则 |
 |---|---|---|
 | `app/prompts/APPEND_SYSTEM.md` | 项目级诊断提示词 | 随包只读分发，自动附加到系统提示词末尾 |
-| `app/skills/` | 8 份诊断与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
+| `app/skills/` | 10 份诊断、检索与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
 | `app/defaults/` | `settings`、`models-store`、`telemetry`、`web-search` 默认模板 | 随包只读分发，用于首次初始化与升级缺失字段合并 |
 | `app/fonts/`、`app/telemetry/`、`app/tools/lhm/` | 共享字体、遥测专用 CA / 币种表与 LHM 辅助程序 | 随包只读分发，在线升级随程序区验签替换 |
 | `data/config/settings.json` | 默认模型、启用范围、思考强度 | 三端共用模型配置，按字段合并原子更新 |
@@ -83,14 +83,14 @@ Rust 主线按 `app/`（只读程序区）、`data/`（用户持久数据区，�
 | `data/sessions/` | 会话历史 JSONL v3（含工作目录分类子目录） | 三端共用，惰性创建，单写权互斥，末行半截 JSON 自动修复 |
 | `data/inbox/` | 持久化输入队列、幂等回执（`receipts/`）、未写入磁盘的空会话快照（`unflushed/`）、已删除会话标记（`deleted/`）与图片附件（`attachments/`） | `cst-server` 管理。输入先写入磁盘再投递，重启后遗留 `delivering` 标为 `uncertain` |
 | `data/exports/` | 会话导出任务登记与渲染临时目录（`work/`） | `SessionExportStore` 管理。重启时清理 `work/` 并将未完成任务标为中断失败 |
-| `data/plans/<ID>/` | 多轮命令方案各版本 JSON | `command_plan` 持有命名管道目录锁校验 `baseVersion` 后原子保存 |
+| `data/plans/<ID>/` | 多轮命令方案各版本 JSON | `runbook` 持有命名管道目录锁校验 `baseVersion` 后原子保存 |
 | `data/telemetry/` | 匿名安装密钥、会话恢复草稿（`drafts/`）、双端发送队列与状态摘要 | 遥测服务通过目录锁与命名管道存活证明维护 |
-| `artifacts/<YYYY-MM-DD>/runbook/` | 手动修复命令清单 TXT（UTF-8 BOM + CRLF） | `runbook_deliver` 与 `runbook` 排他或按序号原子写入 |
+| `artifacts/<YYYY-MM-DD>/runbook/` | 手动修复命令清单 TXT（UTF-8 BOM + CRLF） | `runbook` 按当天序号与版本号排他原子写入 |
 | `artifacts/<YYYY-MM-DD>/sessions/` | 导出的会话长图 PNG 与离线 HTML | 导出引擎排他发布，读取时核验 SHA-256 |
 | `.state/` | `server.json` 服务凭证、`ui-hints.json` 三端共享冷却提示、`locks/` 写锁、`update/` 升级事务与 `tmp/` 临时目录 | 软件端与后台服务维护，`PathGuard` 全面封锁模型工具访问 |
 
 ### 上下文、文件与网络隔离
 
 - **项目上下文隔离**：`DefaultResourceLoader` 固定开启 `no_context_files = true`、`no_skills = true` 与 `no_prompt_templates = true`。会话创建固定传入 `project_trusted = Some(false)` 并在设置层锁定 `defaultProjectTrust = "never"`，忽略机主工作目录中的 `AGENTS.md`、`CLAUDE.md` 与 `.pi/` 配置。项目仓库自身的 `AGENTS.md` 严禁进入发行包。
-- **本地敏感路径拦截**：`PathGuard` 在 `read`、`fffind` 与 `ffgrep` 入口解析真实路径并核对文件身份，阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径与 NTFS 备用数据流。
+- **本地敏感路径拦截**：`PathGuard` 在 `read`、`fffind` 与 `ffgrep` 入口解析真实路径并核对文件身份，阻断受保护凭据文件（默认 `data/config/{auth,models,mcp-auth,web-search}.json` 与 `data/telemetry/identity.json`）、`.state/` 目录及其硬链接／符号链接别名，同时拦截未驻留云文件、Windows 设备路径与 NTFS 备用数据流。
 - **默认离线与 SSRF 防护**：原生桌面启动器与测试环境通过 `CST_OFFLINE=1` 与显式配置关闭通用核心的默认版本检查与官方遥测。模型目录刷新与软件内签名升级由业务服务显式发起。联网检索与外部下载通过 `reqwest::ClientBuilder::no_proxy()` 关闭环境代理，每次请求与重定向前解析 DNS 并阻断回环与私网地址，仅按 `data/config/web-search.json` 放行 `198.18.0.0/15` TUN 假 IP 网段。

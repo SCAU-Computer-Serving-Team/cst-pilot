@@ -1,5 +1,19 @@
 use std::path::{Path, PathBuf};
 
+/// Single source of truth for all bundled CST Pilot skills under `app/skills/<name>/SKILL.md`.
+pub const REQUIRED_SKILL_NAMES: &[&str] = &[
+    "disk",
+    "ls",
+    "files",
+    "sys",
+    "startup",
+    "eventlog",
+    "driver",
+    "runbook",
+    "bitlocker",
+    "web-search",
+];
+
 /// Canonical four-zone path layout of a portable CST Pilot kit directory:
 /// - `app/`: read-only program binaries, prompts, skills, fonts, telemetry assets, defaults, tools
 /// - `data/` (overridable via `CST_PILOT_DATA_DIR`): persistent user data

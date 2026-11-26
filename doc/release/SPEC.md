@@ -10,7 +10,7 @@
 |---|---|
 | 原生主程序 | 根目录提供 `cst-pilot.exe`（桌面与内置 TUI 统一入口，支持 `--ui desktop/tui/web`），`app/` 下提供 `app/cst-server.exe`（本机后台服务，编译期经 `embed-web` 内嵌前端静态产物）与 `app/cst-updater.exe`（独立升级程序） |
 | 随包诊断组件 | `app/tools/lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `app/tools/lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
-| 业务提示词与技能 | `app/prompts/APPEND_SYSTEM.md`、`app/skills/`（8 份维护技能说明），以及 `app/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
+| 业务提示词与技能 | `app/prompts/APPEND_SYSTEM.md`、`app/skills/`（10 份维护技能说明），以及 `app/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
 | 界面与字体资产 | `app/fonts/` 下的双端共享可变字体 `SourceHanSansCN-VF.otf`、`LICENSE.txt` 与桌面等宽字体 `JetBrainsMono-Regular.ttf`、`JetBrainsMono-Medium.ttf`、`JetBrainsMono-OFL.txt` |
 | 预置标准配置 | `app/defaults/` 提供干净 `settings.json`、双端 `telemetry.json`、默认免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
 | 文档、许可与校验 | 根目录 `VERSION`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md`、`doc/`，以及 `app/licenses/`、`app/BUILD-INFO.json` 与全树 `app/SHA256SUMS` |
@@ -23,7 +23,7 @@
 
 1. **受控联网发现**：升级源地址与官方 Ed25519 公钥分别通过编译期环境变量 `CST_UPDATE_MANIFEST_URL` 与 `CST_UPDATE_PUBLIC_KEY` 注入。两项任一缺失或为空时，升级状态固定为不可用（`Phase::Unavailable`），启动时不发起联网检查，普通会话保持可用。配置齐备时支持启动后台检查与手动检查，仅在远端版本高于本机且本机不低于 `minUpgradableVersion` 时提示可升级，下载与安装须经本地确认。
 2. **编译期信任根与双重验签**：禁止从运行期环境变量或远端清单动态读取信任根与升级源。升级包准备阶段强制校验同时包含三支必需可执行文件（`cst-pilot.exe`、`app/cst-server.exe`、`app/cst-updater.exe`）与全部随包字体文件及有效 SFNT 表头，并依次通过清单签名、`SHA256SUMS` 独立签名、归档哈希及解压后全树逐文件 SHA-256 校验。
-3. **程序区与用户数据区严格隔离**：升级过程原样保留 `data/config/{auth,models,mcp-auth,web-settings,desktop,device}.json`、`data/{sessions,command-plans,telemetry,web-inbox,session-exports}/` 与 `artifacts/` 下的全部个人数据。四份预置配置（`data/config/{settings,models-store,telemetry,web-search}.json`）仅按缺失字段合并 `app/defaults/` 默认项，保留用户已有设置。
+3. **程序区与用户数据区严格隔离**：升级按区域分类保护全部用户数据区（`data/` 与 `artifacts/`），仅对四份预置配置（`data/config/{settings,models-store,telemetry,web-search}.json`）按缺失字段合并 `app/defaults/` 默认项，保留用户已有设置。
 4. **空闲门禁与遥测定稿**：启动交接前先关闭输入与写入门禁（`ActivityGate`），校验无运行中会话、未决收件箱或活动导出任务，并核验宿主进程 PID、创建时间及规范化可执行路径。独立更新器启动后在共享 5 秒预算内完成遥测定稿，不阻塞等待网络上传。
 5. **预写事务替换、双进程自检与自动回滚**：独立更新器等待软件端与后台服务双宿主进程退出后，按 `.state/update/transaction.json` 逐文件备份替换。替换后在共用 15 秒总截止时间的独立 Job Object 中依次执行 `cst-server.exe --health-check` 与 `cst-pilot.exe --health-check`，核验版本输出与静态资产完整性。自检失败、取消或替换中途断电重启时，按事务记录逆序恢复原版本文件（主程序启动时同步检测未闭合事务并拉起 `cst-updater.exe --recover`）。
 
@@ -32,7 +32,7 @@
 无论是打包输出树还是在线升级归档，均执行以下六条强制校验，违反任一条立即拒绝发布或安装：
 
 1. **禁止开发与测试文件**：不得包含任何路径下的 `AGENTS.md`、前端源码（`src/`）、测试目录或编译缓存。
-2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`.env` 或 `.env.*`。发行树与升级包也拒绝已退役的 `wiztree/` 和 `app/tools/wiztree/` 组件目录，含空目录。
+2. **禁止运行态与个人数据**：发行包不得携带用户数据区（`data/`）与运行态产物，具体拒绝 `.state/`、`.git/`、`sessions/`、`plans/`、`inbox/`、`exports/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`.env` 或 `.env.*`。发行树与升级包也拒绝已退役的 `wiztree/` 和 `app/tools/wiztree/` 组件目录，含空目录。
 3. **禁止越界路径与链接**：归档与发行树不得包含符号链接、Windows 目录联接（Junction）、硬链接、保留设备名、备用数据流（ADS）、`..` 越界路径或大小写冲突路径。仅精确放行随包共享字体目录（Rust 发行树 `app/fonts/`，过渡包 `assets/fonts/`）下的 `SourceHanSansCN-VF.otf` 与 `JetBrainsMono-{Regular,Medium}.ttf`，其余路径不得包含未裁剪 `.otf` 源文件。
 4. **禁止任何凭据或密钥**：全树扫描拒绝疑似 API 密钥、GitHub 令牌、云厂商密钥、JWT 或私钥块。所有 `.json` 递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`clientSecret`、`identityKey`、`token`、`secret`、`password` 或 `authorization` 字段。
 5. **预置配置精确匹配**：预置 `web-search.json` 与 `telemetry.json`（Rust 发行树 `app/defaults/`，过渡包 `agent/home/`）必须与发行标准常量一致，禁止把构建机本机配置带入发行包。
@@ -40,6 +40,6 @@
 
 ## 验收与发布条件
 
-- 构建产物在隔离副本中通过冷／热启动、17 个开放工具白名单核验、后台对话回合与安全退出冒烟测试，测试运行态不进入正式 ZIP。
+- `xtask dist` 自动冒烟在隔离副本中核验干净发行树、首次配置初始化与双进程健康自检；14 个开放工具白名单、模型对话回合与安全退出另行按集成与端到端测试验收，测试运行态不进入正式 ZIP。
 - 生成 ZIP 后解压至全新临时目录，逐文件复核 `SHA256SUMS` 与全部干净树红线。
 - 实机 U 盘、跨机移动与在线升级回滚验收按 [../test/TESTING.md](../test/TESTING.md) 执行。

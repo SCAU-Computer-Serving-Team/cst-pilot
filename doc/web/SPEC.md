@@ -86,7 +86,7 @@
 | `/model`、`/thinking`、`/scoped-models` | 输入框菜单与设置页 | 切换当前模型与思考强度。设置页保存默认模型、启用范围与排序 |
 | `/login`、`/logout` | `/login`、`/settings`、`/account` | 多服务登录与单服务独立退出 |
 | `/compact` | 斜杠行内标记 | 内嵌标记并将后续输入作为压缩附加说明提交 |
-| `/skill:<name>` | 斜杠行内标记 | 覆盖 8 份诊断技能，提交后由后端展开技能正文 |
+| `/skill:<name>` | 斜杠行内标记 | 覆盖 10 份内置技能，提交后由后端展开技能正文 |
 | `/fork` | 消息末尾按钮 + 斜杠命令 | 按目标或末轮助手节点直接派生新会话并跳转进入 |
 | `/tree` | 消息菜单 + 斜杠命令 + 独立视图 | 跳转 `/s/<id>/tree` |
 | `/export` | 消息菜单与导出页 | 预览并导出会话 PNG 或离线 HTML |
@@ -101,18 +101,18 @@ Web 端不开放扩展重载、项目信任切换、外部文件导入，也不�
 
 ## 工具调用与卡片
 
-Web 覆盖全部 17 个开放工具，单工具调用独立计时并在结束时冻结：
+Web 覆盖全部 14 个开放工具，单工具调用独立计时并在结束时冻结：
 
 | 类别 | 适用工具 | 呈现与交互规则 |
 |---|---|---|
-| 普通工具卡片 | `disk`、`driver`、`eventlog`、`ls`、`startup`、`sys(proc/gpu/io/sensor)`、`bitlocker(status)`、`source_check`、`fetch_content`、`get_search_content`、`ffgrep`、`fffind`、`read` | 连续调用合并为“已完成检查 · N 次工具调用”折叠行。展开后采用概览组、排行组或原文块模板展示，底部附原始数据开关。`read` 图片先展示图片再附绝对路径 |
-| 特殊内嵌组件 | `bitlocker(unlock/decrypt)`、`sys(overview)`、`command_plan`、`runbook_deliver`、`runbook`、`web_search` | 与正文同级常驻展示，不进入过程折叠或普通工具计数 |
+| 普通工具卡片 | `disk`、`driver`、`eventlog`、`ls`、`startup`、`sys(proc/gpu/io/sensor)`、`bitlocker(status)`、`web_fetch`、`get_search_content`、`ffgrep`、`fffind`、`read` | 连续调用合并为“已完成检查 · N 次工具调用”折叠行。展开后采用概览组、排行组或原文块模板展示，底部附原始数据开关。`read` 图片先展示图片再附绝对路径 |
+| 特殊内嵌组件 | `bitlocker(unlock/decrypt)`、`sys(overview)`、`runbook`、`web_search` | 与正文同级常驻展示，不进入过程折叠或普通工具计数（历史会话卡片继续兼容渲染已退役的 `command_plan` 与 `runbook_deliver`） |
 
 特殊内嵌组件行为：
 
 - **`bitlocker unlock/decrypt`**：展示目标卷、保护器 ID、隐藏恢复密码输入框或固定解密目标确认按钮。格式错误保留原请求可修正重试，已消费、超时或异常中断的请求分别展示对应终态或“结果未确认”复查状态。
 - **`sys overview`**：常驻展示 CPU、内存比例条、机型与开机时长，次级字段收进详情折叠区。
-- **`command_plan` / `runbook_deliver` / `runbook`**：按风险分档展示命令、执行环境、说明与单条复制按钮。方案显示版本号与待核对状态，已交付清单显示可点击打开系统记事本的文件名链接。
+- **`runbook`**：按风险分档展示命令、执行环境、说明、单条复制与一键导出并打开系统记事本按钮；已导出清单显示可点击打开的文件名链接（历史会话继续兼容渲染 `command_plan` 与 `runbook_deliver`）。
 - **`web_search`**：默认直接检索返回结果，单行展示状态图标、运行角标柔光与关键词数量，点击展开查询关键词列表。
 
 ## 仪表盘
