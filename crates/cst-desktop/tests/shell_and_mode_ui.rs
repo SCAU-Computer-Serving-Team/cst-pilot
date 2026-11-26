@@ -71,7 +71,11 @@ impl KitTempFixture {
         for skill in cst_os::REQUIRED_SKILL_NAMES {
             let p = dir.join(format!("app/skills/{skill}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
-            fs::write(p, format!("---\nname: {skill}\ndescription: {skill} 技能。\n---\n技能说明。\n")).unwrap();
+            fs::write(
+                p,
+                format!("---\nname: {skill}\ndescription: {skill} 技能。\n---\n技能说明。\n"),
+            )
+            .unwrap();
         }
         for font_file in [
             "SourceHanSansCN-VF.otf",
@@ -709,7 +713,9 @@ fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
 
     // Missing required skill (e.g., new `files` or `web-search`) -> health check must fail cleanly
     for required_skill in ["files", "web-search"] {
-        let skill_path = fixture.root.join(format!("app/skills/{required_skill}/SKILL.md"));
+        let skill_path = fixture
+            .root
+            .join(format!("app/skills/{required_skill}/SKILL.md"));
         let backup = fs::read(&skill_path).unwrap();
         fs::remove_file(&skill_path).unwrap();
         assert!(
