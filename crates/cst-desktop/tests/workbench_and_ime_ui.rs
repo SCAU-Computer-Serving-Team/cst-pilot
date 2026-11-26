@@ -785,7 +785,7 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         "IME candidate selection Enter must NEVER trigger session creation or message send!"
     );
 
-    // Tab inserts at the caret, preserves the suffix and follows keyboard selection.
+    // Tab accepts an open completion at the caret (preserving suffix) and lets focus escape when closed.
     cx.update_window(win_handle, |_, window, cx| {
         let textarea = shell
             .read(cx)
@@ -800,7 +800,31 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
             st.set_value("尾部", window, cx);
         });
         window.press("home", cx);
+        // With no active completion menu, Tab escapes composer into footer controls.
         window.press("tab", cx);
+        assert!(
+            window
+                .try_find("composer-completion-popover-p2bit")
+                .is_none()
+        );
+        // Refocus composer at caret 0 and type `/` to trigger slash completion before the suffix.
+        textarea.update(cx, |st, cx| {
+            st.presentation().focus_handle().focus(window, cx);
+            st.set_selected_range(0..0, cx);
+            EntityInputHandler::replace_text_in_range(st, None, "/", window, cx);
+        });
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        let textarea = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .home_composer()
+            .read(cx)
+            .textarea_state()
+            .clone();
+        window.render_frame(cx);
         assert!(window.find("composer-completion-popover-p2bit").visible());
         window.press("down", cx);
         window.press("tab", cx);
@@ -983,6 +1007,11 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         assert!(window.find("thinking-option-max").visible());
         window.press("end", cx);
         window.press("enter", cx);
+        window.render_frame(cx);
+        // Selecting a thinking level returns to Main (matching Web); Esc closes the picker.
+        assert!(window.find("composer-model-picker-d8zzg").visible());
+        assert!(window.try_find("thinking-option-max").is_none());
+        window.press("escape", cx);
         assert!(window.try_find("composer-model-picker-d8zzg").is_none());
     })
     .unwrap();

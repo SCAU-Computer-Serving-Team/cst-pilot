@@ -359,6 +359,48 @@ impl WorkbenchView {
         }
     }
 
+    pub fn open_model_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_modal() {
+            return false;
+        }
+        if self.header_menu_open {
+            self.header_menu_open = false;
+            self.header_menu_prior_focus = None;
+        }
+        if self.active_session_id.is_some() {
+            self.session_composer
+                .update(cx, |comp, cx| comp.open_model_picker_shortcut(window, cx))
+        } else {
+            self.home_composer
+                .update(cx, |comp, cx| comp.open_model_picker_shortcut(window, cx))
+        }
+    }
+
+    pub fn abort_active_streaming(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(sid) = self.active_session_id.clone() else {
+            return false;
+        };
+        let is_running = self
+            .client
+            .snapshot()
+            .loaded_sessions
+            .get(&sid)
+            .is_some_and(|s| s.running);
+        if !is_running {
+            return false;
+        }
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            if let Err(err) = client.abort_session(sid).await {
+                let _ = weak.update(cx, |_, cx| {
+                    cx.emit(WorkbenchEvent::WorkspaceError(err.to_string()));
+                });
+            }
+        })
+        .detach();
+        true
+    }
+
     fn open_lightbox(
         &mut self,
         target: LightboxImageTarget,

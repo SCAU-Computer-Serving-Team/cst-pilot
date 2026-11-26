@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -450,6 +451,138 @@ impl<const N: usize> KbdBoundsTracker<N> {
     }
 }
 
+/// Keyed bounds tracker for dynamic-length menus, lists, toolbars, and settings views.
+#[derive(Clone, Default)]
+pub struct KbdDynamicBoundsTracker {
+    slots: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
+}
+
+impl KbdDynamicBoundsTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&self) {
+        self.slots.borrow_mut().clear();
+    }
+
+    pub fn set(&self, key: impl Into<SharedString>, bounds: Bounds<Pixels>) {
+        self.slots.borrow_mut().insert(key.into(), bounds);
+    }
+
+    pub fn get(&self, key: &str) -> Option<Bounds<Pixels>> {
+        self.slots.borrow().get(key).copied()
+    }
+}
+
+/// Target descriptor for a dynamic control inside a `KbdDynamicBoundsTracker` container.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KbdDynamicSpec {
+    pub key: SharedString,
+    pub corner_radius: f32,
+    pub tone: KbdTone,
+    pub rail: KbdRailPlacement,
+    pub bracket_pad: f32,
+}
+
+impl KbdDynamicSpec {
+    pub fn row(key: impl Into<SharedString>) -> Self {
+        Self {
+            key: key.into(),
+            corner_radius: 6.0,
+            tone: KbdTone::Neutral,
+            rail: KbdRailPlacement::LeftInside,
+            bracket_pad: 2.0,
+        }
+    }
+
+    pub fn control(key: impl Into<SharedString>, rail: KbdRailPlacement) -> Self {
+        Self {
+            key: key.into(),
+            corner_radius: 4.0,
+            tone: KbdTone::Neutral,
+            rail,
+            bracket_pad: 3.0,
+        }
+    }
+
+    pub fn with_tone(mut self, tone: KbdTone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    pub fn with_radius(mut self, corner_radius: f32) -> Self {
+        self.corner_radius = corner_radius;
+        self
+    }
+
+    pub fn with_bracket_pad(mut self, bracket_pad: f32) -> Self {
+        self.bracket_pad = bracket_pad;
+        self
+    }
+}
+
+/// Pure navigation step for vertical menus, lists, and toolbars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KbdMenuStep {
+    Move(usize),
+    Activate(usize),
+    SubRight,
+    BackLeft,
+    ReorderUp,
+    ReorderDown,
+    Ignore,
+}
+
+/// Resolves vertical list/menu navigation (`up`/`down`/`home`/`end`/`enter`/`space`/`left`/`right`/`alt+up`/`alt+down`).
+pub fn resolve_menu_nav_key(
+    key: &str,
+    modifiers: gpui::Modifiers,
+    is_held: bool,
+    current_idx: usize,
+    item_count: usize,
+    wrap: bool,
+) -> KbdMenuStep {
+    if item_count == 0 {
+        return KbdMenuStep::Ignore;
+    }
+    let cur = current_idx.min(item_count - 1);
+    if modifiers.alt && !modifiers.control && !modifiers.shift && !modifiers.platform {
+        return match key {
+            "up" => KbdMenuStep::ReorderUp,
+            "down" => KbdMenuStep::ReorderDown,
+            _ => KbdMenuStep::Ignore,
+        };
+    }
+    if modifiers != gpui::Modifiers::default() {
+        return KbdMenuStep::Ignore;
+    }
+    match key {
+        "up" => {
+            let next = if cur == 0 {
+                if wrap { item_count - 1 } else { 0 }
+            } else {
+                cur - 1
+            };
+            KbdMenuStep::Move(next)
+        }
+        "down" => {
+            let next = if cur + 1 >= item_count {
+                if wrap { 0 } else { item_count - 1 }
+            } else {
+                cur + 1
+            };
+            KbdMenuStep::Move(next)
+        }
+        "home" => KbdMenuStep::Move(0),
+        "end" => KbdMenuStep::Move(item_count - 1),
+        "right" => KbdMenuStep::SubRight,
+        "left" => KbdMenuStep::BackLeft,
+        "enter" | "space" if !is_held => KbdMenuStep::Activate(cur),
+        _ => KbdMenuStep::Ignore,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RectGeom {
     x: f32,
@@ -638,6 +771,153 @@ pub fn render_gliding_control_indicator<const N: usize>(
                     compute_control_rect(style, rel_x, rel_y, w, h, spec.corner_radius, spec.rail),
                     spec.tone,
                 ))
+            });
+
+            let mut state = anim_state.read(cx).borrow_mut();
+            let (cur_rect, _) = state.sample_rect(now);
+            let (cur_op, _) = state.sample_op(now);
+
+            let want_visible = resolved.is_some();
+            if let Some((goal_rect, tone)) = resolved {
+                state.last_tone = tone;
+                let snap = reduce_motion || !state.initialized || !state.was_visible;
+                if snap {
+                    state.from_rect = goal_rect;
+                    state.to_rect = goal_rect;
+                    state.pos_start = now;
+                    state.pos_duration = Duration::ZERO;
+                } else if !state.to_rect.approx_eq(goal_rect) {
+                    state.from_rect = cur_rect;
+                    state.to_rect = goal_rect;
+                    state.pos_start = now;
+                    state.pos_duration = KBD_GLIDE_DURATION;
+                }
+                state.initialized = true;
+            }
+
+            if want_visible != state.was_visible {
+                state.was_visible = want_visible;
+                state.from_op = cur_op;
+                state.to_op = if want_visible { 1.0 } else { 0.0 };
+                state.op_start = now;
+                state.op_duration = if reduce_motion {
+                    Duration::ZERO
+                } else {
+                    KBD_FADE_DURATION
+                };
+            }
+
+            let (rect, pos_anim) = state.sample_rect(now);
+            let (op, op_anim) = state.sample_op(now);
+            let tone = state.last_tone;
+            drop(state);
+
+            if pos_anim || op_anim {
+                window.request_animation_frame();
+            }
+            if op <= 0.005 || rect.w <= 1.0 || rect.h <= 1.0 {
+                return;
+            }
+
+            let mut color = match (style, tone) {
+                (KeyboardFocusStyleDto::Brackets, KbdTone::Accent)
+                | (KeyboardFocusStyleDto::Rail, KbdTone::Accent) => kbd_bracket_accent(&palette),
+                (KeyboardFocusStyleDto::Brackets, KbdTone::Danger)
+                | (KeyboardFocusStyleDto::Rail, KbdTone::Danger) => kbd_bracket_danger(&palette),
+                (KeyboardFocusStyleDto::Brackets, KbdTone::Neutral) => kbd_bracket_color(&palette),
+                (KeyboardFocusStyleDto::Rail, KbdTone::Neutral) => kbd_rail_color(&palette),
+            };
+            color.a *= op;
+
+            let abs_x = f32::from(container_bounds.origin.x) + rect.x;
+            let abs_y = f32::from(container_bounds.origin.y) + rect.y;
+            let clip = Bounds {
+                origin: point(
+                    container_bounds.origin.x - px(16.0),
+                    container_bounds.origin.y - px(12.0),
+                ),
+                size: gpui::size(
+                    container_bounds.size.width + px(32.0),
+                    container_bounds.size.height + px(28.0),
+                ),
+            };
+            window.with_content_mask(Some(ContentMask { bounds: clip }), |window| match style {
+                KeyboardFocusStyleDto::Brackets => {
+                    paint_four_corner_brackets(
+                        window, abs_x, abs_y, rect.w, rect.h, rect.r, 8.0, 1.5, color,
+                    );
+                }
+                KeyboardFocusStyleDto::Rail => {
+                    let bar = Bounds {
+                        origin: point(px(abs_x), px(abs_y)),
+                        size: gpui::size(px(rect.w), px(rect.h)),
+                    };
+                    window.paint_quad(fill(bar, color).corner_radii(Corners::all(px(rect.r))));
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+    .into_any_element()
+}
+
+/// Renders a `180ms ease-out` gliding keyboard focus indicator (`四角` or `游标`) over arbitrary
+/// dynamically keyed rows or controls inside a container.
+pub fn render_gliding_dynamic_indicator(
+    id_prefix: &'static str,
+    style: KeyboardFocusStyleDto,
+    target: Option<KbdDynamicSpec>,
+    tracker: KbdDynamicBoundsTracker,
+    palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let reduce_motion = cx.reduce_motion();
+    let anim_state = window.use_keyed_state(
+        SharedString::from(format!("{id_prefix}-kbd-dyn-anim")),
+        cx,
+        |_, _| RefCell::new(ControlGlideState::default()),
+    );
+    let palette = *palette;
+
+    canvas(
+        |_, _, _| (),
+        move |container_bounds, _, window, cx| {
+            let now = Instant::now();
+            let resolved = target.as_ref().and_then(|spec| {
+                let ctrl = tracker.get(spec.key.as_ref())?;
+                let rel_x = f32::from(ctrl.origin.x) - f32::from(container_bounds.origin.x);
+                let rel_y = f32::from(ctrl.origin.y) - f32::from(container_bounds.origin.y);
+                let w = f32::from(ctrl.size.width);
+                let h = f32::from(ctrl.size.height);
+                if w <= 1.0 || h <= 1.0 {
+                    return None;
+                }
+                let rect = match style {
+                    KeyboardFocusStyleDto::Brackets => {
+                        let pad = spec.bracket_pad;
+                        RectGeom {
+                            x: rel_x - pad,
+                            y: rel_y - pad,
+                            w: w + pad * 2.0,
+                            h: h + pad * 2.0,
+                            r: spec.corner_radius + pad,
+                        }
+                    }
+                    KeyboardFocusStyleDto::Rail => compute_control_rect(
+                        style,
+                        rel_x,
+                        rel_y,
+                        w,
+                        h,
+                        spec.corner_radius,
+                        spec.rail,
+                    ),
+                };
+                Some((rect, spec.tone))
             });
 
             let mut state = anim_state.read(cx).borrow_mut();
@@ -1141,5 +1421,52 @@ mod tests {
         );
         assert_eq!(outside_rail.x, 3.0);
         assert_eq!(outside_rail.w, 3.0);
+    }
+
+    #[test]
+    fn menu_nav_resolves_vertical_wrap_clamp_and_alt_reorder() {
+        let plain = gpui::Modifiers::default();
+        let alt = gpui::Modifiers { alt: true, ..plain };
+        assert_eq!(
+            resolve_menu_nav_key("down", plain, false, 0, 3, true),
+            KbdMenuStep::Move(1)
+        );
+        assert_eq!(
+            resolve_menu_nav_key("down", plain, false, 2, 3, true),
+            KbdMenuStep::Move(0)
+        );
+        assert_eq!(
+            resolve_menu_nav_key("up", plain, false, 0, 3, false),
+            KbdMenuStep::Move(0)
+        );
+        assert_eq!(
+            resolve_menu_nav_key("right", plain, false, 0, 3, true),
+            KbdMenuStep::SubRight
+        );
+        assert_eq!(
+            resolve_menu_nav_key("left", plain, false, 0, 3, true),
+            KbdMenuStep::BackLeft
+        );
+        assert_eq!(
+            resolve_menu_nav_key("up", alt, false, 1, 3, true),
+            KbdMenuStep::ReorderUp
+        );
+        assert_eq!(
+            resolve_menu_nav_key("down", alt, false, 1, 3, true),
+            KbdMenuStep::ReorderDown
+        );
+    }
+
+    #[test]
+    fn dynamic_bounds_tracker_stores_and_clears_keyed_slots() {
+        let tracker = KbdDynamicBoundsTracker::new();
+        let rect = Bounds {
+            origin: point(px(12.0), px(24.0)),
+            size: gpui::size(px(200.0), px(36.0)),
+        };
+        tracker.set("row-0", rect);
+        assert_eq!(tracker.get("row-0"), Some(rect));
+        tracker.clear();
+        assert_eq!(tracker.get("row-0"), None);
     }
 }

@@ -1,8 +1,18 @@
 import { Button, ListBox, Popover } from "@heroui/react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
-import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type KeyboardEvent as ReactKeyboardEvent,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import type { ModelChoice } from "../data/model-selection";
 import type { Model } from "../data/web-state";
+import { isModelPickerShortcut } from "../shell/input-shortcuts";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import {
@@ -51,6 +61,15 @@ export function ModelPicker({
 	const modelButton = useRef<HTMLButtonElement>(null);
 	const thinkingButton = useRef<HTMLButtonElement>(null);
 	const listBox = useRef<HTMLDivElement>(null);
+	const mainContainerRef = useRef<HTMLDivElement>(null);
+	const mainItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const optionsItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const kbdStyle = useKeyboardFocusStyle();
+	const [kbdActive, setKbdActive] = useState(false);
+	const [mainActiveId, setMainActiveId] = useState<"models" | "thinking">("models");
+	const [optionActiveId, setOptionActiveId] = useState<string | null>(null);
+	const clearKbd = useCallback(() => setKbdActive(false), []);
+	usePointerMutex(open && kbdActive, clearKbd);
 	const shell = useWorkspaceShell();
 	useEffect(() => {
 		if (shell?.appActive) {
@@ -58,6 +77,30 @@ export function ModelPicker({
 			setOpen(false);
 		}
 	}, [shell?.appActive]);
+	useEffect(() => {
+		const onAltM = (event: KeyboardEvent) => {
+			if (!isModelPickerShortcut(event)) return;
+			if (document.querySelector(".standby-scrim, .palette-scrim, dialog[open], .summary-scrim")) return;
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.repeat) return;
+			if (openRef.current) {
+				navigation.current++;
+				setOpen(false);
+				window.setTimeout(() => triggerButton.current?.focus({ preventScroll: true }), 0);
+				return;
+			}
+			navigation.current++;
+			returnFocus.current = "models";
+			setMainActiveId("models");
+			setKbdActive(true);
+			setPage("main");
+			setOpen(true);
+			onOpen();
+		};
+		window.addEventListener("keydown", onAltM, true);
+		return () => window.removeEventListener("keydown", onAltM, true);
+	}, [onOpen]);
 	usePanelDismiss(
 		open,
 		() => {
@@ -113,10 +156,43 @@ export function ModelPicker({
 	}, [open, page, busy]);
 	useLayoutEffect(() => {
 		if (open && page === "main" && returnFocus.current) {
-			(returnFocus.current === "models" ? modelButton : thinkingButton).current?.focus();
+			const target = returnFocus.current;
+			setMainActiveId(target);
+			(target === "models" ? modelButton : thinkingButton).current?.focus();
 			returnFocus.current = null;
 		}
 	}, [open, page]);
+	function handleMainKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			const next = mainActiveId === "models" ? "thinking" : "models";
+			setKbdActive(true);
+			setMainActiveId(next);
+			(next === "models" ? modelButton : thinkingButton).current?.focus({ preventScroll: true });
+			return;
+		}
+		if (event.key === "ArrowRight") {
+			event.preventDefault();
+			if (mainActiveId === "models" && !models.length) return;
+			setKbdActive(true);
+			navigation.current++;
+			setListPage(mainActiveId);
+			setPage(mainActiveId);
+		}
+	}
+	function handleOptionsKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "ArrowLeft") {
+			event.preventDefault();
+			setKbdActive(true);
+			back();
+			return;
+		}
+		if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Home" || event.key === "End") {
+			setKbdActive(true);
+		}
+	}
 	function back() {
 		returnFocus.current = page === "main" ? null : page;
 		navigation.current++;
@@ -216,17 +292,25 @@ export function ModelPicker({
 				>
 					<div className="model-picker-pages t-page-slide" data-page={page === "main" ? "1" : "2"}>
 						<div
+							ref={mainContainerRef}
 							className="model-picker-main t-page"
 							data-page-id="1"
+							data-kbd-active={kbdActive && page === "main" ? "true" : undefined}
 							aria-hidden={page !== "main"}
 							inert={page !== "main"}
+							onKeyDown={handleMainKeyDown}
 						>
 							<Button
-								ref={modelButton}
+								ref={(node) => {
+									modelButton.current = node;
+									if (node) mainItemRefs.current.set("models", node);
+									else mainItemRefs.current.delete("models");
+								}}
 								variant="ghost"
 								className="menu-row model-picker-model"
 								aria-label="选择模型"
 								isDisabled={!models.length}
+								onFocus={() => setMainActiveId("models")}
 								onPress={() => {
 									navigation.current++;
 									setListPage("models");
@@ -243,10 +327,15 @@ export function ModelPicker({
 								</span>
 							</Button>
 							<Button
-								ref={thinkingButton}
+								ref={(node) => {
+									thinkingButton.current = node;
+									if (node) mainItemRefs.current.set("thinking", node);
+									else mainItemRefs.current.delete("thinking");
+								}}
 								variant="ghost"
 								className="menu-row model-picker-thinking"
 								aria-label="选择思考强度"
+								onFocus={() => setMainActiveId("thinking")}
 								onPress={() => {
 									navigation.current++;
 									setListPage("thinking");
@@ -259,12 +348,21 @@ export function ModelPicker({
 									<ChevronRight size={14} aria-hidden="true" />
 								</span>
 							</Button>
+							<KbdFocusOverlay
+								containerRef={mainContainerRef}
+								itemRefs={mainItemRefs}
+								targetId={open && page === "main" && kbdActive ? mainActiveId : null}
+								style={kbdStyle}
+								railPlacement="inside"
+							/>
 						</div>
 						<div
 							className="model-picker-options t-page"
 							data-page-id="2"
+							data-kbd-active={kbdActive && page !== "main" ? "true" : undefined}
 							aria-hidden={page === "main"}
 							inert={page === "main"}
+							onKeyDown={handleOptionsKeyDown}
 						>
 							<button type="button" className="menu-row model-picker-back" onClick={back}>
 								<ChevronLeft size={14} aria-hidden="true" />
@@ -286,7 +384,16 @@ export function ModelPicker({
 								}}
 							>
 								{options.map((option) => (
-									<ListBox.Item key={option.id} id={option.id} textValue={option.title}>
+									<ListBox.Item
+										key={option.id}
+										id={option.id}
+										textValue={option.title}
+										ref={(node: HTMLElement | null) => {
+											if (node) optionsItemRefs.current.set(option.id, node);
+											else optionsItemRefs.current.delete(option.id);
+										}}
+										onFocus={() => setOptionActiveId(option.id)}
+									>
 										<span className="model-picker-option-label" title={option.title}>
 											{option.label}
 										</span>
@@ -303,6 +410,17 @@ export function ModelPicker({
 									</ListBox.Item>
 								))}
 							</ListBox>
+							<KbdFocusOverlay
+								containerRef={listBox}
+								itemRefs={optionsItemRefs}
+								targetId={
+									open && page !== "main" && kbdActive
+										? (optionActiveId ?? selectedKey ?? options[0]?.id ?? null)
+										: null
+								}
+								style={kbdStyle}
+								railPlacement="inside"
+							/>
 						</div>
 					</div>
 				</Popover.Dialog>

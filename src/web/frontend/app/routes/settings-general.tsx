@@ -1,6 +1,6 @@
 import { Monitor, Moon, Scan, Sun, Tally1 } from "lucide-react";
 import { apiJson } from "../data/api";
-import { SettingsHeading, SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
+import { SettingsLoadState, useSettingsFeedback } from "../settings/settings-frame";
 import { SettingsSegment } from "../settings/settings-segment";
 import { useSettingsResource } from "../settings/use-settings-resource";
 import { applyKeyboardFocusStyle, type KeyboardFocusStyle, normalizeKeyboardFocusStyle } from "../shell/kbd-focus";
@@ -77,37 +77,34 @@ export default function GeneralSettings() {
 
 	return (
 		<>
-			<SettingsHeading title="常规" />
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
-				<SettingsSection title="外观">
-					<div className="settings-card">
-						<div className="settings-flat-row">
-							<div className="settings-row-copy">
-								<span>界面主题</span>
-							</div>
-							<SettingsSegment
-								label="页面主题"
-								value={state.data.theme}
-								items={themes}
-								disabled={state.working}
-								onChange={(value) => void updateTheme(value)}
-							/>
+				<section className="settings-flat-list" aria-label="常规设置">
+					<div className="settings-flat-row">
+						<div className="settings-row-copy">
+							<span>界面主题</span>
 						</div>
-						<div className="settings-flat-row">
-							<div className="settings-row-copy">
-								<span>方向键选中样式</span>
-							</div>
-							<SettingsSegment
-								label="方向键选中样式"
-								value={currentKbdStyle}
-								items={kbdFocusStyles}
-								disabled={state.working}
-								onChange={(value) => void updateKbdStyle(value)}
-							/>
-						</div>
+						<SettingsSegment
+							label="界面主题"
+							value={state.data.theme}
+							items={themes}
+							disabled={state.working}
+							onChange={(value) => void updateTheme(value)}
+						/>
 					</div>
-				</SettingsSection>
+					<div className="settings-flat-row">
+						<div className="settings-row-copy">
+							<span>方向键选中样式</span>
+						</div>
+						<SettingsSegment
+							label="方向键选中样式"
+							value={currentKbdStyle}
+							items={kbdFocusStyles}
+							disabled={state.working}
+							onChange={(value) => void updateKbdStyle(value)}
+						/>
+					</div>
+				</section>
 			)}
 		</>
 	);

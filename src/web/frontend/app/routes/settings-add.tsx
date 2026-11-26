@@ -1,4 +1,4 @@
-import { ChevronRight, SlidersHorizontal } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { ProviderServices } from "../auth/provider-services";
 import type { ProviderStatus } from "../data/api";
@@ -9,6 +9,7 @@ import { SettingsHeading, SettingsLink, SettingsLoadState, SettingsSection } fro
 import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
+
 export default function AddModelService() {
 	const state = useSettingsResource<{ providers: ProviderStatus[] }>("/api/auth");
 	const [query, setQuery] = useState("");
@@ -23,33 +24,28 @@ export default function AddModelService() {
 	const list = useAnimatedHeight(`${expanded}:${query}:${listed.total}`);
 	return (
 		<>
-			<SettingsHeading title="添加服务" back action={<CatalogRefreshButton />} />
-			<SettingsSearch label="搜索模型服务" value={query} onChange={setQuery} />
+			<SettingsHeading title="添加提供商" back action={<CatalogRefreshButton />} />
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
 				<>
 					{!query.trim() && (
-						<SettingsSection title="自定义服务">
-							<div className="settings-card settings-services">
-								<div className="settings-flat-row settings-service-row">
-									<div className="settings-row-copy">
-										<span className="settings-service-name">连接兼容接口</span>
-										<span className="settings-description">填写服务地址、接口协议、API key 和模型信息</span>
-									</div>
-									<SettingsLink to="/settings/custom" className="tier-1-btn-outline settings-action">
-										<SlidersHorizontal size={14} aria-hidden="true" /> 配置
-									</SettingsLink>
+						<div className="settings-flat-list">
+							<div className="settings-flat-row">
+								<div className="settings-row-inline">
+									<span className="settings-service-name">自定义提供商</span>
+									<span className="settings-description">兼容 OpenAI / Anthropic / Gemini API</span>
 								</div>
+								<SettingsLink to="/settings/custom" className="settings-inline-action">
+									配置
+									<ChevronRight size={14} aria-hidden="true" />
+								</SettingsLink>
 							</div>
-						</SettingsSection>
+						</div>
 					)}
-					<SettingsSection title="可添加的服务" summary={`${available.length} 个服务`}>
+					<SettingsSection title="可添加的提供商" summary={available.length}>
+						<SettingsSearch label="搜索提供商" value={query} onChange={setQuery} />
 						{available.length ? (
-							<div
-								className="settings-card settings-service-card"
-								ref={list}
-								data-expanded={expanded || !!query.trim()}
-							>
+							<div className="settings-service-card" ref={list} data-expanded={expanded || !!query.trim()}>
 								<ProviderServices providers={visible} adding unframed />
 								{listed.hasMore && (
 									<button
@@ -61,17 +57,15 @@ export default function AddModelService() {
 											setQuery("");
 										}}
 									>
-										{expanded || query.trim() ? "收起服务列表" : "查看全部服务"}（{listed.total}）
+										{expanded || query.trim() ? "收起列表" : "查看全部提供商"}（{listed.total}）
 										<ChevronRight size={14} className="settings-provider-chevron" aria-hidden="true" />
 									</button>
 								)}
 							</div>
 						) : (
-							<div className="settings-card">
-								<p className="settings-empty">
-									{query.trim() ? "没有匹配的模型服务" : "所有支持连接的服务均已配置"}
-								</p>
-							</div>
+							<p className="settings-empty">
+								{query.trim() ? "没有匹配的提供商" : "所有支持连接的提供商均已配置"}
+							</p>
 						)}
 					</SettingsSection>
 				</>

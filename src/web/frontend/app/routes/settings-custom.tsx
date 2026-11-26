@@ -1,4 +1,4 @@
-import { ListBox, Select } from "@heroui/react";
+import { Checkbox, ListBox, Select } from "@heroui/react";
 import { Check, ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -42,8 +42,9 @@ const protocols = [
 	["openai-completions", "OpenAI Chat Completions"],
 	["openai-responses", "OpenAI Responses"],
 	["anthropic-messages", "Anthropic Messages"],
-	["google-generative-ai", "Google Generative AI"],
+	["google-generative-ai", "Google Gemini"],
 ] as const;
+
 export default function CustomModelService() {
 	const [params] = useSearchParams();
 	const editing = params.get("provider");
@@ -72,6 +73,17 @@ export default function CustomModelService() {
 	useEffect(() => {
 		if (shell?.appActive) setProtocolOpen(false);
 	}, [shell?.appActive]);
+	// Esc closes inline delete confirmation BEFORE navigating back to providers list (Level 4 -> Level 6).
+	useEffect(() => {
+		if (!confirming) return;
+		const onEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+			event.preventDefault();
+			setConfirming(false);
+		};
+		window.addEventListener("keydown", onEscape);
+		return () => window.removeEventListener("keydown", onEscape);
+	}, [confirming]);
 	const editedOutputLimits = useRef(new Set<string>());
 	const modelList = useAnimatedHeight(`${loading}:${form.models.length}`);
 	useEffect(() => {
@@ -144,7 +156,7 @@ export default function CustomModelService() {
 				},
 			});
 			setKey("");
-			feedback(editing ? "服务配置已更新" : "自定义服务已添加");
+			feedback(editing ? "提供商配置已更新" : "自定义提供商已添加");
 			void navigate("/settings", { viewTransition: true });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "保存失败，请重试");
@@ -158,7 +170,7 @@ export default function CustomModelService() {
 		setError("");
 		try {
 			await apiJson(`/api/auth/custom/${encodeURIComponent(editing)}`, { method: "DELETE", body: { revision } });
-			feedback("自定义服务已移除");
+			feedback("自定义提供商已移除");
 			void navigate("/settings", { viewTransition: true });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "移除失败，请重试");
@@ -169,11 +181,7 @@ export default function CustomModelService() {
 	}
 	return (
 		<>
-			<SettingsHeading
-				title={editing ? `管理 ${form.name || editing}` : "自定义模型服务"}
-				description="连接兼容 OpenAI、Anthropic 或 Google 接口的服务。"
-				back
-			/>
+			<SettingsHeading title={editing ? form.name || editing : "自定义提供商"} back blockEscape={confirming} />
 			{loading ? (
 				<output className="settings-empty">正在读取配置…</output>
 			) : (
@@ -184,112 +192,141 @@ export default function CustomModelService() {
 						</p>
 					)}
 					<SettingsSection title="服务连接">
-						<div className="settings-card settings-custom-fields">
+						<div className="settings-custom-fields">
 							<label className="settings-custom-field">
-								服务名称{" "}
-								<input
-									required
-									maxLength={100}
-									autoComplete="off"
-									value={form.name}
-									placeholder="例如：团队网关"
-									onChange={(event) => setForm({ ...form, name: event.target.value })}
-								/>
+								<span className="settings-custom-field-label">服务名称</span>
+								<span className="settings-custom-field-control">
+									<input
+										required
+										maxLength={100}
+										autoComplete="off"
+										value={form.name}
+										placeholder="如 本地网关"
+										onChange={(event) => setForm({ ...form, name: event.target.value })}
+									/>
+								</span>
 							</label>
 							<label className="settings-custom-field">
-								服务 ID{" "}
-								<input
-									required
-									pattern="[a-z][a-z0-9_-]{1,63}"
-									title="以小写字母开头，使用小写字母、数字、连字符或下划线"
-									maxLength={64}
-									disabled={!!editing}
-									autoComplete="off"
-									value={form.id}
-									placeholder="例如：team-gateway"
-									onChange={(event) => setForm({ ...form, id: event.target.value })}
-								/>
-								<small>系统以此 ID 引用模型。保存后不可修改。</small>
+								<span className="settings-custom-field-label">服务 ID</span>
+								<span className="settings-custom-field-control">
+									<input
+										required
+										pattern="[a-z][a-z0-9_-]{1,63}"
+										title="以小写字母开头，使用小写字母、数字、连字符或下划线"
+										maxLength={64}
+										disabled={!!editing}
+										autoComplete="off"
+										value={form.id}
+										placeholder="如 my-gateway"
+										onChange={(event) => setForm({ ...form, id: event.target.value })}
+									/>
+								</span>
 							</label>
 							<div className="settings-custom-field settings-custom-protocol">
-								<span>接口协议</span>
-								<Select
-									aria-label="接口协议"
-									className="settings-custom-select"
-									isOpen={protocolOpen}
-									onOpenChange={setProtocolOpen}
-									selectedKey={form.api}
-									onSelectionChange={(value) => {
-										if (value) setForm({ ...form, api: String(value) });
-									}}
-								>
-									<Select.Trigger ref={protocolTriggerRef}>
-										<Select.Value>{protocols.find(([id]) => id === form.api)?.[1]}</Select.Value>
-										<ChevronDown size={14} aria-hidden="true" />
-									</Select.Trigger>
-									<Select.Popover
-										placement="bottom start"
-										offset={6}
-										className="tier-2-glass tier-2-menu settings-protocol-popover"
+								<span className="settings-custom-field-label">接口协议</span>
+								<div className="settings-custom-field-control">
+									<Select
+										aria-label="接口协议"
+										className="settings-custom-select"
+										isOpen={protocolOpen}
+										onOpenChange={setProtocolOpen}
+										selectedKey={form.api}
+										onSelectionChange={(value) => {
+											if (value) setForm({ ...form, api: String(value) });
+										}}
 									>
-										<ListBox aria-label="接口协议" className="tier-2-menu-list">
-											{protocols.map(([id, title]) => (
-												<ListBox.Item
-													key={id}
-													id={id}
-													textValue={title}
-													className="menu-row login-provider-option"
-												>
-													<span className="login-provider-option-name">{title}</span>
-													<span className="login-provider-check">
-														<Check size={14} aria-hidden="true" />
-													</span>
-												</ListBox.Item>
-											))}
-										</ListBox>
-									</Select.Popover>
-								</Select>
+										<Select.Trigger ref={protocolTriggerRef}>
+											<Select.Value>{protocols.find(([id]) => id === form.api)?.[1]}</Select.Value>
+											<ChevronDown size={14} aria-hidden="true" />
+										</Select.Trigger>
+										<Select.Popover
+											placement="bottom start"
+											offset={6}
+											className="tier-2-glass tier-2-menu settings-protocol-popover"
+										>
+											<ListBox aria-label="接口协议" className="tier-2-menu-list">
+												{protocols.map(([id, title]) => (
+													<ListBox.Item
+														key={id}
+														id={id}
+														textValue={title}
+														className="menu-row login-provider-option"
+													>
+														<span className="login-provider-option-name">{title}</span>
+														<span className="login-provider-check">
+															<Check size={14} aria-hidden="true" />
+														</span>
+													</ListBox.Item>
+												))}
+											</ListBox>
+										</Select.Popover>
+									</Select>
+								</div>
 							</div>
 							<label className="settings-custom-field">
-								Base URL{" "}
-								<input
-									required
-									type="url"
-									maxLength={2048}
-									autoComplete="url"
-									spellCheck={false}
-									value={form.baseUrl}
-									placeholder="https://api.example.com/v1"
-									onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
-								/>
-								<small>使用 HTTPS；本机服务可使用 HTTP。</small>
+								<span className="settings-custom-field-label">Base URL</span>
+								<span className="settings-custom-field-control">
+									<input
+										required
+										type="url"
+										maxLength={2048}
+										autoComplete="url"
+										spellCheck={false}
+										value={form.baseUrl}
+										placeholder="https://api.example.com/v1"
+										onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
+									/>
+								</span>
 							</label>
 							<label className="settings-custom-field">
-								API key{" "}
-								<span className="settings-custom-key">
-									<input
-										type={showKey ? "text" : "password"}
-										autoComplete="new-password"
-										maxLength={8192}
-										spellCheck={false}
-										value={key}
-										placeholder={keyPresent ? "已保存 · 留空保持原密钥" : "填写服务密钥"}
-										onChange={(event) => setKey(event.target.value)}
-									/>
-									<button
-										type="button"
-										aria-label={showKey ? "隐藏密钥" : "显示密钥"}
-										onClick={() => setShowKey(!showKey)}
-									>
-										{showKey ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-									</button>
+								<span className="settings-custom-field-label">API Key</span>
+								<span className="settings-custom-field-control">
+									<span className="settings-custom-key">
+										<input
+											type={showKey ? "text" : "password"}
+											autoComplete="new-password"
+											maxLength={8192}
+											spellCheck={false}
+											value={key}
+											placeholder={keyPresent ? "已保存 · 留空保持原密钥" : "输入 API Key"}
+											onChange={(event) => setKey(event.target.value)}
+										/>
+										<button
+											type="button"
+											aria-label={showKey ? "隐藏密钥" : "显示密钥"}
+											onClick={() => setShowKey(!showKey)}
+										>
+											{showKey ? (
+												<EyeOff size={15} aria-hidden="true" />
+											) : (
+												<Eye size={15} aria-hidden="true" />
+											)}
+										</button>
+									</span>
 								</span>
-								<small>密钥保存在本地模型配置中，界面不会回显。</small>
 							</label>
 						</div>
 					</SettingsSection>
-					<SettingsSection title="模型" summary={`${form.models.length} 个模型`}>
-						<div className="settings-card settings-custom-models" ref={modelList}>
+					<SettingsSection
+						title="模型"
+						summary={form.models.length}
+						action={
+							<button
+								type="button"
+								className="settings-inline-action settings-inline-action--primary"
+								disabled={form.models.length >= 32}
+								onClick={() =>
+									setForm((current) => ({
+										...current,
+										models: [...current.models, emptyModel(defaultMaxTokens)],
+									}))
+								}
+							>
+								<Plus size={14} aria-hidden="true" /> 添加模型
+							</button>
+						}
+					>
+						<div className="settings-custom-models" ref={modelList}>
 							{form.models.map((model, index) => (
 								<div className="settings-custom-model" key={model.clientId}>
 									<div className="settings-custom-model-title">
@@ -306,55 +343,65 @@ export default function CustomModelService() {
 													}))
 												}
 											>
-												<Trash2 size={16} aria-hidden="true" />
+												<Trash2 size={15} aria-hidden="true" />
 											</button>
 										)}
 									</div>
 									<div className="settings-custom-model-grid">
 										<label className="settings-custom-field">
-											模型 ID{" "}
-											<input
-												required
-												maxLength={128}
-												spellCheck={false}
-												value={model.id}
-												placeholder="例如：my-model"
-												onChange={(event) => updateModel(index, { id: event.target.value })}
-											/>
+											<span>模型 ID</span>
+											<span className="settings-custom-field-control">
+												<input
+													required
+													maxLength={128}
+													spellCheck={false}
+													value={model.id}
+													placeholder="例如：my-model"
+													onChange={(event) => updateModel(index, { id: event.target.value })}
+												/>
+											</span>
 										</label>
 										<label className="settings-custom-field">
-											显示名称{" "}
-											<input
-												required
-												maxLength={128}
-												value={model.name}
-												placeholder="例如：My Model"
-												onChange={(event) => updateModel(index, { name: event.target.value })}
-											/>
+											<span>显示名称</span>
+											<span className="settings-custom-field-control">
+												<input
+													required
+													maxLength={128}
+													value={model.name}
+													placeholder="例如：My Model"
+													onChange={(event) => updateModel(index, { name: event.target.value })}
+												/>
+											</span>
 										</label>
 										<label className="settings-custom-field">
-											上下文窗口{" "}
-											<input
-												required
-												type="number"
-												min={1024}
-												max={100000000}
-												value={model.contextWindow}
-												onChange={(event) =>
-													updateModel(index, { contextWindow: Number(event.target.value) })
-												}
-											/>
+											<span>上下文窗口</span>
+											<span className="settings-custom-field-control">
+												<input
+													required
+													type="number"
+													min={1024}
+													max={100000000}
+													value={model.contextWindow}
+													onChange={(event) =>
+														updateModel(index, { contextWindow: Number(event.target.value) })
+													}
+												/>
+											</span>
 										</label>
 										<label className="settings-custom-field">
-											最大输出 Token{" "}
-											<input
-												required
-												type="number"
-												min={1}
-												max={model.contextWindow}
-												value={model.maxTokens}
-												onChange={(event) => updateModel(index, { maxTokens: Number(event.target.value) })}
-											/>
+											<span>最大输出 Token</span>
+											<span className="settings-custom-field-control">
+												<input
+													required
+													type="number"
+													min={1}
+													max={model.contextWindow}
+													value={model.maxTokens}
+													onChange={(event) =>
+														updateModel(index, { maxTokens: Number(event.target.value) })
+													}
+												/>
+											</span>
 										</label>
 									</div>
 									<div className="settings-custom-capabilities">
@@ -363,38 +410,38 @@ export default function CustomModelService() {
 												{ key: "reasoning", label: "支持思考" },
 												{ key: "image", label: "支持图片输入" },
 											] as const
-										).map(({ key, label }) => (
-											<div className="settings-capability-row" key={key}>
-												<span id={`${model.clientId}-${key}`}>{label}</span>
-												<button
-													type="button"
-													className="settings-action settings-capability-button"
-													role="switch"
-													aria-labelledby={`${model.clientId}-${key}`}
-													aria-checked={model[key]}
-													data-selected={model[key] || undefined}
-													onClick={() => updateModel(index, { [key]: !model[key] })}
+										).map(({ key: capKey, label }) => (
+											<div className="settings-capability-check" key={capKey}>
+												<Checkbox
+													isSelected={model[capKey]}
+													aria-label={label}
+													className="settings-check-box"
+													onChange={(checked) => updateModel(index, { [capKey]: checked })}
 												>
-													{model[key] ? "已启用" : "启用"}
-												</button>
+													<Checkbox.Content>
+														<Checkbox.Control>
+															<Checkbox.Indicator>
+																<svg
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	strokeWidth="2"
+																	strokeLinecap="round"
+																	strokeLinejoin="round"
+																	aria-hidden="true"
+																>
+																	<path d="M20 6 9 17 4 12" pathLength="1" />
+																</svg>
+															</Checkbox.Indicator>
+														</Checkbox.Control>
+													</Checkbox.Content>
+												</Checkbox>
+												<span>{label}</span>
 											</div>
 										))}
 									</div>
 								</div>
 							))}
-							<button
-								type="button"
-								className="tier-1-btn-outline settings-action"
-								disabled={form.models.length >= 32}
-								onClick={() =>
-									setForm((current) => ({
-										...current,
-										models: [...current.models, emptyModel(defaultMaxTokens)],
-									}))
-								}
-							>
-								<Plus size={14} aria-hidden="true" /> 添加模型
-							</button>
 						</div>
 					</SettingsSection>
 					<div className="settings-custom-actions">
@@ -407,39 +454,42 @@ export default function CustomModelService() {
 							取消
 						</button>
 						<button type="submit" className="tier-1-btn-primary" disabled={working}>
-							{working ? "正在保存…" : editing ? "保存修改" : "添加服务"}
+							{working ? "正在保存…" : editing ? "保存修改" : "添加提供商"}
 						</button>
 					</div>
 					{editing && (
-						<SettingsSection title="移除服务">
-							<div className="settings-card settings-custom-remove">
-								<span>从本地模型配置移除此服务和模型。</span>
-								{confirming ? (
-									<div className="settings-custom-confirm">
-										<button
-											type="button"
-											className="tier-1-btn-outline"
-											disabled={working}
-											onClick={() => setConfirming(false)}
-										>
-											取消
-										</button>
-										<button
-											type="button"
-											className="tier-1-btn-danger solid-danger"
-											disabled={working}
-											onClick={() => void remove()}
-										>
-											确认移除
-										</button>
-									</div>
-								) : (
-									<button type="button" className="tier-1-btn-danger" onClick={() => setConfirming(true)}>
-										移除服务
+						<div className="settings-custom-remove">
+							<span>移除后将隐藏该服务下的关联模型</span>
+							{confirming ? (
+								<div className="settings-custom-confirm">
+									<button
+										type="button"
+										className="settings-inline-action"
+										disabled={working}
+										onClick={() => setConfirming(false)}
+									>
+										取消
 									</button>
-								)}
-							</div>
-						</SettingsSection>
+									<button
+										type="button"
+										className="settings-inline-action settings-inline-action--danger"
+										disabled={working}
+										onClick={() => void remove()}
+									>
+										确认移除
+									</button>
+								</div>
+							) : (
+								<button
+									type="button"
+									className="settings-inline-action settings-inline-action--danger"
+									onClick={() => setConfirming(true)}
+								>
+									<Trash2 size={14} aria-hidden="true" />
+									移除
+								</button>
+							)}
+						</div>
 					)}
 				</form>
 			)}

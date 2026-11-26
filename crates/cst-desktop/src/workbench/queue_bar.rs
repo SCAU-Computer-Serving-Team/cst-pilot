@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
-use cst_client::{ClientError, ClientHandle};
+use cst_client::{ClientError, ClientHandle, KeyboardFocusStyleDto};
+use gpui::{FocusHandle, KeyDownEvent, MouseMoveEvent};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
@@ -10,6 +12,10 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{
+    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdRailPlacement, KbdTone,
+    render_gliding_dynamic_indicator,
+};
 use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
@@ -161,9 +167,62 @@ impl QueueMutation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueRowAction {
+    MoveUp,
+    MoveDown,
+    Steer,
+    Retry,
+    Edit,
+    Delete,
+}
+
+/// Returns the ordered inline action buttons visible for a queue row.
+pub fn queue_item_action_slots(
+    item: &VisibleQueueItem,
+    queued_ids: &[String],
+) -> Vec<QueueRowAction> {
+    let mut slots = Vec::with_capacity(5);
+    let can_reorder = item.status == "pending" && item.delivery == "queue";
+    if can_reorder
+        && queued_ids.len() > 1
+        && let Some(pos) = queued_ids.iter().position(|id| id == &item.id)
+    {
+        if pos > 0 {
+            slots.push(QueueRowAction::MoveUp);
+        }
+        if pos + 1 < queued_ids.len() {
+            slots.push(QueueRowAction::MoveDown);
+        }
+    }
+    if item.status == "pending" {
+        slots.push(QueueRowAction::Steer);
+        slots.push(QueueRowAction::Edit);
+        slots.push(QueueRowAction::Delete);
+    } else if item.status == "failed" {
+        slots.push(QueueRowAction::Retry);
+        slots.push(QueueRowAction::Edit);
+        slots.push(QueueRowAction::Delete);
+    }
+    slots
+}
+
 pub type QueueItemActionFn = Rc<dyn Fn(String, u64, &mut Window, &mut App)>;
 pub type QueueReorderFn = Rc<dyn Fn(u64, Vec<String>, &mut Window, &mut App)>;
 pub type QueueEditFn = Rc<dyn Fn(VisibleQueueItem, u64, &mut Window, &mut App)>;
+pub type QueueKeyDownFn = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
+pub type QueueMouseMoveFn = Rc<dyn Fn(&MouseMoveEvent, &mut Window, &mut App)>;
+
+pub struct QueueBarKbdProps {
+    pub kbd_style: KeyboardFocusStyleDto,
+    pub kbd_active: bool,
+    pub selected_id: Option<String>,
+    pub action_idx: Option<usize>,
+    pub tracker: KbdDynamicBoundsTracker,
+    pub focus_handle: FocusHandle,
+    pub on_key_down: QueueKeyDownFn,
+    pub on_mouse_move: QueueMouseMoveFn,
+}
 
 pub struct QueueBarCallbacks {
     pub on_steer: QueueItemActionFn,
@@ -180,6 +239,7 @@ pub fn render_queue_bar(
     queue: &ParsedQueueSnapshot,
     session_id: &str,
     palette: &DesktopPalette,
+    kbd: QueueBarKbdProps,
     window: &mut Window,
     cx: &mut App,
     cb: QueueBarCallbacks,
@@ -187,6 +247,8 @@ pub fn render_queue_bar(
     if queue.items.is_empty() {
         return None;
     }
+
+    kbd.tracker.clear();
 
     let failed_item = queue.items.iter().find(|i| i.status == "failed");
     let has_uncertain = queue.items.iter().any(|i| i.uncertain);
@@ -214,10 +276,18 @@ pub fn render_queue_bar(
         palette.text_secondary
     };
 
+    let on_key = kbd.on_key_down;
+    let on_move = kbd.on_mouse_move;
+    let kbd_active = kbd.kbd_active;
     let mut list = div()
         .id("composer-queue-bar-rneha")
         .test_support()
         .a11y_region("composer-queue-bar-rneha", "排队消息栏")
+        .relative()
+        .track_focus(&kbd.focus_handle)
+        .tab_index(0)
+        .on_key_down(move |ev, w, cx| (on_key)(ev, w, cx))
+        .on_mouse_move(move |ev, w, cx| (on_move)(ev, w, cx))
         .pb(space::XS)
         .border_b_1()
         .border_color(palette.border_subtle)
@@ -234,6 +304,8 @@ pub fn render_queue_bar(
     );
 
     let flip_scope = SharedString::from(session_id.to_owned());
+    let mut active_spec: Option<KbdDynamicSpec> = None;
+
     for (index, item) in queue.items.iter().enumerate() {
         let iid = item.id.clone();
 
@@ -245,8 +317,29 @@ pub fn render_queue_bar(
 
         let can_reorder = item.status == "pending" && item.delivery == "queue";
         let pos_in_queue = queued_ids.iter().position(|x| x == &iid);
+        let slots = queue_item_action_slots(item, &queued_ids);
+        let is_selected_row = kbd_active && kbd.selected_id.as_deref() == Some(iid.as_str());
+        if is_selected_row {
+            if let Some(a_idx) = kbd.action_idx.filter(|&i| i < slots.len()) {
+                let tone = if slots[a_idx] == QueueRowAction::Delete {
+                    KbdTone::Danger
+                } else {
+                    KbdTone::Neutral
+                };
+                active_spec = Some(
+                    KbdDynamicSpec::control(
+                        format!("act-{iid}-{a_idx}"),
+                        KbdRailPlacement::BottomCenter,
+                    )
+                    .with_tone(tone),
+                );
+            } else {
+                active_spec = Some(KbdDynamicSpec::row(format!("row-{iid}")).with_radius(4.0));
+            }
+        }
 
         let mut actions = div().flex().items_center().gap(space::XS).flex_shrink_0();
+        let mut slot_idx = 0usize;
 
         if can_reorder
             && queued_ids.len() > 1
@@ -257,6 +350,9 @@ pub fn render_queue_bar(
                 let mut next_ids = queued_ids.clone();
                 next_ids.swap(pos, pos - 1);
                 let up_id = SharedString::from(format!("queue-move-up-{iid}"));
+                let tr = kbd.tracker.clone();
+                let key = SharedString::from(format!("act-{iid}-{slot_idx}"));
+                slot_idx += 1;
                 actions = actions.child(
                     div()
                         .id(up_id.clone())
@@ -274,6 +370,7 @@ pub fn render_queue_bar(
                         .on_click(move |_, w, cx| {
                             (reorder_up)(version, next_ids.clone(), w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                         .child(
                             Icon::new(IconName::ChevronUp)
                                 .size(px(13.0))
@@ -286,6 +383,9 @@ pub fn render_queue_bar(
                 let mut next_ids = queued_ids.clone();
                 next_ids.swap(pos, pos + 1);
                 let down_id = SharedString::from(format!("queue-move-down-{iid}"));
+                let tr = kbd.tracker.clone();
+                let key = SharedString::from(format!("act-{iid}-{slot_idx}"));
+                slot_idx += 1;
                 actions = actions.child(
                     div()
                         .id(down_id.clone())
@@ -303,6 +403,7 @@ pub fn render_queue_bar(
                         .on_click(move |_, w, cx| {
                             (reorder_down)(version, next_ids.clone(), w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                         .child(
                             Icon::new(IconName::ChevronDown)
                                 .size(px(13.0))
@@ -337,6 +438,15 @@ pub fn render_queue_bar(
             let edit_id = SharedString::from(format!("queue-edit-btn-{iid}"));
             let del_id = SharedString::from(format!("queue-delete-btn-{iid}"));
 
+            let tr_pri = kbd.tracker.clone();
+            let key_pri = SharedString::from(format!("act-{iid}-{slot_idx}"));
+            slot_idx += 1;
+            let tr_edit = kbd.tracker.clone();
+            let key_edit = SharedString::from(format!("act-{iid}-{slot_idx}"));
+            slot_idx += 1;
+            let tr_del = kbd.tracker.clone();
+            let key_del = SharedString::from(format!("act-{iid}-{slot_idx}"));
+
             actions = actions
                 .child(
                     div()
@@ -355,6 +465,7 @@ pub fn render_queue_bar(
                         .on_click(move |_, w, cx| {
                             (action_fn)(iid_act.clone(), version, w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr_pri.set(key_pri.clone(), bounds))
                         .child(
                             Icon::new(if is_failed {
                                 IconName::RotateCcw
@@ -382,6 +493,7 @@ pub fn render_queue_bar(
                         .on_click(move |_, w, cx| {
                             (edit_fn)(item_for_edit.clone(), version, w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr_edit.set(key_edit.clone(), bounds))
                         .child(
                             Icon::new(IconName::Pencil)
                                 .size(px(14.0))
@@ -405,6 +517,7 @@ pub fn render_queue_bar(
                         .on_click(move |_, w, cx| {
                             (del_fn)(iid_del.clone(), version, w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr_del.set(key_del.clone(), bounds))
                         .child(
                             Icon::new(IconName::Trash)
                                 .size(px(14.0))
@@ -421,6 +534,8 @@ pub fn render_queue_bar(
             window,
             cx,
         );
+        let tr_row = kbd.tracker.clone();
+        let row_key = SharedString::from(format!("row-{iid}"));
         list = list.child(
             div()
                 .id(SharedString::from(format!("queue-item-row-{iid}")))
@@ -434,6 +549,7 @@ pub fn render_queue_bar(
                 .items_center()
                 .justify_between()
                 .gap(space::SM)
+                .on_prepaint(move |bounds, _, _| tr_row.set(row_key.clone(), bounds))
                 .child(
                     apply_scale(div(), scale::UI)
                         .flex_1()
@@ -458,6 +574,16 @@ pub fn render_queue_bar(
                 .child(actions),
         );
     }
+
+    list = list.child(render_gliding_dynamic_indicator(
+        "composer-queue",
+        kbd.kbd_style,
+        active_spec,
+        kbd.tracker,
+        palette,
+        window,
+        cx,
+    ));
 
     Some(list.into_any_element())
 }

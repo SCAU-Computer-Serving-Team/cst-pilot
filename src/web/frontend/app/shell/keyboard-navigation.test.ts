@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isNavigationKeyEvent, pointerMoved, resolveDialogActionKey } from "./keyboard-navigation.ts";
+import {
+	isNavigationKeyEvent,
+	pointerMoved,
+	resolveDialogActionKey,
+	resolveListNavKey,
+	resolveToolbarNavKey,
+} from "./keyboard-navigation.ts";
 
 test("按键交由已经消费事件的控件或输入法处理", () => {
 	const plain = {
@@ -86,4 +92,24 @@ test("确认弹窗方向键自动跳过禁用按钮，并保护输入法组合�
 	assert.equal(resolveDialogActionKey(key("ArrowRight", { keyCode: 229 }), 0, 2), null);
 	assert.equal(resolveDialogActionKey(key("ArrowRight", { ctrlKey: true }), 0, 2), null);
 	assert.equal(resolveDialogActionKey(key("ArrowUp"), 0, 2), null);
+});
+
+test("列表与工具栏方向键纯函数支持夹紧、循环与禁用项跳过", () => {
+	const key = (k: string) => ({
+		key: k,
+		defaultPrevented: false,
+		isComposing: false,
+		keyCode: 0,
+		ctrlKey: false,
+		metaKey: false,
+		altKey: false,
+		shiftKey: false,
+	});
+	assert.equal(resolveListNavKey(key("ArrowDown"), 0, 3), 1);
+	assert.equal(resolveListNavKey(key("ArrowDown"), 2, 3), 2);
+	assert.equal(resolveListNavKey(key("ArrowDown"), 2, 3, { wrap: true }), 0);
+	assert.equal(resolveListNavKey(key("ArrowUp"), 0, 3, { wrap: true }), 2);
+	assert.equal(resolveListNavKey(key("ArrowDown"), 0, 3, { isDisabled: (i) => i === 1 }), 2);
+	assert.equal(resolveToolbarNavKey(key("ArrowLeft"), 0, 4, { wrap: true }), 3);
+	assert.equal(resolveToolbarNavKey(key("ArrowRight"), 3, 4, { wrap: true }), 0);
 });

@@ -1,8 +1,8 @@
-import { SettingsHeading, SettingsSection } from "../settings/settings-frame";
+import { SettingsSection } from "../settings/settings-frame";
 
 const shortcutGroups = [
 	{
-		title: "全局与页面",
+		title: "全局与窗口",
 		items: [
 			{ command: "打开命令面板与常见导航操作", keys: "Ctrl + P" },
 			{ command: "快速打开指定会话与近期导出", keys: "Ctrl + O" },
@@ -15,28 +15,26 @@ const shortcutGroups = [
 	{
 		title: "对话与输入",
 		items: [
-			{ command: "打开命令补全", keys: "/" },
-			{ command: "打开文件引用补全", keys: "@" },
-			{ command: "补全命令", keys: "Tab" },
-			{ command: "在补全面板中移动选项", keys: "↑ ↓" },
-			{ command: "选中补全项；发送消息", keys: "Enter" },
-			{ command: "在输入框中换行", keys: "Shift + Enter" },
+			{ command: "发送当前消息（中文输入法候选态下仅选词）", keys: "Enter" },
+			{ command: "在聊天输入框中换行", keys: "Shift + Enter" },
+			{ command: "打开模型与思考强度选择器", keys: "Alt + M" },
+			{ command: "唤出斜杠命令与诊断技能补全面板", keys: "行首 /" },
+			{ command: "检索当前会话工作目录文件并附加引用", keys: "@" },
 			{ command: "逐级关闭悬浮面板；停止当前会话的执行", keys: "Esc" },
 		],
 	},
 	{
 		title: "模型偏好",
-		items: [{ command: "调整启用模型顺序（聚焦排序手柄）", keys: "Alt + ↑ / ↓" }],
+		items: [{ command: "上下移动已启用模型顺序", keys: "Alt + ↑ / ↓" }],
 	},
 ] as const;
 
 export default function ShortcutSettings() {
 	return (
 		<>
-			<SettingsHeading title="快捷键" />
 			{shortcutGroups.map((group) => (
 				<SettingsSection title={group.title} key={group.title}>
-					<div className="settings-card settings-shortcuts">
+					<div className="settings-flat-list settings-shortcuts">
 						{group.items.map((shortcut) => (
 							<div className="settings-flat-row" key={shortcut.keys}>
 								<span>{shortcut.command}</span>

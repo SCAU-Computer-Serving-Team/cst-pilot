@@ -82,6 +82,7 @@ gpui_kit::actions!(
         ToggleCommandPalette,
         ToggleQuickOpenPalette,
         FocusPrimaryInput,
+        OpenModelPicker,
         DismissTopSurface,
         RequestAppExit
     ]
@@ -97,6 +98,7 @@ pub fn register_shell_keys(cx: &mut App) {
         KeyBinding::new("ctrl-p", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-o", ToggleQuickOpenPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-j", FocusPrimaryInput, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("alt-m", OpenModelPicker, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissTopSurface, Some(SHELL_KEY_CONTEXT)),
     ]);
 }
@@ -2401,10 +2403,6 @@ impl AppShell {
             cx.notify();
             return true;
         }
-        if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
-            self.return_to_chat(window, cx);
-            return true;
-        }
         if self.route == ShellRoute::Account
             && self
                 .account_view
@@ -2447,6 +2445,18 @@ impl AppShell {
                     .update(cx, |st, cx| st.set_value("", window, cx));
             }
             cx.notify();
+            return true;
+        }
+        if self.route == ShellRoute::Session
+            && self.session_subview == SessionSubView::Chat
+            && self
+                .workbench
+                .update(cx, |wb, cx| wb.abort_active_streaming(cx))
+        {
+            return true;
+        }
+        if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
+            self.return_to_chat(window, cx);
             return true;
         }
         false
@@ -4040,6 +4050,19 @@ impl Render for AppShell {
             }))
             .on_action(cx.listener(|this, _: &FocusPrimaryInput, window, cx| {
                 let _ = this.focus_primary_input(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenModelPicker, window, cx| {
+                if this.blocks_workspace_shortcuts(cx) {
+                    return;
+                }
+                if matches!(this.route, ShellRoute::Home)
+                    || (this.route == ShellRoute::Session
+                        && this.session_subview == SessionSubView::Chat)
+                {
+                    let _ = this
+                        .workbench
+                        .update(cx, |wb, cx| wb.open_model_picker(window, cx));
+                }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 crate::sessions::consume_composing_escape(&this.sidebar_search_input, window, cx);

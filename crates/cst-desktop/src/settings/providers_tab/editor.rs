@@ -266,10 +266,22 @@ impl ProvidersTabView {
             self.form_error.is_some() && self.base_url_input.read(cx).value().trim().is_empty();
 
         // Flat deferred protocol dropdown popover aligned to trigger text (`left: -12px` offsets `p: 4px + item px: 8px`)
+        let kbd_style = self.client.snapshot().desktop_settings.keyboard_focus_style;
         let protocol_popover = self.protocol_dropdown_open.then(|| {
+            self.protocol_tracker.clear();
+            let kbd_nav = self.protocol_kbd_active;
+            let active_proto_spec = kbd_nav.then(|| {
+                KbdDynamicSpec::row(format!(
+                    "proto-{}",
+                    self.protocol_dropdown_index
+                        .min(CustomApiProtocol::ALL.len() - 1)
+                ))
+            });
             let mut items = div().w_full().flex().flex_col().gap(space::MICRO);
             for (idx, proto) in CustomApiProtocol::ALL.iter().copied().enumerate() {
                 let is_selected = self.protocol == proto;
+                let tr = self.protocol_tracker.clone();
+                let key = SharedString::from(format!("proto-{idx}"));
                 let proto_id = SharedString::from(format!("custom-proto-{}", proto.wire_value()));
                 items = items.child(
                     apply_scale(div(), scale::UI)
@@ -279,24 +291,27 @@ impl ProvidersTabView {
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if self.protocol_dropdown_index == idx && !is_selected {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_nav {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.protocol = proto;
                             this.protocol_dropdown_open = false;
+                            this.protocol_kbd_active = false;
                             cx.notify();
                             cx.stop_propagation();
                         }))
+                        .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                         .child(SharedString::from(proto.label()))
                         .children(is_selected.then(|| {
                             Icon::new(IconName::Check)
@@ -314,6 +329,7 @@ impl ProvidersTabView {
                             .id("custom-protocol-popover")
                             .test_support()
                             .a11y_dialog("custom-protocol-popover", "选择接口协议")
+                            .relative()
                             .w(px(268.0))
                             .p(space::XS)
                             .rounded(radius::ROW)
@@ -325,12 +341,23 @@ impl ProvidersTabView {
                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })
+                            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                                if this.protocol_kbd_active
+                                    && pointer_moved_past_threshold(
+                                        &mut this.protocol_last_pointer,
+                                        ev.position,
+                                    )
+                                {
+                                    this.protocol_kbd_active = false;
+                                    cx.notify();
+                                }
+                            }))
                             .child(
                                 div()
                                     .w_full()
                                     .focus_trap("custom-protocol-focus", &self.protocol_focus)
                                     .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, _, cx| {
+                                        |this, event: &KeyDownEvent, window, cx| {
                                             if event.keystroke.modifiers
                                                 != gpui::Modifiers::default()
                                             {
@@ -343,12 +370,18 @@ impl ProvidersTabView {
                                                         .protocol_dropdown_index
                                                         .checked_sub(1)
                                                         .unwrap_or(len - 1);
+                                                    this.protocol_kbd_active = true;
+                                                    this.protocol_last_pointer =
+                                                        Some(window.mouse_position());
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
                                                 "down" => {
                                                     this.protocol_dropdown_index =
                                                         (this.protocol_dropdown_index + 1) % len;
+                                                    this.protocol_kbd_active = true;
+                                                    this.protocol_last_pointer =
+                                                        Some(window.mouse_position());
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
@@ -359,11 +392,13 @@ impl ProvidersTabView {
                                                         this.protocol = proto;
                                                     }
                                                     this.protocol_dropdown_open = false;
+                                                    this.protocol_kbd_active = false;
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
                                                 "escape" if !event.is_held => {
                                                     this.protocol_dropdown_open = false;
+                                                    this.protocol_kbd_active = false;
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
@@ -372,7 +407,16 @@ impl ProvidersTabView {
                                         },
                                     ))
                                     .child(items),
-                            ),
+                            )
+                            .child(render_gliding_dynamic_indicator(
+                                "custom-proto-pop",
+                                kbd_style,
+                                active_proto_spec,
+                                self.protocol_tracker.clone(),
+                                palette,
+                                window,
+                                cx,
+                            )),
                         palette.flat_popover_shadows(),
                         -6.0,
                     ),
@@ -941,16 +985,13 @@ impl ProvidersTabView {
                         div()
                             .id("providers-custom-search-box")
                             .w_full()
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
+                            .h(px(40.0))
+                            .border_b_1()
                             .border_color(if search_focused {
-                                palette.border_focus
+                                palette.accent_solid
                             } else {
-                                palette.border_strong
+                                palette.border_subtle
                             })
-                            .bg(palette.bg_workspace)
                             .flex()
                             .items_center()
                             .gap(space::SM)

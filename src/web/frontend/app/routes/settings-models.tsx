@@ -1,21 +1,32 @@
 import { Checkbox, ListBox, Select } from "@heroui/react";
-import { Check, ChevronDown, ChevronRight, GripVertical } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight } from "lucide-react";
+import {
+	type KeyboardEvent as ReactKeyboardEvent,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { apiJson } from "../data/api";
 import type { ModelChoice, ModelSelectionPayload } from "../data/model-selection";
 import type { Model } from "../data/web-state";
 import { DefaultModelPicker } from "../settings/default-model-picker";
 import { modelListRows } from "../settings/model-list";
 import { moveModel, normalizeScope, toggleModel } from "../settings/model-scope";
-import { SettingsHeading, SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
+import { SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
 import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { resolveListNavKey } from "../shell/keyboard-navigation";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 type ModelsPayload = ModelSelectionPayload;
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
+
 export default function ModelPreferences() {
 	const state = useSettingsResource<ModelsPayload>("/api/models");
 	const feedback = useSettingsFeedback();
@@ -31,7 +42,14 @@ export default function ModelPreferences() {
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);
-	const listRoot = useRef<HTMLUListElement>(null);
+	const listRoot = useRef<HTMLDivElement>(null);
+	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const kbdStyle = useKeyboardFocusStyle();
+	const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+	const [kbdActive, setKbdActive] = useState(false);
+	const clearKbd = useCallback(() => setKbdActive(false), []);
+	usePointerMutex(kbdActive, clearKbd);
+
 	const models = state.data?.models ?? [];
 	const selection = state.data?.enabled ?? null;
 	const allIds = models.map(fullId);
@@ -57,21 +75,29 @@ export default function ModelPreferences() {
 	);
 	const listed = modelListRows(visible, unavailable, expanded || !!needle);
 	const list = useAnimatedHeight(`${expanded}:${query}:${provider}:${listed.total}`);
+
+	// Effective ordered enabled list (materializes allIds when selection === null so Alt+↑↓ always works!)
+	const effectiveEnabledOrder = selection === null ? sorted : selection.filter((id) => byId.has(id));
+	const visibleEnabledOrder = effectiveEnabledOrder.filter((id) => listed.ids.includes(id));
+
 	useLayoutEffect(() => {
 		const targetId = keyboardFocusId.current;
 		if (!targetId) return;
-		const button = listRoot.current?.querySelector<HTMLButtonElement>(
-			`button.settings-grip[data-model-id="${CSS.escape(targetId)}"]`,
+		const row = listRoot.current?.querySelector<HTMLElement>(
+			`.settings-model[data-model-id="${CSS.escape(targetId)}"]`,
 		);
 		const active = document.activeElement;
-		if (active !== document.body && active !== button) {
+		if (active !== document.body && active !== row) {
 			keyboardFocusId.current = null;
 			return;
 		}
-		if (button && active === document.body) button.focus({ preventScroll: true });
+		if (row && active === document.body) row.focus({ preventScroll: true });
 		if (!state.working) keyboardFocusId.current = null;
 	});
+
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
+	const allVisibleEnabled = visible.length > 0 && visible.every((id) => selection === null || selection.includes(id));
+
 	async function save(next: string[] | null) {
 		if (!state.data || state.working) return;
 		const optimistic = { ...state.data, enabled: next };
@@ -84,6 +110,7 @@ export default function ModelPreferences() {
 		}, optimistic);
 		if (ok) feedback();
 	}
+
 	async function saveDefault(model: ModelChoice) {
 		const ok = await state.mutate(async (current) => {
 			await apiJson("/api/models/default", {
@@ -95,18 +122,89 @@ export default function ModelPreferences() {
 		if (ok) feedback("已保存默认模型");
 		return ok;
 	}
+
+	function reorderByDelta(id: string, delta: -1 | 1) {
+		if (state.working) return;
+		const baseOrder = selection === null ? [...sorted] : [...selection];
+		const visPos = visibleEnabledOrder.indexOf(id);
+		if (visPos < 0) return;
+		const targetId = visibleEnabledOrder[visPos + delta];
+		if (!targetId) return;
+		const nextOrder = moveModel(baseOrder, id, targetId);
+		if (!nextOrder || nextOrder === baseOrder) return;
+		keyboardFocusId.current = id;
+		displayOrder.current = [...nextOrder, ...sorted.filter((item) => !nextOrder.includes(item))];
+		void save(nextOrder);
+	}
+
 	function drop(target: string) {
-		if (!dragId || !selection) return;
-		const next = moveModel(selection, dragId, target);
+		if (!dragId) return;
+		const baseOrder = selection === null ? [...sorted] : [...selection];
+		const next = moveModel(baseOrder, dragId, target);
 		setDragId(null);
-		if (next !== selection) {
-			displayOrder.current = [...next!, ...sorted.filter((id) => !next?.includes(id))];
+		if (next && next !== baseOrder) {
+			displayOrder.current = [...next, ...sorted.filter((id) => !next.includes(id))];
 			void save(next);
 		}
 	}
+
+	function handleRowKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, id: string, idx: number, enabled: boolean) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (
+			enabled &&
+			event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey &&
+			(event.key === "ArrowUp" || event.key === "ArrowDown")
+		) {
+			event.preventDefault();
+			setKbdActive(true);
+			reorderByDelta(id, event.key === "ArrowUp" ? -1 : 1);
+			return;
+		}
+		if (
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey &&
+			(event.key === "Enter" || event.key === " ")
+		) {
+			if ((event.target as HTMLElement)?.closest("button")) return;
+			event.preventDefault();
+			setKbdActive(true);
+			void save(toggleModel(selection, allIds, id));
+			return;
+		}
+		const nextIdx = resolveListNavKey(
+			{
+				key: event.key,
+				defaultPrevented: event.defaultPrevented,
+				isComposing: event.nativeEvent.isComposing,
+				keyCode: event.keyCode,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				altKey: event.altKey,
+				shiftKey: event.shiftKey,
+			},
+			idx,
+			listed.ids.length,
+		);
+		if (nextIdx !== null) {
+			event.preventDefault();
+			setKbdActive(true);
+			const nextId = listed.ids[nextIdx];
+			if (nextId) {
+				setFocusedRowId(nextId);
+				listRoot.current
+					?.querySelector<HTMLElement>(`.settings-model[data-model-id="${CSS.escape(nextId)}"]`)
+					?.focus();
+			}
+		}
+	}
+
 	return (
 		<>
-			<SettingsHeading title="模型偏好" description="设置新会话默认模型与输入框中的模型范围。" />
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
 				<>
@@ -116,98 +214,144 @@ export default function ModelPreferences() {
 						busy={state.working}
 						onSelect={saveDefault}
 					/>
-					<div className="settings-model-filters">
-						<SettingsSearch label="搜索模型" value={query} onChange={setQuery} />
-						<Select
-							aria-label="按服务筛选模型"
-							className="settings-provider-select"
-							isOpen={providerOpen}
-							onOpenChange={setProviderOpen}
-							selectedKey={provider}
-							onSelectionChange={(key) => setProvider(String(key ?? "all"))}
-						>
-							<Select.Trigger ref={providerTriggerRef}>
-								<Select.Value>{provider === "all" ? "全部" : provider}</Select.Value>{" "}
-								<ChevronDown size={14} aria-hidden="true" />
-							</Select.Trigger>
-							<Select.Popover
-								className="tier-2-glass tier-2-menu settings-provider-popover"
-								placement="bottom end"
-								offset={6}
+					<SettingsSection
+						title="启用模型"
+						summary={`${enabledCount} / ${models.length}`}
+						action={
+							<div className="settings-section-actions">
+								<button
+									type="button"
+									className="settings-inline-action"
+									disabled={state.working || !visible.length}
+									onClick={() => {
+										if (allVisibleEnabled) {
+											void save(
+												normalizeScope(
+													(selection ?? allIds).filter((id) => !visible.includes(id)),
+													allIds,
+												),
+											);
+										} else {
+											void save(
+												normalizeScope([...new Set([...(selection ?? allIds), ...visible])], allIds),
+											);
+										}
+									}}
+								>
+									{allVisibleEnabled ? "清空" : "全选"}
+								</button>
+								<button
+									type="button"
+									className="settings-inline-action"
+									disabled={state.working || state.loading}
+									onClick={() => void state.refresh()}
+								>
+									刷新
+								</button>
+							</div>
+						}
+					>
+						<div className="settings-model-filters">
+							<SettingsSearch label="搜索模型" value={query} onChange={setQuery} />
+							<Select
+								aria-label="按提供商筛选模型"
+								className="settings-provider-select"
+								isOpen={providerOpen}
+								onOpenChange={setProviderOpen}
+								selectedKey={provider}
+								onSelectionChange={(key) => setProvider(String(key ?? "all"))}
 							>
-								<ListBox aria-label="模型服务" className="tier-2-menu-list">
-									<ListBox.Item id="all" textValue="全部" className="menu-row settings-select-option">
-										<span>全部</span>
-										{provider === "all" && (
-											<Check size={14} className="settings-select-check" aria-hidden="true" />
-										)}
-									</ListBox.Item>
-									{providers.map((id) => (
-										<ListBox.Item id={id} key={id} textValue={id} className="menu-row settings-select-option">
-											<span>{id}</span>
-											{provider === id && (
+								<Select.Trigger ref={providerTriggerRef}>
+									<Select.Value>{provider === "all" ? "全部提供商" : provider}</Select.Value>{" "}
+									<ChevronDown size={13} aria-hidden="true" />
+								</Select.Trigger>
+								<Select.Popover
+									className="tier-2-glass tier-2-menu settings-provider-popover"
+									placement="bottom end"
+									offset={6}
+								>
+									<ListBox aria-label="提供商筛选" className="tier-2-menu-list">
+										<ListBox.Item id="all" textValue="全部提供商" className="menu-row settings-select-option">
+											<span>全部提供商</span>
+											{provider === "all" && (
 												<Check size={14} className="settings-select-check" aria-hidden="true" />
 											)}
 										</ListBox.Item>
-									))}
-								</ListBox>
-							</Select.Popover>
-						</Select>
-					</div>
-					<SettingsSection title="启用模型" summary={`${enabledCount} 个已启用`}>
-						<div className="settings-model-bulk">
-							<button
-								type="button"
-								className="btn-ghost"
-								disabled={state.working || !visible.length || selection === null}
-								onClick={() =>
-									void save(normalizeScope([...new Set([...(selection ?? allIds), ...visible])], allIds))
-								}
-							>
-								全选
-							</button>
-							<button
-								type="button"
-								className="btn-ghost"
-								disabled={state.working || !visible.some((id) => selection === null || selection.includes(id))}
-								onClick={() =>
-									void save(
-										normalizeScope(
-											(selection ?? allIds).filter((id) => !visible.includes(id)),
-											allIds,
-										),
-									)
-								}
-							>
-								清空
-							</button>
-							<button
-								type="button"
-								className="btn-ghost"
-								disabled={state.working || state.loading}
-								onClick={() => void state.refresh()}
-							>
-								刷新
-							</button>
-							{state.working && <output>正在保存…</output>}
+										{providers.map((id) => (
+											<ListBox.Item
+												id={id}
+												key={id}
+												textValue={id}
+												className="menu-row settings-select-option"
+											>
+												<span>{id}</span>
+												{provider === id && (
+													<Check size={14} className="settings-select-check" aria-hidden="true" />
+												)}
+											</ListBox.Item>
+										))}
+									</ListBox>
+								</Select.Popover>
+							</Select>
 						</div>
 						<div
-							className="settings-card settings-model-card"
+							className="settings-model-card"
 							ref={list}
 							data-expanded={expanded || !!needle}
 							aria-busy={state.working}
 						>
-							<ul className="settings-models" id="enabled-model-list" ref={listRoot}>
-								{listed.ids.map((id) => {
+							<div
+								className="settings-models"
+								id="enabled-model-list"
+								role="listbox"
+								aria-label="启用模型列表"
+								ref={listRoot}
+								data-kbd-active={kbdActive && focusedRowId !== null ? "true" : undefined}
+								onBlur={(event) => {
+									if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+										setFocusedRowId(null);
+										setKbdActive(false);
+									}
+								}}
+							>
+								{listed.ids.map((id, idx) => {
 									const model = byId.get(id)!;
 									const enabled = selection === null || selection.includes(id);
+									const enabledPos = enabled ? visibleEnabledOrder.indexOf(id) : -1;
+									const canMoveUp = enabledPos > 0;
+									const canMoveDown = enabledPos >= 0 && enabledPos + 1 < visibleEnabledOrder.length;
 									return (
-										<li
+										<div
 											key={id}
+											ref={(node) => {
+												if (node) itemRefs.current.set(id, node);
+												else itemRefs.current.delete(id);
+											}}
+											role="option"
+											aria-selected={enabled}
+											tabIndex={0}
+											data-model-id={id}
+											data-enabled={enabled ? "true" : "false"}
 											className="settings-model"
 											data-dragging={dragId === id || undefined}
+											draggable={enabled && !state.working}
+											onFocus={(event) => {
+												setFocusedRowId(id);
+												if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+											}}
+											onKeyDown={(event) => handleRowKeyDown(event, id, idx, enabled)}
+											onDragStart={(event) => {
+												if (!enabled || state.working) {
+													event.preventDefault();
+													return;
+												}
+												event.dataTransfer.setData("text/plain", id);
+												event.dataTransfer.effectAllowed = "move";
+												setDragId(id);
+											}}
+											onDragEnd={() => setDragId(null)}
 											onDragOver={(event) => {
-												if (dragId && selection?.includes(id)) event.preventDefault();
+												if (dragId && enabled) event.preventDefault();
 											}}
 											onDrop={(event) => {
 												event.preventDefault();
@@ -239,66 +383,72 @@ export default function ModelPreferences() {
 													</Checkbox.Control>
 												</Checkbox.Content>
 											</Checkbox>
-											<span className="settings-model-name" title={model.name}>
-												{model.name}
-											</span>
-											<span className="settings-model-provider" title={model.provider}>
-												{model.provider}
-											</span>
-											{enabled && selection !== null ? (
-												<button
-													type="button"
-													className="settings-grip"
-													data-model-id={id}
-													draggable={!state.working}
-													aria-disabled={state.working || undefined}
-													aria-label={`调整 ${model.name} 的顺序`}
-													title="拖动排序；Alt + ↑ / ↓ 调整顺序"
-													onDragStart={(event) => {
-														if (state.working) {
-															event.preventDefault();
-															return;
-														}
-														event.dataTransfer.setData("text/plain", id);
-														event.dataTransfer.effectAllowed = "move";
-														setDragId(id);
-													}}
-													onDragEnd={() => setDragId(null)}
-													onKeyDown={(event) => {
-														if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
-														event.preventDefault();
-														if (state.working) return;
-														const target =
-															selection[selection.indexOf(id) + (event.key === "ArrowUp" ? -1 : 1)];
-														if (target) {
-															keyboardFocusId.current = id;
-															displayOrder.current = moveModel(sorted, id, target) ?? sorted;
-															void save(moveModel(selection, id, target));
-														}
-													}}
-												>
-													<GripVertical size={16} aria-hidden="true" />
-												</button>
-											) : (
-												<span className="settings-grip-space" aria-hidden="true" />
+											<div className="settings-model-main">
+												<span className="settings-model-name" title={model.name}>
+													{model.name}
+												</span>
+												<span className="settings-model-provider" title={model.provider}>
+													{model.provider}
+												</span>
+											</div>
+											{enabled && (
+												<div className="settings-model-reorder">
+													<button
+														type="button"
+														className="settings-model-arrow"
+														disabled={state.working || !canMoveUp}
+														aria-label={`上移 ${model.name}`}
+														title="上移（Alt + ↑）"
+														onClick={(event) => {
+															event.stopPropagation();
+															reorderByDelta(id, -1);
+														}}
+													>
+														<ArrowUp size={13} aria-hidden="true" />
+													</button>
+													<button
+														type="button"
+														className="settings-model-arrow"
+														disabled={state.working || !canMoveDown}
+														aria-label={`下移 ${model.name}`}
+														title="下移（Alt + ↓）"
+														onClick={(event) => {
+															event.stopPropagation();
+															reorderByDelta(id, 1);
+														}}
+													>
+														<ArrowDown size={13} aria-hidden="true" />
+													</button>
+												</div>
 											)}
-										</li>
+										</div>
 									);
 								})}
 								{listed.unavailable.map((id) => (
-									<li key={id} className="settings-model settings-model-unavailable">
+									<div key={id} className="settings-model settings-model-unavailable">
 										<span className="settings-check settings-check-disabled" aria-hidden="true" />
-										<span className="settings-model-name">{id}</span>
-										<span className="settings-model-provider">不可用</span>
-										<span className="settings-grip-space" aria-hidden="true" />
-									</li>
+										<div className="settings-model-main">
+											<span className="settings-model-name">{id}</span>
+											<span className="settings-model-provider">不可用</span>
+										</div>
+									</div>
 								))}
 								{!listed.total && (
-									<li className="settings-empty">
-										{models.length ? "没有匹配的模型" : "连接模型服务后，可在此选择模型。"}
-									</li>
+									<div className="settings-empty">
+										{models.length ? "没有匹配的模型" : "连接提供商后，可在此选择模型。"}
+									</div>
 								)}
-							</ul>
+								<KbdFocusOverlay
+									containerRef={listRoot}
+									itemRefs={itemRefs}
+									targetId={
+										kbdActive && focusedRowId && listed.ids.includes(focusedRowId) ? focusedRowId : null
+									}
+									style={kbdStyle}
+									railPlacement="inside"
+									bracketOutset={2}
+								/>
+							</div>
 							{listed.hasMore && (
 								<button
 									type="button"

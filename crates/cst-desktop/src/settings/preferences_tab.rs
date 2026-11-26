@@ -4,9 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cst_client::{ClientHandle, ModelChoiceDto, ModelsSnapshot};
-use gpui::{KeyDownEvent, ScrollStrategy, UniformListScrollHandle, uniform_list};
+use gpui::{
+    KeyDownEvent, MouseMoveEvent, Pixels, Point, ScrollStrategy, UniformListScrollHandle,
+    uniform_list,
+};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::{
@@ -16,6 +19,10 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{
+    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, pointer_moved_past_threshold,
+    render_gliding_dynamic_indicator, resolve_menu_nav_key,
+};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
@@ -43,7 +50,7 @@ enum PrefRowItem {
     },
 }
 
-const PREF_LIST_ROW_HEIGHT_PX: f32 = 56.0;
+const PREF_LIST_ROW_HEIGHT_PX: f32 = 48.0;
 const PREF_LIST_MAX_VISIBLE_ROWS: usize = 8;
 const PREF_COLLAPSED_MODEL_LIMIT: usize = 5;
 
@@ -58,6 +65,7 @@ pub struct PreferencesTabView {
     last_ready_models: Vec<ModelChoiceDto>,
     optimistic_default: Option<(String, String)>,
     selected_row_id: Option<String>,
+    visible_row_ids: Vec<String>,
     visible_enabled_indices: Vec<usize>,
     visible_filter_key: Option<(Option<String>, String)>,
     observed_models: Option<Arc<ModelsSnapshot>>,
@@ -69,9 +77,14 @@ pub struct PreferencesTabView {
     picker_focus: FocusHandle,
     picker_index: usize,
     picker_keyboard_nav: bool,
+    picker_last_pointer: Option<Point<Pixels>>,
+    picker_tracker: KbdDynamicBoundsTracker,
     picker_scroll: gpui::ScrollHandle,
     default_picker_scroll: UniformListScrollHandle,
     list_scroll: UniformListScrollHandle,
+    list_kbd_active: bool,
+    list_last_pointer: Option<Point<Pixels>>,
+    list_tracker: KbdDynamicBoundsTracker,
     _search_subscription: Subscription,
     focus_handle: FocusHandle,
 }
@@ -111,6 +124,7 @@ impl PreferencesTabView {
             last_ready_models: Vec::new(),
             optimistic_default: None,
             selected_row_id: None,
+            visible_row_ids: Vec::new(),
             visible_enabled_indices: Vec::new(),
             visible_filter_key: None,
             observed_models: None,
@@ -122,11 +136,16 @@ impl PreferencesTabView {
             picker_focus: cx.focus_handle(),
             picker_index: 0,
             picker_keyboard_nav: false,
+            picker_last_pointer: None,
+            picker_tracker: KbdDynamicBoundsTracker::new(),
             picker_scroll: gpui::ScrollHandle::new(),
             default_picker_scroll: UniformListScrollHandle::new(),
             list_scroll: UniformListScrollHandle::new(),
+            list_kbd_active: false,
+            list_last_pointer: None,
+            list_tracker: KbdDynamicBoundsTracker::new(),
             _search_subscription: search_subscription,
-            focus_handle: cx.focus_handle(),
+            focus_handle: cx.focus_handle().tab_stop(true),
         }
     }
 
@@ -144,10 +163,21 @@ impl PreferencesTabView {
         true
     }
 
+    pub fn focus_from_tabbar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.list_kbd_active = true;
+        self.list_last_pointer = Some(window.mouse_position());
+        if self.selected_row_id.is_none() {
+            self.selected_row_id = self.visible_row_ids.first().cloned();
+        }
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.default_dropdown_open = false;
         self.filter_dropdown_open = false;
         self.picker_keyboard_nav = false;
+        self.list_kbd_active = false;
         self.models_expanded = false;
         cx.notify();
     }
@@ -464,31 +494,64 @@ impl PreferencesTabView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let ks = &event.keystroke;
-        if self.has_dropdown() {
+        if self.has_dropdown() || !self.focus_handle.is_focused(window) {
             return;
         }
-        if ks.modifiers.alt && self.focus_handle.is_focused(window) && !self.saving_scope {
-            let Some(idx) = self
-                .visible_enabled_indices
-                .iter()
-                .copied()
-                .find(|&idx| self.enabled_scope.model_id_at(idx) == self.selected_row_id.as_deref())
-                .or_else(|| self.visible_enabled_indices.first().copied())
-            else {
-                return;
-            };
-            match ks.key.as_str() {
-                "up" => {
-                    self.move_enabled_row(idx, -1, cx);
-                    cx.stop_propagation();
-                }
-                "down" => {
-                    self.move_enabled_row(idx, 1, cx);
-                    cx.stop_propagation();
-                }
-                _ => {}
+        let ks = &event.keystroke;
+        if self.visible_row_ids.is_empty() {
+            return;
+        }
+        let cur_vis_idx = self
+            .selected_row_id
+            .as_deref()
+            .and_then(|id| self.visible_row_ids.iter().position(|x| x == id))
+            .unwrap_or(0);
+        match resolve_menu_nav_key(
+            ks.key.as_str(),
+            ks.modifiers,
+            event.is_held,
+            cur_vis_idx,
+            self.visible_row_ids.len(),
+            false,
+        ) {
+            KbdMenuStep::Move(next) => {
+                self.selected_row_id = self.visible_row_ids.get(next).cloned();
+                self.list_kbd_active = true;
+                self.list_last_pointer = Some(window.mouse_position());
+                self.list_scroll
+                    .scroll_to_item(next, ScrollStrategy::Nearest);
+                cx.stop_propagation();
+                cx.notify();
             }
+            KbdMenuStep::Activate(idx) => {
+                if let Some(fid) = self.visible_row_ids.get(idx).cloned() {
+                    self.selected_row_id = Some(fid.clone());
+                    self.list_kbd_active = true;
+                    self.list_last_pointer = Some(window.mouse_position());
+                    self.toggle_model_enabled(fid, cx);
+                    cx.stop_propagation();
+                }
+            }
+            KbdMenuStep::ReorderUp | KbdMenuStep::ReorderDown => {
+                if self.saving_scope {
+                    return;
+                }
+                let Some(idx) = self
+                    .visible_enabled_indices
+                    .iter()
+                    .copied()
+                    .find(|&i| self.enabled_scope.model_id_at(i) == self.selected_row_id.as_deref())
+                    .or_else(|| self.visible_enabled_indices.first().copied())
+                else {
+                    return;
+                };
+                self.list_kbd_active = true;
+                self.list_last_pointer = Some(window.mouse_position());
+                let delta = if ks.key.as_str() == "up" { -1 } else { 1 };
+                self.move_enabled_row(idx, delta, cx);
+                cx.stop_propagation();
+            }
+            KbdMenuStep::SubRight | KbdMenuStep::BackLeft | KbdMenuStep::Ignore => {}
         }
     }
 }
@@ -496,9 +559,12 @@ impl PreferencesTabView {
 impl Render for PreferencesTabView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_from_snapshot();
+        self.picker_tracker.clear();
+        self.list_tracker.clear();
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let snap = self.client.snapshot();
+        let kbd_style = snap.desktop_settings.keyboard_focus_style;
         let models_snap = snap.models.as_ref();
 
         let snap_ready: Vec<&ModelChoiceDto> = models_snap
@@ -557,8 +623,11 @@ impl Render for PreferencesTabView {
                 }
             })
             .unwrap_or_else(|| "未选择默认模型".to_owned());
+        let default_provider = effective_default
+            .map(|m| m.provider.clone())
+            .unwrap_or_default();
 
-        // 1. Default model `72px` card with `208×32px` custom dropdown trigger + frosted popover (`H2p2z`)
+        // 1. Frameless 48px hairline row for 新会话默认模型 (`lTWwV` / `psK3f`)
         let choices: Vec<_> = enabled_ready_models
             .iter()
             .map(|m| (m.provider.clone(), m.id.clone()))
@@ -572,6 +641,10 @@ impl Render for PreferencesTabView {
             .unwrap_or(0);
         let mut dropdown_menu_opt = None;
         if self.default_dropdown_open {
+            let picker_kbd = self.picker_keyboard_nav;
+            let active_pop_spec = (picker_kbd && !choices.is_empty()).then(|| {
+                KbdDynamicSpec::row(format!("def-{}", self.picker_index.min(choices.len() - 1)))
+            });
             let items = if enabled_ready_models.is_empty() {
                 div()
                     .id("pref-default-model-scroll")
@@ -615,10 +688,11 @@ impl Render for PreferencesTabView {
                                 let is_selected = current_def_pair
                                     .as_ref()
                                     .is_some_and(|(p, m)| p == prov && m == mid);
-                                let is_kbd_hi =
-                                    this.picker_keyboard_nav && idx == this.picker_index;
                                 let prov_c = prov.clone();
                                 let mid_c = mid.clone();
+                                let tr = this.picker_tracker.clone();
+                                let key = SharedString::from(format!("def-{idx}"));
+                                let kbd_nav = this.picker_keyboard_nav;
                                 let opt_id =
                                     SharedString::from(format!("pref-default-model-{prov}-{mid}"));
                                 let mname_label = SharedString::from(mname.clone());
@@ -633,17 +707,18 @@ impl Render for PreferencesTabView {
                                     .h(height::CONTROL)
                                     .px(space::SM)
                                     .rounded(radius::CONTROL)
-                                    .bg(if is_kbd_hi {
-                                        palette.bg_item_active
-                                    } else {
-                                        gpui_kit::transparent_black()
-                                    })
                                     .text_color(palette.text_primary)
                                     .flex()
                                     .items_center()
                                     .justify_between()
                                     .gap(space::SM)
-                                    .hover(|s| s.bg(palette.bg_item_active))
+                                    .hover(move |s| {
+                                        if kbd_nav {
+                                            s
+                                        } else {
+                                            s.bg(palette.bg_item_hover)
+                                        }
+                                    })
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.set_default_model(
                                             prov_c.clone(),
@@ -653,6 +728,7 @@ impl Render for PreferencesTabView {
                                         );
                                         cx.stop_propagation();
                                     }))
+                                    .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                                     .child(div().flex_1().min_w_0().truncate().child(mname_label))
                                     .child(
                                         div()
@@ -686,6 +762,7 @@ impl Render for PreferencesTabView {
                     .id("pref-default-model-popover")
                     .test_support()
                     .a11y_dialog("pref-default-model-popover", "选择默认模型")
+                    .relative()
                     .w(px(300.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
@@ -695,6 +772,17 @@ impl Render for PreferencesTabView {
                     .occlude()
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                        if this.picker_keyboard_nav
+                            && pointer_moved_past_threshold(
+                                &mut this.picker_last_pointer,
+                                ev.position,
+                            )
+                        {
+                            this.picker_keyboard_nav = false;
+                            cx.notify();
+                        }
+                    }))
                     .child(
                         div()
                             .w_full()
@@ -727,6 +815,8 @@ impl Render for PreferencesTabView {
                                         };
                                         if moved {
                                             this.picker_keyboard_nav = true;
+                                            this.picker_last_pointer =
+                                                Some(window.mouse_position());
                                             this.default_picker_scroll.scroll_to_item(
                                                 this.picker_index,
                                                 ScrollStrategy::Nearest,
@@ -752,49 +842,43 @@ impl Render for PreferencesTabView {
                                 },
                             ))
                             .child(items),
-                    ),
+                    )
+                    .child(render_gliding_dynamic_indicator(
+                        "pref-default-pop",
+                        kbd_style,
+                        active_pop_spec,
+                        self.picker_tracker.clone(),
+                        &palette,
+                        window,
+                        cx,
+                    )),
                 palette.flat_popover_shadows(),
                 -6.0,
             );
-            dropdown_menu_opt = Some(div().absolute().top(px(60.0)).right(space::LG).child(menu));
+            dropdown_menu_opt = Some(div().absolute().top(px(46.0)).right_0().child(menu));
         }
 
-        let default_card = div()
+        let default_row = div()
             .w_full()
-            .h(px(72.0))
-            .px(space::LG)
-            .rounded(radius::ROW)
-            .border_1()
+            .h(px(48.0))
+            .border_b_1()
             .border_color(palette.border_subtle)
-            .bg(palette.bg_workspace)
             .flex()
             .items_center()
             .justify_between()
             .gap(space::LG)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::MICRO)
-                    .min_w_0()
-                    .child(
-                        apply_scale(div(), scale::BODY)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("默认模型")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("用于新会话，三端同步")),
-                    ),
+                apply_scale(div(), scale::BODY)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label("新会话默认模型")),
             )
             .child(
-                apply_scale(div(), scale::UI)
+                div()
                     .id("pref-default-model-trigger")
                     .test_support()
                     .a11y_toggle_button(
                         "pref-default-model-trigger",
-                        format!("默认模型：{default_label}"),
+                        format!("新会话默认模型：{default_label}"),
                         self.default_dropdown_open,
                     )
                     .track_focus(&self.default_trigger_focus)
@@ -802,49 +886,47 @@ impl Render for PreferencesTabView {
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if super::activates_button(event) {
                             this.toggle_dropdown(true, default_index, window, cx);
+                            this.picker_keyboard_nav = true;
+                            this.picker_last_pointer = Some(window.mouse_position());
                             cx.stop_propagation();
                         }
                     }))
-                    .w(px(208.0))
-                    .h(height::CONTROL)
-                    .px(space::MD)
+                    .h(height::COMPACT)
+                    .px(space::SM)
                     .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(if self.default_dropdown_open {
-                        palette.bg_item_active
-                    } else {
-                        palette.bg_workspace
-                    })
-                    .text_color(palette.text_primary)
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .gap(space::XS)
-                    .hover(|s| s.bg(palette.bg_surface))
+                    .gap(space::TIGHT)
+                    .hover(|s| s.bg(palette.bg_item_hover))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.toggle_dropdown(true, default_index, window, cx);
                     }))
                     .child(
-                        div()
-                            .min_w_0()
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .max_w(px(280.0))
                             .truncate()
+                            .text_color(palette.text_primary)
                             .child(SharedString::from(default_label)),
                     )
-                    .child(motion::animated_chevron(
+                    .children((!default_provider.is_empty()).then(|| {
+                        apply_scale(div(), scale::CAPTION)
+                            .text_color(palette.text_muted)
+                            .child(SharedString::from(default_provider))
+                    }))
+                    .child(div().ml(px(2.0)).child(motion::animated_chevron(
                         "pref-default-model",
                         self.default_dropdown_open,
                         true,
-                        px(14.0),
+                        px(13.0),
                         palette.text_secondary,
                         window,
                         cx,
-                    )),
+                    ))),
             );
 
-        // 2. Search + Provider filter `PHFud` dropdown (`zjoqr`) + `"全选 / 清空 / 刷新"` ghost buttons (`I8Og18`)
+        // 2. Provider filter dropdown & frameless 40px search bar
         let mut providers_seen = Vec::new();
         let mut providers_seen_set = HashSet::new();
         for m in &ready_models {
@@ -856,7 +938,7 @@ impl Render for PreferencesTabView {
             .provider_filter
             .as_deref()
             .filter(|pf| providers_seen_set.contains(*pf));
-        let filter_label = active_provider_filter.unwrap_or("全部").to_owned();
+        let filter_label = active_provider_filter.unwrap_or("全部提供商").to_owned();
 
         let filter_index = providers_seen
             .iter()
@@ -864,6 +946,11 @@ impl Render for PreferencesTabView {
             .map_or(0, |index| index + 1);
         let filter_menu_opt = self.filter_dropdown_open.then(|| {
             let choices = providers_seen.clone();
+            let kbd_nav = self.picker_keyboard_nav;
+            let active_filter_spec = kbd_nav.then(|| {
+                KbdDynamicSpec::row(format!("flt-{}", self.picker_index.min(choices.len())))
+            });
+            let tr_all = self.picker_tracker.clone();
             let mut items = div()
                 .id("pref-filter-scroll")
                 .track_scroll(&self.picker_scroll)
@@ -886,22 +973,24 @@ impl Render for PreferencesTabView {
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if self.picker_keyboard_nav && self.picker_index == 0 {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_nav {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.provider_filter = None;
                             this.dismiss_dropdowns(window, cx);
                         }))
-                        .child(cjk_inline_label("全部"))
+                        .on_prepaint(move |bounds, _, _| tr_all.set("flt-0", bounds))
+                        .child(cjk_inline_label("全部提供商"))
                         .children(active_provider_filter.is_none().then(|| {
                             Icon::new(IconName::Check)
                                 .size(px(13.0))
@@ -911,8 +1000,9 @@ impl Render for PreferencesTabView {
 
             for (index, prov) in providers_seen.iter().enumerate() {
                 let is_selected = active_provider_filter == Some(prov.as_str());
-                let is_kbd_hi = self.picker_keyboard_nav && self.picker_index == index + 1;
                 let p_click = prov.clone();
+                let tr = self.picker_tracker.clone();
+                let key = SharedString::from(format!("flt-{}", index + 1));
                 let filter_id = SharedString::from(format!("pref-filter-{prov}"));
                 let prov_label = SharedString::from(prov.clone());
                 items = items.child(
@@ -924,21 +1014,23 @@ impl Render for PreferencesTabView {
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if is_kbd_hi {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_nav {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.provider_filter = Some(p_click.clone());
                             this.dismiss_dropdowns(window, cx);
                         }))
+                        .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                         .child(div().flex_1().min_w_0().truncate().child(prov_label))
                         .children(is_selected.then(|| {
                             Icon::new(IconName::Check)
@@ -950,7 +1042,7 @@ impl Render for PreferencesTabView {
 
             div()
                 .absolute()
-                .top(px(36.0))
+                .top(px(42.0))
                 .right_0()
                 .child(motion::animate_popover_enter(
                     "pref-filter-pop-anim",
@@ -958,6 +1050,7 @@ impl Render for PreferencesTabView {
                         .id("pref-filter-popover")
                         .test_support()
                         .a11y_dialog("pref-filter-popover", "按提供商筛选")
+                        .relative()
                         .w(px(220.0))
                         .p(space::XS)
                         .rounded(radius::ROW)
@@ -967,6 +1060,17 @@ impl Render for PreferencesTabView {
                         .occlude()
                         .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                            if this.picker_keyboard_nav
+                                && pointer_moved_past_threshold(
+                                    &mut this.picker_last_pointer,
+                                    ev.position,
+                                )
+                            {
+                                this.picker_keyboard_nav = false;
+                                cx.notify();
+                            }
+                        }))
                         .child(
                             div()
                                 .w_full()
@@ -980,6 +1084,8 @@ impl Render for PreferencesTabView {
                                             &this.picker_scroll,
                                         ) {
                                             this.picker_keyboard_nav = true;
+                                            this.picker_last_pointer =
+                                                Some(window.mouse_position());
                                             cx.notify();
                                             cx.stop_propagation();
                                         } else if super::activates_button(event) {
@@ -994,7 +1100,16 @@ impl Render for PreferencesTabView {
                                     },
                                 ))
                                 .child(items),
-                        ),
+                        )
+                        .child(render_gliding_dynamic_indicator(
+                            "pref-filter-pop",
+                            kbd_style,
+                            active_filter_spec,
+                            self.picker_tracker.clone(),
+                            &palette,
+                            window,
+                            cx,
+                        )),
                     palette.flat_popover_shadows(),
                     -6.0,
                 ))
@@ -1075,9 +1190,27 @@ impl Render for PreferencesTabView {
             }
         }
 
+        let total_matching_rows = visible_rows.len();
+        let filtering_active = active_provider_filter.is_some() || !search_q.is_empty();
+        let can_collapse_models =
+            !filtering_active && total_matching_rows > PREF_COLLAPSED_MODEL_LIMIT;
+        let display_row_count = if can_collapse_models && !self.models_expanded {
+            PREF_COLLAPSED_MODEL_LIMIT
+        } else {
+            total_matching_rows
+        };
+
         self.visible_enabled_indices = visible_enabled_indices;
-        let vis_for_all = visible_full_ids.clone();
-        let vis_for_clear = visible_full_ids;
+        self.visible_row_ids = visible_full_ids
+            .iter()
+            .take(display_row_count)
+            .cloned()
+            .collect();
+
+        // Merged single 全选 / 清空 toggle per finalized lTWwV design
+        let all_visible_enabled = !visible_full_ids.is_empty()
+            && self.visible_enabled_indices.len() == visible_full_ids.len();
+        let vis_for_toggle = visible_full_ids;
 
         let search_focused = self
             .search_input
@@ -1087,8 +1220,16 @@ impl Render for PreferencesTabView {
         let search_has_text = !search_q.is_empty();
         let search_focus_ent = self.search_input.clone();
 
-        let filter_row = div()
+        let search_filter_bar = div()
+            .relative()
             .w_full()
+            .h(px(40.0))
+            .border_b_1()
+            .border_color(if search_focused {
+                palette.accent_solid
+            } else {
+                palette.border_subtle
+            })
             .flex()
             .items_center()
             .justify_between()
@@ -1096,17 +1237,9 @@ impl Render for PreferencesTabView {
             .child(
                 div()
                     .id("preferences-search-box")
-                    .w(px(340.0))
-                    .h(height::CONTROL)
-                    .px(space::MD)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(if search_focused {
-                        palette.border_focus
-                    } else {
-                        palette.border_strong
-                    })
-                    .bg(palette.bg_workspace)
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
                     .flex()
                     .items_center()
                     .gap(space::SM)
@@ -1169,27 +1302,19 @@ impl Render for PreferencesTabView {
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         if super::activates_button(event) {
                             this.toggle_dropdown(false, filter_index, window, cx);
+                            this.picker_keyboard_nav = true;
+                            this.picker_last_pointer = Some(window.mouse_position());
                             cx.stop_propagation();
                         }
                     }))
-                    .min_w(px(84.0))
-                    .max_w(px(180.0))
-                    .h(height::CONTROL)
-                    .px(space::MD)
+                    .h(height::COMPACT)
+                    .px(space::SM)
                     .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(if self.filter_dropdown_open {
-                        palette.bg_item_active
-                    } else {
-                        palette.bg_workspace
-                    })
-                    .text_color(palette.text_primary)
+                    .text_color(palette.text_secondary)
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .gap(space::SM)
-                    .hover(|s| s.bg(palette.bg_surface))
+                    .gap(space::XS)
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -1197,7 +1322,7 @@ impl Render for PreferencesTabView {
                     }))
                     .child(
                         div()
-                            .min_w_0()
+                            .max_w(px(160.0))
                             .truncate()
                             .child(SharedString::from(filter_label)),
                     )
@@ -1205,99 +1330,139 @@ impl Render for PreferencesTabView {
                         "pref-filter",
                         self.filter_dropdown_open,
                         true,
-                        px(14.0),
+                        px(13.0),
                         palette.text_secondary,
                         window,
                         cx,
                     )),
-            );
+            )
+            .children(filter_menu_opt);
 
-        let batch_toolbar = div()
+        let section_header = div()
             .w_full()
             .flex()
             .items_center()
-            .gap(space::SM)
+            .justify_between()
             .child(
-                apply_scale(div(), scale::UI)
-                    .id("pref-select-all-btn")
-                    .test_support()
-                    .a11y_button("pref-select-all-btn", "全选可见模型")
-                    .h(height::CONTROL)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
+                div()
                     .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_all_visible(vis_for_all.clone(), cx);
-                    }))
-                    .child(cjk_inline_label("全选")),
+                    .items_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("启用模型")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .pb(px(1.0))
+                            .text_color(palette.text_muted)
+                            .child(SharedString::from(format!(
+                                "{enabled_ready_count} / {}",
+                                ready_models.len()
+                            ))),
+                    ),
             )
             .child(
-                apply_scale(div(), scale::UI)
-                    .id("pref-clear-all-btn")
-                    .test_support()
-                    .a11y_button("pref-clear-all-btn", "清空可见模型")
-                    .h(height::CONTROL)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
+                div()
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.clear_visible(vis_for_clear.clone(), cx);
-                    }))
-                    .child(cjk_inline_label("清空")),
-            )
-            .child(
-                apply_scale(div(), scale::UI)
-                    .id("pref-refresh-btn")
-                    .test_support()
-                    .a11y_button("pref-refresh-btn", "刷新模型列表")
-                    .h(height::CONTROL)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.refresh_catalog(cx);
-                    }))
-                    .child(cjk_inline_label(if self.refreshing_catalog {
-                        "刷新中…"
-                    } else {
-                        "刷新"
-                    })),
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id(if all_visible_enabled {
+                                "pref-clear-all-btn"
+                            } else {
+                                "pref-select-all-btn"
+                            })
+                            .test_support()
+                            .a11y_button(
+                                if all_visible_enabled {
+                                    "pref-clear-all-btn"
+                                } else {
+                                    "pref-select-all-btn"
+                                },
+                                if all_visible_enabled {
+                                    "清空可见模型"
+                                } else {
+                                    "全选可见模型"
+                                },
+                            )
+                            .h(height::COMPACT)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if all_visible_enabled {
+                                    this.clear_visible(vis_for_toggle.clone(), cx);
+                                } else {
+                                    this.select_all_visible(vis_for_toggle.clone(), cx);
+                                }
+                            }))
+                            .child(cjk_inline_label(if all_visible_enabled {
+                                "清空"
+                            } else {
+                                "全选"
+                            })),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("pref-refresh-btn")
+                            .test_support()
+                            .a11y_button("pref-refresh-btn", "刷新模型列表")
+                            .h(height::COMPACT)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.refresh_catalog(cx);
+                            }))
+                            .child(cjk_inline_label(if self.refreshing_catalog {
+                                "刷新中…"
+                            } else {
+                                "刷新"
+                            })),
+                    ),
             );
 
-        // 3. Enabled & unchecked logged-in models (`56px` uniform rows, collapsed to 5 rows by default per `lTWwV`)
-        let total_matching_rows = visible_rows.len();
-        let filtering_active = active_provider_filter.is_some() || !search_q.is_empty();
-        let can_collapse_models =
-            !filtering_active && total_matching_rows > PREF_COLLAPSED_MODEL_LIMIT;
-        let display_row_count = if can_collapse_models && !self.models_expanded {
-            PREF_COLLAPSED_MODEL_LIMIT
-        } else {
-            total_matching_rows
-        };
-        let mut list_card = div()
+        // 3. Frameless 48px hairline model rows (collapsed to 5 rows by default per `lTWwV`)
+        let list_focused = self.focus_handle.is_focused(window);
+        let active_list_spec = (list_focused && self.list_kbd_active)
+            .then(|| {
+                self.selected_row_id.as_deref().and_then(|id| {
+                    self.visible_row_ids
+                        .iter()
+                        .position(|x| x == id)
+                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(4.0))
+                })
+            })
+            .flatten();
+
+        let mut list_body = div()
+            .relative()
             .w_full()
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_workspace)
-            .overflow_hidden()
             .flex()
-            .flex_col();
+            .flex_col()
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.list_kbd_active
+                    && pointer_moved_past_threshold(&mut this.list_last_pointer, ev.position)
+                {
+                    this.list_kbd_active = false;
+                    cx.notify();
+                }
+            }));
 
         if display_row_count == 0 {
-            list_card = list_card.child(
+            list_body = list_body.child(
                 apply_scale(div(), scale::UI)
-                    .p(space::LG)
+                    .py(space::LG)
                     .text_color(palette.text_muted)
                     .child(if ready_models.is_empty() {
                         "暂无已登录提供商的可用模型，请先在「提供商」中登录"
@@ -1310,273 +1475,330 @@ impl Render for PreferencesTabView {
             let rows_arc = Arc::new(visible_rows);
             let viewport_h = px((display_row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32)
                 * PREF_LIST_ROW_HEIGHT_PX);
-            list_card = list_card.child(
+            list_body = list_body.child(
                 uniform_list(
                     "pref-models-virtual-list",
                     display_row_count,
                     cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                         range
-                            .map(|vis_idx| match &rows_arc[vis_idx] {
-                                PrefRowItem::Enabled {
-                                    ordered_idx,
-                                    full_id,
-                                    provider,
-                                    name,
-                                } => {
-                                    let idx = *ordered_idx;
-                                    let can_move_up = vis_idx > 0;
-                                    let can_move_down =
-                                        vis_idx + 1 < this.visible_enabled_indices.len();
-                                    let fid_chk = full_id.clone();
-                                    let fid_select = full_id.clone();
-                                    let selected = this.selected_row_id.as_ref() == Some(full_id);
-                                    let row_id =
-                                        SharedString::from(format!("pref-enabled-row-{idx}"));
-                                    let chk_id =
-                                        SharedString::from(format!("pref-toggle-enabled-{idx}"));
-                                    let up_id = SharedString::from(format!("pref-move-up-{idx}"));
-                                    let down_id =
-                                        SharedString::from(format!("pref-move-down-{idx}"));
-                                    let flip_y = motion::flip_row_offset_y_with_duration(
-                                        "pref-enabled-models",
+                            .map(|vis_idx| {
+                                let tr = this.list_tracker.clone();
+                                let row_track_key =
+                                    SharedString::from(format!("pref-row-{vis_idx}"));
+                                let kbd_active = this.list_kbd_active;
+                                match &rows_arc[vis_idx] {
+                                    PrefRowItem::Enabled {
+                                        ordered_idx,
                                         full_id,
-                                        &flip_scope,
-                                        px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
-                                        motion::FAST,
-                                        window,
-                                        cx,
-                                    );
-                                    let mut row = div()
-                                        .id(row_id.clone())
-                                        .test_support()
-                                        .relative()
-                                        .top(flip_y)
-                                        .a11y_listitem(
-                                            row_id,
-                                            format!("{name}（{provider}）"),
-                                            selected,
-                                        )
-                                        .w_full()
-                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                        .px(space::LG)
-                                        .bg(if selected {
-                                            palette.bg_item_active
-                                        } else {
-                                            gpui_kit::transparent_black()
-                                        })
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::MD)
-                                        .hover(|s| s.bg(palette.bg_item_hover))
-                                        .on_click(cx.listener(move |this, _, w, cx| {
-                                            this.selected_row_id = Some(fid_select.clone());
-                                            this.focus_handle.focus(w, cx);
-                                            cx.notify();
-                                        }))
-                                        .child({
-                                            let chk_mark = motion::animated_checkbox_mark(
-                                                format!("pref-chk-{full_id}"),
-                                                true,
-                                                px(11.0),
-                                                palette.text_on_accent,
-                                                window,
-                                                cx,
-                                            );
-                                            div()
-                                                .id(chk_id.clone())
-                                                .test_support()
-                                                .a11y_checkbox(
-                                                    chk_id,
-                                                    format!("启用模型：{name}"),
-                                                    true,
-                                                )
-                                                .w(px(16.0))
-                                                .h(px(16.0))
-                                                .rounded(radius::CONTROL)
-                                                .border_1()
-                                                .border_color(palette.accent_solid)
-                                                .bg(palette.accent_solid)
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .flex_shrink_0()
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.toggle_model_enabled(fid_chk.clone(), cx);
-                                                    cx.stop_propagation();
-                                                }))
-                                                .children(chk_mark)
-                                        })
-                                        .child(
-                                            apply_scale(div(), scale::BODY)
-                                                .flex_1()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_color(palette.text_primary)
-                                                .child(SharedString::from(name.clone())),
-                                        )
-                                        .child(
-                                            apply_scale(div(), scale::UI)
-                                                .w(px(140.0))
-                                                .flex_shrink_0()
-                                                .flex()
-                                                .justify_end()
-                                                .truncate()
-                                                .text_color(palette.text_secondary)
-                                                .child(SharedString::from(provider.clone())),
-                                        )
-                                        .child(
-                                            div()
-                                                .w(px(60.0))
-                                                .flex_shrink_0()
-                                                .flex()
-                                                .items_center()
-                                                .justify_end()
-                                                .gap(space::MICRO)
-                                                .child(
-                                                    div()
-                                                        .id(up_id.clone())
-                                                        .test_support()
-                                                        .a11y_button(
-                                                            up_id,
-                                                            format!("上移模型：{name}"),
-                                                        )
-                                                        .w(height::COMPACT)
-                                                        .h(height::COMPACT)
-                                                        .rounded(radius::CONTROL)
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .hover(|s| s.bg(palette.bg_item_hover))
-                                                        .on_click(cx.listener(
-                                                            move |this, _, _, cx| {
-                                                                if can_move_up {
-                                                                    this.move_enabled_row(
-                                                                        idx, -1, cx,
-                                                                    );
-                                                                }
-                                                                cx.stop_propagation();
-                                                            },
-                                                        ))
-                                                        .child(
-                                                            Icon::new(IconName::ArrowUp)
-                                                                .size(px(13.0))
-                                                                .text_color(palette.text_secondary),
-                                                        ),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .id(down_id.clone())
-                                                        .test_support()
-                                                        .a11y_button(
-                                                            down_id,
-                                                            format!("下移模型：{name}"),
-                                                        )
-                                                        .w(height::COMPACT)
-                                                        .h(height::COMPACT)
-                                                        .rounded(radius::CONTROL)
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .hover(|s| s.bg(palette.bg_item_hover))
-                                                        .on_click(cx.listener(
-                                                            move |this, _, _, cx| {
-                                                                if can_move_down {
-                                                                    this.move_enabled_row(
-                                                                        idx, 1, cx,
-                                                                    );
-                                                                }
-                                                                cx.stop_propagation();
-                                                            },
-                                                        ))
-                                                        .child(
-                                                            Icon::new(IconName::ArrowDown)
-                                                                .size(px(13.0))
-                                                                .text_color(palette.text_secondary),
-                                                        ),
-                                                ),
+                                        provider,
+                                        name,
+                                    } => {
+                                        let idx = *ordered_idx;
+                                        let can_move_up = vis_idx > 0;
+                                        let can_move_down =
+                                            vis_idx + 1 < this.visible_enabled_indices.len();
+                                        let fid_chk = full_id.clone();
+                                        let fid_select = full_id.clone();
+                                        let selected =
+                                            this.selected_row_id.as_ref() == Some(full_id);
+                                        let row_id =
+                                            SharedString::from(format!("pref-enabled-row-{idx}"));
+                                        let chk_id = SharedString::from(format!(
+                                            "pref-toggle-enabled-{idx}"
+                                        ));
+                                        let up_id =
+                                            SharedString::from(format!("pref-move-up-{idx}"));
+                                        let down_id =
+                                            SharedString::from(format!("pref-move-down-{idx}"));
+                                        let flip_y = motion::flip_row_offset_y_with_duration(
+                                            "pref-enabled-models",
+                                            full_id,
+                                            &flip_scope,
+                                            px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
+                                            motion::FAST,
+                                            window,
+                                            cx,
                                         );
-                                    if vis_idx > 0 {
-                                        row = row.border_t_1().border_color(palette.border_subtle);
-                                    }
-                                    // GPUI positions the uniform-list item root itself. Move
-                                    // the child so the FLIP offset also moves its hitboxes.
-                                    div()
-                                        .w_full()
-                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                        .child(row)
-                                        .into_any_element()
-                                }
-                                PrefRowItem::Unchecked {
-                                    full_id,
-                                    provider,
-                                    name,
-                                } => {
-                                    let fid_add = full_id.clone();
-                                    let unchk_id =
-                                        SharedString::from(format!("pref-unchecked-{full_id}"));
-                                    let mut row = div()
-                                        .id(unchk_id.clone())
-                                        .test_support()
-                                        .a11y_checkbox(
-                                            unchk_id,
-                                            format!("启用模型：{name}（{provider}）"),
-                                            false,
-                                        )
-                                        .w_full()
-                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                        .px(space::LG)
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::MD)
-                                        .hover(|s| s.bg(palette.bg_item_hover))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.toggle_model_enabled(fid_add.clone(), cx);
-                                        }))
-                                        .child({
-                                            let unchk_mark = motion::animated_checkbox_mark(
-                                                format!("pref-chk-{full_id}"),
-                                                false,
-                                                px(11.0),
-                                                palette.text_on_accent,
-                                                window,
-                                                cx,
+                                        let row = div()
+                                            .id(row_id.clone())
+                                            .test_support()
+                                            .relative()
+                                            .top(flip_y)
+                                            .a11y_listitem(
+                                                row_id,
+                                                format!("{name}（{provider}）"),
+                                                selected,
+                                            )
+                                            .w_full()
+                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                            .border_b_1()
+                                            .border_color(palette.border_subtle)
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::MD)
+                                            .hover(move |s| {
+                                                if kbd_active {
+                                                    s
+                                                } else {
+                                                    s.bg(palette.bg_item_hover)
+                                                }
+                                            })
+                                            .on_click(cx.listener(move |this, _, w, cx| {
+                                                this.selected_row_id = Some(fid_select.clone());
+                                                this.list_kbd_active = false;
+                                                this.focus_handle.focus(w, cx);
+                                                cx.notify();
+                                            }))
+                                            .on_prepaint(move |bounds, _, _| {
+                                                tr.set(row_track_key.clone(), bounds);
+                                            })
+                                            .child({
+                                                let chk_mark = motion::animated_checkbox_mark(
+                                                    format!("pref-chk-{full_id}"),
+                                                    true,
+                                                    px(11.0),
+                                                    palette.text_on_accent,
+                                                    window,
+                                                    cx,
+                                                );
+                                                div()
+                                                    .id(chk_id.clone())
+                                                    .test_support()
+                                                    .a11y_checkbox(
+                                                        chk_id,
+                                                        format!("启用模型：{name}"),
+                                                        true,
+                                                    )
+                                                    .w(px(16.0))
+                                                    .h(px(16.0))
+                                                    .rounded(radius::CONTROL)
+                                                    .border_1()
+                                                    .border_color(palette.accent_solid)
+                                                    .bg(palette.accent_solid)
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .flex_shrink_0()
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.toggle_model_enabled(
+                                                            fid_chk.clone(),
+                                                            cx,
+                                                        );
+                                                        cx.stop_propagation();
+                                                    }))
+                                                    .children(chk_mark)
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .items_end()
+                                                    .gap(space::MD)
+                                                    .child(
+                                                        apply_scale(div(), scale::BODY)
+                                                            .truncate()
+                                                            .text_color(palette.text_primary)
+                                                            .child(SharedString::from(
+                                                                name.clone(),
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        apply_scale(div(), scale::CAPTION)
+                                                            .pb(px(1.0))
+                                                            .flex_shrink_0()
+                                                            .text_color(palette.text_muted)
+                                                            .child(SharedString::from(
+                                                                provider.clone(),
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(space::MICRO)
+                                                    .child(
+                                                        div()
+                                                            .id(up_id.clone())
+                                                            .test_support()
+                                                            .a11y_button(
+                                                                up_id,
+                                                                format!("上移模型：{name}"),
+                                                            )
+                                                            .w(height::COMPACT)
+                                                            .h(height::COMPACT)
+                                                            .rounded(radius::CONTROL)
+                                                            .opacity(if can_move_up {
+                                                                1.0
+                                                            } else {
+                                                                0.35
+                                                            })
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .hover(move |s| {
+                                                                if can_move_up {
+                                                                    s.bg(palette.bg_item_hover)
+                                                                } else {
+                                                                    s
+                                                                }
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    if can_move_up {
+                                                                        this.move_enabled_row(
+                                                                            idx, -1, cx,
+                                                                        );
+                                                                    }
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            ))
+                                                            .child(
+                                                                Icon::new(IconName::ArrowUp)
+                                                                    .size(px(13.0))
+                                                                    .text_color(
+                                                                        palette.text_secondary,
+                                                                    ),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .id(down_id.clone())
+                                                            .test_support()
+                                                            .a11y_button(
+                                                                down_id,
+                                                                format!("下移模型：{name}"),
+                                                            )
+                                                            .w(height::COMPACT)
+                                                            .h(height::COMPACT)
+                                                            .rounded(radius::CONTROL)
+                                                            .opacity(if can_move_down {
+                                                                1.0
+                                                            } else {
+                                                                0.35
+                                                            })
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .hover(move |s| {
+                                                                if can_move_down {
+                                                                    s.bg(palette.bg_item_hover)
+                                                                } else {
+                                                                    s
+                                                                }
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    if can_move_down {
+                                                                        this.move_enabled_row(
+                                                                            idx, 1, cx,
+                                                                        );
+                                                                    }
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            ))
+                                                            .child(
+                                                                Icon::new(IconName::ArrowDown)
+                                                                    .size(px(13.0))
+                                                                    .text_color(
+                                                                        palette.text_secondary,
+                                                                    ),
+                                                            ),
+                                                    ),
                                             );
-                                            div()
-                                                .w(px(16.0))
-                                                .h(px(16.0))
-                                                .rounded(radius::CONTROL)
-                                                .border_1()
-                                                .border_color(palette.border_strong)
-                                                .bg(palette.bg_workspace)
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .flex_shrink_0()
-                                                .children(unchk_mark)
-                                        })
-                                        .child(
-                                            apply_scale(div(), scale::BODY)
-                                                .flex_1()
-                                                .min_w_0()
-                                                .truncate()
-                                                .text_color(palette.text_secondary)
-                                                .child(SharedString::from(name.clone())),
-                                        )
-                                        .child(
-                                            apply_scale(div(), scale::UI)
-                                                .w(px(140.0))
-                                                .flex_shrink_0()
-                                                .flex()
-                                                .justify_end()
-                                                .truncate()
-                                                .text_color(palette.text_secondary)
-                                                .child(SharedString::from(provider.clone())),
-                                        )
-                                        .child(div().w(px(60.0)).flex_shrink_0());
-                                    if vis_idx > 0 {
-                                        row = row.border_t_1().border_color(palette.border_subtle);
+                                        div()
+                                            .w_full()
+                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                            .child(row)
+                                            .into_any_element()
                                     }
-                                    row.into_any_element()
+                                    PrefRowItem::Unchecked {
+                                        full_id,
+                                        provider,
+                                        name,
+                                    } => {
+                                        let fid_add = full_id.clone();
+                                        let unchk_id =
+                                            SharedString::from(format!("pref-unchecked-{full_id}"));
+                                        let row = div()
+                                            .id(unchk_id.clone())
+                                            .test_support()
+                                            .a11y_checkbox(
+                                                unchk_id,
+                                                format!("启用模型：{name}（{provider}）"),
+                                                false,
+                                            )
+                                            .w_full()
+                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                            .border_b_1()
+                                            .border_color(palette.border_subtle)
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::MD)
+                                            .hover(move |s| {
+                                                if kbd_active {
+                                                    s
+                                                } else {
+                                                    s.bg(palette.bg_item_hover)
+                                                }
+                                            })
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.toggle_model_enabled(fid_add.clone(), cx);
+                                            }))
+                                            .on_prepaint(move |bounds, _, _| {
+                                                tr.set(row_track_key.clone(), bounds);
+                                            })
+                                            .child({
+                                                let unchk_mark = motion::animated_checkbox_mark(
+                                                    format!("pref-chk-{full_id}"),
+                                                    false,
+                                                    px(11.0),
+                                                    palette.text_on_accent,
+                                                    window,
+                                                    cx,
+                                                );
+                                                div()
+                                                    .w(px(16.0))
+                                                    .h(px(16.0))
+                                                    .rounded(radius::CONTROL)
+                                                    .border_1()
+                                                    .border_color(palette.border_strong)
+                                                    .bg(palette.bg_workspace)
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .flex_shrink_0()
+                                                    .children(unchk_mark)
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .items_end()
+                                                    .gap(space::MD)
+                                                    .child(
+                                                        apply_scale(div(), scale::BODY)
+                                                            .truncate()
+                                                            .text_color(palette.text_secondary)
+                                                            .child(SharedString::from(
+                                                                name.clone(),
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        apply_scale(div(), scale::CAPTION)
+                                                            .pb(px(1.0))
+                                                            .flex_shrink_0()
+                                                            .text_color(palette.text_muted)
+                                                            .child(SharedString::from(
+                                                                provider.clone(),
+                                                            )),
+                                                    ),
+                                            );
+                                        row.into_any_element()
+                                    }
                                 }
                             })
                             .collect()
@@ -1594,15 +1816,14 @@ impl Render for PreferencesTabView {
                 } else {
                     SharedString::from(format!("查看全部模型（{total_matching_rows}）"))
                 };
-                list_card = list_card.child(
+                list_body = list_body.child(
                     apply_scale(div(), scale::UI)
                         .id("pref-toggle-expand-models-btn")
                         .test_support()
                         .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
                         .w_full()
                         .h(height::HEADER)
-                        .px(space::LG)
-                        .border_t_1()
+                        .border_b_1()
                         .border_color(palette.border_subtle)
                         .text_color(palette.text_secondary)
                         .flex()
@@ -1628,90 +1849,48 @@ impl Render for PreferencesTabView {
             }
         }
 
-        let enabled_count = enabled_ready_count;
+        list_body = list_body.child(render_gliding_dynamic_indicator(
+            "pref-models-list",
+            kbd_style,
+            active_list_spec,
+            self.list_tracker.clone(),
+            &palette,
+            window,
+            cx,
+        ));
 
         div()
             .id("settings-preferences-tab")
             .test_support()
             .a11y_region("settings-preferences-tab", "模型偏好设置")
             .track_focus(&self.focus_handle)
+            .tab_index(0)
             .on_key_down(cx.listener(Self::on_key_down))
             .w_full()
             .flex()
             .flex_col()
-            .gap(space::GROUP)
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::XS)
-                    .child(
-                        apply_scale(div(), scale::TITLE)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("模型偏好")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("设置新会话默认模型与输入框中的模型范围。")),
-                    ),
+                    .relative()
+                    .w_full()
+                    .child(default_row)
+                    .children(dropdown_menu_opt),
             )
             .child(
                 div()
+                    .mt(px(32.0))
+                    .w_full()
                     .flex()
                     .flex_col()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::BODY_SEMIBOLD)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("新会话默认模型")),
-                    )
+                    .gap(space::MD)
+                    .child(section_header)
                     .child(
                         div()
-                            .relative()
                             .w_full()
                             .flex()
                             .flex_col()
-                            .gap(space::GROUP)
-                            .child(default_card)
-                            .child(
-                                div()
-                                    .relative()
-                                    .w_full()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(space::GROUP)
-                                    .child(filter_row)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(space::SM)
-                                            .child(
-                                                div()
-                                                    .w_full()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_between()
-                                                    .child(
-                                                        apply_scale(div(), scale::BODY_SEMIBOLD)
-                                                            .text_color(palette.text_primary)
-                                                            .child(cjk_inline_label("启用模型")),
-                                                    )
-                                                    .child(
-                                                        apply_scale(div(), scale::UI)
-                                                            .text_color(palette.text_secondary)
-                                                            .child(cjk_inline_label(format!(
-                                                                "{enabled_count} 个已启用"
-                                                            ))),
-                                                    ),
-                                            )
-                                            .child(batch_toolbar)
-                                            .child(list_card),
-                                    )
-                                    .children(filter_menu_opt),
-                            )
-                            .children(dropdown_menu_opt),
+                            .child(search_filter_bar)
+                            .child(list_body),
                     ),
             )
     }

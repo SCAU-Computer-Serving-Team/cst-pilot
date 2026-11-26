@@ -163,6 +163,7 @@
   flex-shrink: 0;
 }
 .model-picker-options [data-slot="list-box"] {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-micro);
@@ -219,15 +220,21 @@
   flex-shrink: 0;
   color: var(--accent-ink);
 }
-.composer-popover .model-picker-options [role="option"]:is(:hover, [data-hovered="true"], [data-focused="true"], [data-focus-visible="true"]):not([aria-disabled="true"]) {
+.composer-popover .model-picker-options [role="option"]:is(:hover, [data-hovered="true"]):not([aria-disabled="true"]) {
   background: var(--bg-item-active);
   color: var(--text-primary);
 }
+.composer-popover .model-picker-options[data-kbd-active="true"] [role="option"]:is(:focus, [data-focused="true"], [data-focus-visible="true"], :hover, [data-hovered="true"]) {
+  background: transparent;
+}
+.composer-popover .model-picker-main[data-kbd-active="true"] .menu-row:is(:focus, :focus-visible, [data-focused="true"], [data-focus-visible="true"], :hover, [data-hovered="true"]) {
+  background: transparent;
+  box-shadow: none;
+}
 .composer-popover .model-picker-options [role="option"][aria-selected="true"] {
-  background: var(--bg-item-active);
   font-weight: 500;
 }
 .composer-popover .model-picker-options [role="option"]:is(:focus-visible, [data-focus-visible="true"]) {
   outline: none;
-  box-shadow: var(--focus-shadow);
+  box-shadow: none;
 }

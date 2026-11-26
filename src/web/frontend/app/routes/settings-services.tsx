@@ -3,33 +3,32 @@ import { Plus } from "lucide-react";
 import { ProviderServices } from "../auth/provider-services";
 import type { ProviderStatus } from "../data/api";
 import { settingsProviders } from "../settings/provider-list";
-import { SettingsHeading, SettingsLink, SettingsLoadState, SettingsSection } from "../settings/settings-frame";
+import { SettingsLink, SettingsLoadState, SettingsSection } from "../settings/settings-frame";
 import { useSettingsResource } from "../settings/use-settings-resource";
+
 export default function ModelServices() {
 	const state = useSettingsResource<{ providers: ProviderStatus[] }>("/api/auth");
 	const configured = settingsProviders(state.data?.providers ?? []).configured;
 	return (
 		<>
-			<SettingsHeading
-				title="模型服务"
-				action={
-					<SettingsLink to="/settings/add" className="tier-1-btn-outline settings-action">
-						<Plus size={14} aria-hidden="true" />
-						添加服务
-					</SettingsLink>
-				}
-			/>
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
-				<SettingsSection title="已配置" summary={`${configured.length} 个服务`}>
+				<SettingsSection
+					title="已配置"
+					summary={configured.length}
+					action={
+						<SettingsLink to="/settings/add" className="settings-inline-action settings-inline-action--primary">
+							<Plus size={14} aria-hidden="true" />
+							添加提供商
+						</SettingsLink>
+					}
+				>
 					{configured.length ? (
-						<ProviderServices providers={configured} />
+						<ProviderServices providers={configured} unframed />
 					) : (
-						<div className="settings-card">
-							<p className="settings-empty">
-								尚未配置模型服务。<SettingsLink to="/settings/add">添加服务</SettingsLink>
-							</p>
-						</div>
+						<p className="settings-empty">
+							尚未配置提供商。<SettingsLink to="/settings/add">添加提供商</SettingsLink>
+						</p>
 					)}
 				</SettingsSection>
 			)}
