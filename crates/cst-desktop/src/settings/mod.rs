@@ -636,12 +636,24 @@ impl SettingsView {
     }
 
     fn trigger_update_check_or_open(&mut self, cx: &mut Context<Self>) {
-        let cur_phase = self
-            .client
-            .snapshot()
-            .update_state
+        let cur_status = self.client.snapshot().update_state.clone();
+        let cur_phase = cur_status.as_ref().map(|u| u.status.phase);
+        let manual_upgrade_required = cur_status
             .as_ref()
-            .map(|u| u.status.phase);
+            .and_then(|u| u.status.error_kind.as_deref())
+            == Some("manual_upgrade_required");
+        if manual_upgrade_required
+            || matches!(
+                cur_phase,
+                Some(
+                    UpdatePhaseDto::Unavailable
+                        | UpdatePhaseDto::Launching
+                        | UpdatePhaseDto::ExitRequired
+                )
+            )
+        {
+            return;
+        }
         if matches!(
             cur_phase,
             Some(UpdatePhaseDto::Available | UpdatePhaseDto::Ready)
@@ -663,9 +675,23 @@ impl SettingsView {
                     {
                         cx.emit(SettingsViewEvent::OpenUpdateDialog);
                     }
-                    Ok(_) => {
-                        cx.emit(SettingsViewEvent::Notice("当前已是最新版本。".into()));
+                    Ok(st) if st.phase == UpdatePhaseDto::Failed => {
+                        let msg = if st.message.is_empty() {
+                            "检查更新失败，请稍后重试。".to_owned()
+                        } else {
+                            st.message
+                        };
+                        cx.emit(SettingsViewEvent::ErrorMessage(msg));
                     }
+                    Ok(st) if st.phase == UpdatePhaseDto::Current => {
+                        let msg = if st.message.is_empty() {
+                            "当前已是最新版本。".to_owned()
+                        } else {
+                            st.message
+                        };
+                        cx.emit(SettingsViewEvent::Notice(msg));
+                    }
+                    Ok(_) => {}
                     Err(err) => {
                         cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
                     }
@@ -691,8 +717,20 @@ impl SettingsView {
             .as_ref()
             .map(|u| u.status.phase)
             .unwrap_or(UpdatePhaseDto::Idle);
-        let unavailable = phase == UpdatePhaseDto::Unavailable;
-        let max_row = if unavailable { 1 } else { 2 };
+        let manual_upgrade_required = phase == UpdatePhaseDto::Failed
+            && snap
+                .update_state
+                .as_ref()
+                .and_then(|u| u.status.error_kind.as_deref())
+                == Some("manual_upgrade_required");
+        let update_actionable = !matches!(
+            phase,
+            UpdatePhaseDto::Unavailable
+                | UpdatePhaseDto::Checking
+                | UpdatePhaseDto::Launching
+                | UpdatePhaseDto::ExitRequired
+        ) && !manual_upgrade_required;
+        let max_row = if update_actionable { 2 } else { 1 };
         let themes = [
             ThemeModeDto::System,
             ThemeModeDto::Light,
@@ -798,8 +836,8 @@ impl SettingsView {
                         };
                         self.save_keyboard_style(next, cx);
                     }
-                    2 if !unavailable => {
-                        if matches!(phase, UpdatePhaseDto::Checking | UpdatePhaseDto::Preparing) {
+                    2 if update_actionable => {
+                        if phase == UpdatePhaseDto::Preparing {
                             cx.emit(SettingsViewEvent::CancelUpdate);
                         } else {
                             self.trigger_update_check_or_open(cx);

@@ -71,12 +71,25 @@ pub fn render_general_tab(
 
     let progress_ratio = compute_update_progress_ratio(update_state);
     let in_flight = matches!(phase, UpdatePhaseDto::Checking | UpdatePhaseDto::Preparing);
+    let restarting = matches!(
+        phase,
+        UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired
+    );
     let unavailable = phase == UpdatePhaseDto::Unavailable;
+    let error_kind = update_state.and_then(|u| u.status.error_kind.as_deref());
+    let manual_upgrade_required =
+        phase == UpdatePhaseDto::Failed && error_kind == Some("manual_upgrade_required");
 
     let (status_title, status_detail): (SharedString, SharedString) = match phase {
         UpdatePhaseDto::Unavailable => ("未启用自动更新".into(), "未配置编译期更新源".into()),
         UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验签名发布清单".into()),
-        UpdatePhaseDto::Current => ("当前已是最新版本".into(), "".into()),
+        UpdatePhaseDto::Current => {
+            let detail = update_state
+                .map(|u| u.status.message.trim())
+                .filter(|s| !s.is_empty() && *s != "当前已是最新版本。" && *s != "当前已是最新版本")
+                .unwrap_or("");
+            ("当前已是最新版本".into(), detail.to_owned().into())
+        }
         UpdatePhaseDto::Available => {
             let target = update_state
                 .and_then(|u| u.status.version.as_deref())
@@ -110,19 +123,28 @@ pub fn render_general_tab(
                     format!("{} / {}", format_megabytes(d), format_megabytes(t))
                 }
                 (_, Some(t), _) => format!("总计 {}", format_megabytes(t)),
-                _ => "正在验签离线更新包…".to_owned(),
+                _ => "正在验签在线更新包…".to_owned(),
             };
             (target.into(), detail.into())
         }
         UpdatePhaseDto::Ready => ("更新包已就绪".into(), "校验通过，重启后完成升级".into()),
+        UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired => (
+            "正在重启完成更新…".into(),
+            "窗口即将自动重启并替换组件".into(),
+        ),
         UpdatePhaseDto::Failed => {
+            let title = match error_kind {
+                Some("manual_upgrade_required") => "需下载完整发行包",
+                Some("download_failed") => "下载更新失败",
+                _ => "更新检查失败",
+            };
             let msg = update_state
                 .map(|u| u.status.message.as_str())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("检查或下载更新失败");
-            ("更新检查失败".into(), msg.to_owned().into())
+            (title.into(), msg.to_owned().into())
         }
-        _ => ("检查签名更新".into(), "手动检查离线升级包".into()),
+        UpdatePhaseDto::Idle => ("检查签名更新".into(), "手动检查在线升级包".into()),
     };
 
     let tr_update_btn = kbd.tracker.clone();
@@ -148,43 +170,63 @@ pub fn render_general_tab(
                     ),
             );
         }
-        group
-            .child(
-                apply_scale(div(), scale::UI)
-                    .id("settings-update-cancel-btn-ohwrt")
-                    .test_support()
-                    .a11y_button("settings-update-cancel-btn", "取消更新")
-                    .h(height::COMPACT)
-                    .px(px(10.0))
-                    .mr(px(-10.0))
-                    .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
-                    .flex()
-                    .items_center()
-                    .hover(move |s| {
-                        if kbd_active_for_update {
-                            s
-                        } else {
-                            s.bg(palette.bg_item_hover).text_color(palette.text_primary)
-                        }
-                    })
-                    .active(|s| s.bg(palette.bg_active_press))
-                    .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
-                    .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
-                    .child(cjk_inline_label("取消")),
-            )
-            .into_any_element()
-    } else if unavailable {
+        if phase == UpdatePhaseDto::Preparing {
+            group
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("settings-update-cancel-btn-ohwrt")
+                        .test_support()
+                        .a11y_button("settings-update-cancel-btn", "取消更新")
+                        .h(height::COMPACT)
+                        .px(px(10.0))
+                        .mr(px(-10.0))
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_secondary)
+                        .flex()
+                        .items_center()
+                        .hover(move |s| {
+                            if kbd_active_for_update {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                            }
+                        })
+                        .active(|s| s.bg(palette.bg_active_press))
+                        .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
+                        .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
+                        .child(cjk_inline_label("取消")),
+                )
+                .into_any_element()
+        } else {
+            group
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("settings-update-checking-label")
+                        .test_support()
+                        .text_color(palette.text_muted)
+                        .child(cjk_inline_label("检查中")),
+                )
+                .into_any_element()
+        }
+    } else if unavailable || restarting || manual_upgrade_required {
+        let readonly_label = if unavailable {
+            "未启用"
+        } else if restarting {
+            "重启中"
+        } else {
+            "手动换包"
+        };
         apply_scale(div(), scale::UI)
             .id("settings-update-disabled-btn")
             .test_support()
             .text_color(palette.text_muted)
-            .child(cjk_inline_label("未启用"))
+            .child(cjk_inline_label(readonly_label))
             .into_any_element()
     } else {
         let btn_label = match phase {
             UpdatePhaseDto::Available => "查看更新",
             UpdatePhaseDto::Ready => "重启更新",
+            UpdatePhaseDto::Failed => "重试",
             _ => "检查更新",
         };
         apply_scale(div(), scale::UI_MEDIUM)

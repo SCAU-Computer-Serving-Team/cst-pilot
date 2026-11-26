@@ -1747,11 +1747,25 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert_eq!(draft.selected_thinking_level.as_deref(), Some("high"));
     });
 
-    // 8. Software Update lifecycle (`kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
+    // 8. Software Update lifecycle (silent startup check on `Available` -> open via Settings `C9or7K` -> `kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
     {
         backend.state.lock().unwrap().update_phase = "available".into();
     }
     backend.rt().block_on(handle.refresh_globals()).unwrap();
+
+    // Startup background check must stay silent and not auto-open the modal.
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("update-available-dialog-kom7j").is_none());
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        let sv_ent = shell.read(cx).settings_view().clone();
+        sv_ent.update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::General, cx);
+        });
+        window.render_frame(cx);
+        window.click("settings-update-action-btn", cx);
+    })
+    .unwrap();
 
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
         window.try_find("update-available-dialog-kom7j").is_some()

@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use cst_os::{Storage, parse_strict_json};
 use pi_session::{AgentSession, ExtensionRegistrar, ExtensionUiContext, UiNotifyLevel};
@@ -10,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::telemetry::TelemetryService;
 use crate::update::{
-    UpdateClient,
+    UpdateClient, UpdateError,
     activity::{ActivityGate, UpgradeLease},
     handoff::{Handoff, LaunchReceipt},
     layout,
@@ -72,9 +73,13 @@ pub struct UpdateStatus {
     pub phase: Phase,
     pub version: Option<String>,
     pub archive_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
     pub release_notes: Option<String>,
     pub operation_id: Option<String>,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
     pub launch: Option<LaunchReceipt>,
 }
 
@@ -160,9 +165,11 @@ impl UpdateService {
                     },
                     version: None,
                     archive_bytes: None,
+                    downloaded_bytes: None,
                     release_notes: None,
                     operation_id: None,
                     message: message.into(),
+                    error_kind: None,
                     launch: None,
                 },
                 release: None,
@@ -200,6 +207,17 @@ impl UpdateService {
             .push(listener);
     }
 
+    fn notify_listeners(&self, status: &UpdateStatus) {
+        let listeners = self
+            .listeners
+            .lock()
+            .expect("update status listeners")
+            .clone();
+        for listener in listeners {
+            listener(status);
+        }
+    }
+
     fn publish(&self, phase: Phase, message: &str) {
         {
             let mut state = self.state.lock().expect("update state");
@@ -216,14 +234,19 @@ impl UpdateService {
                 },
             );
         }
-        let listeners = self
-            .listeners
-            .lock()
-            .expect("update status listeners")
-            .clone();
-        for listener in listeners {
-            listener(&status);
-        }
+        self.notify_listeners(&status);
+    }
+
+    fn publish_download_progress(&self, downloaded: u64) {
+        let status = {
+            let mut state = self.state.lock().expect("update state");
+            if state.status.phase != Phase::Preparing {
+                return;
+            }
+            state.status.downloaded_bytes = Some(downloaded);
+            state.status.clone()
+        };
+        self.notify_listeners(&status);
     }
 
     fn participants(&self) -> Vec<Arc<SessionRegistration>> {
@@ -318,10 +341,15 @@ impl UpdateService {
 
     async fn run_check_locked(&self, cancel: CancellationToken) -> Result<UpdateStatus, String> {
         let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
+        {
+            let mut state = self.state.lock().expect("update state");
+            state.status.downloaded_bytes = None;
+            state.status.error_kind = None;
+        }
         self.publish(Phase::Checking, "正在检查更新。");
         let result = async {
-            let current = layout::read_version(&self.root)?;
-            client.check(&current, cancel).await
+            let current = layout::read_version(&self.root).map_err(|_| UpdateError::Other)?;
+            client.check_detailed(&current, cancel).await
         }
         .await;
         match result {
@@ -331,9 +359,11 @@ impl UpdateService {
                     let mut state = self.state.lock().expect("update state");
                     state.status.version = release.as_ref().map(|r| r.info().version.clone());
                     state.status.archive_bytes = release.as_ref().map(|r| r.info().archive.size);
+                    state.status.downloaded_bytes = None;
                     state.status.release_notes =
                         release.as_ref().map(|r| r.info().release_notes.clone());
                     state.status.operation_id = None;
+                    state.status.error_kind = None;
                     state.release = release;
                 }
                 self.publish(
@@ -350,11 +380,34 @@ impl UpdateService {
                 );
                 Ok(self.status())
             }
-            Err(_) => {
-                self.publish(
-                    Phase::Failed,
-                    "升级检查未完成，请检查网络、发行配置或版本后重试。",
-                );
+            Err(UpdateError::ChannelEmpty) => {
+                {
+                    let mut state = self.state.lock().expect("update state");
+                    state.status.version = None;
+                    state.status.archive_bytes = None;
+                    state.status.downloaded_bytes = None;
+                    state.status.release_notes = None;
+                    state.status.operation_id = None;
+                    state.status.error_kind = None;
+                    state.release = None;
+                }
+                self.publish(Phase::Current, "暂未发布在线更新");
+                Ok(self.status())
+            }
+            Err(err) => {
+                let kind = if err.is_manual_upgrade_required() {
+                    "manual_upgrade_required"
+                } else {
+                    "check_failed"
+                };
+                {
+                    let mut state = self.state.lock().expect("update state");
+                    state.status.downloaded_bytes = None;
+                    state.status.operation_id = None;
+                    state.status.error_kind = Some(kind.to_owned());
+                }
+                let message = err.ui_message(false);
+                self.publish(Phase::Failed, &message);
                 Err(self.status().message)
             }
         }
@@ -443,17 +496,38 @@ impl UpdateService {
             .release
             .clone()
             .ok_or("请先检查并确认存在新版本。")?;
+        let total_size = release.info().archive.size;
         {
             let mut state = self.state.lock().expect("update state");
             state.status.operation_id = operation_id.clone();
+            state.status.downloaded_bytes = Some(0);
+            state.status.error_kind = None;
         }
         self.publish(Phase::Preparing, "正在下载并验证升级包。");
-        let res = client.prepare(&self.root, &release, cancel.clone()).await;
+        let mut last_emitted_bytes = 0u64;
+        let mut last_emitted_at = Instant::now();
+        const PROGRESS_STEP_BYTES: u64 = 256 * 1024;
+        const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
+        let res = client
+            .prepare_detailed(&self.root, &release, cancel.clone(), |downloaded| {
+                let now = Instant::now();
+                if downloaded >= total_size
+                    || downloaded.saturating_sub(last_emitted_bytes) >= PROGRESS_STEP_BYTES
+                    || now.duration_since(last_emitted_at) >= PROGRESS_INTERVAL
+                {
+                    last_emitted_bytes = downloaded;
+                    last_emitted_at = now;
+                    self.publish_download_progress(downloaded);
+                }
+            })
+            .await;
         match res {
             Ok(package) => {
                 {
                     let mut state = self.state.lock().expect("update state");
                     state.active_prepare = None;
+                    state.status.downloaded_bytes = Some(total_size);
+                    state.status.error_kind = None;
                     state.package = Some(package);
                 }
                 self.publish(Phase::Ready, "升级包已验证，可开始交接。");
@@ -464,6 +538,8 @@ impl UpdateService {
                     let mut state = self.state.lock().expect("update state");
                     state.active_prepare = None;
                     state.status.operation_id = None;
+                    state.status.downloaded_bytes = None;
+                    state.status.error_kind = None;
                     state.release.is_some()
                 };
                 if has_release {
@@ -471,16 +547,21 @@ impl UpdateService {
                 }
                 Err("升级准备已取消。".into())
             }
-            Err(_) => {
+            Err(err) => {
+                let kind = if err.is_manual_upgrade_required() {
+                    "manual_upgrade_required"
+                } else {
+                    "download_failed"
+                };
                 {
                     let mut state = self.state.lock().expect("update state");
                     state.active_prepare = None;
                     state.status.operation_id = None;
+                    state.status.downloaded_bytes = None;
+                    state.status.error_kind = Some(kind.to_owned());
                 }
-                self.publish(
-                    Phase::Failed,
-                    "升级包准备失败，当前程序与用户数据保持不变。",
-                );
+                let message = err.ui_message(true);
+                self.publish(Phase::Failed, &message);
                 Err(self.status().message)
             }
         }
@@ -528,6 +609,8 @@ impl UpdateService {
             let had_stage = state.package.take().is_some();
             let had_active = state.active_prepare.take().is_some();
             state.status.operation_id = None;
+            state.status.downloaded_bytes = None;
+            state.status.error_kind = None;
             (
                 state.release.is_some(),
                 had_stage || had_active || state.status.phase == Phase::Available,
