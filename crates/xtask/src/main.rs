@@ -1,3 +1,5 @@
+mod release;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File};
@@ -28,7 +30,10 @@ fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let Some(cmd) = args.next() else {
         print_usage();
-        return Err("缺少子命令（支持 dist / verify-tree）。".into());
+        return Err(
+            "缺少子命令（支持 dist / verify-tree / keygen / sign-release / publish-release）。"
+                .into(),
+        );
     };
     match cmd.as_str() {
         "dist" => run_dist(args),
@@ -44,6 +49,9 @@ fn run() -> Result<(), String> {
             println!("[xtask] verify-tree PASS: {count} files validated for {target_version}");
             Ok(())
         }
+        "keygen" => release::run_keygen(args),
+        "sign-release" => release::run_sign_release(args),
+        "publish-release" => release::run_publish_release(args),
         "-h" | "--help" | "help" => {
             print_usage();
             Ok(())
@@ -57,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -65,6 +73,7 @@ struct DistArgs {
     out_dir: PathBuf,
     version: String,
     profile: String,
+    require_update_config: bool,
     skip_web_build: bool,
     skip_cargo_build: bool,
     skip_smoke: bool,
@@ -75,6 +84,7 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
     let mut out_dir: Option<PathBuf> = None;
     let mut version = format!("v{}", env!("CARGO_PKG_VERSION"));
     let mut profile = "release".to_owned();
+    let mut require_update_config = false;
     let mut skip_web_build = false;
     let mut skip_cargo_build = false;
     let mut skip_smoke = false;
@@ -97,6 +107,7 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
                     ));
                 }
             }
+            "--require-update-config" => require_update_config = true,
             "--skip-web-build" => skip_web_build = true,
             "--skip-cargo-build" => skip_cargo_build = true,
             "--skip-smoke" => skip_smoke = true,
@@ -112,6 +123,7 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
         out_dir,
         version,
         profile,
+        require_update_config,
         skip_web_build,
         skip_cargo_build,
         skip_smoke,
@@ -130,6 +142,7 @@ fn repo_root() -> Result<PathBuf, String> {
 
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
+    let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
     let root = repo_root()?;
     let target_subdir = if args.profile == "dist" {
         "dist"
@@ -154,8 +167,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     // 2. Optional Cargo build (with embed-web on cst-server; static CRT on Windows dist)
     if !args.skip_cargo_build {
         println!(
-            "[xtask] Building Rust binaries (profile={})...",
-            args.profile
+            "[xtask] Building Rust binaries (profile={}, updateEnabled={})...",
+            args.profile,
+            update_cfg.is_some()
         );
         let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
         let dist_rustflags = if cfg!(windows) && args.profile == "dist" {
@@ -183,6 +197,10 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         ])
         .env("CST_BUILD_VERSION", &args.version)
         .current_dir(&root);
+        if let Some(cfg) = &update_cfg {
+            cmd1.env(release::ENV_MANIFEST_URL, &cfg.manifest_url)
+                .env(release::ENV_PUBLIC_KEY, &cfg.public_key_b64);
+        }
         if let Some(flags) = &dist_rustflags {
             cmd1.env("RUSTFLAGS", flags);
         }
@@ -206,6 +224,10 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         ])
         .env("CST_BUILD_VERSION", &args.version)
         .current_dir(&root);
+        if let Some(cfg) = &update_cfg {
+            cmd2.env(release::ENV_MANIFEST_URL, &cfg.manifest_url)
+                .env(release::ENV_PUBLIC_KEY, &cfg.public_key_b64);
+        }
         if let Some(flags) = &dist_rustflags {
             cmd2.env("RUSTFLAGS", flags);
         }
@@ -264,14 +286,23 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_else(|| "unknown".to_owned());
-    let build_info = json!({
+    let mut build_info = json!({
         "version": args.version,
         "gitCommit": git_commit,
         "builtAt": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
         "profile": args.profile,
         "platform": "windows-x86_64",
         "embedWeb": true,
+        "updateEnabled": update_cfg.is_some(),
     });
+    if let Some(cfg) = &update_cfg
+        && let Some(obj) = build_info.as_object_mut()
+    {
+        obj.insert(
+            "updatePublicKeyFingerprint".to_owned(),
+            json!(cfg.public_key_fingerprint),
+        );
+    }
     let mut build_info_bytes =
         serde_json::to_vec_pretty(&build_info).map_err(|_| "BUILD-INFO 序列化失败。")?;
     build_info_bytes.push(b'\n');
@@ -342,16 +373,14 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     fs::write(kit_dir.join(SHA256SUMS_PATH), sums_text.as_bytes())
         .map_err(|e| format!("无法写入 {SHA256SUMS_PATH}：{e}"))?;
 
-    let mut total_bytes = 0u64;
-    for rel in sums.keys() {
-        total_bytes += fs::metadata(kit_dir.join(rel))
-            .map(|m| m.len())
-            .unwrap_or(0);
-    }
+    let mut all_paths: Vec<String> = sums.keys().cloned().collect();
+    all_paths.push(SHA256SUMS_PATH.to_owned());
+    let total_bytes = release::write_zip_entries_unpacked_size(&kit_dir, &all_paths)?;
     println!(
-        "[xtask] Assembled {} files ({:.2} MiB) under {}",
-        sums.len() + 1,
+        "[xtask] Assembled {} files ({:.2} MiB, unpackedSize={} bytes incl. SHA256SUMS) under {}",
+        all_paths.len(),
         total_bytes as f64 / (1024.0 * 1024.0),
+        total_bytes,
         kit_dir.display()
     );
 
