@@ -69,7 +69,7 @@ Rust 主线按 `app/`（只读程序区）、`data/`（用户持久数据区，�
 | 路径 | 内容 | 读写规则 |
 |---|---|---|
 | `app/prompts/APPEND_SYSTEM.md` | 项目级诊断提示词 | 随包只读分发，自动附加到系统提示词末尾 |
-| `app/skills/` | 8 份诊断与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
+| `app/skills/` | 10 份诊断、检索与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
 | `app/defaults/` | `settings`、`models-store`、`telemetry`、`web-search` 默认模板 | 随包只读分发，用于首次初始化与升级缺失字段合并 |
 | `app/fonts/`、`app/telemetry/`、`app/tools/lhm/` | 共享字体、遥测专用 CA / 币种表与 LHM 辅助程序 | 随包只读分发，在线升级随程序区验签替换 |
 | `data/config/settings.json` | 默认模型、启用范围、思考强度 | 三端共用模型配置，按字段合并原子更新 |

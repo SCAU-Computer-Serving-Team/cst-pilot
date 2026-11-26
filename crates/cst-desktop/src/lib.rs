@@ -28,12 +28,14 @@ use crate::theme::{FontLoadReport, load_bundled_fonts, motion};
 const REQUIRED_SKILL_NAMES: &[&str] = &[
     "disk",
     "ls",
+    "files",
     "sys",
     "startup",
     "eventlog",
     "driver",
     "runbook",
     "bitlocker",
+    "web-search",
 ];
 
 const REQUIRED_FONT_NAMES: &[&str] = &[

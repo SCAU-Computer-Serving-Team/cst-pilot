@@ -716,7 +716,10 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
             .collect::<BTreeSet<_>>(),
         expected
     );
-    assert_eq!(created.resource_loader.get_skills().skills.len(), 8);
+    assert_eq!(
+        created.resource_loader.get_skills().skills.len(),
+        SKILL_NAMES.len()
+    );
     assert!(
         created
             .resource_loader

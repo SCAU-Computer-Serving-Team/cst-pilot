@@ -10,7 +10,7 @@
 |---|---|
 | 原生主程序 | 根目录提供 `cst-pilot.exe`（桌面与内置 TUI 统一入口，支持 `--ui desktop/tui/web`），`app/` 下提供 `app/cst-server.exe`（本机后台服务，编译期经 `embed-web` 内嵌前端静态产物）与 `app/cst-updater.exe`（独立升级程序） |
 | 随包诊断组件 | `app/tools/lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `app/tools/lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
-| 业务提示词与技能 | `app/prompts/APPEND_SYSTEM.md`、`app/skills/`（8 份维护技能说明），以及 `app/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
+| 业务提示词与技能 | `app/prompts/APPEND_SYSTEM.md`、`app/skills/`（10 份维护技能说明），以及 `app/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
 | 界面与字体资产 | `app/fonts/` 下的双端共享可变字体 `SourceHanSansCN-VF.otf`、`LICENSE.txt` 与桌面等宽字体 `JetBrainsMono-Regular.ttf`、`JetBrainsMono-Medium.ttf`、`JetBrainsMono-OFL.txt` |
 | 预置标准配置 | `app/defaults/` 提供干净 `settings.json`、双端 `telemetry.json`、默认免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
 | 文档、许可与校验 | 根目录 `VERSION`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md`、`doc/`，以及 `app/licenses/`、`app/BUILD-INFO.json` 与全树 `app/SHA256SUMS` |

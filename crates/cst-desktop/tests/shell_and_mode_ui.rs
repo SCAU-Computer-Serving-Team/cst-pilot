@@ -71,12 +71,14 @@ impl KitTempFixture {
         for skill in [
             "disk",
             "ls",
+            "files",
             "sys",
             "startup",
             "eventlog",
             "driver",
             "runbook",
             "bitlocker",
+            "web-search",
         ] {
             let p = dir.join(format!("app/skills/{skill}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();

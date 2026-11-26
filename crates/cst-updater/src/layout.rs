@@ -14,12 +14,14 @@ pub const UPDATER_EXE_PATH: &str = "app/cst-updater.exe";
 pub const REQUIRED_SKILL_NAMES: &[&str] = &[
     "disk",
     "ls",
+    "files",
     "sys",
     "startup",
     "eventlog",
     "driver",
     "runbook",
     "bitlocker",
+    "web-search",
 ];
 
 pub const REQUIRED_FONT_FILES: &[&str] = &[

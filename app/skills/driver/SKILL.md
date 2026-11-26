@@ -1,34 +1,44 @@
 ---
 name: driver
-description: driver 工具的参数与返回字段说明。四个 scope 的查询范围与字段定义、错误码原样透传约定、ID 白名单前缀、已知盲区、与 sys / disk 的边界。
+description: driver 设备与驱动诊断参考。排查异常设备（problem）、核心硬件与签名驱动版本（core）、外设与可移动存储（external）或按条件查设备（find）时查阅。
 ---
 
-# driver 工具说明
+# driver
 
-只读设备与驱动健康工具，按 `scope` 选择子功能，不传默认 `problem`。可在普通权限下调用，采集失败时保留错误。与 sys 的边界：sys 管设备负载，driver 管设备健康（在不在、驱动对不对）；与 disk 的边界：盘上容量归 disk。
+只读设备与驱动健康工具，普通权限可用。职责分工：`driver` 查设备识别与驱动状态，`sys` 查实时负载，`disk` 查卷容量与 SMART。
+
+## 排查路径
+
+1. 硬件失灵或设备管理器报错先查 `problem`。
+2. 断网、蓝牙失效、无声音或显卡驱动异常查 `core`。
+3. 外接 U 盘、移动硬盘、蓝牙外设或外接屏异常查 `external`。
+4. 已知设备名、设备类或硬件 ID 时用 `find` 精确定位；拿到 `hardwareIds` 后可用 `web_search` 核查官方驱动，驱动卸载或重装命令写入 `runbook` 交队员执行。
+5. 核对顶层 `elapsedMs`、`degraded`、`collectionErrors` 与 `notice`，仅在采集无错误时将空数组解读为未枚举到目标设备。
 
 ## 参数
 
-1. `scope`（可选）：`problem` / `core` / `external` / `find`，不传默认 `problem`
-2. find 分支参数（至少传一个，AND 组合）：`name`（名称子串）/ `class`（设备类精确名，固定英文类名如 Net、MEDIA、Bluetooth）/ `id`（硬件 ID 或 DeviceID 子串，如 VID_045E，对 deviceId 与 hardwareIds 双通道匹配）
+| 参数 | 适用 `scope` | 约束与默认值 |
+|---|---|---|
+| `scope` | 全部 | `problem`（默认）、`core`、`external`、`find` |
+| `name` | `find` | 设备名称子串（忽略大小写，上限 512 字节） |
+| `class` | `find` | 设备类子串（常用英文类名如 `Net`、`MEDIA`、`Bluetooth`、`Display`，上限 512 字节） |
+| `id` | `find` | 设备 ID 或硬件 ID 子串（如 `VID_045E`，双通道匹配，上限 512 字节） |
 
-## 返回字段
+`find` 至少提供一个条件，多个条件按 AND 组合。
 
-1. `problem` / `find` 返回 `devices[]`（`name` / `class` / `status` / `errorCode` / `deviceId` / `hardwareIds[]`）与 `count`。`errorCode` 是 ConfigManagerErrorCode 原始值（0 = 正常），不翻译；`hardwareIds` 含 VEN/DEV，供联网定位驱动
-2. `problem` 只收 Status 为 Error / Unknown 的 PnP 设备。查询成功时空数组表示未枚举到该范围内的异常，不能据此确认整机健康
-3. `core` 返回 `net[]`（`name` / `connId` / `physical` 布尔 / `connStatus` 原始值）、`bluetooth[]` 与 `audio[]`（PnP 设备级）、`display[]`（`name` / `vendor` / `driver` / `status` / `bus`）、`services[]`（bthserv / Audiosrv 的 `state`，仅采集成功时缺失才可解释为无该服务）、`drivers[]`（`class` / `device` / `version` / `date` yyyy-MM-dd / `provider`）
-4. `external` 返回 `devices[]`（同 problem 字段行）与 `removable[]`（`model` / `interface` / `mediaType` / `sizeGB`）
-5. `physical` 标志可能误报（个别虚拟网卡也返回 true），只作展示
+## 各 scope 返回字段与判读
 
-## scope 查询范围
+返回结构为 `{ "<scope>": { ... }, "elapsedMs": N }`。
 
-1. `problem`：Status 为 Error / Unknown 的全部 PnP 设备
-2. `core`：Net（网络连接面板真实条目，虚拟网卡不剔除）/ Bluetooth / Audio / 显示四类硬件现状 + 两个关键服务状态 + 驱动版本日期表
-3. `external`：DeviceID 前缀白名单 `USB\`（连带 `USBSTOR\`）/ `BTHENUM\`（蓝牙外设）/ `DISPLAY\`（显示器）+ 可移动存储（U 盘 / 移动硬盘 / SD 卡）
-4. `find`：全量 PnP 设备按条件定位
+| `scope` | 返回字段 | 判读要点 |
+|---|---|---|
+| `problem` | `count`、`devices[]` | 仅筛选 `Status` 为 `Error` 或 `Unknown` 的 PnP 设备。每项含 `name`、`class`、`status`、`errorCode`（系统原始错误码，0 为正常）、`deviceId`、`hardwareIds[]`。采集无误时为空仅说明未枚举到该类异常，不能单独确认整机健康 |
+| `core` | `net[]`、`bluetooth[]`、`audio[]`、`display[]`、`services[]`、`drivers[]` | `net` 含 `name`、`connId`、`physical`、`connStatus`（含虚拟网卡，`physical` 偶发误报仅作展示）；`bluetooth` 与 `audio` 含 `name`、`status`、`errorCode`；`display` 含 `name`、`vendor`、`driver`、`status`、`bus`；`services` 为 `bthserv` 与 `Audiosrv` 状态（采集无误时缺失才表示无该服务）；`drivers` 覆盖 NET、BLUETOOTH、MEDIA、DISPLAY 四类签名驱动（`class`、`device`、`version`、`date` 为 `YYYY-MM-DD`、`provider`） |
+| `external` | `devices[]`、`removable[]` | `devices` 按 `USB`、`BTHENUM`、`DISPLAY` 前缀筛选（含 `name`、`class`、`status`、`errorCode`、`deviceId`，不含 `hardwareIds`，可能包含内置摄像头与内置屏）；`removable` 为可移动磁盘（`model`、`interface`、`mediaType`、`sizeGB`） |
+| `find` | `count`、`devices[]` | 字段与 `problem` 相同，覆盖全量 PnP 设备 |
 
-## 通用约定
+## 通用边界与耗时判读
 
-1. `notice` 说明错误码语义、采集范围与字段含义
-2. `error` 表示查询失败；`degraded` / `collectionErrors` 表示部分采集失败。只有采集成功时，空数组才可解释为未枚举到对应设备
-3. 设备名随驱动可能是任意语言，只透传不过滤
+1. 设备名称随驱动可能为任意语言，原样透传不做语言过滤。
+2. 超时上限 30 秒；`elapsedMs` 偏高提示设备树或驱动枚举阻塞。
+3. 全部采集源失败返回 `isError: true`（`{"error", "elapsedMs"}`）；部分失败置 `degraded: true` 并附 `collectionErrors`，此时空数组不能当作无异常或无设备。
