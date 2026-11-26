@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
-use cst_updater::layout::{BUILD_INFO_PATH, SHA256SUMS_PATH};
+use cst_updater::layout::{BUILD_INFO_PATH, SERVER_EXE_PATH, SHA256SUMS_PATH, UPDATER_EXE_PATH};
 use cst_updater::manifest::{
     Archive, MANIFEST_DOMAIN, ReleaseKey, ReleaseManifest, SUMS_DOMAIN, SignedManifest,
     validate_release_url,
@@ -63,6 +63,24 @@ pub fn parse_canonical_public_key(raw_b64: &str) -> Result<(ReleaseKey, [u8; 32]
 pub fn public_key_fingerprint(public_key_bytes: &[u8; 32]) -> String {
     let hex = format!("{:x}", Sha256::digest(public_key_bytes));
     hex[..16].to_owned()
+}
+
+pub fn verify_binaries_embed_public_key(
+    dist_dir: &Path,
+    public_key_b64: &str,
+) -> Result<(), String> {
+    let needle = public_key_b64.as_bytes();
+    for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
+        let path = dist_dir.join(rel);
+        let bytes =
+            fs::read(&path).map_err(|e| format!("无法读取发行二进制 {rel} 以校验内嵌公钥：{e}"))?;
+        if !bytes.windows(needle.len()).any(|w| w == needle) {
+            return Err(format!(
+                "发行二进制 {rel} 未内嵌与当前签名密钥匹配的升级公钥，拒绝继续（请确认未使用过期构建产物）。"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn resolve_update_build_config(require: bool) -> Result<Option<UpdateBuildConfig>, String> {
@@ -352,7 +370,8 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     }
 
     let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
-    let signing_pub_fp = public_key_fingerprint(signing_key.verifying_key().as_bytes());
+    let signing_pub_b64 = STANDARD.encode(signing_key.verifying_key().as_bytes());
+    let signing_pub_fp = release_key.fingerprint();
     cst_updater::verify::verify_clean_dist_tree(&args.dist_dir, &version)?;
 
     let sums_bytes = fs::read(args.dist_dir.join(SHA256SUMS_PATH))
@@ -367,21 +386,28 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     if build_info
         .get("updateEnabled")
         .and_then(serde_json::Value::as_bool)
-        == Some(false)
+        != Some(true)
     {
         return Err(
-            "BUILD-INFO.json 表明该构建未启用在线更新（updateEnabled=false），请使用 --require-update-config 重新构建后再签名。".into(),
+            "BUILD-INFO.json 缺少 updateEnabled=true，请使用 --require-update-config 重新构建后再签名。".into(),
         );
     }
-    if let Some(built_fp) = build_info
+    let Some(built_fp) = build_info
         .get("updatePublicKeyFingerprint")
         .and_then(serde_json::Value::as_str)
-        && built_fp != signing_pub_fp
-    {
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Err(
+            "BUILD-INFO.json 缺少 updatePublicKeyFingerprint，请使用 --require-update-config 重新构建后再签名。".into(),
+        );
+    };
+    if built_fp != signing_pub_fp {
         return Err(format!(
             "签名私钥对应公钥指纹（{signing_pub_fp}）与构建内嵌公钥指纹（{built_fp}）不一致，拒绝签名。"
         ));
     }
+    verify_binaries_embed_public_key(&args.dist_dir, &signing_pub_b64)?;
     let built_at = build_info
         .get("builtAt")
         .and_then(serde_json::Value::as_str)
@@ -973,21 +999,37 @@ mod tests {
         buf
     }
 
-    fn build_synthetic_dist(root: &Path, version: &str) -> (PathBuf, PathBuf, u64) {
+    fn build_synthetic_dist(
+        root: &Path,
+        version: &str,
+        embedded_pub_b64: Option<&str>,
+        build_info_json: Option<&str>,
+    ) -> (PathBuf, PathBuf, u64) {
         let dist_dir = root.join("cst-pilot");
+        let _ = fs::remove_dir_all(&dist_dir);
+        let mut server_bin = b"synthetic server ".to_vec();
+        let mut updater_bin = b"synthetic updater ".to_vec();
+        if let Some(pub_b64) = embedded_pub_b64 {
+            server_bin.extend_from_slice(pub_b64.as_bytes());
+            updater_bin.extend_from_slice(pub_b64.as_bytes());
+        }
+        let build_info = build_info_json.map(str::to_owned).unwrap_or_else(|| {
+            let fp = embedded_pub_b64
+                .and_then(|b| parse_canonical_public_key(b).ok().map(|(_, _, fp)| fp))
+                .unwrap_or_default();
+            format!(
+                "{{\"version\":\"{version}\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{fp}\"}}\n"
+            )
+        });
         let mut files = BTreeMap::from([
             ("cst-pilot.exe".to_owned(), b"synthetic main".to_vec()),
-            ("app/cst-server.exe".into(), b"synthetic server".to_vec()),
-            ("app/cst-updater.exe".into(), b"synthetic updater".to_vec()),
+            ("app/cst-server.exe".into(), server_bin),
+            ("app/cst-updater.exe".into(), updater_bin),
             (
                 "VERSION".into(),
                 format!("cst-pilot {version}\n").into_bytes(),
             ),
-            (
-                "app/BUILD-INFO.json".into(),
-                format!("{{\"version\":\"{version}\",\"builtAt\":\"2026-11-26T12:00:00Z\"}}\n")
-                    .into_bytes(),
-            ),
+            ("app/BUILD-INFO.json".into(), build_info.into_bytes()),
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
             ("app/licenses/mock.txt".into(), b"mock".to_vec()),
@@ -1064,7 +1106,8 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, _) = generate_keypair_file(&key_file).unwrap();
-        let (dist_dir, zip_path, expected_unpacked) = build_synthetic_dist(&dir, "v0.9.8");
+        let (dist_dir, zip_path, expected_unpacked) =
+            build_synthetic_dist(&dir, "v0.9.8", Some(&pub_b64), None);
         let out_manifest = dir.join("manifest.signed.json");
 
         let summary = sign_release(&SignReleaseArgs {
@@ -1091,13 +1134,69 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn sign_release_rejects_missing_metadata_or_unmatched_binary_key() {
+        let dir = env::temp_dir().join(format!("xtask-sign-bind-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let key_file = dir.join("release.key");
+        let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let out_manifest = dir.join("manifest.signed.json");
+
+        // 1. Missing updatePublicKeyFingerprint in BUILD-INFO.json must fail.
+        let (dist_dir, zip_path, _) = build_synthetic_dist(
+            &dir,
+            "v0.9.8",
+            Some(&pub_b64),
+            Some(
+                "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true}\n",
+            ),
+        );
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir,
+            zip_path,
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
+        .err()
+        .expect("missing fingerprint must fail");
+        assert!(err.contains("updatePublicKeyFingerprint"));
+
+        // 2. Forged BUILD-INFO.json with matching fingerprint, but binaries lack embedded key.
+        let forged_info = format!(
+            "{{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{fp}\"}}\n"
+        );
+        let (dist_dir, zip_path, _) =
+            build_synthetic_dist(&dir, "v0.9.8", None, Some(&forged_info));
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir,
+            zip_path,
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest,
+            private_key_file: key_file,
+        })
+        .err()
+        .expect("binary without embedded key must fail");
+        assert!(err.contains("未内嵌"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test]
     async fn publish_release_streams_multipart_and_verifies_public_endpoints() {
         let dir = env::temp_dir().join(format!("xtask-publish-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, _) = generate_keypair_file(&key_file).unwrap();
-        let (dist_dir, zip_path, _) = build_synthetic_dist(&dir, "v0.9.9");
+        let (dist_dir, zip_path, _) = build_synthetic_dist(&dir, "v0.9.9", Some(&pub_b64), None);
         let out_manifest = dir.join("manifest.signed.json");
         let summary = sign_release(&SignReleaseArgs {
             dist_dir,

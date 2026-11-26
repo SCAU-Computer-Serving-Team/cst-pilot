@@ -577,6 +577,10 @@ impl AppShell {
         self.command_palette.as_ref()
     }
 
+    pub fn client_snapshot(&self) -> &std::sync::Arc<ClientSnapshot> {
+        &self.snapshot
+    }
+
     pub fn set_route(&mut self, route: ShellRoute, cx: &mut Context<Self>) {
         self.set_workspace_route(route, SessionSubView::Chat, cx);
     }

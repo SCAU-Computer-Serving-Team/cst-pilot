@@ -2069,7 +2069,10 @@ async fn run_state_reducer_loop(
                                 if apply_account && let Some(acc) = account.clone() {
                                     snap.account = Some(Arc::new(acc));
                                 }
-                                if apply_update && let Some(us) = update_state.clone() {
+                                if apply_update
+                                    && let Some(us) = update_state.clone()
+                                    && should_apply_update_state(snap.update_state.as_deref(), &us)
+                                {
                                     snap.update_state = Some(Arc::new(us));
                                 }
                                 if apply_models && let Some(m) = models.clone() {
@@ -2991,16 +2994,19 @@ fn handle_global_state_payload(
                     .update_state
                     .as_ref()
                     .and_then(|u| u.last_report.clone());
-                next.update_state = Some(Arc::new(UpdateStateDto {
+                let incoming = UpdateStateDto {
                     current_version: current_ver,
                     status: status_dto,
                     last_report,
-                }));
-                next.revision = next.revision.wrapping_add(1);
-                let r = next.revision;
-                *guard = Arc::new(next);
-                drop(guard);
-                notify_revision(revision_tx, r);
+                };
+                if should_apply_update_state(next.update_state.as_deref(), &incoming) {
+                    next.update_state = Some(Arc::new(incoming));
+                    next.revision = next.revision.wrapping_add(1);
+                    let r = next.revision;
+                    *guard = Arc::new(next);
+                    drop(guard);
+                    notify_revision(revision_tx, r);
+                }
             } else {
                 dirty.update_status = true;
             }
@@ -3165,6 +3171,21 @@ fn bump_revision(core: &Arc<SharedClientCore>, revision_tx: &watch::Sender<u64>)
     notify_revision(revision_tx, next_rev);
 }
 
+fn is_terminal_exit_required(state: &UpdateStateDto) -> bool {
+    state.status.phase == crate::state::UpdatePhaseDto::ExitRequired
+        && state.status.launch.is_some()
+}
+
+fn should_apply_update_state(current: Option<&UpdateStateDto>, incoming: &UpdateStateDto) -> bool {
+    if let Some(cur) = current
+        && is_terminal_exit_required(cur)
+        && !is_terminal_exit_required(incoming)
+    {
+        return false;
+    }
+    true
+}
+
 fn notify_revision(tx: &watch::Sender<u64>, revision: u64) {
     // Concurrent HTTP completions may publish out of order after releasing the snapshot lock.
     tx.send_if_modified(|current| {
@@ -3174,4 +3195,55 @@ fn notify_revision(tx: &watch::Sender<u64>, revision: u64) {
         *current = revision;
         true
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{UpdatePhaseDto, UpdateStatusDto};
+    use cst_os::LaunchReceipt;
+
+    fn status_with(phase: UpdatePhaseDto, launch: Option<LaunchReceipt>) -> UpdateStateDto {
+        UpdateStateDto {
+            current_version: "v0.9.5".into(),
+            status: UpdateStatusDto {
+                phase,
+                version: Some("v0.9.6".into()),
+                archive_bytes: None,
+                downloaded_bytes: None,
+                release_notes: None,
+                operation_id: None,
+                message: String::new(),
+                error_kind: None,
+                launch,
+            },
+            last_report: None,
+        }
+    }
+
+    #[test]
+    fn terminal_exit_required_receipt_is_not_overwritten_by_stale_snapshot() {
+        let receipt = LaunchReceipt {
+            updater_pid: 4242,
+            request_id: "req-1".into(),
+        };
+        let terminal = status_with(UpdatePhaseDto::ExitRequired, Some(receipt.clone()));
+        let stale_launching = status_with(UpdatePhaseDto::Launching, None);
+        let stale_ready = status_with(UpdatePhaseDto::Ready, None);
+        let incomplete_exit = status_with(UpdatePhaseDto::ExitRequired, None);
+        let same_terminal = status_with(UpdatePhaseDto::ExitRequired, Some(receipt));
+
+        assert!(!should_apply_update_state(
+            Some(&terminal),
+            &stale_launching
+        ));
+        assert!(!should_apply_update_state(Some(&terminal), &stale_ready));
+        assert!(!should_apply_update_state(
+            Some(&terminal),
+            &incomplete_exit
+        ));
+        assert!(should_apply_update_state(Some(&terminal), &same_terminal));
+        assert!(should_apply_update_state(Some(&stale_launching), &terminal));
+        assert!(should_apply_update_state(None, &stale_launching));
+    }
 }

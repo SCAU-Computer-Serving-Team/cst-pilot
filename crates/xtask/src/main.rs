@@ -143,9 +143,23 @@ fn repo_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "无法定位仓库根目录。".to_owned())
 }
 
+fn validate_dist_update_build_flags(
+    has_update_config: bool,
+    skip_cargo_build: bool,
+) -> Result<(), String> {
+    if has_update_config && skip_cargo_build {
+        return Err(
+            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），不能与 --skip-cargo-build 同时使用，必须重新编译全部二进制以绑定内嵌公钥。"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
     let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
+    validate_dist_update_build_flags(update_cfg.is_some(), args.skip_cargo_build)?;
     let root = repo_root()?;
     let target_subdir = if args.profile == "dist" {
         "dist"
@@ -262,6 +276,11 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         &bin_dir.join("cst-updater.exe"),
         &kit_dir.join(UPDATER_EXE_PATH),
     )?;
+    if let Some(cfg) = &update_cfg {
+        release::verify_binaries_embed_public_key(&kit_dir, &cfg.public_key_b64)?;
+        #[cfg(windows)]
+        verify_updater_binary_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
+    }
 
     for doc in [
         "README.md",
@@ -400,7 +419,13 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip::ZipArchive::new(archive)
                 .and_then(|mut archive| archive.extract(&temp.0))
                 .map_err(|e| format!("解压发行 ZIP 失败：{e}"))?;
-            smoke_release(&temp.0.join("cst-pilot"), &args.version)?;
+            smoke_release(
+                &temp.0.join("cst-pilot"),
+                &args.version,
+                update_cfg
+                    .as_ref()
+                    .map(|cfg| cfg.public_key_fingerprint.as_str()),
+            )?;
         }
         let zip_bytes = fs::read(&zip_path).map_err(|e| format!("读取发行 ZIP 失败：{e}"))?;
         let zip_hash = format!("{:x}", Sha256::digest(&zip_bytes));
@@ -413,7 +438,13 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     } else if !args.skip_smoke {
         let temp = SmokeDir::new()?;
         copy_dir_filtered(&kit_dir, &temp.0, |_| true)?;
-        smoke_release(&temp.0, &args.version)?;
+        smoke_release(
+            &temp.0,
+            &args.version,
+            update_cfg
+                .as_ref()
+                .map(|cfg| cfg.public_key_fingerprint.as_str()),
+        )?;
     }
 
     Ok(())
@@ -486,8 +517,52 @@ fn isolated_command(root: &Path, exe: &str) -> Command {
     cmd
 }
 
-fn smoke_release(root: &Path, version: &str) -> Result<(), String> {
+fn verify_updater_binary_key_fingerprint(root: &Path, expected_fp: &str) -> Result<(), String> {
+    let mut cmd = Command::new(root.join(UPDATER_EXE_PATH));
+    cmd.env_clear();
+    for key in [
+        "SystemRoot",
+        "WINDIR",
+        "ComSpec",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+        "OS",
+    ] {
+        if let Some(value) = env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+    let output = cmd
+        .current_dir(root)
+        .arg("--key-fingerprint")
+        .output()
+        .map_err(|e| format!("无法执行 {UPDATER_EXE_PATH} --key-fingerprint：{e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{UPDATER_EXE_PATH} 公钥自检失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let actual_fp = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if actual_fp != expected_fp {
+        return Err(format!(
+            "{UPDATER_EXE_PATH} 内嵌公钥指纹（{actual_fp}）与预期（{expected_fp}）不一致。"
+        ));
+    }
+    Ok(())
+}
+
+fn smoke_release(
+    root: &Path,
+    version: &str,
+    expected_key_fingerprint: Option<&str>,
+) -> Result<(), String> {
     cst_updater::verify::verify_clean_dist_tree(root, version)?;
+    if let Some(expected_fp) = expected_key_fingerprint {
+        verify_updater_binary_key_fingerprint(root, expected_fp)?;
+    }
     let expected = format!("cst-pilot {version}");
     for exe in [SERVER_EXE_PATH, "cst-pilot.exe"] {
         let output = isolated_command(root, exe)
@@ -647,4 +722,17 @@ fn write_release_zip(
         .flush()
         .map_err(|e| format!("刷新 ZIP 失败：{e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dist_rejects_skip_cargo_build_whenever_update_config_is_present() {
+        assert!(validate_dist_update_build_flags(true, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false).is_ok());
+        assert!(validate_dist_update_build_flags(false, true).is_ok());
+        assert!(validate_dist_update_build_flags(false, false).is_ok());
+    }
 }

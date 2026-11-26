@@ -5,6 +5,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use url::{Host, Url};
 
 use crate::layout;
@@ -111,6 +112,12 @@ impl ReleaseKey {
                 .try_into()
                 .map_err(|_| "构建中的升级公钥无效。")?,
         )
+    }
+
+    /// Returns the 16-char lowercase hex SHA-256 prefix of the 32-byte Ed25519 verifying key.
+    pub fn fingerprint(&self) -> String {
+        let hex = format!("{:x}", Sha256::digest(self.0.as_bytes()));
+        hex[..16].to_owned()
     }
 
     fn signature(&self, domain: &[u8], data: &[u8], encoded: &str) -> Result<(), String> {

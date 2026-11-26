@@ -1753,7 +1753,18 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     }
     backend.rt().block_on(handle.refresh_globals()).unwrap();
 
-    // Startup background check must stay silent and not auto-open the modal.
+    // Wait until the desktop shell has observed the `Available` snapshot and rendered,
+    // then verify startup background check stays silent and does not auto-open the modal.
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, cx| {
+        shell
+            .read(cx)
+            .client_snapshot()
+            .update_state
+            .as_ref()
+            .is_some_and(|u| u.status.phase == cst_client::UpdatePhaseDto::Available)
+    })
+    .await;
+
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("update-available-dialog-kom7j").is_none());
