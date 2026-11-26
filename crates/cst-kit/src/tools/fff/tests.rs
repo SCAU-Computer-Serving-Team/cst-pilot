@@ -572,7 +572,8 @@ fn v2_path_rules_literal_brackets_and_forbidden_roots() {
         .is_err()
     );
 
-    // UNC and drive-relative paths rejected.
+    // UNC and drive-relative paths rejected on Windows.
+    #[cfg(windows)]
     for bad in [r"\\server\share", "//server/share", r"\Windows", "C:foo"] {
         assert!(
             find_paths(&guard, &ws.root, fffind_in(json!({"path": bad})), &cancel).is_err(),

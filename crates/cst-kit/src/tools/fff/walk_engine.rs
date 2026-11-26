@@ -1,8 +1,15 @@
+#[cfg(windows)]
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::sync::Condvar;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+#[cfg(windows)]
+use std::time::Duration;
+use std::time::Instant;
 
 use globset::GlobSet;
 use tokio_util::sync::CancellationToken;
@@ -15,14 +22,19 @@ use super::{
 };
 
 const MAX_DIR_DEPTH: usize = 1024;
+#[cfg(windows)]
 const MAX_QUEUE_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(windows)]
 const RETURN_DEADLINE_MARGIN: Duration = Duration::from_millis(120);
 
 /// Global permit pool across concurrent search requests so stuck driver I/O threads
 /// continue holding their slot until exit without allowing unbounded thread growth.
+#[cfg(windows)]
 static GLOBAL_WALK_PERMITS: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(windows)]
 struct GlobalWorkerPermit;
+#[cfg(windows)]
 impl GlobalWorkerPermit {
     fn try_acquire(max_global: usize) -> Option<Self> {
         let mut cur = GLOBAL_WALK_PERMITS.load(AtomicOrdering::Relaxed);
@@ -59,6 +71,7 @@ impl GlobalWorkerPermit {
         }
     }
 }
+#[cfg(windows)]
 impl Drop for GlobalWorkerPermit {
     fn drop(&mut self) {
         GLOBAL_WALK_PERMITS.fetch_sub(1, AtomicOrdering::AcqRel);
@@ -82,6 +95,7 @@ pub(crate) struct WalkQuerySpec {
 pub(crate) struct WalkRootTarget {
     pub display_root: String,
     pub verified_root: VerifiedSearchEntry,
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub is_volume_root: bool,
 }
 
@@ -1272,22 +1286,23 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
 
         let root_shared = Arc::clone(&shared);
         builder.build_parallel().run(|| {
-            let mut worker = FindWorker::new(Arc::clone(&root_shared));
-            let root_canon = root_shared.targets[root_idx]
+            let worker_shared = Arc::clone(&root_shared);
+            let mut worker = FindWorker::new(Arc::clone(&worker_shared));
+            let root_canon = worker_shared.targets[root_idx]
                 .verified_root
                 .canonical_path
                 .clone();
             Box::new(move |entry| {
-                if root_shared.stop.load(AtomicOrdering::Relaxed) {
+                if worker_shared.stop.load(AtomicOrdering::Relaxed) {
                     return WalkState::Quit;
                 }
-                if root_shared.cancel.is_cancelled() {
-                    root_shared.mark_cancelled();
+                if worker_shared.cancel.is_cancelled() {
+                    worker_shared.mark_cancelled();
                     return WalkState::Quit;
                 }
-                if Instant::now() >= root_shared.deadline {
-                    root_shared.mark_timed_out();
-                    root_shared.mark_root_partial(root_idx);
+                if Instant::now() >= worker_shared.deadline {
+                    worker_shared.mark_timed_out();
+                    worker_shared.mark_root_partial(root_idx);
                     return WalkState::Quit;
                 }
                 let entry = match entry {
@@ -1307,21 +1322,22 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                     return WalkState::Continue;
                 }
                 let is_dir = ft.is_dir();
-                if is_dir && matches!(root_shared.spec.kind, FffindKind::File) {
+                if is_dir && matches!(worker_shared.spec.kind, FffindKind::File) {
                     return WalkState::Continue;
                 }
-                if !is_dir && matches!(root_shared.spec.kind, FffindKind::Dir) {
+                if !is_dir && matches!(worker_shared.spec.kind, FffindKind::Dir) {
                     return WalkState::Continue;
                 }
                 if is_dir
-                    && (!root_shared.spec.exts.is_empty() || root_shared.spec.size_bounds.is_some())
+                    && (!worker_shared.spec.exts.is_empty()
+                        || worker_shared.spec.size_bounds.is_some())
                 {
                     return WalkState::Continue;
                 }
                 let name = entry.file_name().to_string_lossy();
                 if !is_dir
-                    && !root_shared.spec.exts.is_empty()
-                    && !ext_matches(&name, &root_shared.spec.exts)
+                    && !worker_shared.spec.exts.is_empty()
+                    && !ext_matches(&name, &worker_shared.spec.exts)
                 {
                     return WalkState::Continue;
                 }
@@ -1332,10 +1348,10 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                     .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs() as i64);
-                if !is_dir && !size_within_bounds(size, root_shared.spec.size_bounds) {
+                if !is_dir && !size_within_bounds(size, worker_shared.spec.size_bounds) {
                     return WalkState::Continue;
                 }
-                if !path_within_modified_window(mtime, root_shared.spec.modified_window) {
+                if !path_within_modified_window(mtime, worker_shared.spec.modified_window) {
                     return WalkState::Continue;
                 }
                 let p = entry.path();
@@ -1344,14 +1360,14 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                     .ok()
                     .map(normalize_path)
                     .unwrap_or_else(|| normalize_path(p));
-                if !root_shared.spec.excludes.is_empty()
-                    && (root_shared.spec.excludes.is_match(&rel)
-                        || root_shared.spec.excludes.is_match(&*name))
+                if !worker_shared.spec.excludes.is_empty()
+                    && (worker_shared.spec.excludes.is_match(&rel)
+                        || worker_shared.spec.excludes.is_match(&*name))
                 {
                     return WalkState::Continue;
                 }
                 let Some(score) =
-                    root_shared
+                    worker_shared
                         .spec
                         .query
                         .score_entry(&rel, &name, &mut worker.scratch)

@@ -1,4 +1,5 @@
 mod grep_engine;
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) mod mft_index;
 mod walk_engine;
 mod win_volumes;
@@ -402,7 +403,9 @@ fn find_paths_with_details(
     }
 
     // Try elevated NTFS MFT+USN memory index first (for volume root or subtree on NTFS).
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut method = if cfg!(windows) { "native-walk" } else { "walk" };
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut vol_index_status: Option<Map<String, Value>> = None;
     let mut candidates = Vec::new();
     let mut truncated_by_limit = false;

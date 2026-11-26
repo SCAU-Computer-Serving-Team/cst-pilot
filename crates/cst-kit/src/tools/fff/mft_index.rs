@@ -13,6 +13,7 @@ use ntfs_ng::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[cfg(windows)]
 use crate::diagnostics::mft::mft_enabled;
 use crate::diagnostics::volume_index::{MemoryReservation, ProcessMemoryLedger, VolumeIdentity};
 use crate::diagnostics::walk::is_cloud_reparse_tag;

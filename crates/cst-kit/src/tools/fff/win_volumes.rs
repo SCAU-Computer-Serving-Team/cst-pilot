@@ -1,5 +1,7 @@
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+#[cfg(windows)]
+use std::time::Duration;
+use std::time::Instant;
 
 use tokio_util::sync::CancellationToken;
 
