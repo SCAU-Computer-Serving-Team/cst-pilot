@@ -26,7 +26,7 @@ use cst_kit::diagnostics::win_native::{Control, WindowsSource};
 use cst_kit::diagnostics::{disk, driver, eventlog, ls, startup, sys};
 use cst_kit::runbook::RunbookStore;
 use cst_kit::runbook::model::{DeliverInput, Level, PlanInput, RunbookItem, Shell};
-use cst_kit::tools::fff::{SearchInput, search as fff_search};
+use cst_kit::tools::fff::{FffindInput, FfgrepInput, find_paths, grep_files};
 use cst_kit::tools::path_guard::{GuardedReadOperations, PathGuard};
 use cst_kit::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
 use cst_kit::tools::web_access::{
@@ -888,20 +888,25 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
 
     // 2. fffind on 2,500+ files
     let cancel = CancellationToken::new();
+    let ws_str = ws.to_string_lossy().into_owned();
     let t0 = Instant::now();
-    let found = fff_search(
+    let found = find_paths(
         &guard,
         &ws,
-        SearchInput {
-            pattern: "log_042".into(),
-            path: None,
+        FffindInput {
+            path: ws_str.clone(),
+            pattern: Some("log_042".into()),
+            kind: None,
+            ext: None,
             exclude: None,
-            limit: Some(50),
-            context: None,
+            max_depth: None,
+            modified_within_hours: None,
+            min_size_mib: None,
+            max_size_mib: None,
+            sort_by: None,
             case_sensitive: None,
-            literal: false,
+            limit: Some(50),
         },
-        false,
         &cancel,
     )
     .expect("fffind");
@@ -918,91 +923,96 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
 
     // 3. ffgrep on 2,500+ files
     let t1 = Instant::now();
-    let grepped = fff_search(
+    let grepped = grep_files(
         &guard,
         &ws,
-        SearchInput {
+        FfgrepInput {
             pattern: "NEEDLE_DIAG_TOKEN".into(),
-            path: None,
+            path: ws_str.clone(),
+            include: None,
             exclude: None,
-            limit: Some(20),
-            context: Some(1),
-            case_sensitive: Some(true),
+            modified_within_hours: None,
             literal: true,
+            case_sensitive: Some(true),
+            context: Some(1),
+            limit: Some(20),
         },
-        true,
         &cancel,
     )
     .expect("ffgrep");
     let grep_ms = t1.elapsed().as_millis();
     let matches = grepped["matches"].as_array().unwrap();
-    assert!(
-        matches
-            .iter()
-            .any(|m| m["path"].as_str() == Some("dir_12/log_042.txt") && m["matched"] == true)
-    );
-    assert!(
-        grepped["skipped"].as_u64().unwrap_or(0) >= 1,
-        "oversized line should increment skipped"
-    );
+    assert!(matches.iter().any(|m| {
+        m["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("/dir_12/log_042.txt"))
+            && m["matched"] == true
+    }));
+    assert_eq!(grepped["truncated"], true);
+    assert_eq!(grepped["truncatedReason"], "line_limit");
 
     // Verify zero secret leakage via content search
-    let leak = fff_search(
+    let leak = grep_files(
         &guard,
         &ws,
-        SearchInput {
+        FfgrepInput {
             pattern: "LIVE_SECRET_NEEDLE|LIVE_STATE_NEEDLE".into(),
-            path: None,
+            path: ws_str.clone(),
+            include: None,
             exclude: None,
-            limit: Some(10),
-            context: None,
-            case_sensitive: Some(true),
+            modified_within_hours: None,
             literal: false,
+            case_sensitive: Some(true),
+            context: None,
+            limit: Some(10),
         },
-        true,
         &cancel,
     )
     .expect("ffgrep secret check");
     assert!(leak["matches"].as_array().unwrap().is_empty());
 
     // Record UTF-16 LE search behavior explicitly
-    let utf16_res = fff_search(
+    let utf16_res = grep_files(
         &guard,
         &ws,
-        SearchInput {
+        FfgrepInput {
             pattern: "NEEDLE_UTF16_TEST".into(),
-            path: None,
+            path: ws_str.clone(),
+            include: None,
             exclude: None,
-            limit: Some(10),
-            context: None,
-            case_sensitive: Some(true),
+            modified_within_hours: None,
             literal: true,
+            case_sensitive: Some(true),
+            context: None,
+            limit: Some(10),
         },
-        true,
         &cancel,
     )
     .expect("ffgrep utf16 probe");
+    assert_eq!(utf16_res["matches"].as_array().unwrap().len(), 1);
 
-    // Verify relative glob matching with unextended Windows cwd (regression from sol's fix)
-    let globbed = fff_search(
+    // Verify include + exclude filtering
+    let globbed = grep_files(
         &guard,
         &ws,
-        SearchInput {
+        FfgrepInput {
             pattern: "NEEDLE_DIAG_TOKEN".into(),
-            path: Some("dir_12/*.txt".into()),
+            path: ws.join("dir_12").to_string_lossy().into_owned(),
+            include: Some(vec!["*.txt".into()]),
             exclude: Some(vec!["dir_00/**".into()]),
-            limit: Some(10),
-            context: None,
-            case_sensitive: Some(true),
+            modified_within_hours: None,
             literal: true,
+            case_sensitive: Some(true),
+            context: None,
+            limit: Some(10),
         },
-        true,
         &cancel,
     )
-    .expect("ffgrep relative glob");
-    assert_eq!(
-        globbed["matches"][0]["path"].as_str(),
-        Some("dir_12/log_042.txt")
+    .expect("ffgrep include/exclude");
+    assert!(
+        globbed["matches"][0]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with("/dir_12/log_042.txt"))
     );
 
     println!(
@@ -1020,6 +1030,71 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
         grep_ms < 10_000,
         "ffgrep too slow on 2,500 files: {grep_ms}ms"
     );
+}
+
+#[test]
+#[ignore = "live Windows real-machine whole-PC fffind verification"]
+fn live_fffind_real_machine_whole_pc_and_queries() {
+    let kit = TempKit::new("fff-real-pc");
+    let guard = PathGuard::new(&kit.root).unwrap();
+    let cancel = CancellationToken::new();
+    let target_name = "X-op7418-2125331795998851072.mp4";
+    let target_exists =
+        Path::new(r"C:\Users\Tim2354\Downloads\X-op7418-2125331795998851072.mp4").is_file();
+
+    let cases: [(&str, serde_json::Value); 5] = [
+        (
+            "whole-pc exact",
+            json!({"path": "*", "pattern": target_name, "limit": 20}),
+        ),
+        (
+            "C:\\ exact",
+            json!({"path": "C:\\", "pattern": target_name, "limit": 20}),
+        ),
+        (
+            "C:\\ glob *X-op7418*",
+            json!({"path": "C:\\", "pattern": "*X-op7418*", "limit": 20}),
+        ),
+        (
+            "C:\\ glob *.mp4",
+            json!({"path": "C:\\", "pattern": "*.mp4", "limit": 20}),
+        ),
+        (
+            "C:\\ multi-term op7418 mp4",
+            json!({"path": "C:\\", "pattern": "op7418 mp4", "limit": 20}),
+        ),
+    ];
+
+    for (label, payload) in cases {
+        let input: FffindInput = serde_json::from_value(payload).unwrap();
+        let t0 = Instant::now();
+        let res = find_paths(&guard, &kit.root, input, &cancel)
+            .unwrap_or_else(|e| panic!("fffind `{label}` failed: {e}"));
+        let ms = t0.elapsed().as_millis();
+        let matches = res["matches"].as_array().unwrap();
+        let hit_target = matches
+            .iter()
+            .any(|m| m["path"].as_str().is_some_and(|p| p.ends_with(target_name)));
+        println!(
+            "[real-pc] {label}: {}ms | hits={} | hit_target={} | truncated={} ({:?}) | scannedRoots={:?} | skippedRoots={:?}",
+            ms,
+            matches.len(),
+            hit_target,
+            res["truncated"],
+            res.get("truncatedReason"),
+            res.get("scannedRoots"),
+            res.get("skippedRoots"),
+        );
+        if target_exists && label != "C:\\ glob *.mp4" {
+            assert!(
+                hit_target,
+                "`{label}` failed to find {target_name}; matches={matches:?}"
+            );
+        }
+        if label == "C:\\ glob *.mp4" && target_exists {
+            assert!(!matches.is_empty(), "expected at least one .mp4 on C:\\");
+        }
+    }
 }
 
 #[tokio::test]

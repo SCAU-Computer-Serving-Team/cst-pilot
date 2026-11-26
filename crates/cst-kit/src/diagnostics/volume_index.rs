@@ -16,6 +16,22 @@ const MAX_CACHED_VOLUMES: usize = 4;
 const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CONCURRENT_MFT_SCANS: usize = 2;
 
+/// Process-wide accounting of bytes currently held by `VolumeIndex` storage snapshots,
+/// shared with `fffind`'s search index manager under the unified 384 MiB process ceiling.
+static STORAGE_SNAPSHOT_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn storage_cache_bytes() -> usize {
+    STORAGE_SNAPSHOT_BYTES.load(Ordering::Relaxed)
+}
+
+fn update_storage_cache_bytes(snapshots: &HashMap<String, Arc<ScanSnapshot>>) {
+    let total: usize = snapshots
+        .values()
+        .map(|s| s.estimated_bytes())
+        .fold(0usize, usize::saturating_add);
+    STORAGE_SNAPSHOT_BYTES.store(total, Ordering::Relaxed);
+}
+
 struct MftScanSlot {
     counter: Arc<AtomicUsize>,
 }
@@ -363,6 +379,7 @@ fn refresh_inner(inner: &VolumeIndexInner, drive: &str) -> Result<VolumeIdentity
     }
     if state.identity(drive) != observed {
         state.snapshots.remove(drive);
+        update_storage_cache_bytes(&state.snapshots);
         state.failed.remove(drive);
         state.pending.retain(|(pending_drive, _), flight| {
             if pending_drive == drive {
@@ -454,6 +471,7 @@ fn purge_expired(state: &mut State, failed_ttl: Duration) {
         .snapshots
         .retain(|_, snap| snap.captured_at.elapsed() < VOLUME_CACHE_TTL);
     state.failed.retain(|_, (at, _)| at.elapsed() < failed_ttl);
+    update_storage_cache_bytes(&state.snapshots);
 }
 
 fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes: usize) {
@@ -463,6 +481,7 @@ fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes
             .map(|s| s.estimated_bytes())
             .fold(0usize, usize::saturating_add);
         if snapshots.len() <= MAX_CACHED_VOLUMES && total_bytes <= max_bytes {
+            STORAGE_SNAPSHOT_BYTES.store(total_bytes, Ordering::Relaxed);
             break;
         }
         let Some(oldest) = snapshots
@@ -470,6 +489,7 @@ fn evict_if_needed(snapshots: &mut HashMap<String, Arc<ScanSnapshot>>, max_bytes
             .min_by_key(|(_, snap)| snap.captured_at)
             .map(|(k, _)| k.clone())
         else {
+            STORAGE_SNAPSHOT_BYTES.store(0, Ordering::Relaxed);
             break;
         };
         snapshots.remove(&oldest);

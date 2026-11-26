@@ -30,6 +30,12 @@ fn is_identity_key(key: &str) -> bool {
             | "responseId"
             | "provider"
             | "mode"
+            | "root"
+            | "scannedRoots"
+            | "partialRoots"
+            | "skippedRoots"
+            | "truncated"
+            | "truncatedReason"
     )
 }
 
@@ -175,6 +181,80 @@ pub fn error_result(message: impl Into<String>, elapsed_ms: u64) -> AgentToolRes
     }
 }
 
+/// Tool result where model-facing text and `structured_content` share an already
+/// atomically bounded JSON object while local `details` carries extra UI/diagnostic fields.
+pub fn structured_search_result(
+    model_value: Value,
+    details_value: Value,
+) -> Result<AgentToolResult, String> {
+    let text = serde_json::to_string(&model_value).map_err(|_| "检索结果无法编码。")?;
+    Ok(AgentToolResult {
+        content: vec![UserContentBlock::Text(TextContent::new(text))],
+        details: details_value,
+        structured_content: Some(model_value),
+        usage: None,
+        is_error: false,
+        terminate: None,
+    })
+}
+
+fn truncation_reason_rank(reason: &str) -> u8 {
+    match reason {
+        "timeout" => 6,
+        "read_budget" => 5,
+        "visited_limit" => 4,
+        "output_bytes" => 3,
+        "limit" => 2,
+        "line_limit" => 1,
+        _ => 0,
+    }
+}
+
+/// Ensures an object with a `matches` array stays strictly within `MAX_OUTPUT_BYTES`
+/// by popping whole rows from `matches` without stripping identity/volume fields.
+pub fn enforce_atomic_matches_bound(obj: &mut Map<String, Value>) -> Result<String, String> {
+    let mut text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    if text.len() <= MAX_OUTPUT_BYTES {
+        return Ok(text);
+    }
+    let mut dropped = false;
+    while text.len() > MAX_OUTPUT_BYTES {
+        let Some(matches) = obj.get_mut("matches").and_then(Value::as_array_mut) else {
+            break;
+        };
+        if matches.pop().is_none() {
+            break;
+        }
+        dropped = true;
+        obj.insert("truncated".into(), json!(true));
+        let keep_existing = obj
+            .get("truncatedReason")
+            .and_then(Value::as_str)
+            .is_some_and(|cur| {
+                truncation_reason_rank(cur) > truncation_reason_rank("output_bytes")
+            });
+        if !keep_existing {
+            obj.insert("truncatedReason".into(), json!("output_bytes"));
+        }
+        text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    }
+    if dropped && text.len() <= MAX_OUTPUT_BYTES {
+        return Ok(text);
+    }
+    if text.len() <= MAX_OUTPUT_BYTES {
+        return Ok(text);
+    }
+    // Extreme case: even with empty `matches`, trim `notice` before giving up.
+    if let Some(notice) = obj.get("notice").and_then(Value::as_str).map(str::to_owned) {
+        obj.insert(
+            "notice".into(),
+            json!(clip_chars_with_ellipsis(&notice, 256)),
+        );
+        text = serde_json::to_string(obj).map_err(|_| "检索结果无法编码。")?;
+    }
+    Ok(text)
+}
+
 pub fn inject_elapsed_ms(mut result: AgentToolResult, elapsed_ms: u64) -> AgentToolResult {
     match &mut result.details {
         Value::Object(obj) => {
@@ -184,6 +264,25 @@ pub fn inject_elapsed_ms(mut result: AgentToolResult, elapsed_ms: u64) -> AgentT
             result.details = json!({ "elapsedMs": elapsed_ms });
         }
         _ => {}
+    }
+
+    if let Some(Value::Object(mut structured)) = result.structured_content.take() {
+        structured.insert("elapsedMs".into(), json!(elapsed_ms));
+        if let Ok(bounded_text) = enforce_atomic_matches_bound(&mut structured) {
+            if let Some(UserContentBlock::Text(first)) = result.content.first_mut() {
+                first.text = bounded_text;
+            }
+            if let Value::Object(details) = &mut result.details {
+                if let Some(t) = structured.get("truncated") {
+                    details.insert("truncated".into(), t.clone());
+                }
+                if let Some(r) = structured.get("truncatedReason") {
+                    details.insert("truncatedReason".into(), r.clone());
+                }
+            }
+        }
+        result.structured_content = Some(Value::Object(structured));
+        return result;
     }
 
     if let Some(UserContentBlock::Text(first)) = result.content.first_mut() {

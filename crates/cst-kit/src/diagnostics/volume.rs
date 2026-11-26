@@ -47,7 +47,7 @@ impl ScanSource for NativeScanSource {
 }
 
 #[cfg(windows)]
-fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
+pub(crate) fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
     use std::fs;
     use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle};
     use windows::Win32::Foundation::HANDLE;
@@ -128,6 +128,6 @@ fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
 }
 
 #[cfg(not(windows))]
-fn volume_identity(_: &str) -> Result<VolumeIdentity, String> {
+pub(crate) fn volume_identity(_: &str) -> Result<VolumeIdentity, String> {
     Err("卷身份查询仅支持 Windows。".into())
 }

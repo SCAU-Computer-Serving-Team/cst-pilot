@@ -157,6 +157,28 @@ test("ffgrep maps skippedLargeFiles, skipped, match rows, and empty matches to C
 	assert.match(serialized, /命中行/);
 	assert.doesNotMatch(serialized, /skippedLargeFiles/);
 
-	const empty = mapTool(call("fffind"), result({ truncated: false, skipped: 0, matches: [] }, ""));
-	assert.match(JSON.stringify(empty.blocks), /匹配结果：本次没有结果/);
+	const empty = mapTool(
+		call("fffind"),
+		result(
+			{
+				root: "*",
+				scannedRoots: ["C:\\", "D:\\"],
+				partialRoots: ["E:\\"],
+				skippedRoots: [{ root: "Z:\\", reason: "网络映射盘已跳过" }],
+				truncated: true,
+				truncatedReason: "timeout",
+				skipped: 0,
+				matches: [],
+			},
+			"",
+		),
+	);
+	const emptySerialized = JSON.stringify(empty.blocks);
+	assert.match(emptySerialized, /匹配结果：本次没有结果/);
+	assert.match(emptySerialized, /扫描卷/);
+	assert.match(emptySerialized, /部分完成卷/);
+	assert.match(emptySerialized, /截断原因/);
+	assert.match(emptySerialized, /超时/);
+	assert.doesNotMatch(emptySerialized, /scannedRoots/);
+	assert.doesNotMatch(emptySerialized, /truncatedReason/);
 });

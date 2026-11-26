@@ -25,11 +25,41 @@ struct FileIdentity {
 #[derive(Clone, Copy, Debug)]
 struct HandleMeta {
     identity: Option<FileIdentity>,
+    #[cfg(windows)]
+    legacy_id: Option<(u32, u64)>,
+    #[cfg(windows)]
+    attrs: u32,
     link_count: u64,
     is_dir: bool,
     is_file: bool,
     unhydrated: bool,
     file_size: u64,
+    modified_secs: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VerifiedSearchEntry {
+    pub canonical_path: PathBuf,
+    pub is_dir: bool,
+    pub size_bytes: Option<u64>,
+    pub modified_secs: Option<i64>,
+    #[allow(dead_code)]
+    pub unhydrated: bool,
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    pub vol_serial: u32,
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    pub index64: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SearchGuardError {
+    /// Protected secret, `.state/`, `.git`, or reparse/symlink escape.
+    /// Callers must never count this in `skipped` or `truncated`.
+    PolicyDenied,
+    /// Non-policy I/O, access denied, or stale/missing entry failure.
+    IoOrAccess,
 }
 
 #[cfg(any(windows, test))]
@@ -94,6 +124,8 @@ struct SessionInner {
     state_dir: PathBuf,
     state_keys: Vec<String>,
     state_identity: Option<FileIdentity>,
+    #[cfg(windows)]
+    state_legacy_id: Option<(u32, u64)>,
     secret_paths: [PathBuf; 5],
     secret_keys: Vec<String>,
     secret_identities: Vec<FileIdentity>,
@@ -130,10 +162,13 @@ impl PathGuard {
         let state_dir = self.layout.state_dir();
         let mut state_keys = Vec::with_capacity(2);
         push_unique_key(&mut state_keys, &state_dir);
-        let state_identity = inspect_path(&state_dir).ok().and_then(|(resolved, meta)| {
+        let state_inspected = inspect_path(&state_dir).ok().map(|(resolved, meta)| {
             push_unique_key(&mut state_keys, &resolved);
-            meta.identity
+            meta
         });
+        let state_identity = state_inspected.and_then(|meta| meta.identity);
+        #[cfg(windows)]
+        let state_legacy_id = state_inspected.and_then(|meta| meta.legacy_id);
 
         let secret_paths = self.secret_paths();
         let mut secret_keys = Vec::with_capacity(10);
@@ -153,6 +188,8 @@ impl PathGuard {
                 state_dir,
                 state_keys,
                 state_identity,
+                #[cfg(windows)]
+                state_legacy_id,
                 secret_paths,
                 secret_keys,
                 secret_identities,
@@ -176,6 +213,7 @@ impl PathGuard {
 
 impl PathGuardSession {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn check_count(&self) -> usize {
         self.inner.checks.load(Ordering::Relaxed)
     }
@@ -183,6 +221,258 @@ impl PathGuardSession {
     fn record_check(&self) {
         #[cfg(test)]
         self.inner.checks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn state_legacy_identity(&self) -> Option<(u32, u64)> {
+        self.inner.state_legacy_id
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn has_state_identity(&self) -> bool {
+        self.inner.state_identity.is_some()
+    }
+
+    /// Returns true if any protected state or secret path lies at or beneath `dir`.
+    #[cfg(windows)]
+    pub(crate) fn dir_may_contain_protected_key(&self, dir: &Path) -> bool {
+        let dir_key = if dir.is_absolute() {
+            path_key(dir)
+        } else if let Ok(abs) = std::path::absolute(dir) {
+            path_key(&abs)
+        } else {
+            return true;
+        };
+        let matches_prefix = |target: &str| {
+            target == dir_key
+                || target
+                    .strip_prefix(&dir_key)
+                    .is_some_and(|rest| dir_key.ends_with('/') || rest.starts_with('/'))
+        };
+        self.inner.state_keys.iter().any(|k| matches_prefix(k))
+            || self.inner.secret_keys.iter().any(|k| matches_prefix(k))
+    }
+
+    /// Search-dedicated root verification: refuses `.state/`, `.git`, credentials, UNC/network
+    /// paths, and reparse/symlink links at the root or any ancestor before traversal starts.
+    pub(crate) fn verify_search_root(&self, path: &Path) -> Result<VerifiedSearchEntry, String> {
+        self.record_check();
+        if is_unc_or_network_path(path) {
+            return Err("不支持检索 UNC 网络共享或网络映射盘。".into());
+        }
+        if has_git_component(path) {
+            return Err(denied());
+        }
+        self.verify_requested(path)?;
+        reject_symlink_ancestors(path)?;
+
+        #[cfg(windows)]
+        {
+            let file = open_search_handle_no_follow(path, true).map_err(|err| {
+                if err.kind() == io::ErrorKind::NotFound {
+                    "检索路径不存在。".to_owned()
+                } else if err.kind() == io::ErrorKind::PermissionDenied {
+                    "目标路径无权访问。".to_owned()
+                } else {
+                    "目标路径无法读取。".to_owned()
+                }
+            })?;
+            let (resolved, meta) = inspect_search_handle(&file, true).map_err(|err| match err {
+                SearchGuardError::PolicyDenied => denied(),
+                SearchGuardError::IoOrAccess => "目标路径无法读取。".to_owned(),
+            })?;
+            if is_unc_or_network_path(&resolved) {
+                return Err("不支持检索 UNC 网络共享或网络映射盘。".into());
+            }
+            if has_git_component(&resolved) {
+                return Err(denied());
+            }
+            self.verify_resolved_strict(&resolved, meta)?;
+            // If root is a directory, verify caller holds FILE_LIST_DIRECTORY authorization.
+            if meta.is_dir {
+                verify_dir_list_access(path).map_err(|_| "目标目录无权枚举。".to_owned())?;
+            }
+            let (vol_serial, index64) = meta.legacy_id.unwrap_or((0, 0));
+            Ok(VerifiedSearchEntry {
+                canonical_path: resolved,
+                is_dir: meta.is_dir,
+                size_bytes: meta.is_file.then_some(meta.file_size),
+                modified_secs: meta.modified_secs,
+                unhydrated: meta.unhydrated,
+                vol_serial,
+                index64,
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let link_meta = std::fs::symlink_metadata(path).map_err(|err| {
+                if err.kind() == io::ErrorKind::NotFound {
+                    "检索路径不存在。".to_owned()
+                } else {
+                    "目标路径无法读取。".to_owned()
+                }
+            })?;
+            if is_link(&link_meta) {
+                return Err(denied());
+            }
+            let (resolved, meta) = inspect_path(path).map_err(|_| "目标路径无法读取。")?;
+            if has_git_component(&resolved) {
+                return Err(denied());
+            }
+            self.verify_resolved_strict(&resolved, meta)?;
+            Ok(VerifiedSearchEntry {
+                canonical_path: resolved,
+                is_dir: meta.is_dir,
+                size_bytes: meta.is_file.then_some(meta.file_size),
+                modified_secs: meta.modified_secs,
+                unhydrated: meta.unhydrated,
+            })
+        }
+    }
+
+    /// Search-dedicated candidate verification on a single no-follow handle.
+    /// Confirms volume/object identity, root containment, `.git`/`.state`/secret policy,
+    /// cloud/reparse status, and extracts verified path, logical size, and modified time.
+    pub(crate) fn verify_search_entry(
+        &self,
+        path: &Path,
+        expected_root: &VerifiedSearchEntry,
+        expected_vol: Option<u32>,
+        expected_index64: Option<u64>,
+        allow_dir: bool,
+    ) -> Result<VerifiedSearchEntry, SearchGuardError> {
+        self.record_check();
+        if has_git_component(path) || self.verify_requested(path).is_err() {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+        if is_unc_or_network_path(path) {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+
+        let root_key = path_key(&expected_root.canonical_path);
+
+        #[cfg(windows)]
+        {
+            let file = open_search_handle_no_follow(path, false)
+                .map_err(|_| SearchGuardError::IoOrAccess)?;
+            let (resolved, meta) = inspect_search_handle(&file, allow_dir)?;
+            if meta.is_dir && !allow_dir {
+                return Err(SearchGuardError::IoOrAccess);
+            }
+            if is_unc_or_network_path(&resolved) || has_git_component(&resolved) {
+                return Err(SearchGuardError::PolicyDenied);
+            }
+            let resolved_key = path_key(&resolved);
+            if !is_within_root_key(&resolved_key, &root_key) {
+                return Err(SearchGuardError::PolicyDenied);
+            }
+            let (vol_serial, index64) = meta.legacy_id.unwrap_or((0, 0));
+            if let Some(ev) = expected_vol
+                && ev != 0
+                && vol_serial != 0
+                && vol_serial != ev
+            {
+                return Err(SearchGuardError::IoOrAccess);
+            }
+            if let Some(eid) = expected_index64
+                && eid != 0
+                && index64 != 0
+                && index64 != eid
+            {
+                return Err(SearchGuardError::IoOrAccess);
+            }
+            self.verify_resolved_strict(&resolved, meta)
+                .map_err(|_| SearchGuardError::PolicyDenied)?;
+            Ok(VerifiedSearchEntry {
+                canonical_path: resolved,
+                is_dir: meta.is_dir,
+                size_bytes: meta.is_file.then_some(meta.file_size),
+                modified_secs: meta.modified_secs,
+                unhydrated: meta.unhydrated,
+                vol_serial,
+                index64,
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (expected_vol, expected_index64);
+            let link_meta =
+                std::fs::symlink_metadata(path).map_err(|_| SearchGuardError::IoOrAccess)?;
+            if is_link(&link_meta) {
+                return Err(SearchGuardError::PolicyDenied);
+            }
+            let (resolved, meta) = inspect_path(path).map_err(|_| SearchGuardError::IoOrAccess)?;
+            if meta.is_dir && !allow_dir {
+                return Err(SearchGuardError::IoOrAccess);
+            }
+            if has_git_component(&resolved) {
+                return Err(SearchGuardError::PolicyDenied);
+            }
+            let resolved_key = path_key(&resolved);
+            if !is_within_root_key(&resolved_key, &root_key) {
+                return Err(SearchGuardError::PolicyDenied);
+            }
+            self.verify_resolved_strict(&resolved, meta)
+                .map_err(|_| SearchGuardError::PolicyDenied)?;
+            Ok(VerifiedSearchEntry {
+                canonical_path: resolved,
+                is_dir: meta.is_dir,
+                size_bytes: meta.is_file.then_some(meta.file_size),
+                modified_secs: meta.modified_secs,
+                unhydrated: meta.unhydrated,
+            })
+        }
+    }
+
+    /// Open a regular file for `ffgrep` content reading with root containment and policy checks.
+    pub(crate) fn open_grep_file(
+        &self,
+        path: &Path,
+        expected_root: &VerifiedSearchEntry,
+    ) -> Result<(File, VerifiedSearchEntry), SearchGuardError> {
+        self.record_check();
+        if has_git_component(path)
+            || is_unc_or_network_path(path)
+            || self.verify_requested(path).is_err()
+        {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+        let file = open_read_handle(path).map_err(|err| {
+            if err.kind() == io::ErrorKind::InvalidData {
+                SearchGuardError::PolicyDenied
+            } else {
+                SearchGuardError::IoOrAccess
+            }
+        })?;
+        let (resolved, meta) =
+            inspect_opened_file(&file, path).map_err(|_| SearchGuardError::PolicyDenied)?;
+        if meta.unhydrated || !meta.is_file {
+            return Err(SearchGuardError::IoOrAccess);
+        }
+        if is_unc_or_network_path(&resolved) || has_git_component(&resolved) {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+        let root_key = path_key(&expected_root.canonical_path);
+        let resolved_key = path_key(&resolved);
+        if !is_within_root_key(&resolved_key, &root_key) {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+        self.verify_resolved_strict(&resolved, meta)
+            .map_err(|_| SearchGuardError::PolicyDenied)?;
+        Ok((
+            file,
+            VerifiedSearchEntry {
+                canonical_path: resolved,
+                is_dir: false,
+                size_bytes: Some(meta.file_size),
+                modified_secs: meta.modified_secs,
+                unhydrated: false,
+                #[cfg(windows)]
+                vol_serial: meta.legacy_id.map_or(0, |(v, _)| v),
+                #[cfg(windows)]
+                index64: meta.legacy_id.map_or(0, |(_, i)| i),
+            },
+        ))
     }
 
     /// Prune protected paths and refuse recursion into discovered directory links.
@@ -267,6 +557,83 @@ impl PathGuardSession {
                         return Err(denied());
                     };
                     self.verify_hard_link(id)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_resolved_strict(&self, resolved: &Path, meta: HandleMeta) -> Result<(), String> {
+        self.verify_key(resolved)?;
+        if let Some(id) = meta.identity
+            && self.inner.secret_identities.contains(&id)
+        {
+            return Err(denied());
+        }
+        if let Some(state_id) = self.inner.state_identity {
+            if meta.identity == Some(state_id) {
+                return Err(denied());
+            }
+            // Strict ancestor verification: refuse candidates if any ancestor identity
+            // cannot be read or matches `.state`.
+            self.verify_ancestors_not_state_strict(resolved, state_id)?;
+        }
+        if meta.is_file {
+            match meta.link_count {
+                0 => return Err(denied()),
+                1 => (),
+                _ => {
+                    let Some(id) = meta.identity else {
+                        return Err(denied());
+                    };
+                    self.verify_hard_link(id)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn verify_ancestors_not_state_strict(
+        &self,
+        resolved: &Path,
+        state_id: FileIdentity,
+    ) -> Result<(), String> {
+        for ancestor in resolved.ancestors().skip(1) {
+            let key = path_key(ancestor);
+            if self
+                .inner
+                .verified_non_state_dirs
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&key)
+            {
+                break;
+            }
+            match path_meta(ancestor) {
+                Ok(meta) => match meta.identity {
+                    Some(id) if id == state_id => return Err(denied()),
+                    Some(_) => {
+                        let mut guard = self
+                            .inner
+                            .verified_non_state_dirs
+                            .write()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if guard.len() < 16_384 {
+                            guard.insert(key);
+                        }
+                    }
+                    None => {
+                        // Drive roots on non-NTFS volumes may lack FileId; reject non-root
+                        // unreadable/identity-less ancestors.
+                        if ancestor.parent().is_some() {
+                            return Err(denied());
+                        }
+                    }
+                },
+                Err(_) => {
+                    if ancestor.parent().is_some() {
+                        return Err(denied());
+                    }
                 }
             }
         }
@@ -439,7 +806,10 @@ fn open_read_handle(path: &Path) -> io::Result<File> {
         }
         .map_err(io::Error::other)?;
         if should_reject_windows_open_attrs(tag_info.FileAttributes, Some(tag_info.ReparseTag)) {
-            return Err(io::Error::other("reparse point rejected"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "reparse point rejected",
+            ));
         }
     }
     File::open(path)
@@ -510,17 +880,104 @@ fn handle_meta(file: &File) -> std::io::Result<HandleMeta> {
     .map(|()| (id_info.VolumeSerialNumber, id_info.FileId.Identifier));
 
     let index64 = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+    let legacy_id = (info.dwVolumeSerialNumber != 0 && index64 != 0 && index64 != u64::MAX)
+        .then_some((info.dwVolumeSerialNumber, index64));
     let identity = build_windows_file_identity(ex_id, info.dwVolumeSerialNumber, index64)
         .map(|(volume, id)| FileIdentity { volume, id });
     let is_dir = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+    let ft = ((info.ftLastWriteTime.dwHighDateTime as u64) << 32)
+        | (info.ftLastWriteTime.dwLowDateTime as u64);
     Ok(HandleMeta {
         identity,
+        legacy_id,
+        attrs: info.dwFileAttributes,
         link_count: u64::from(info.nNumberOfLinks),
         is_dir,
         is_file: !is_dir,
         unhydrated: (info.dwFileAttributes & FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0,
         file_size: ((info.nFileSizeHigh as u64) << 32) | (info.nFileSizeLow as u64),
+        modified_secs: filetime_to_unix_secs(ft),
     })
+}
+
+#[cfg(windows)]
+pub(crate) fn filetime_to_unix_secs(ft: u64) -> Option<i64> {
+    const WINDOWS_EPOCH_DIFF_100NS: u64 = 116_444_736_000_000_000;
+    if ft == 0 {
+        return None;
+    }
+    let delta = ft as i128 - WINDOWS_EPOCH_DIFF_100NS as i128;
+    let secs = delta.div_euclid(10_000_000);
+    i64::try_from(secs).ok()
+}
+
+#[cfg(windows)]
+fn open_search_handle_no_follow(path: &Path, is_root: bool) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+    };
+    let _ = is_root;
+    std::fs::OpenOptions::new()
+        .read(false)
+        .access_mode(FILE_READ_ATTRIBUTES.0)
+        .share_mode(7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn verify_dir_list_access(path: &Path) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+    };
+    let _file = std::fs::OpenOptions::new()
+        .read(false)
+        .access_mode(FILE_LIST_DIRECTORY.0)
+        .share_mode(7)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn inspect_search_handle(
+    file: &File,
+    allow_dir: bool,
+) -> Result<(PathBuf, HandleMeta), SearchGuardError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_TAG_INFO, FileAttributeTagInfo, GetFileInformationByHandleEx,
+    };
+
+    let meta = handle_meta(file).map_err(|_| SearchGuardError::IoOrAccess)?;
+    if meta.is_dir {
+        if !allow_dir {
+            return Err(SearchGuardError::IoOrAccess);
+        }
+        if meta.attrs & (FILE_ATTRIBUTE_REPARSE_POINT_BITS | FILE_ATTRIBUTE_UNHYDRATED_MASK) != 0 {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+    } else if meta.attrs & FILE_ATTRIBUTE_REPARSE_POINT_BITS != 0 {
+        let mut tag_info = FILE_ATTRIBUTE_TAG_INFO::default();
+        let handle = HANDLE(file.as_raw_handle());
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileAttributeTagInfo,
+                (&raw mut tag_info).cast(),
+                std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        }
+        .map_err(|_| SearchGuardError::PolicyDenied)?;
+        if !crate::diagnostics::walk::is_cloud_reparse_tag(tag_info.ReparseTag) {
+            return Err(SearchGuardError::PolicyDenied);
+        }
+    }
+    let resolved = handle_final_path(file).map_err(|_| SearchGuardError::IoOrAccess)?;
+    Ok((resolved, meta))
 }
 
 #[cfg(windows)]
@@ -583,7 +1040,97 @@ fn metadata_to_handle_meta(meta: &std::fs::Metadata) -> HandleMeta {
         is_file: meta.is_file(),
         unhydrated: false,
         file_size: meta.len(),
+        modified_secs: Some(meta.mtime()),
     }
+}
+
+pub(crate) fn has_git_component(path: &Path) -> bool {
+    path.components().any(|c| match c {
+        std::path::Component::Normal(name) => {
+            #[cfg(windows)]
+            {
+                name.to_str()
+                    .is_some_and(|s| s.eq_ignore_ascii_case(".git"))
+            }
+            #[cfg(not(windows))]
+            {
+                name == ".git"
+            }
+        }
+        _ => false,
+    })
+}
+
+pub(crate) fn is_within_root_key(child_key: &str, root_key: &str) -> bool {
+    if child_key == root_key {
+        return true;
+    }
+    child_key
+        .strip_prefix(root_key)
+        .is_some_and(|rest| root_key.ends_with('/') || rest.starts_with('/'))
+}
+
+pub(crate) fn is_unc_or_network_path(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let raw = path.to_string_lossy();
+        if raw.starts_with(r"\\") || raw.starts_with("//") {
+            let upper = raw.to_ascii_uppercase();
+            if upper.starts_with(r"\\?\UNC\") || upper.starts_with("//?/UNC/") {
+                return true;
+            }
+            if !upper.starts_with(r"\\?\") && !upper.starts_with("//?/") {
+                return true;
+            }
+        }
+        if let Some(Component::Prefix(prefix)) = path.components().next() {
+            match prefix.kind() {
+                Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _) => return true,
+                Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                    use std::os::windows::ffi::OsStrExt;
+                    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+                    use windows::core::PCWSTR;
+                    const DRIVE_REMOTE: u32 = 4;
+                    let drive_root = format!("{}:\\", letter as char);
+                    let wide: Vec<u16> = std::ffi::OsStr::new(&drive_root)
+                        .encode_wide()
+                        .chain(Some(0))
+                        .collect();
+                    if unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) } == DRIVE_REMOTE {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+fn reject_symlink_ancestors(path: &Path) -> Result<(), String> {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::path::absolute(path).map_err(|_| denied())?
+    };
+    for ancestor in abs.ancestors().skip(1) {
+        if ancestor.parent().is_none() {
+            // Stop at volume root (`C:\` or `/`).
+            break;
+        }
+        if let Ok(meta) = std::fs::symlink_metadata(ancestor)
+            && is_link(&meta)
+        {
+            return Err(denied());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]

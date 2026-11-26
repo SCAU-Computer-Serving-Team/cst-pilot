@@ -41,10 +41,21 @@ const endSuffixes: [string, string][] = [
 	["MB", " MB"],
 	["GB", " GB"],
 ];
+const truncatedReasons: Record<string, string> = {
+	timeout: "超时",
+	read_budget: "读取预算上限",
+	visited_limit: "遍历条目上限",
+	output_bytes: "输出体积上限",
+	limit: "结果条数上限",
+	line_limit: "长行上限",
+};
 const measure = (key: string, value: unknown): string => {
 	if (key in booleans) {
 		const [yes, no] = booleans[key];
 		return value == null ? "状态未知" : value ? yes : no;
+	}
+	if (key === "truncatedReason" && typeof value === "string") {
+		return truncatedReasons[value] ?? value;
 	}
 	if (value == null) return "未知";
 	if (typeof value === "boolean") return value ? "是" : "否";
@@ -369,6 +380,10 @@ export function mapTool(call: Call, result: Message): CardView {
 			}
 			if (key === "stats" && record(value)) continue;
 			if (Array.isArray(value)) {
+				if (key === "scannedRoots" || key === "partialRoots") {
+					if (value.length) rows.push({ label: label(key), value: value.map(words).join("、") });
+					continue;
+				}
 				if (!value.length) {
 					notice(`${id}-${key}-empty`, `${label(key)}：本次没有结果`, "default");
 					continue;
