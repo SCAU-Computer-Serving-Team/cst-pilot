@@ -3,9 +3,10 @@ import { test } from "node:test";
 import { moveModel, normalizeScope, toggleModel } from "./model-scope.ts";
 
 const all = ["a/one", "a/two", "b/three", "b/four"];
-test("清空保留空选择；全选沿用 Pi 默认，部分选择保留顺序并去重", () => {
+test("清空保留空选择；默认顺序全选归一为 null，自定义顺序全选与部分选择保留顺序并去重", () => {
 	assert.deepEqual(normalizeScope([], all), []);
-	assert.equal(normalizeScope([...all].reverse(), all), null);
+	assert.equal(normalizeScope([...all], all), null);
+	assert.deepEqual(normalizeScope([...all].reverse(), all), [...all].reverse());
 	assert.deepEqual(normalizeScope(["a/two", "a/two", "missing", "a/one"], all), ["a/two", "a/one"]);
 	assert.deepEqual(normalizeScope([], []), []);
 });

@@ -311,6 +311,7 @@ pub fn render_general_tab(
                             IconName::Monitor,
                             "跟随系统",
                             desktop_settings.theme == ThemeModeDto::System,
+                            kbd.kbd_active,
                             palette,
                             kbd.tracker.clone(),
                             move |w, cx| (t_sys)(ThemeModeDto::System, w, cx),
@@ -321,6 +322,7 @@ pub fn render_general_tab(
                             IconName::Sun,
                             "浅色",
                             desktop_settings.theme == ThemeModeDto::Light,
+                            kbd.kbd_active,
                             palette,
                             kbd.tracker.clone(),
                             move |w, cx| (t_light)(ThemeModeDto::Light, w, cx),
@@ -331,6 +333,7 @@ pub fn render_general_tab(
                             IconName::Moon,
                             "深色",
                             desktop_settings.theme == ThemeModeDto::Dark,
+                            kbd.kbd_active,
                             palette,
                             kbd.tracker.clone(),
                             move |w, cx| (t_dark)(ThemeModeDto::Dark, w, cx),
@@ -369,6 +372,7 @@ pub fn render_general_tab(
                             ),
                             "四角",
                             brackets_active,
+                            kbd.kbd_active,
                             palette,
                             kbd.tracker.clone(),
                             move |w, cx| (k_brackets)(KeyboardFocusStyleDto::Brackets, w, cx),
@@ -386,6 +390,7 @@ pub fn render_general_tab(
                             ),
                             "游标",
                             rail_active,
+                            kbd.kbd_active,
                             palette,
                             kbd.tracker.clone(),
                             move |w, cx| (k_rail)(KeyboardFocusStyleDto::Rail, w, cx),
@@ -456,6 +461,7 @@ fn light_chip_icon(
     icon: IconName,
     label: &'static str,
     active: bool,
+    kbd_active: bool,
     palette: &DesktopPalette,
     tracker: KbdDynamicBoundsTracker,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
@@ -469,7 +475,7 @@ fn light_chip_icon(
         })
         .into_any_element();
     light_chip_custom(
-        id, track_key, icon_el, label, active, palette, tracker, on_click,
+        id, track_key, icon_el, label, active, kbd_active, palette, tracker, on_click,
     )
 }
 
@@ -480,6 +486,7 @@ fn light_chip_custom(
     icon_el: AnyElement,
     label: &'static str,
     active: bool,
+    kbd_active: bool,
     palette: &DesktopPalette,
     tracker: KbdDynamicBoundsTracker,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
@@ -508,7 +515,7 @@ fn light_chip_custom(
         .items_center()
         .gap(space::TIGHT)
         .hover(move |s| {
-            if active {
+            if active || kbd_active {
                 s
             } else {
                 s.bg(palette.bg_item_hover).text_color(palette.text_primary)

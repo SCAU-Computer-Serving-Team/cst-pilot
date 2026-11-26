@@ -536,13 +536,9 @@ impl PreferencesTabView {
                 if self.saving_scope {
                     return;
                 }
-                let Some(idx) = self
-                    .visible_enabled_indices
-                    .iter()
-                    .copied()
-                    .find(|&i| self.enabled_scope.model_id_at(i) == self.selected_row_id.as_deref())
-                    .or_else(|| self.visible_enabled_indices.first().copied())
-                else {
+                let Some(idx) = self.visible_enabled_indices.iter().copied().find(|&i| {
+                    self.enabled_scope.model_id_at(i) == self.selected_row_id.as_deref()
+                }) else {
                     return;
                 };
                 self.list_kbd_active = true;
@@ -1200,17 +1196,22 @@ impl Render for PreferencesTabView {
             total_matching_rows
         };
 
-        self.visible_enabled_indices = visible_enabled_indices;
+        // Merged single 全选 / 清空 toggle per finalized lTWwV design
+        let all_visible_enabled =
+            !visible_full_ids.is_empty() && visible_enabled_indices.len() == visible_full_ids.len();
+        let vis_for_toggle = visible_full_ids.clone();
+
+        // Restrict keyboard/button reorder boundaries to the currently rendered preview slice
+        // so Alt+Up/Down never pushes the focused row out of the collapsed preview.
         self.visible_row_ids = visible_full_ids
             .iter()
             .take(display_row_count)
             .cloned()
             .collect();
-
-        // Merged single 全选 / 清空 toggle per finalized lTWwV design
-        let all_visible_enabled = !visible_full_ids.is_empty()
-            && self.visible_enabled_indices.len() == visible_full_ids.len();
-        let vis_for_toggle = visible_full_ids;
+        self.visible_enabled_indices = visible_enabled_indices
+            .into_iter()
+            .take(display_row_count)
+            .collect();
 
         let search_focused = self
             .search_input
@@ -1388,6 +1389,7 @@ impl Render for PreferencesTabView {
                                     "全选可见模型"
                                 },
                             )
+                            .tab_index(0)
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -1395,6 +1397,22 @@ impl Render for PreferencesTabView {
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .on_key_down({
+                                let vis_kbd = vis_for_toggle.clone();
+                                cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
+                                    if !ev.is_held
+                                        && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                                    {
+                                        cx.stop_propagation();
+                                        if all_visible_enabled {
+                                            this.clear_visible(vis_kbd.clone(), cx);
+                                        } else {
+                                            this.select_all_visible(vis_kbd.clone(), cx);
+                                        }
+                                    }
+                                })
+                            })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if all_visible_enabled {
                                     this.clear_visible(vis_for_toggle.clone(), cx);
@@ -1413,6 +1431,7 @@ impl Render for PreferencesTabView {
                             .id("pref-refresh-btn")
                             .test_support()
                             .a11y_button("pref-refresh-btn", "刷新模型列表")
+                            .tab_index(0)
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -1421,6 +1440,15 @@ impl Render for PreferencesTabView {
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
                             .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                                if !ev.is_held
+                                    && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                    && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                                {
+                                    cx.stop_propagation();
+                                    this.refresh_catalog(cx);
+                                }
+                            }))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.refresh_catalog(cx);
                             }))
@@ -1821,6 +1849,7 @@ impl Render for PreferencesTabView {
                         .id("pref-toggle-expand-models-btn")
                         .test_support()
                         .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
+                        .tab_index(0)
                         .w_full()
                         .h(height::HEADER)
                         .border_b_1()
@@ -1830,6 +1859,17 @@ impl Render for PreferencesTabView {
                         .items_center()
                         .gap(space::SM)
                         .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                            if !ev.is_held
+                                && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                cx.stop_propagation();
+                                this.models_expanded = !this.models_expanded;
+                                this.list_scroll = UniformListScrollHandle::new();
+                                cx.notify();
+                            }
+                        }))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.models_expanded = !this.models_expanded;
                             this.list_scroll = UniformListScrollHandle::new();

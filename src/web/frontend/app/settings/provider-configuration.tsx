@@ -1,19 +1,26 @@
-import { Input, Label, TextField } from "@heroui/react";
-import { ChevronRight, Eye, EyeOff, KeyRound, ScanLine, Trash2 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Checkbox, Input, Label, TextField } from "@heroui/react";
+import { ChevronRight, Eye, EyeOff, KeyRound, RefreshCw, ScanLine, Search, Trash2 } from "lucide-react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { OAuthPanel } from "../auth/oauth-panel";
 import { initialLogin, type LoginMethod, returnPath } from "../auth/providers";
 import type { ProviderStatus } from "../data/api";
 import { apiJson } from "../data/api";
+import type { ModelSelectionPayload } from "../data/model-selection";
+import type { Model } from "../data/web-state";
 import { CredentialDialog } from "./credential-dialog";
-import { SettingsHeading, useSettingsFeedback } from "./settings-frame";
+import { toggleModel } from "./model-scope";
+import { SettingsHeading, SettingsSection, useSettingsFeedback } from "./settings-frame";
+import { SettingsSearch } from "./settings-search";
 import { SettingsSegment } from "./settings-segment";
+import { useSettingsResource } from "./use-settings-resource";
 
 const methods = [
 	{ id: "oauth", label: "账号授权", icon: ScanLine },
 	{ id: "api_key", label: "API Key", icon: KeyRound },
 ];
+const fullId = (model: Model) => `${model.provider}/${model.id}`;
+
 export function ProviderConfigurationForm({
 	provider,
 	requestedMethod,
@@ -32,6 +39,11 @@ export function ProviderConfigurationForm({
 	const [baseUrl, setBaseUrl] = useState("");
 	const [showKey, setShowKey] = useState(false);
 	const [advanced, setAdvanced] = useState(false);
+	const [editingKey, setEditingKey] = useState(false);
+	const [modelSearchOpen, setModelSearchOpen] = useState(false);
+	const [modelQuery, setModelQuery] = useState("");
+	const [catalogBusy, setCatalogBusy] = useState(false);
+	const [catalogError, setCatalogError] = useState("");
 	const [oauth, setOauth] = useState(
 		() =>
 			initialLogin([provider], provider.id, requestedMethod)?.method === "oauth" &&
@@ -44,6 +56,7 @@ export function ProviderConfigurationForm({
 	const [removing, setRemoving] = useState(false);
 	const lock = useRef(false);
 	const mounted = useRef(true);
+	const modelsResource = useSettingsResource<ModelSelectionPayload>("/api/models");
 	useEffect(() => {
 		mounted.current = true;
 		return () => {
@@ -56,6 +69,47 @@ export function ProviderConfigurationForm({
 	);
 	const pending = oauth || !!flow;
 	const isConnected = Boolean(provider.type) && !provider.requiresLogin;
+
+	const allModels = modelsResource.data?.models ?? [];
+	const allIds = useMemo(() => allModels.map(fullId), [allModels]);
+	const selection = modelsResource.data?.enabled ?? null;
+	const providerModels = useMemo(() => {
+		const needle = modelQuery.trim().toLocaleLowerCase();
+		return allModels.filter(
+			(item) =>
+				item.provider === provider.id &&
+				(!needle || `${item.name} ${item.id}`.toLocaleLowerCase().includes(needle)),
+		);
+	}, [allModels, modelQuery, provider.id]);
+
+	async function refreshCatalog(testLabel = false) {
+		if (catalogBusy || removing) return;
+		setCatalogBusy(true);
+		setCatalogError("");
+		try {
+			await apiJson("/api/models/refresh", { method: "POST" });
+			await modelsResource.refresh();
+			feedback(testLabel ? "连接正常，模型目录已同步" : "模型目录已更新");
+		} catch (cause) {
+			setCatalogError(cause instanceof Error ? cause.message : "拉取模型目录失败，请检查网络连接与密钥");
+		} finally {
+			if (mounted.current) setCatalogBusy(false);
+		}
+	}
+
+	async function toggleProviderModel(modelId: string) {
+		if (!modelsResource.data || modelsResource.working) return;
+		const next = toggleModel(selection, allIds, modelId);
+		const optimistic = { ...modelsResource.data, enabled: next };
+		const ok = await modelsResource.mutate(async (current) => {
+			const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
+				method: "POST",
+				body: { patterns: next ?? [], empty: next !== null && next.length === 0 },
+			});
+			return { ...current, enabled: result.enabled, unavailableEnabled: [] };
+		}, optimistic);
+		if (ok) feedback();
+	}
 
 	function saveKey(event?: FormEvent) {
 		event?.preventDefault();
@@ -85,10 +139,12 @@ export function ProviderConfigurationForm({
 		if (!mounted.current) return;
 		setFlow(null);
 		setOauth(false);
+		setEditingKey(false);
 		setApiKey("");
 		setError("");
 		feedback();
 		await onRefresh();
+		await modelsResource.refresh();
 		if (mounted.current && returnTo) void navigate(returnPath(returnTo));
 		else if (mounted.current && provider.id === "cstoa") void navigate("/account");
 	}
@@ -103,6 +159,7 @@ export function ProviderConfigurationForm({
 				setConfirming(false);
 				setFlow(null);
 				setOauth(false);
+				setEditingKey(false);
 				feedback("已移除凭据");
 				await onRefresh();
 			}
@@ -116,6 +173,8 @@ export function ProviderConfigurationForm({
 			if (mounted.current) setRemoving(false);
 		}
 	}
+	const showKeyEditor = method === "api_key" && !flow && (!isConnected || editingKey);
+
 	return (
 		<>
 			<SettingsHeading
@@ -156,7 +215,33 @@ export function ProviderConfigurationForm({
 						/>
 					</div>
 				)}
-				{method === "api_key" && !flow && (
+				{isConnected && method === "api_key" && !editingKey && !flow && (
+					<div className="settings-flat-row">
+						<div className="settings-row-inline">
+							<span className="settings-custom-field-label">API 密钥</span>
+							<span className="settings-description">已配置（••••••••••••••••）</span>
+						</div>
+						<div className="settings-section-actions">
+							<button
+								type="button"
+								className="settings-inline-action"
+								disabled={catalogBusy || removing}
+								onClick={() => void refreshCatalog(true)}
+							>
+								{catalogBusy ? "检测中…" : "测试连接"}
+							</button>
+							<button
+								type="button"
+								className="settings-inline-action settings-inline-action--primary"
+								disabled={removing}
+								onClick={() => setEditingKey(true)}
+							>
+								更换密钥
+							</button>
+						</div>
+					</div>
+				)}
+				{showKeyEditor && (
 					<form onSubmit={saveKey} className="settings-credential-form">
 						<div className="settings-flat-row">
 							<span className="settings-custom-field-label">API 密钥</span>
@@ -168,9 +253,6 @@ export function ProviderConfigurationForm({
 									setError("");
 								}}
 								aria-label="API 密钥"
-								onBlur={(event) => {
-									if (!event.currentTarget.contains(event.relatedTarget)) saveKey();
-								}}
 							>
 								<Label className="visually-hidden">API 密钥</Label>
 								<div className="settings-input-with-action">
@@ -179,7 +261,7 @@ export function ProviderConfigurationForm({
 										autoComplete="off"
 										spellCheck={false}
 										maxLength={8192}
-										placeholder={provider.type === "api_key" ? "••••••••••••••••" : "输入 API Key"}
+										placeholder={provider.type === "api_key" ? "输入新的 API Key" : "输入 API Key"}
 										disabled={removing}
 										onKeyDown={(event) => {
 											if (
@@ -201,6 +283,19 @@ export function ProviderConfigurationForm({
 									>
 										{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
 									</button>
+									{isConnected && (
+										<button
+											type="button"
+											className="settings-inline-action"
+											onClick={() => {
+												setEditingKey(false);
+												setApiKey("");
+												setError("");
+											}}
+										>
+											取消
+										</button>
+									)}
 									<button
 										type="submit"
 										className="settings-inline-action settings-inline-action--accent"
@@ -216,13 +311,25 @@ export function ProviderConfigurationForm({
 				{method === "oauth" && !oauth && (
 					<div className="settings-flat-row">
 						<span className="settings-custom-field-label">账号授权</span>
-						<button
-							type="button"
-							className="settings-inline-action settings-inline-action--primary"
-							onClick={() => setOauth(true)}
-						>
-							{provider.type ? "重新授权" : "开始授权"}
-						</button>
+						<div className="settings-section-actions">
+							{isConnected && (
+								<button
+									type="button"
+									className="settings-inline-action"
+									disabled={catalogBusy || removing}
+									onClick={() => void refreshCatalog(true)}
+								>
+									{catalogBusy ? "检测中…" : "测试连接"}
+								</button>
+							)}
+							<button
+								type="button"
+								className="settings-inline-action settings-inline-action--primary"
+								onClick={() => setOauth(true)}
+							>
+								{provider.type ? "重新授权" : "开始授权"}
+							</button>
+						</div>
 					</div>
 				)}
 				{pending && (
@@ -278,6 +385,99 @@ export function ProviderConfigurationForm({
 						</div>
 					</div>
 				</div>
+			)}
+			{isConnected && (
+				<SettingsSection
+					title="可用模型"
+					summary={providerModels.length}
+					action={
+						<div className="settings-section-actions">
+							<button
+								type="button"
+								className="btn-icon sm-28"
+								aria-label="搜索可用模型"
+								aria-pressed={modelSearchOpen}
+								onClick={() => {
+									setModelSearchOpen((prev) => {
+										if (prev) setModelQuery("");
+										return !prev;
+									});
+								}}
+							>
+								<Search size={14} aria-hidden="true" />
+							</button>
+							<button
+								type="button"
+								className="btn-icon sm-28"
+								aria-label="刷新可用模型"
+								disabled={catalogBusy || removing}
+								onClick={() => void refreshCatalog(false)}
+							>
+								<RefreshCw size={14} aria-hidden="true" />
+							</button>
+						</div>
+					}
+				>
+					{modelSearchOpen && <SettingsSearch label="筛选可用模型" value={modelQuery} onChange={setModelQuery} />}
+					{catalogError && (
+						<div className="settings-load-error" role="alert">
+							<span>{catalogError}</span>
+							<button
+								type="button"
+								className="settings-inline-action settings-inline-action--primary"
+								onClick={() => void refreshCatalog(false)}
+							>
+								重试
+							</button>
+						</div>
+					)}
+					<div className="settings-flat-list settings-models">
+						{providerModels.map((item) => {
+							const itemKey = fullId(item);
+							const enabled = selection === null || selection.includes(itemKey);
+							return (
+								<div className="settings-model" key={itemKey} data-enabled={enabled ? "true" : "false"}>
+									<Checkbox
+										isSelected={enabled}
+										isDisabled={modelsResource.working}
+										aria-label={`启用 ${item.name}`}
+										className="settings-check-box"
+										onChange={() => void toggleProviderModel(itemKey)}
+									>
+										<Checkbox.Content>
+											<Checkbox.Control>
+												<Checkbox.Indicator>
+													<svg
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														strokeWidth="2"
+														strokeLinecap="round"
+														strokeLinejoin="round"
+														aria-hidden="true"
+													>
+														<path d="M20 6 9 17 4 12" pathLength="1" />
+													</svg>
+												</Checkbox.Indicator>
+											</Checkbox.Control>
+										</Checkbox.Content>
+									</Checkbox>
+									<div className="settings-model-main">
+										<span className="settings-model-name" title={item.name}>
+											{item.name}
+										</span>
+										<span className="settings-model-provider" title={item.id}>
+											{item.id}
+										</span>
+									</div>
+								</div>
+							);
+						})}
+						{!providerModels.length && (
+							<p className="settings-empty">{modelQuery ? "没有匹配的模型" : "暂无可用模型"}</p>
+						)}
+					</div>
+				</SettingsSection>
 			)}
 			{(provider.type || provider.requiresLogin) && (
 				<section className="settings-danger-zone">

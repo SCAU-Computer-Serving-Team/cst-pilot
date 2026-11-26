@@ -98,6 +98,7 @@ export function DefaultModelPicker({
 								aria-label="默认模型候选列表"
 								style={{ position: "relative", border: 0, padding: 0, margin: 0, minInlineSize: 0 }}
 								onKeyDown={(event) => {
+									if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 									if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
 										setKbdActive(true);
 										requestAnimationFrame(() => {

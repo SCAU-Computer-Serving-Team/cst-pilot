@@ -814,6 +814,7 @@ export function Composer({
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 		if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest(".chip-remove")) return;
 		if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Tab" && (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)) return;
 			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
 			if (event.key === "ArrowUp") {
@@ -827,6 +828,7 @@ export function Composer({
 			return;
 		}
 		if (suggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Tab" && (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)) return;
 			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
 			if (event.key === "ArrowUp") {
@@ -839,10 +841,14 @@ export function Composer({
 			else selectCommand(suggestions[commandIndex] ?? suggestions[0]);
 			return;
 		}
-		if (event.key === "Escape" && running) {
+		if (event.key === "Escape") {
 			if (hasOpenDismissiblePanel()) return;
 			event.preventDefault();
-			void onStop?.();
+			if (running) {
+				void onStop?.();
+			} else {
+				editorRef.current?.blur();
+			}
 			return;
 		}
 		if (event.key === "Enter" && !event.shiftKey) {
@@ -1164,6 +1170,7 @@ export function Composer({
 						ref={fileInput}
 						className="visually-hidden"
 						type="file"
+						tabIndex={-1}
 						accept="image/png,image/jpeg,image/gif,image/webp"
 						multiple
 						aria-label="选择图片"

@@ -20,12 +20,14 @@ const shortcutGroups = [
 			{ command: "打开模型与思考强度选择器", keys: "Alt + M" },
 			{ command: "唤出斜杠命令与诊断技能补全面板", keys: "行首 /" },
 			{ command: "检索当前会话工作目录文件并附加引用", keys: "@" },
-			{ command: "逐级关闭悬浮面板；停止当前会话的执行", keys: "Esc" },
+			{ command: "补全打开时接受候选项；补全关闭时移出输入焦点", keys: "Tab" },
+			{ command: "方向键浏览列表与按钮；输入框首末行跳至起止", keys: "↑ ↓ ← →" },
+			{ command: "逐级关闭浮层与补全、停止当前生成或退出输入态", keys: "Esc" },
 		],
 	},
 	{
-		title: "模型偏好",
-		items: [{ command: "上下移动已启用模型顺序", keys: "Alt + ↑ / ↓" }],
+		title: "列表与排序",
+		items: [{ command: "上下移动已启用模型或排队消息顺序", keys: "Alt + ↑ / ↓" }],
 	},
 ] as const;
 

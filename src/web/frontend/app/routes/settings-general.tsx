@@ -1,4 +1,5 @@
 import { Monitor, Moon, Scan, Sun, Tally1 } from "lucide-react";
+import { useRef } from "react";
 import { apiJson } from "../data/api";
 import { SettingsLoadState, useSettingsFeedback } from "../settings/settings-frame";
 import { SettingsSegment } from "../settings/settings-segment";
@@ -25,6 +26,17 @@ export default function GeneralSettings() {
 	const state = useSettingsResource<GeneralSettingsData>("/api/settings");
 	const feedback = useSettingsFeedback();
 	const currentKbdStyle = normalizeKeyboardFocusStyle(state.data?.keyboardFocusStyle);
+	const listRef = useRef<HTMLElement>(null);
+
+	function focusRow(rowIdx: number) {
+		if (rowIdx < 0) {
+			document.querySelector<HTMLElement>(".settings-nav-link.is-current")?.focus();
+			return;
+		}
+		const rows = listRef.current?.querySelectorAll<HTMLElement>(".settings-flat-row");
+		const target = rows?.[rowIdx]?.querySelector<HTMLElement>('.settings-chip[tabindex="0"], .settings-chip');
+		target?.focus();
+	}
 
 	async function updateTheme(value: string) {
 		if (!state.data || state.working || !themes.some((item) => item.id === value) || value === state.data.theme)
@@ -79,7 +91,7 @@ export default function GeneralSettings() {
 		<>
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
-				<section className="settings-flat-list" aria-label="常规设置">
+				<section ref={listRef} className="settings-flat-list" aria-label="常规设置">
 					<div className="settings-flat-row">
 						<div className="settings-row-copy">
 							<span>界面主题</span>
@@ -88,8 +100,9 @@ export default function GeneralSettings() {
 							label="界面主题"
 							value={state.data.theme}
 							items={themes}
-							disabled={state.working}
+							busy={state.working}
 							onChange={(value) => void updateTheme(value)}
+							onVerticalNav={(dir) => focusRow(dir < 0 ? -1 : 1)}
 						/>
 					</div>
 					<div className="settings-flat-row">
@@ -100,8 +113,11 @@ export default function GeneralSettings() {
 							label="方向键选中样式"
 							value={currentKbdStyle}
 							items={kbdFocusStyles}
-							disabled={state.working}
+							busy={state.working}
 							onChange={(value) => void updateKbdStyle(value)}
+							onVerticalNav={(dir) => {
+								if (dir < 0) focusRow(0);
+							}}
 						/>
 					</div>
 				</section>

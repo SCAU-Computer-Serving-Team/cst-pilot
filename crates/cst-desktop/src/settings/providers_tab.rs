@@ -16,8 +16,9 @@ use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::kbd_focus::{
-    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, pointer_moved_past_threshold,
-    render_gliding_dynamic_indicator, resolve_menu_nav_key,
+    DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, KbdRailPlacement, KbdTone,
+    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
+    resolve_menu_nav_key,
 };
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
@@ -178,11 +179,20 @@ pub struct ProvidersTabView {
     protocol_last_pointer: Option<Point<Pixels>>,
     protocol_tracker: KbdDynamicBoundsTracker,
     protocol_focus: FocusHandle,
+    protocol_trigger_focus: FocusHandle,
     list_focus: FocusHandle,
     list_kbd_active: bool,
     list_selected_idx: usize,
+    return_focus_idx: usize,
     list_last_pointer: Option<Point<Pixels>>,
     list_tracker: KbdDynamicBoundsTracker,
+    confirm_remove: bool,
+    remove_trigger_focus: FocusHandle,
+    remove_cancel_focus: FocusHandle,
+    remove_confirm_focus: FocusHandle,
+    remove_confirm_kbd_active: bool,
+    remove_confirm_last_pointer: Option<Point<Pixels>>,
+    remove_confirm_tracker: KbdDynamicBoundsTracker,
     inline_token_edit: Option<(usize, TokenFieldKind)>,
     inline_token_input: Entity<InputState>,
     revision: Option<String>,
@@ -301,11 +311,20 @@ impl ProvidersTabView {
             protocol_last_pointer: None,
             protocol_tracker: KbdDynamicBoundsTracker::new(),
             protocol_focus: cx.focus_handle(),
+            protocol_trigger_focus: cx.focus_handle().tab_stop(true),
             list_focus: cx.focus_handle().tab_stop(true),
             list_kbd_active: false,
             list_selected_idx: 0,
+            return_focus_idx: 0,
             list_last_pointer: None,
             list_tracker: KbdDynamicBoundsTracker::new(),
+            confirm_remove: false,
+            remove_trigger_focus: cx.focus_handle().tab_stop(true),
+            remove_cancel_focus: cx.focus_handle().tab_stop(true),
+            remove_confirm_focus: cx.focus_handle().tab_stop(true),
+            remove_confirm_kbd_active: false,
+            remove_confirm_last_pointer: None,
+            remove_confirm_tracker: KbdDynamicBoundsTracker::new(),
             inline_token_edit: None,
             inline_token_input,
             revision: None,
@@ -365,6 +384,29 @@ impl ProvidersTabView {
         self.page_slide.start(-1.0, cx);
         self.reset_form();
         self.clear_key(window, cx);
+        self.list_selected_idx = self.return_focus_idx;
+        self.list_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn open_remove_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving || self.loading || (self.inline_edit_mode && self.revision.is_none()) {
+            return;
+        }
+        self.confirm_remove = true;
+        self.remove_confirm_kbd_active = true;
+        self.remove_confirm_last_pointer = Some(window.mouse_position());
+        self.remove_cancel_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn cancel_remove_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        self.confirm_remove = false;
+        self.remove_confirm_kbd_active = false;
+        self.remove_trigger_focus.focus(window, cx);
         cx.notify();
     }
 
@@ -376,10 +418,11 @@ impl ProvidersTabView {
     }
 
     pub fn has_dropdown(&self) -> bool {
-        self.protocol_dropdown_open || self.inline_token_edit.is_some()
+        self.protocol_dropdown_open || self.inline_token_edit.is_some() || self.confirm_remove
     }
 
     pub fn open_add_provider_catalog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.return_focus_idx = self.list_selected_idx;
         self.page_slide.start(1.0, cx);
         self.reset_form();
         self.adding_provider = true;
@@ -387,6 +430,7 @@ impl ProvidersTabView {
         self.list_selected_idx = 0;
         self.add_search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
+        self.list_focus.focus(window, cx);
         cx.notify();
     }
 
@@ -398,7 +442,36 @@ impl ProvidersTabView {
     }
 
     pub fn dismiss_topmost(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.protocol_dropdown_open {
+            self.protocol_dropdown_open = false;
+            self.protocol_kbd_active = false;
+            self.protocol_trigger_focus.focus(window, cx);
+            cx.notify();
+            return true;
+        }
         if self.dismiss_dropdowns(cx) {
+            return true;
+        }
+        if self.confirm_remove {
+            if !self.saving {
+                self.cancel_remove_confirm(window, cx);
+            }
+            return true;
+        }
+        if self.adding_provider
+            && self
+                .add_search_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            if self.add_search_input.read(cx).value().is_empty() {
+                self.list_focus.focus(window, cx);
+            } else {
+                self.add_search_input
+                    .update(cx, |i, cx| i.set_value("", window, cx));
+            }
+            cx.notify();
             return true;
         }
         if self.search_visible {
@@ -532,6 +605,8 @@ impl ProvidersTabView {
         self.search_visible = false;
         self.protocol_dropdown_open = false;
         self.protocol_kbd_active = false;
+        self.confirm_remove = false;
+        self.remove_confirm_kbd_active = false;
         self.inline_token_edit = None;
         self.key_error = None;
         self.form_error = None;
@@ -789,6 +864,9 @@ impl ProvidersTabView {
                         }));
                     }
                     Err(err) => {
+                        this.confirm_remove = false;
+                        this.remove_confirm_kbd_active = false;
+                        this.remove_trigger_focus.focus(window, cx);
                         cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
                     }
                 }
@@ -1913,15 +1991,9 @@ impl Render for ProvidersTabView {
                         .child(model_rows),
                 )
                 .children(is_configured.then(|| {
-                    div()
-                        .mt(px(40.0))
-                        .w_full()
-                        .child(render_remove_credentials_card(
-                            &palette,
-                            cx.listener(|this, _, window, cx| {
-                                this.remove_active_provider_credentials(window, cx);
-                            }),
-                        ))
+                    div().mt(px(40.0)).w_full().child(
+                        self.render_remove_credentials_section(&palette, kbd_style, window, cx),
+                    )
                 }));
         }
 
@@ -1948,18 +2020,31 @@ impl Render for ProvidersTabView {
             .iter()
             .filter(|p| p.id != "cstoa" && (p.configured == Some(true) || p.requires_login))
             .collect();
+        #[derive(Clone)]
+        enum ProviderListTarget {
+            Cstoa,
+            Configured(String),
+            AddProvider,
+        }
         let configured_total = 1 + configured_others.len();
-        let kbd_targets: Vec<Option<String>> = std::iter::once(None)
-            .chain(configured_others.iter().map(|p| Some(p.id.clone())))
+        let kbd_targets: Vec<ProviderListTarget> = std::iter::once(ProviderListTarget::Cstoa)
+            .chain(
+                configured_others
+                    .iter()
+                    .map(|p| ProviderListTarget::Configured(p.id.clone())),
+            )
+            .chain(std::iter::once(ProviderListTarget::AddProvider))
             .collect();
+        let clamped_idx = self.list_selected_idx.min(kbd_targets.len() - 1);
         let list_focused = self.list_focus.is_focused(window);
         let active_spec =
             (list_focused && self.list_kbd_active && !kbd_targets.is_empty()).then(|| {
-                KbdDynamicSpec::row(format!(
-                    "cfg-row-{}",
-                    self.list_selected_idx.min(kbd_targets.len() - 1)
-                ))
-                .with_radius(4.0)
+                match kbd_targets[clamped_idx] {
+                    ProviderListTarget::AddProvider => {
+                        KbdDynamicSpec::control("cfg-row-add", KbdRailPlacement::BottomCenter)
+                    }
+                    _ => KbdDynamicSpec::row(format!("cfg-row-{clamped_idx}")).with_radius(4.0),
+                }
             });
         let kbd_active = self.list_kbd_active;
         let tr_cstoa = self.list_tracker.clone();
@@ -2137,11 +2222,20 @@ impl Render for ProvidersTabView {
                     }
                     KbdMenuStep::Activate(idx) => {
                         cx.stop_propagation();
-                        match kbd_targets.get(idx).and_then(|x| x.clone()) {
-                            None => cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
-                                signed_in: cstoa_signed_in,
-                            }),
-                            Some(pid) => this.select_provider(pid, w, cx),
+                        this.return_focus_idx = idx;
+                        match kbd_targets.get(idx) {
+                            Some(ProviderListTarget::Cstoa) => {
+                                cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
+                                    signed_in: cstoa_signed_in,
+                                });
+                            }
+                            Some(ProviderListTarget::Configured(pid)) => {
+                                this.select_provider(pid.clone(), w, cx);
+                            }
+                            Some(ProviderListTarget::AddProvider) => {
+                                this.open_add_provider_catalog(w, cx);
+                            }
+                            None => {}
                         }
                     }
                     _ => {}
@@ -2182,11 +2276,13 @@ impl Render for ProvidersTabView {
                                     .child(SharedString::from(configured_total.to_string())),
                             ),
                     )
-                    .child(
+                    .child({
+                        let tr_add = self.list_tracker.clone();
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-new-custom-btn")
                             .test_support()
                             .a11y_button("providers-new-custom-btn", "添加提供商")
+                            .tab_index(0)
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -2194,17 +2290,33 @@ impl Render for ProvidersTabView {
                             .flex()
                             .items_center()
                             .gap(space::XS)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                                if !ev.is_held
+                                    && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                    && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                                {
+                                    cx.stop_propagation();
+                                    this.open_add_provider_catalog(w, cx);
+                                }
+                            }))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 this.open_add_provider_catalog(w, cx);
                             }))
+                            .on_prepaint(move |bounds, _, _| tr_add.set("cfg-row-add", bounds))
                             .child(
                                 Icon::new(IconName::Plus)
                                     .size(px(14.0))
                                     .text_color(palette.text_secondary),
                             )
-                            .child(cjk_inline_label("添加提供商")),
-                    ),
+                            .child(cjk_inline_label("添加提供商"))
+                    }),
             )
             .child(rows_list)
             .child(render_gliding_dynamic_indicator(
@@ -2219,33 +2331,157 @@ impl Render for ProvidersTabView {
     }
 }
 
-fn render_remove_credentials_card<F>(palette: &DesktopPalette, on_remove: F) -> impl IntoElement
-where
-    F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
-{
-    div()
-        .id("providers-remove-credentials-card-gawme")
-        .test_support()
-        .w_full()
-        .h(px(44.0))
-        .border_t_1()
-        .border_color(palette.border_subtle)
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(space::LG)
-        .child(
-            apply_scale(div(), scale::CAPTION)
-                .min_w_0()
-                .truncate()
-                .text_color(palette.text_muted)
-                .child("移除后将隐藏该服务下的关联模型"),
-        )
-        .child(
+impl ProvidersTabView {
+    pub(super) fn render_remove_credentials_section(
+        &self,
+        palette: &DesktopPalette,
+        kbd_style: cst_client::KeyboardFocusStyleDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        self.remove_confirm_tracker.clear();
+        let cancel_focused = self.remove_cancel_focus.is_focused(window);
+        let confirm_focused = self.remove_confirm_focus.is_focused(window);
+        let confirm_kbd_active = self.confirm_remove
+            && self.remove_confirm_kbd_active
+            && (cancel_focused || confirm_focused);
+        let active_spec = confirm_kbd_active.then(|| {
+            if confirm_focused {
+                KbdDynamicSpec::control("rm-confirm", KbdRailPlacement::BottomCenter)
+                    .with_tone(KbdTone::Danger)
+            } else {
+                KbdDynamicSpec::control("rm-cancel", KbdRailPlacement::BottomCenter)
+            }
+        });
+        let right_el = if self.confirm_remove {
+            let tr_cancel = self.remove_confirm_tracker.clone();
+            let tr_confirm = self.remove_confirm_tracker.clone();
+            div()
+                .relative()
+                .flex()
+                .items_center()
+                .gap(space::SM)
+                .flex_shrink_0()
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                    let cur = usize::from(this.remove_confirm_focus.is_focused(w));
+                    match resolve_dialog_nav_key(
+                        ev.keystroke.key.as_str(),
+                        ev.keystroke.modifiers,
+                        ev.is_held,
+                        cur,
+                        2,
+                    ) {
+                        DialogNavStep::Move(next) => {
+                            this.remove_confirm_kbd_active = true;
+                            this.remove_confirm_last_pointer = Some(w.mouse_position());
+                            if next == 0 {
+                                this.remove_cancel_focus.focus(w, cx);
+                            } else {
+                                this.remove_confirm_focus.focus(w, cx);
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                        DialogNavStep::Activate(slot) => {
+                            cx.stop_propagation();
+                            if slot == 0 {
+                                this.cancel_remove_confirm(w, cx);
+                            } else {
+                                this.remove_active_provider_credentials(w, cx);
+                            }
+                        }
+                        DialogNavStep::TabActivated => {
+                            this.remove_confirm_kbd_active = true;
+                            this.remove_confirm_last_pointer = Some(w.mouse_position());
+                            cx.notify();
+                        }
+                        DialogNavStep::Ignore => {}
+                    }
+                }))
+                .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                    if this.remove_confirm_kbd_active
+                        && pointer_moved_past_threshold(
+                            &mut this.remove_confirm_last_pointer,
+                            ev.position,
+                        )
+                    {
+                        this.remove_confirm_kbd_active = false;
+                        cx.notify();
+                    }
+                }))
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("providers-remove-cancel-btn")
+                        .test_support()
+                        .a11y_button("providers-remove-cancel-btn", "取消移除")
+                        .track_focus(&self.remove_cancel_focus)
+                        .tab_index(0)
+                        .h(height::COMPACT)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_secondary)
+                        .flex()
+                        .items_center()
+                        .hover(move |s| {
+                            if confirm_kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                            }
+                        })
+                        .on_click(cx.listener(|this, _, w, cx| {
+                            this.cancel_remove_confirm(w, cx);
+                        }))
+                        .on_prepaint(move |bounds, _, _| tr_cancel.set("rm-cancel", bounds))
+                        .child(cjk_inline_label("取消")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .id("providers-remove-confirm-btn")
+                        .test_support()
+                        .a11y_button("providers-remove-confirm-btn", "确认移除")
+                        .track_focus(&self.remove_confirm_focus)
+                        .tab_index(0)
+                        .h(height::COMPACT)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.status_danger)
+                        .flex()
+                        .items_center()
+                        .hover(move |s| {
+                            if confirm_kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.status_danger_subtle)
+                            }
+                        })
+                        .on_click(cx.listener(|this, _, w, cx| {
+                            this.remove_active_provider_credentials(w, cx);
+                        }))
+                        .on_prepaint(move |bounds, _, _| tr_confirm.set("rm-confirm", bounds))
+                        .child(cjk_inline_label(if self.saving {
+                            "移除中…"
+                        } else {
+                            "确认移除"
+                        })),
+                )
+                .child(render_gliding_dynamic_indicator(
+                    "providers-remove-confirm",
+                    kbd_style,
+                    active_spec,
+                    self.remove_confirm_tracker.clone(),
+                    palette,
+                    window,
+                    cx,
+                ))
+                .into_any_element()
+        } else {
             apply_scale(div(), scale::UI)
                 .id("providers-remove-cred-btn")
                 .test_support()
                 .a11y_button("providers-remove-cred-btn", "移除")
+                .track_focus(&self.remove_trigger_focus)
+                .tab_index(0)
                 .h(height::COMPACT)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
@@ -2255,14 +2491,47 @@ where
                 .gap(space::TIGHT)
                 .flex_shrink_0()
                 .hover(|s| s.bg(palette.status_danger_subtle))
-                .on_click(on_remove)
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                    if !ev.is_held
+                        && ev.keystroke.modifiers == gpui::Modifiers::default()
+                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        this.open_remove_confirm(w, cx);
+                    }
+                }))
+                .on_click(cx.listener(|this, _, w, cx| {
+                    this.open_remove_confirm(w, cx);
+                }))
                 .child(
                     Icon::new(IconName::Trash)
                         .size(px(14.0))
                         .text_color(palette.status_danger),
                 )
-                .child(cjk_inline_label("移除")),
-        )
+                .child(cjk_inline_label("移除"))
+                .into_any_element()
+        };
+
+        div()
+            .id("providers-remove-credentials-card-gawme")
+            .test_support()
+            .w_full()
+            .h(px(44.0))
+            .border_t_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(space::LG)
+            .child(
+                apply_scale(div(), scale::CAPTION)
+                    .min_w_0()
+                    .truncate()
+                    .text_color(palette.text_muted)
+                    .child("移除后将隐藏该服务下的关联模型"),
+            )
+            .child(right_el)
+    }
 }
 
 fn capability_checkbox<F>(

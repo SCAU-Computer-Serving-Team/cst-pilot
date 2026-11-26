@@ -2455,8 +2455,25 @@ impl AppShell {
         {
             return true;
         }
+        if matches!(self.route, ShellRoute::Home | ShellRoute::Session)
+            && (self.route == ShellRoute::Home || self.session_subview == SessionSubView::Chat)
+            && self
+                .workbench
+                .update(cx, |wb, cx| wb.blur_focused_composer(window, cx))
+        {
+            return true;
+        }
         if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
             self.return_to_chat(window, cx);
+            return true;
+        }
+        if self.route == ShellRoute::Login {
+            let dest = match self.login_return_route {
+                ShellRoute::Login => ShellRoute::Home,
+                other => other,
+            };
+            self.set_route(dest, cx);
+            cx.notify();
             return true;
         }
         false

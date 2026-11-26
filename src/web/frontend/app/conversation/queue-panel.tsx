@@ -3,10 +3,11 @@ import { ArrowUp, CircleAlert, CircleHelp, GripVertical, Pause, Pencil, RotateCc
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiJson, sessionPath } from "../data/api";
 import type { InboxSnapshot } from "../data/web-state";
-import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { KbdFocusOverlay, type KeyboardFocusTone, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { resolveListNavKey, resolveToolbarNavKey } from "../shell/keyboard-navigation";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { visibleQueueItems } from "./conversation-parts";
+import { acceptNewerQueue, reconcilePendingOrder } from "./queue-reorder";
 
 export const EDIT_QUEUE_ITEM_EVENT = "cst-pilot:edit-queue-item";
 
@@ -36,22 +37,37 @@ export function QueuePanel({
 	const busyRef = useRef(false);
 	const locked = busy || disabled;
 	const [errorTipOpen, setErrorTipOpen] = useState(false);
+	const [confirmedQueue, setConfirmedQueue] = useState<InboxSnapshot>(queue);
+	const confirmedSessionRef = useRef(id);
+	const confirmedQueueRef = useRef<InboxSnapshot>(queue);
+	if (confirmedSessionRef.current !== id) {
+		confirmedSessionRef.current = id;
+		confirmedQueueRef.current = queue;
+		if (confirmedQueue !== queue) setConfirmedQueue(queue);
+	} else {
+		const merged = acceptNewerQueue(confirmedQueueRef.current, queue);
+		if (merged !== confirmedQueueRef.current) {
+			confirmedQueueRef.current = merged;
+			if (confirmedQueue !== merged) setConfirmedQueue(merged);
+		}
+	}
 	const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
 	const pendingOrderRef = useRef<string[] | null>(null);
-	const versionRef = useRef(queue.version);
-	versionRef.current = queue.version;
 	const listRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
 	const kbdStyle = useKeyboardFocusStyle();
 	const [kbdActive, setKbdActive] = useState(false);
 	const [activeRowId, setActiveRowId] = useState<string | null>(null);
+	const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
+	const [activeTone, setActiveTone] = useState<KeyboardFocusTone>("accent");
 	const clearKbd = useCallback(() => setKbdActive(false), []);
 	usePointerMutex(kbdActive, clearKbd);
 	const shell = useWorkspaceShell();
 	useEffect(() => {
 		if (shell?.appActive) setErrorTipOpen(false);
 	}, [shell?.appActive]);
-	const rawPending = visibleQueueItems(queue.items);
+	const effectiveQueue = confirmedQueue;
+	const rawPending = visibleQueueItems(effectiveQueue.items);
 	const pending = (() => {
 		if (!optimisticOrder) return rawPending;
 		const byId = new Map(rawPending.map((item) => [item.id, item]));
@@ -81,22 +97,35 @@ export function QueuePanel({
 		}
 		busyRef.current = true;
 		setBusy(true);
-		let nextIds: string[] | null = initialIds;
+		pendingOrderRef.current = initialIds;
 		try {
-			while (nextIds) {
-				const idsToSend = nextIds;
+			while (pendingOrderRef.current) {
+				const desired = pendingOrderRef.current;
 				pendingOrderRef.current = null;
-				setOptimisticOrder(idsToSend);
-				const res = await apiJson<{ version?: number }>(sessionPath(id, "/queue/order"), {
+				const reconciled = reconcilePendingOrder(confirmedQueueRef.current, desired);
+				if (!reconciled) {
+					setOptimisticOrder(null);
+					continue;
+				}
+				setOptimisticOrder(reconciled);
+				const res = await apiJson<{ queue?: InboxSnapshot }>(sessionPath(id, "/queue/order"), {
 					method: "PUT",
-					body: { version: versionRef.current, ids: idsToSend },
+					body: { version: confirmedQueueRef.current.version, ids: reconciled },
 				});
-				if (typeof res?.version === "number") versionRef.current = res.version;
+				const accepted = acceptNewerQueue(confirmedQueueRef.current, res?.queue);
+				if (accepted !== confirmedQueueRef.current) {
+					confirmedQueueRef.current = accepted;
+					setConfirmedQueue(accepted);
+				}
 				setError("");
-				nextIds = pendingOrderRef.current;
+				if (!pendingOrderRef.current) {
+					await refresh();
+					// Re-check if another rapid Alt+Up/Down arrived during refresh!
+					if (!pendingOrderRef.current) {
+						setOptimisticOrder(null);
+					}
+				}
 			}
-			setOptimisticOrder(null);
-			await refresh();
 		} catch (cause) {
 			pendingOrderRef.current = null;
 			setOptimisticOrder(null);
@@ -112,7 +141,15 @@ export function QueuePanel({
 		busyRef.current = true;
 		setBusy(true);
 		try {
-			await apiJson(sessionPath(id, `/${path}`), { method, body: { version: queue.version, ...body } });
+			const res = await apiJson<{ queue?: InboxSnapshot }>(sessionPath(id, `/${path}`), {
+				method,
+				body: { version: confirmedQueueRef.current.version, ...body },
+			});
+			const accepted = acceptNewerQueue(confirmedQueueRef.current, res?.queue);
+			if (accepted !== confirmedQueueRef.current) {
+				confirmedQueueRef.current = accepted;
+				setConfirmedQueue(accepted);
+			}
 			setError("");
 			await refresh();
 		} catch (cause) {
@@ -146,6 +183,8 @@ export function QueuePanel({
 			[ids[pos], ids[nextPos]] = [ids[nextPos], ids[pos]];
 			setKbdActive(true);
 			setActiveRowId(itemId);
+			setActiveTargetId(`row:${itemId}`);
+			setActiveTone("accent");
 			void flushReorder(ids);
 			return;
 		}
@@ -181,6 +220,9 @@ export function QueuePanel({
 				event.preventDefault();
 				setKbdActive(true);
 				if (event.key === "ArrowLeft" && focusedIdx === 0) {
+					setActiveRowId(itemId);
+					setActiveTargetId(`row:${itemId}`);
+					setActiveTone("accent");
 					event.currentTarget.focus({ preventScroll: true });
 				} else {
 					buttons[nextBtn]?.focus({ preventScroll: true });
@@ -208,15 +250,27 @@ export function QueuePanel({
 			if (target) {
 				setKbdActive(true);
 				setActiveRowId(target.id);
-				itemRefs.current.get(target.id)?.focus({ preventScroll: true });
+				setActiveTargetId(`row:${target.id}`);
+				setActiveTone("accent");
+				itemRefs.current.get(`row:${target.id}`)?.focus({ preventScroll: true });
 			}
 		}
 	}
+	const validTargetId =
+		kbdActive && activeTargetId && itemRefs.current.has(activeTargetId) ? activeTargetId : null;
 	return (
 		<section
 			className="queue-panel"
-			data-state={failed ? "failed" : uncertain ? "uncertain" : queue.paused ? "paused" : "queued"}
+			data-state={failed ? "failed" : uncertain ? "uncertain" : effectiveQueue.paused ? "paused" : "queued"}
+			data-kbd-active={validTargetId ? "true" : undefined}
 			aria-label="排队消息"
+			onBlur={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+					setKbdActive(false);
+					setActiveTargetId(null);
+					setActiveTone("accent");
+				}
+			}}
 		>
 			{failed ? (
 				<output className="queue-status queue-status--failed">
@@ -268,11 +322,16 @@ export function QueuePanel({
 				{pending.map((item, itemIndex) => {
 					const draggable = item.status === "pending" && item.delivery === "queue";
 					const encodedId = encodeURIComponent(item.id);
+					const rowKey = `row:${item.id}`;
+					const retryKey = `act:${item.id}:retry`;
+					const steerKey = `act:${item.id}:steer`;
+					const editKey = `act:${item.id}:edit`;
+					const deleteKey = `act:${item.id}:delete`;
 					return (
 						<div
 							ref={(node) => {
-								if (node) itemRefs.current.set(item.id, node);
-								else itemRefs.current.delete(item.id);
+								if (node) itemRefs.current.set(rowKey, node);
+								else itemRefs.current.delete(rowKey);
 							}}
 							className="queue-item"
 							key={item.id}
@@ -281,7 +340,13 @@ export function QueuePanel({
 							tabIndex={0}
 							data-status={item.status}
 							draggable={draggable && !locked}
-							onFocus={() => setActiveRowId(item.id)}
+							onFocus={(event) => {
+								if (event.target !== event.currentTarget) return;
+								setActiveRowId(item.id);
+								setActiveTargetId(rowKey);
+								setActiveTone("accent");
+								if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+							}}
 							onKeyDown={(event) => handleRowKeyDown(event, itemIndex, item.id, draggable)}
 							onDragStart={(event) => {
 								event.dataTransfer.setData("text/plain", item.id);
@@ -310,11 +375,21 @@ export function QueuePanel({
 									{item.status === "failed" ? (
 										<Tooltip delay={80} closeDelay={0} isDisabled={!!shell?.appActive}>
 											<Button
+												ref={(node) => {
+													if (node) itemRefs.current.set(retryKey, node);
+													else itemRefs.current.delete(retryKey);
+												}}
 												variant="ghost"
 												isIconOnly
 												isDisabled={locked}
 												className="btn-icon xs-24 queue-action-retry"
 												aria-label="重试排队消息"
+												onFocus={(event) => {
+													setActiveRowId(item.id);
+													setActiveTargetId(retryKey);
+													setActiveTone("accent");
+													if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+												}}
 												onPress={() => void change(`queue/${encodedId}/retry`, "POST", {})}
 											>
 												<RotateCcw size={14} aria-hidden="true" />
@@ -326,11 +401,21 @@ export function QueuePanel({
 									) : (
 										<Tooltip delay={80} closeDelay={0} isDisabled={!!shell?.appActive}>
 											<Button
+												ref={(node) => {
+													if (node) itemRefs.current.set(steerKey, node);
+													else itemRefs.current.delete(steerKey);
+												}}
 												variant="ghost"
 												isIconOnly
 												isDisabled={locked}
 												className="btn-icon xs-24 queue-action-steer"
 												aria-label="立即发送"
+												onFocus={(event) => {
+													setActiveRowId(item.id);
+													setActiveTargetId(steerKey);
+													setActiveTone("accent");
+													if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+												}}
 												onPress={() => void change(`queue/${encodedId}/steer`, "POST", {})}
 											>
 												<ArrowUp size={16} aria-hidden="true" />
@@ -342,18 +427,28 @@ export function QueuePanel({
 									)}
 									<Tooltip delay={80} closeDelay={0} isDisabled={!!shell?.appActive}>
 										<Button
+											ref={(node) => {
+												if (node) itemRefs.current.set(editKey, node);
+												else itemRefs.current.delete(editKey);
+											}}
 											variant="ghost"
 											isIconOnly
 											isDisabled={locked}
 											className="btn-icon xs-24"
 											aria-label="编辑排队消息"
+											onFocus={(event) => {
+												setActiveRowId(item.id);
+												setActiveTargetId(editKey);
+												setActiveTone("accent");
+												if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+											}}
 											onPress={() => {
 												window.dispatchEvent(
 													new CustomEvent<EditQueueItemDetail>(EDIT_QUEUE_ITEM_EVENT, {
 														detail: {
 															sessionId: id,
 															itemId: item.id,
-															version: queue.version,
+															version: confirmedQueueRef.current.version,
 															text: item.text,
 															skill: item.skill,
 															images: item.images,
@@ -371,11 +466,21 @@ export function QueuePanel({
 									</Tooltip>
 									<Tooltip delay={80} closeDelay={0} isDisabled={!!shell?.appActive}>
 										<Button
+											ref={(node) => {
+												if (node) itemRefs.current.set(deleteKey, node);
+												else itemRefs.current.delete(deleteKey);
+											}}
 											variant="ghost"
 											isIconOnly
 											isDisabled={locked}
 											className="btn-icon xs-24"
 											aria-label="删除排队消息"
+											onFocus={(event) => {
+												setActiveRowId(item.id);
+												setActiveTargetId(deleteKey);
+												setActiveTone("danger");
+												if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+											}}
 											onPress={() => void change(`queue/${encodedId}`, "DELETE", {})}
 										>
 											<Trash2 size={14} aria-hidden="true" />
@@ -393,8 +498,9 @@ export function QueuePanel({
 					as="div"
 					containerRef={listRef}
 					itemRefs={itemRefs}
-					targetId={kbdActive && activeRowId && pending.some((p) => p.id === activeRowId) ? activeRowId : null}
+					targetId={validTargetId}
 					style={kbdStyle}
+					tone={activeTone}
 					railPlacement="inside"
 				/>
 			</div>

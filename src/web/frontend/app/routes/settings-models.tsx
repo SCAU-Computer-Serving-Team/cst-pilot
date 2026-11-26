@@ -34,11 +34,22 @@ export default function ModelPreferences() {
 	const [provider, setProvider] = useState("all");
 	const [providerOpen, setProviderOpen] = useState(false);
 	const providerTriggerRef = useRef<HTMLButtonElement>(null);
+	const providerListRef = useRef<HTMLFieldSetElement>(null);
+	const providerItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const [providerFocusedId, setProviderFocusedId] = useState<string | null>(null);
+	const [providerKbdActive, setProviderKbdActive] = useState(false);
+	const clearProviderKbd = useCallback(() => setProviderKbdActive(false), []);
 	const shell = useWorkspaceShell();
-	usePanelDismiss(providerOpen, () => setProviderOpen(false), undefined, providerTriggerRef);
+	const closeProviderPopover = useCallback(() => {
+		setProviderOpen(false);
+		setProviderFocusedId(null);
+		setProviderKbdActive(false);
+	}, []);
+	usePanelDismiss(providerOpen, closeProviderPopover, undefined, providerTriggerRef);
+	usePointerMutex(providerOpen && providerKbdActive, clearProviderKbd);
 	useEffect(() => {
-		if (shell?.appActive) setProviderOpen(false);
-	}, [shell?.appActive]);
+		if (shell?.appActive) closeProviderPopover();
+	}, [shell?.appActive, closeProviderPopover]);
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);
@@ -52,19 +63,61 @@ export default function ModelPreferences() {
 
 	const models = state.data?.models ?? [];
 	const selection = state.data?.enabled ?? null;
-	const allIds = models.map(fullId);
+	const allIds = useMemo(() => models.map(fullId), [models]);
 	const byId = useMemo(() => new Map(models.map((model) => [fullId(model), model])), [models]);
 	const providers = [...new Set(models.map((model) => model.provider))];
 	if (state.data && provider !== "all" && !providers.includes(provider)) setProvider("all");
-	// 勾选变化不重新排列可见行；取消勾选的模型留在原位。
-	const displayOrder = useRef<string[]>([]);
-	if (displayOrder.current.length !== allIds.length || displayOrder.current.some((id) => !byId.has(id))) {
-		displayOrder.current =
+	// 确认顺序与乐观重排纳入同一事务：外部刷新或保存失败时直接回滚到已确认顺序，取消勾选保留原展示位。
+	const canonicalOrder = useMemo(
+		() =>
 			selection === null
 				? allIds
-				: [...selection.filter((id) => byId.has(id)), ...allIds.filter((id) => !selection.includes(id))];
-	}
-	const sorted = displayOrder.current;
+				: [...selection.filter((id) => byId.has(id)), ...allIds.filter((id) => !selection.includes(id))],
+		[allIds, byId, selection],
+	);
+	const [displayOrderState, setDisplayOrderState] = useState<{
+		baseSelection: string[] | null;
+		baseCatalogKey: string;
+		order: string[];
+	} | null>(null);
+	const catalogKey = allIds.join("\0");
+	const sorted = useMemo(() => {
+		if (
+			displayOrderState &&
+			displayOrderState.baseCatalogKey === catalogKey &&
+			displayOrderState.order.length === allIds.length &&
+			displayOrderState.order.every((id) => byId.has(id))
+		) {
+			return displayOrderState.order;
+		}
+		return canonicalOrder;
+	}, [allIds.length, byId, canonicalOrder, catalogKey, displayOrderState]);
+	// 外部数据源变更（如刷新、其他端修改或保存失败回滚）时，同步对账到最新确认顺序。
+	const lastSelectionRef = useRef<string[] | null | undefined>(undefined);
+	const pendingReorderRef = useRef(false);
+	useEffect(() => {
+		if (pendingReorderRef.current) return;
+		if (lastSelectionRef.current !== selection) {
+			lastSelectionRef.current = selection;
+			setDisplayOrderState((prev) => {
+				if (!prev || prev.baseCatalogKey !== catalogKey) return null;
+				// 仅在启用集合相同但顺序不同、或外部刷新时重置展示顺序；单次勾选保留当前行位置。
+				const prevEnabled = prev.baseSelection;
+				const sameOrder =
+					selection === null
+						? prevEnabled === null
+						: prevEnabled !== null &&
+							selection.length === prevEnabled.length &&
+							selection.every((id, i) => prevEnabled[i] === id);
+				if (sameOrder) return prev;
+				// 如果启用集长度相同但顺序改变（或外部重置为 null），按服务端确认顺序重排
+				const prevLen = prevEnabled === null ? allIds.length : prevEnabled.length;
+				const nextLen = selection === null ? allIds.length : selection.length;
+				if (prevLen === nextLen) return null;
+				return { baseSelection: selection, baseCatalogKey: catalogKey, order: prev.order };
+			});
+		}
+	}, [allIds.length, catalogKey, selection]);
 	const needle = query.trim().toLocaleLowerCase();
 	const matches = (id: string) =>
 		(provider === "all" || byId.get(id)?.provider === provider) &&
@@ -98,8 +151,13 @@ export default function ModelPreferences() {
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
 	const allVisibleEnabled = visible.length > 0 && visible.every((id) => selection === null || selection.includes(id));
 
-	async function save(next: string[] | null) {
+	async function save(next: string[] | null, nextDisplayOrder?: string[]) {
 		if (!state.data || state.working) return;
+		const previousOrder = displayOrderState;
+		if (nextDisplayOrder) {
+			pendingReorderRef.current = true;
+			setDisplayOrderState({ baseSelection: next, baseCatalogKey: catalogKey, order: nextDisplayOrder });
+		}
 		const optimistic = { ...state.data, enabled: next };
 		const ok = await state.mutate(async (current) => {
 			const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
@@ -108,7 +166,13 @@ export default function ModelPreferences() {
 			});
 			return { ...current, enabled: result.enabled, unavailableEnabled: [] };
 		}, optimistic);
-		if (ok) feedback();
+		pendingReorderRef.current = false;
+		if (ok) {
+			feedback();
+		} else if (nextDisplayOrder) {
+			// 保存失败时同步回滚展示顺序，避免列表残留乐观位置。
+			setDisplayOrderState(previousOrder);
+		}
 	}
 
 	async function saveDefault(model: ModelChoice) {
@@ -133,8 +197,8 @@ export default function ModelPreferences() {
 		const nextOrder = moveModel(baseOrder, id, targetId);
 		if (!nextOrder || nextOrder === baseOrder) return;
 		keyboardFocusId.current = id;
-		displayOrder.current = [...nextOrder, ...sorted.filter((item) => !nextOrder.includes(item))];
-		void save(nextOrder);
+		const nextDisplay = [...nextOrder, ...sorted.filter((item) => !nextOrder.includes(item))];
+		void save(nextOrder, nextDisplay);
 	}
 
 	function drop(target: string) {
@@ -143,8 +207,8 @@ export default function ModelPreferences() {
 		const next = moveModel(baseOrder, dragId, target);
 		setDragId(null);
 		if (next && next !== baseOrder) {
-			displayOrder.current = [...next, ...sorted.filter((id) => !next.includes(id))];
-			void save(next);
+			const nextDisplay = [...next, ...sorted.filter((id) => !next.includes(id))];
+			void save(next, nextDisplay);
 		}
 	}
 
@@ -232,9 +296,10 @@ export default function ModelPreferences() {
 												),
 											);
 										} else {
-											void save(
-												normalizeScope([...new Set([...(selection ?? allIds), ...visible])], allIds),
+											const merged = sorted.filter(
+												(id) => (selection ?? allIds).includes(id) || visible.includes(id),
 											);
+											void save(normalizeScope(merged, allIds));
 										}
 									}}
 								>
@@ -257,9 +322,15 @@ export default function ModelPreferences() {
 								aria-label="按提供商筛选模型"
 								className="settings-provider-select"
 								isOpen={providerOpen}
-								onOpenChange={setProviderOpen}
+								onOpenChange={(next) => {
+									if (next) setProviderOpen(true);
+									else closeProviderPopover();
+								}}
 								selectedKey={provider}
-								onSelectionChange={(key) => setProvider(String(key ?? "all"))}
+								onSelectionChange={(key) => {
+									setProvider(String(key ?? "all"));
+									closeProviderPopover();
+								}}
 							>
 								<Select.Trigger ref={providerTriggerRef}>
 									<Select.Value>{provider === "all" ? "全部提供商" : provider}</Select.Value>{" "}
@@ -269,28 +340,70 @@ export default function ModelPreferences() {
 									className="tier-2-glass tier-2-menu settings-provider-popover"
 									placement="bottom end"
 									offset={6}
+									data-kbd-active={providerKbdActive && providerFocusedId ? "true" : undefined}
 								>
-									<ListBox aria-label="提供商筛选" className="tier-2-menu-list">
-										<ListBox.Item id="all" textValue="全部提供商" className="menu-row settings-select-option">
-											<span>全部提供商</span>
-											{provider === "all" && (
-												<Check size={14} className="settings-select-check" aria-hidden="true" />
-											)}
-										</ListBox.Item>
-										{providers.map((id) => (
+									<fieldset
+										ref={providerListRef}
+										aria-label="提供商筛选列表"
+										style={{ position: "relative", border: 0, padding: 0, margin: 0, minInlineSize: 0 }}
+										onKeyDown={(event) => {
+											if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+											if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+												setProviderKbdActive(true);
+												requestAnimationFrame(() => {
+													const focused = providerListRef.current?.querySelector<HTMLElement>(
+														'[role="option"][data-focused="true"], [role="option"]:focus',
+													);
+													const fid = focused?.getAttribute("data-option-id") ?? null;
+													if (fid) setProviderFocusedId(fid);
+												});
+											}
+										}}
+									>
+										<ListBox aria-label="提供商筛选" className="tier-2-menu-list">
 											<ListBox.Item
-												id={id}
-												key={id}
-												textValue={id}
+												id="all"
+												textValue="全部提供商"
 												className="menu-row settings-select-option"
+												data-option-id="all"
+												ref={(node: HTMLElement | null) => {
+													if (node) providerItemRefs.current.set("all", node);
+													else providerItemRefs.current.delete("all");
+												}}
 											>
-												<span>{id}</span>
-												{provider === id && (
+												<span>全部提供商</span>
+												{provider === "all" && (
 													<Check size={14} className="settings-select-check" aria-hidden="true" />
 												)}
 											</ListBox.Item>
-										))}
-									</ListBox>
+											{providers.map((id) => (
+												<ListBox.Item
+													id={id}
+													key={id}
+													textValue={id}
+													className="menu-row settings-select-option"
+													data-option-id={id}
+													ref={(node: HTMLElement | null) => {
+														if (node) providerItemRefs.current.set(id, node);
+														else providerItemRefs.current.delete(id);
+													}}
+												>
+													<span>{id}</span>
+													{provider === id && (
+														<Check size={14} className="settings-select-check" aria-hidden="true" />
+													)}
+												</ListBox.Item>
+											))}
+										</ListBox>
+										<KbdFocusOverlay
+											containerRef={providerListRef}
+											itemRefs={providerItemRefs}
+											targetId={providerKbdActive && providerFocusedId ? providerFocusedId : null}
+											style={kbdStyle}
+											railPlacement="inside"
+											bracketOutset={2}
+										/>
+									</fieldset>
 								</Select.Popover>
 							</Select>
 						</div>

@@ -1,11 +1,13 @@
 import { Checkbox, ListBox, Select } from "@heroui/react";
-import { Check, ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Eye, EyeOff, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { apiJson } from "../data/api";
 import { commonOutputLimit, DEFAULT_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS } from "../settings/custom-model-defaults";
 import { SettingsHeading, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
+import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
@@ -64,28 +66,56 @@ export default function CustomModelService() {
 	const [revision, setRevision] = useState<string | undefined>();
 	const [loading, setLoading] = useState(!!editing);
 	const [working, setWorking] = useState(false);
+	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+	const [modelSearchOpen, setModelSearchOpen] = useState(false);
+	const [modelQuery, setModelQuery] = useState("");
 	const [error, setError] = useState("");
 	const [confirming, setConfirming] = useState(false);
 	const [protocolOpen, setProtocolOpen] = useState(false);
 	const protocolTriggerRef = useRef<HTMLButtonElement>(null);
+	const protocolListRef = useRef<HTMLFieldSetElement>(null);
+	const protocolItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const [protocolFocusedId, setProtocolFocusedId] = useState<string | null>(null);
+	const [protocolKbdActive, setProtocolKbdActive] = useState(false);
+	const clearProtocolKbd = useCallback(() => setProtocolKbdActive(false), []);
+	const kbdStyle = useKeyboardFocusStyle();
+	const removeTriggerRef = useRef<HTMLButtonElement>(null);
+	const cancelConfirmRef = useRef<HTMLButtonElement>(null);
+	const restoreRemoveFocusRef = useRef(false);
 	const shell = useWorkspaceShell();
-	usePanelDismiss(protocolOpen, () => setProtocolOpen(false), undefined, protocolTriggerRef);
+
+	const closeProtocolPopover = useCallback(() => {
+		setProtocolOpen(false);
+		setProtocolFocusedId(null);
+		setProtocolKbdActive(false);
+	}, []);
+	const cancelRemoveConfirm = useCallback(() => {
+		if (working) return;
+		restoreRemoveFocusRef.current = true;
+		setConfirming(false);
+	}, [working]);
+
+	// 统一注册进全局 LIFO 浮层栈：确认态与协议下拉严格按打开顺序消费 Esc。
+	usePanelDismiss(confirming && !working, cancelRemoveConfirm, undefined, removeTriggerRef);
+	usePanelDismiss(protocolOpen, closeProtocolPopover, undefined, protocolTriggerRef);
+	usePointerMutex(protocolOpen && protocolKbdActive, clearProtocolKbd);
+
 	useEffect(() => {
-		if (shell?.appActive) setProtocolOpen(false);
-	}, [shell?.appActive]);
-	// Esc closes inline delete confirmation BEFORE navigating back to providers list (Level 4 -> Level 6).
+		if (shell?.appActive) closeProtocolPopover();
+	}, [shell?.appActive, closeProtocolPopover]);
+
+	// 打开行内删除确认时自动聚焦安全的「取消」钮；取消或失败关闭后将焦点归还「移除」触发钮。
 	useEffect(() => {
-		if (!confirming) return;
-		const onEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
-			event.preventDefault();
-			setConfirming(false);
-		};
-		window.addEventListener("keydown", onEscape);
-		return () => window.removeEventListener("keydown", onEscape);
+		if (confirming) {
+			cancelConfirmRef.current?.focus({ preventScroll: true });
+		} else if (restoreRemoveFocusRef.current) {
+			restoreRemoveFocusRef.current = false;
+			removeTriggerRef.current?.focus({ preventScroll: true });
+		}
 	}, [confirming]);
+
 	const editedOutputLimits = useRef(new Set<string>());
-	const modelList = useAnimatedHeight(`${loading}:${form.models.length}`);
+	const modelList = useAnimatedHeight(`${loading}:${form.models.length}:${modelSearchOpen}:${modelQuery}`);
 	useEffect(() => {
 		let active = true;
 		void apiJson<ModelCatalog>("/api/models")
@@ -133,6 +163,7 @@ export default function CustomModelService() {
 			active = false;
 		};
 	}, [editing]);
+
 	function updateModel(index: number, patch: Partial<ModelEntry>) {
 		if (patch.maxTokens !== undefined) editedOutputLimits.current.add(form.models[index].clientId);
 		setForm((current) => ({
@@ -140,6 +171,21 @@ export default function CustomModelService() {
 			models: current.models.map((model, i) => (i === index ? { ...model, ...patch } : model)),
 		}));
 	}
+
+	async function refreshCatalog() {
+		if (refreshingCatalog || working) return;
+		setRefreshingCatalog(true);
+		setError("");
+		try {
+			await apiJson("/api/models/refresh", { method: "POST" });
+			feedback("模型目录已刷新");
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : "拉取模型目录失败，请重试");
+		} finally {
+			setRefreshingCatalog(false);
+		}
+	}
+
 	async function save(event: FormEvent) {
 		event.preventDefault();
 		if (working || loading) return;
@@ -164,6 +210,7 @@ export default function CustomModelService() {
 			setWorking(false);
 		}
 	}
+
 	async function remove() {
 		if (!editing || !revision || working) return;
 		setWorking(true);
@@ -174,11 +221,18 @@ export default function CustomModelService() {
 			void navigate("/settings", { viewTransition: true });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "移除失败，请重试");
+			restoreRemoveFocusRef.current = true;
+			setConfirming(false);
 		} finally {
 			setWorking(false);
-			setConfirming(false);
 		}
 	}
+
+	const modelNeedle = modelQuery.trim().toLocaleLowerCase();
+	const indexedModels = form.models
+		.map((model, index) => ({ model, index }))
+		.filter(({ model }) => !modelNeedle || `${model.id} ${model.name}`.toLocaleLowerCase().includes(modelNeedle));
+
 	return (
 		<>
 			<SettingsHeading title={editing ? form.name || editing : "自定义提供商"} back blockEscape={confirming} />
@@ -229,10 +283,14 @@ export default function CustomModelService() {
 										aria-label="接口协议"
 										className="settings-custom-select"
 										isOpen={protocolOpen}
-										onOpenChange={setProtocolOpen}
+										onOpenChange={(next) => {
+											if (next) setProtocolOpen(true);
+											else closeProtocolPopover();
+										}}
 										selectedKey={form.api}
 										onSelectionChange={(value) => {
 											if (value) setForm({ ...form, api: String(value) });
+											closeProtocolPopover();
 										}}
 									>
 										<Select.Trigger ref={protocolTriggerRef}>
@@ -243,22 +301,55 @@ export default function CustomModelService() {
 											placement="bottom start"
 											offset={6}
 											className="tier-2-glass tier-2-menu settings-protocol-popover"
+											data-kbd-active={protocolKbdActive && protocolFocusedId ? "true" : undefined}
 										>
-											<ListBox aria-label="接口协议" className="tier-2-menu-list">
-												{protocols.map(([id, title]) => (
-													<ListBox.Item
-														key={id}
-														id={id}
-														textValue={title}
-														className="menu-row login-provider-option"
-													>
-														<span className="login-provider-option-name">{title}</span>
-														<span className="login-provider-check">
-															<Check size={14} aria-hidden="true" />
-														</span>
-													</ListBox.Item>
-												))}
-											</ListBox>
+											<fieldset
+												ref={protocolListRef}
+												aria-label="接口协议列表"
+												style={{ position: "relative", border: 0, padding: 0, margin: 0, minInlineSize: 0 }}
+												onKeyDown={(event) => {
+													if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+													if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+														setProtocolKbdActive(true);
+														requestAnimationFrame(() => {
+															const focused = protocolListRef.current?.querySelector<HTMLElement>(
+																'[role="option"][data-focused="true"], [role="option"]:focus',
+															);
+															const fid = focused?.getAttribute("data-option-id") ?? null;
+															if (fid) setProtocolFocusedId(fid);
+														});
+													}
+												}}
+											>
+												<ListBox aria-label="接口协议" className="tier-2-menu-list">
+													{protocols.map(([id, title]) => (
+														<ListBox.Item
+															key={id}
+															id={id}
+															textValue={title}
+															className="menu-row login-provider-option"
+															data-option-id={id}
+															ref={(node: HTMLElement | null) => {
+																if (node) protocolItemRefs.current.set(id, node);
+																else protocolItemRefs.current.delete(id);
+															}}
+														>
+															<span className="login-provider-option-name">{title}</span>
+															<span className="login-provider-check">
+																{form.api === id && <Check size={14} aria-hidden="true" />}
+															</span>
+														</ListBox.Item>
+													))}
+												</ListBox>
+												<KbdFocusOverlay
+													containerRef={protocolListRef}
+													itemRefs={protocolItemRefs}
+													targetId={protocolKbdActive && protocolFocusedId ? protocolFocusedId : null}
+													style={kbdStyle}
+													railPlacement="inside"
+													bracketOutset={2}
+												/>
+											</fieldset>
 										</Select.Popover>
 									</Select>
 								</div>
@@ -308,29 +399,151 @@ export default function CustomModelService() {
 						</div>
 					</SettingsSection>
 					<SettingsSection
-						title="模型"
+						title="模型列表"
 						summary={form.models.length}
 						action={
-							<button
-								type="button"
-								className="settings-inline-action settings-inline-action--primary"
-								disabled={form.models.length >= 32}
-								onClick={() =>
-									setForm((current) => ({
-										...current,
-										models: [...current.models, emptyModel(defaultMaxTokens)],
-									}))
-								}
-							>
-								<Plus size={14} aria-hidden="true" /> 添加模型
-							</button>
+							<div className="settings-section-actions">
+								<button
+									type="button"
+									className="btn-icon sm-28"
+									aria-label="筛选模型"
+									aria-pressed={modelSearchOpen}
+									onClick={() => {
+										setModelSearchOpen((prev) => {
+											if (prev) setModelQuery("");
+											return !prev;
+										});
+									}}
+								>
+									<Search size={14} aria-hidden="true" />
+								</button>
+								<button
+									type="button"
+									className="btn-icon sm-28"
+									aria-label="刷新模型目录"
+									disabled={refreshingCatalog || working}
+									onClick={() => void refreshCatalog()}
+								>
+									<RefreshCw size={14} aria-hidden="true" />
+								</button>
+								<button
+									type="button"
+									className="btn-icon sm-28"
+									aria-label="添加模型"
+									disabled={form.models.length >= 32}
+									onClick={() =>
+										setForm((current) => ({
+											...current,
+											models: [...current.models, emptyModel(defaultMaxTokens)],
+										}))
+									}
+								>
+									<Plus size={15} aria-hidden="true" />
+								</button>
+							</div>
 						}
 					>
 						<div className="settings-custom-models" ref={modelList}>
-							{form.models.map((model, index) => (
-								<div className="settings-custom-model" key={model.clientId}>
-									<div className="settings-custom-model-title">
-										<strong>模型 {index + 1}</strong>
+							{modelSearchOpen && <SettingsSearch label="搜索自定义模型" value={modelQuery} onChange={setModelQuery} />}
+							<div className="settings-custom-table-head" aria-hidden="true">
+								<span>模型 ID</span>
+								<span>显示名称</span>
+								<span>上下文</span>
+								<span>最大输出</span>
+								<span>思考</span>
+								<span>图片</span>
+								<span />
+							</div>
+							{indexedModels.map(({ model, index }) => (
+								<div className="settings-custom-table-row" key={model.clientId}>
+									<input
+										required
+										aria-label={`模型 ${index + 1} ID`}
+										maxLength={128}
+										spellCheck={false}
+										value={model.id}
+										placeholder="my-model"
+										onChange={(event) => updateModel(index, { id: event.target.value })}
+									/>
+									<input
+										required
+										aria-label={`模型 ${index + 1} 显示名称`}
+										maxLength={128}
+										value={model.name}
+										placeholder="My Model"
+										onChange={(event) => updateModel(index, { name: event.target.value })}
+									/>
+									<input
+										required
+										aria-label={`模型 ${index + 1} 上下文窗口`}
+										type="number"
+										min={1024}
+										max={100000000}
+										value={model.contextWindow}
+										onChange={(event) => updateModel(index, { contextWindow: Number(event.target.value) })}
+									/>
+									<input
+										required
+										aria-label={`模型 ${index + 1} 最大输出 Token`}
+										type="number"
+										min={1}
+										max={model.contextWindow}
+										value={model.maxTokens}
+										onChange={(event) => updateModel(index, { maxTokens: Number(event.target.value) })}
+									/>
+									<div className="settings-table-check">
+										<Checkbox
+											isSelected={model.reasoning}
+											aria-label={`模型 ${index + 1} 支持思考`}
+											className="settings-check-box"
+											onChange={(checked) => updateModel(index, { reasoning: checked })}
+										>
+											<Checkbox.Content>
+												<Checkbox.Control>
+													<Checkbox.Indicator>
+														<svg
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															strokeWidth="2"
+															strokeLinecap="round"
+															strokeLinejoin="round"
+															aria-hidden="true"
+														>
+															<path d="M20 6 9 17 4 12" pathLength="1" />
+														</svg>
+													</Checkbox.Indicator>
+												</Checkbox.Control>
+											</Checkbox.Content>
+										</Checkbox>
+									</div>
+									<div className="settings-table-check">
+										<Checkbox
+											isSelected={model.image}
+											aria-label={`模型 ${index + 1} 支持图片输入`}
+											className="settings-check-box"
+											onChange={(checked) => updateModel(index, { image: checked })}
+										>
+											<Checkbox.Content>
+												<Checkbox.Control>
+													<Checkbox.Indicator>
+														<svg
+															viewBox="0 0 24 24"
+															fill="none"
+															stroke="currentColor"
+															strokeWidth="2"
+															strokeLinecap="round"
+															strokeLinejoin="round"
+															aria-hidden="true"
+														>
+															<path d="M20 6 9 17 4 12" pathLength="1" />
+														</svg>
+													</Checkbox.Indicator>
+												</Checkbox.Control>
+											</Checkbox.Content>
+										</Checkbox>
+									</div>
+									<div className="settings-table-remove">
 										{form.models.length > 1 && (
 											<button
 												type="button"
@@ -343,105 +556,13 @@ export default function CustomModelService() {
 													}))
 												}
 											>
-												<Trash2 size={15} aria-hidden="true" />
+												<Trash2 size={14} aria-hidden="true" />
 											</button>
 										)}
 									</div>
-									<div className="settings-custom-model-grid">
-										<label className="settings-custom-field">
-											<span>模型 ID</span>
-											<span className="settings-custom-field-control">
-												<input
-													required
-													maxLength={128}
-													spellCheck={false}
-													value={model.id}
-													placeholder="例如：my-model"
-													onChange={(event) => updateModel(index, { id: event.target.value })}
-												/>
-											</span>
-										</label>
-										<label className="settings-custom-field">
-											<span>显示名称</span>
-											<span className="settings-custom-field-control">
-												<input
-													required
-													maxLength={128}
-													value={model.name}
-													placeholder="例如：My Model"
-													onChange={(event) => updateModel(index, { name: event.target.value })}
-												/>
-											</span>
-										</label>
-										<label className="settings-custom-field">
-											<span>上下文窗口</span>
-											<span className="settings-custom-field-control">
-												<input
-													required
-													type="number"
-													min={1024}
-													max={100000000}
-													value={model.contextWindow}
-													onChange={(event) =>
-														updateModel(index, { contextWindow: Number(event.target.value) })
-													}
-												/>
-											</span>
-										</label>
-										<label className="settings-custom-field">
-											<span>最大输出 Token</span>
-											<span className="settings-custom-field-control">
-												<input
-													required
-													type="number"
-													min={1}
-													max={model.contextWindow}
-													value={model.maxTokens}
-													onChange={(event) =>
-														updateModel(index, { maxTokens: Number(event.target.value) })
-													}
-												/>
-											</span>
-										</label>
-									</div>
-									<div className="settings-custom-capabilities">
-										{(
-											[
-												{ key: "reasoning", label: "支持思考" },
-												{ key: "image", label: "支持图片输入" },
-											] as const
-										).map(({ key: capKey, label }) => (
-											<div className="settings-capability-check" key={capKey}>
-												<Checkbox
-													isSelected={model[capKey]}
-													aria-label={label}
-													className="settings-check-box"
-													onChange={(checked) => updateModel(index, { [capKey]: checked })}
-												>
-													<Checkbox.Content>
-														<Checkbox.Control>
-															<Checkbox.Indicator>
-																<svg
-																	viewBox="0 0 24 24"
-																	fill="none"
-																	stroke="currentColor"
-																	strokeWidth="2"
-																	strokeLinecap="round"
-																	strokeLinejoin="round"
-																	aria-hidden="true"
-																>
-																	<path d="M20 6 9 17 4 12" pathLength="1" />
-																</svg>
-															</Checkbox.Indicator>
-														</Checkbox.Control>
-													</Checkbox.Content>
-												</Checkbox>
-												<span>{label}</span>
-											</div>
-										))}
-									</div>
 								</div>
 							))}
+							{!indexedModels.length && <p className="settings-empty">没有匹配的模型</p>}
 						</div>
 					</SettingsSection>
 					<div className="settings-custom-actions">
@@ -463,10 +584,11 @@ export default function CustomModelService() {
 							{confirming ? (
 								<div className="settings-custom-confirm">
 									<button
+										ref={cancelConfirmRef}
 										type="button"
 										className="settings-inline-action"
 										disabled={working}
-										onClick={() => setConfirming(false)}
+										onClick={cancelRemoveConfirm}
 									>
 										取消
 									</button>
@@ -481,6 +603,7 @@ export default function CustomModelService() {
 								</div>
 							) : (
 								<button
+									ref={removeTriggerRef}
 									type="button"
 									className="settings-inline-action settings-inline-action--danger"
 									onClick={() => setConfirming(true)}

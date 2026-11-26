@@ -57,6 +57,8 @@ export function ModelPicker({
 	pageRef.current = page;
 	const escapeSubpageGuard = useRef(false);
 	const returnFocus = useRef<Exclude<Page, "main"> | null>(null);
+	const priorFocusRef = useRef<{ element: HTMLElement; range: Range | null } | null>(null);
+	const popoverDialogRef = useRef<HTMLDivElement>(null);
 	const triggerButton = useRef<HTMLButtonElement>(null);
 	const modelButton = useRef<HTMLButtonElement>(null);
 	const thinkingButton = useRef<HTMLButtonElement>(null);
@@ -71,9 +73,37 @@ export function ModelPicker({
 	const clearKbd = useCallback(() => setKbdActive(false), []);
 	usePointerMutex(open && kbdActive, clearKbd);
 	const shell = useWorkspaceShell();
+	const restorePriorFocus = useCallback((onlyIfWithinPicker: boolean) => {
+		const saved = priorFocusRef.current;
+		priorFocusRef.current = null;
+		const active = document.activeElement;
+		const withinPicker =
+			active === document.body ||
+			active === null ||
+			Boolean(popoverDialogRef.current?.contains(active)) ||
+			active === triggerButton.current;
+		if (onlyIfWithinPicker && !withinPicker) return;
+		const target = saved?.element && saved.element.isConnected ? saved.element : triggerButton.current;
+		window.setTimeout(() => {
+			if (!target?.isConnected) return;
+			target.focus({ preventScroll: true });
+			if (saved?.range && saved.element === target) {
+				try {
+					const sel = window.getSelection();
+					if (sel) {
+						sel.removeAllRanges();
+						sel.addRange(saved.range);
+					}
+				} catch {
+					/* 选区失效时仅保留焦点 */
+				}
+			}
+		}, 0);
+	}, []);
 	useEffect(() => {
 		if (shell?.appActive) {
 			navigation.current++;
+			priorFocusRef.current = null;
 			setOpen(false);
 		}
 	}, [shell?.appActive]);
@@ -87,9 +117,16 @@ export function ModelPicker({
 			if (openRef.current) {
 				navigation.current++;
 				setOpen(false);
-				window.setTimeout(() => triggerButton.current?.focus({ preventScroll: true }), 0);
+				restorePriorFocus(true);
 				return;
 			}
+			const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			let savedRange: Range | null = null;
+			if (active?.isContentEditable) {
+				const sel = window.getSelection();
+				if (sel && sel.rangeCount > 0) savedRange = sel.getRangeAt(0).cloneRange();
+			}
+			priorFocusRef.current = active ? { element: active, range: savedRange } : null;
 			navigation.current++;
 			returnFocus.current = "models";
 			setMainActiveId("models");
@@ -100,19 +137,21 @@ export function ModelPicker({
 		};
 		window.addEventListener("keydown", onAltM, true);
 		return () => window.removeEventListener("keydown", onAltM, true);
-	}, [onOpen]);
-	usePanelDismiss(
+	}, [onOpen, restorePriorFocus]);
+	const panelDismiss = usePanelDismiss(
 		open,
 		() => {
 			navigation.current++;
 			setOpen(false);
+			restorePriorFocus(true);
 		},
 		triggerButton,
 	);
-	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，保证子列表 Esc 只退回主菜单，主菜单 Esc 归还入口焦点。
+	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，仅在当前选择器位于全局浮层栈顶时消费 Esc。
 	useLayoutEffect(() => {
 		function onEscape(event: KeyboardEvent) {
 			if (!openRef.current || event.key !== "Escape") return;
+			if (!panelDismiss.isTop()) return;
 			// 输入法组合态下的 Esc 只应交给输入法，拦截传播以阻止第三方 Popover 误关闭，且不调用 preventDefault。
 			if (event.isComposing || event.keyCode === 229) {
 				escapeSubpageGuard.current = true;
@@ -139,11 +178,11 @@ export function ModelPicker({
 			}
 			navigation.current++;
 			setOpen(false);
-			window.setTimeout(() => triggerButton.current?.focus(), 0);
+			restorePriorFocus(true);
 		}
 		window.addEventListener("keydown", onEscape, true);
 		return () => window.removeEventListener("keydown", onEscape, true);
-	}, []);
+	}, [panelDismiss, restorePriorFocus]);
 	useLayoutEffect(() => {
 		if (!open || page === "main" || busy) return;
 		function focusList() {
@@ -284,6 +323,7 @@ export function ModelPicker({
 				containerPadding={16}
 			>
 				<Popover.Dialog
+					ref={popoverDialogRef}
 					aria-label={page === "models" ? "选择模型" : page === "thinking" ? "选择思考强度" : "模型与思考强度"}
 					className="model-picker-dialog"
 					aria-busy={busy}

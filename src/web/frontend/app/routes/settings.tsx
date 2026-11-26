@@ -40,12 +40,13 @@ export default function Settings() {
 	usePointerMutex(navKbdActive, clearNavKbd);
 
 	function handleNavKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+		if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
 		const links = [...(navRef.current?.querySelectorAll<HTMLElement>(".settings-nav-link") ?? [])];
 		if (!links.length) return;
 		const currentIdx = Math.max(0, links.indexOf(document.activeElement as HTMLElement));
 		if (event.key === "ArrowDown" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
 			const first = routeRef.current?.querySelector<HTMLElement>(
-				'button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]',
+				'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
 			);
 			if (first) {
 				event.preventDefault();

@@ -1422,7 +1422,8 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("settings-providers-tab").visible());
         assert!(window.find("providers-cstoa-pinned-card").visible());
 
-        // Click `+ 添加提供商` -> Add Provider catalog (`FRRjK`), then `自定义提供商` -> hairline custom editor (`FxSIA`)
+        // Navigate to `+ 添加提供商` via keyboard (`down` -> `enter`) -> Add Provider catalog (`FRRjK`)
+        window.press("down", cx);
         window.click("providers-new-custom-btn", cx);
         assert!(window.find("providers-add-custom-row").visible());
         window.click("providers-add-custom-row", cx);
@@ -1430,6 +1431,15 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("providers-hdr-refresh-btn").visible());
         assert!(window.find("providers-hdr-add-model-btn").visible());
         assert!(window.find("providers-hairline-edit-table").visible());
+        // Protocol dropdown trigger is keyboard-activatable and Esc restores focus cleanly
+        window.click("custom-protocol-dropdown-trigger", cx);
+        assert!(window.find("custom-protocol-popover").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("custom-protocol-popover").is_none());
+        assert_eq!(
+            window.find("custom-protocol-dropdown-trigger").focused(),
+            Some(true)
+        );
     })
     .unwrap();
 

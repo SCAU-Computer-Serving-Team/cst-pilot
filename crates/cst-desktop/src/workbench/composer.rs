@@ -249,7 +249,7 @@ pub struct ComposerView {
     queue_last_pointer: Option<Point<Pixels>>,
     queue_tracker: KbdDynamicBoundsTracker,
     queue_selected_id: Option<String>,
-    queue_action_idx: Option<usize>,
+    queue_action: Option<QueueRowAction>,
     attach_btn_focus: FocusHandle,
     model_btn_focus: FocusHandle,
     context_btn_focus: FocusHandle,
@@ -368,7 +368,7 @@ impl ComposerView {
             queue_last_pointer: None,
             queue_tracker: KbdDynamicBoundsTracker::new(),
             queue_selected_id: None,
-            queue_action_idx: None,
+            queue_action: None,
             attach_btn_focus,
             model_btn_focus,
             context_btn_focus,
@@ -475,6 +475,9 @@ impl ComposerView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.is_ime_composing(window, cx) {
+            return false;
+        }
         #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("model_picker");
         self.clear_completion();
@@ -495,6 +498,15 @@ impl ComposerView {
             self.picker_prior_focus = window.focused(cx);
             self.model_btn_focus.focus(window, cx);
         }
+        cx.notify();
+        true
+    }
+
+    pub fn blur_if_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.focus_handle(cx).is_focused(window) || self.is_ime_composing(window, cx) {
+            return false;
+        }
+        window.blur(cx);
         cx.notify();
         true
     }
@@ -749,6 +761,15 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) {
         if !self.picker_open || !self.model_btn_focus.is_focused(window) {
+            return;
+        }
+        if event.keystroke.key.as_str() == "tab"
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.platform
+        {
+            // Keep focus trapped inside the open model picker popover until Esc/selection closes it.
+            cx.stop_propagation();
             return;
         }
         let snap = self.client.snapshot();
@@ -1508,7 +1529,7 @@ impl ComposerView {
         match step {
             KbdMenuStep::Move(next) => {
                 self.queue_selected_id = Some(queue.items[next].id.clone());
-                self.queue_action_idx = None;
+                self.queue_action = None;
                 self.queue_kbd_active = true;
                 self.queue_last_pointer = Some(window.mouse_position());
                 cx.stop_propagation();
@@ -1518,24 +1539,30 @@ impl ComposerView {
                 if slots.is_empty() {
                     return;
                 }
-                let next_a = match self.queue_action_idx {
+                let cur_pos = self
+                    .queue_action
+                    .and_then(|act| slots.iter().position(|&s| s == act));
+                let next_a = match cur_pos {
                     None => 0,
                     Some(i) => (i + 1).min(slots.len() - 1),
                 };
                 self.queue_selected_id = Some(item.id.clone());
-                self.queue_action_idx = Some(next_a);
+                self.queue_action = slots.get(next_a).copied();
                 self.queue_kbd_active = true;
                 self.queue_last_pointer = Some(window.mouse_position());
                 cx.stop_propagation();
                 cx.notify();
             }
             KbdMenuStep::BackLeft => {
-                let next_a = match self.queue_action_idx {
+                let cur_pos = self
+                    .queue_action
+                    .and_then(|act| slots.iter().position(|&s| s == act));
+                let next_a = match cur_pos {
                     None | Some(0) => None,
-                    Some(i) => Some(i - 1),
+                    Some(i) => slots.get(i - 1).copied(),
                 };
                 self.queue_selected_id = Some(item.id.clone());
-                self.queue_action_idx = next_a;
+                self.queue_action = next_a;
                 self.queue_kbd_active = true;
                 self.queue_last_pointer = Some(window.mouse_position());
                 cx.stop_propagation();
@@ -1551,6 +1578,9 @@ impl ComposerView {
                     if let Some(swap_pos) = target {
                         let mut next_ids = queued_ids.clone();
                         next_ids.swap(pos, swap_pos);
+                        let next_slots = queue_item_action_slots(item, &next_ids);
+                        // Preserve action identity across reorder; fall back to row if that action disappeared.
+                        self.queue_action = self.queue_action.filter(|a| next_slots.contains(a));
                         self.queue_selected_id = Some(item.id.clone());
                         self.queue_kbd_active = true;
                         self.queue_last_pointer = Some(window.mouse_position());
@@ -1566,10 +1596,10 @@ impl ComposerView {
                 }
             }
             KbdMenuStep::Activate(_) => {
-                let Some(a_idx) = self.queue_action_idx.filter(|&i| i < slots.len()) else {
-                    if !slots.is_empty() {
+                let Some(act) = self.queue_action.filter(|a| slots.contains(a)) else {
+                    self.queue_action = slots.first().copied();
+                    if self.queue_action.is_some() {
                         self.queue_selected_id = Some(item.id.clone());
-                        self.queue_action_idx = Some(0);
                         self.queue_kbd_active = true;
                         self.queue_last_pointer = Some(window.mouse_position());
                         cx.stop_propagation();
@@ -1577,7 +1607,6 @@ impl ComposerView {
                     }
                     return;
                 };
-                let act = slots[a_idx];
                 cx.stop_propagation();
                 match act {
                     QueueRowAction::MoveUp => {
@@ -2273,7 +2302,7 @@ impl Render for ComposerView {
                     kbd_style,
                     kbd_active: queue_focused && self.queue_kbd_active,
                     selected_id: queue_selected_id,
-                    action_idx: self.queue_action_idx,
+                    action: self.queue_action,
                     tracker: self.queue_tracker.clone(),
                     focus_handle: self.queue_focus.clone(),
                     on_key_down: Rc::new(move |ev, w, cx| {

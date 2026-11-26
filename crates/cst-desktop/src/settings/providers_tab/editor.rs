@@ -393,12 +393,14 @@ impl ProvidersTabView {
                                                     }
                                                     this.protocol_dropdown_open = false;
                                                     this.protocol_kbd_active = false;
+                                                    this.protocol_trigger_focus.focus(window, cx);
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
                                                 "escape" if !event.is_held => {
                                                     this.protocol_dropdown_open = false;
                                                     this.protocol_kbd_active = false;
+                                                    this.protocol_trigger_focus.focus(window, cx);
                                                     cx.notify();
                                                     cx.stop_propagation();
                                                 }
@@ -573,6 +575,8 @@ impl ProvidersTabView {
                                                 format!("接口协议：{}", self.protocol.label()),
                                                 self.protocol_dropdown_open,
                                             )
+                                            .track_focus(&self.protocol_trigger_focus)
+                                            .tab_index(0)
                                             .w_full()
                                             .h_full()
                                             .text_color(palette.text_primary)
@@ -586,6 +590,32 @@ impl ProvidersTabView {
                                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation();
                                             })
+                                            .on_key_down(cx.listener(
+                                                |this, ev: &KeyDownEvent, window, cx| {
+                                                    if !ev.is_held
+                                                        && ev.keystroke.modifiers
+                                                            == gpui::Modifiers::default()
+                                                        && matches!(
+                                                            ev.keystroke.key.as_str(),
+                                                            "enter" | "space" | "down"
+                                                        )
+                                                    {
+                                                        this.commit_inline_token_edit(cx);
+                                                        this.protocol_dropdown_open = true;
+                                                        this.protocol_kbd_active = true;
+                                                        this.protocol_last_pointer =
+                                                            Some(window.mouse_position());
+                                                        this.protocol_dropdown_index =
+                                                            CustomApiProtocol::ALL
+                                                                .iter()
+                                                                .position(|&p| p == this.protocol)
+                                                                .unwrap_or(0);
+                                                        this.protocol_focus.focus(window, cx);
+                                                        cx.notify();
+                                                        cx.stop_propagation();
+                                                    }
+                                                },
+                                            ))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.commit_inline_token_edit(cx);
                                                 this.protocol_dropdown_open =
@@ -1078,12 +1108,7 @@ impl ProvidersTabView {
             )
             .children(
                 (!self.creating_new_custom && self.active_provider_id.is_some()).then(|| {
-                    render_remove_credentials_card(
-                        palette,
-                        cx.listener(|this, _, window, cx| {
-                            this.remove_active_provider_credentials(window, cx);
-                        }),
-                    )
+                    self.render_remove_credentials_section(palette, kbd_style, window, cx)
                 }),
             )
     }

@@ -363,17 +363,28 @@ impl WorkbenchView {
         if self.has_modal() {
             return false;
         }
+        let composer = if self.active_session_id.is_some() {
+            self.session_composer.clone()
+        } else {
+            self.home_composer.clone()
+        };
+        if composer.update(cx, |comp, cx| comp.is_ime_composing(window, cx)) {
+            return false;
+        }
         if self.header_menu_open {
             self.header_menu_open = false;
             self.header_menu_prior_focus = None;
         }
-        if self.active_session_id.is_some() {
-            self.session_composer
-                .update(cx, |comp, cx| comp.open_model_picker_shortcut(window, cx))
+        composer.update(cx, |comp, cx| comp.open_model_picker_shortcut(window, cx))
+    }
+
+    pub fn blur_focused_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let composer = if self.active_session_id.is_some() {
+            self.session_composer.clone()
         } else {
-            self.home_composer
-                .update(cx, |comp, cx| comp.open_model_picker_shortcut(window, cx))
-        }
+            self.home_composer.clone()
+        };
+        composer.update(cx, |comp, cx| comp.blur_if_focused(window, cx))
     }
 
     pub fn abort_active_streaming(&mut self, cx: &mut Context<Self>) -> bool {

@@ -737,6 +737,14 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.tab_kbd_active
+                    && pointer_moved_past_threshold(&mut this.tab_last_pointer, ev.position)
+                {
+                    this.tab_kbd_active = false;
+                    cx.notify();
+                }
+            }))
             .child(render_subpage_header_xwjof(
                 "settings-subpage-header",
                 IconName::Settings,

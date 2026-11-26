@@ -800,13 +800,22 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
             st.set_value("尾部", window, cx);
         });
         window.press("home", cx);
-        // With no active completion menu, Tab escapes composer into footer controls.
+        // With no active completion menu, Tab escapes composer without inserting text or opening completion.
         window.press("tab", cx);
         assert!(
             window
                 .try_find("composer-completion-popover-p2bit")
                 .is_none()
         );
+        assert!(
+            !textarea
+                .read(cx)
+                .presentation()
+                .focus_handle()
+                .is_focused(window),
+            "Tab with no completion menu must move focus out of composer textarea"
+        );
+        assert_eq!(textarea.read(cx).value().as_ref(), "尾部");
         // Refocus composer at caret 0 and type `/` to trigger slash completion before the suffix.
         textarea.update(cx, |st, cx| {
             st.presentation().focus_handle().focus(window, cx);

@@ -8,13 +8,17 @@ export function SettingsSegment({
 	value,
 	items,
 	disabled = false,
+	busy = false,
 	onChange,
+	onVerticalNav,
 }: {
 	label: string;
 	value: string;
 	items: readonly { id: string; label: string; icon?: LucideIcon }[];
 	disabled?: boolean;
+	busy?: boolean;
 	onChange: (value: string) => void;
+	onVerticalNav?: (direction: -1 | 1) => void;
 }) {
 	const groupRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -25,7 +29,21 @@ export function SettingsSegment({
 	usePointerMutex(kbdActive, clearKbd);
 
 	function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-		if (disabled) return;
+		if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (
+			onVerticalNav &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey &&
+			(event.key === "ArrowUp" || event.key === "ArrowDown")
+		) {
+			event.preventDefault();
+			setKbdActive(false);
+			onVerticalNav(event.key === "ArrowUp" ? -1 : 1);
+			return;
+		}
+		if (disabled || busy) return;
 		const buttons = [...(groupRef.current?.querySelectorAll<HTMLElement>(".settings-chip") ?? [])];
 		if (!buttons.length) return;
 		const cur = Math.max(0, buttons.indexOf(document.activeElement as HTMLElement));
@@ -60,6 +78,7 @@ export function SettingsSegment({
 			ref={groupRef}
 			role="toolbar"
 			aria-label={label}
+			aria-busy={busy || undefined}
 			className="settings-chip-group"
 			data-kbd-active={kbdActive && focusedId !== null ? "true" : undefined}
 			onKeyDown={handleKeyDown}
@@ -82,6 +101,7 @@ export function SettingsSegment({
 						}}
 						type="button"
 						aria-pressed={selected}
+						aria-disabled={disabled || busy || undefined}
 						tabIndex={selected ? 0 : -1}
 						disabled={disabled}
 						className="settings-chip"
@@ -91,6 +111,7 @@ export function SettingsSegment({
 							if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
 						}}
 						onClick={() => {
+							if (disabled || busy) return;
 							setKbdActive(false);
 							if (!selected) onChange(item.id);
 						}}

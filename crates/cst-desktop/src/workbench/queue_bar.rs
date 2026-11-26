@@ -217,7 +217,7 @@ pub struct QueueBarKbdProps {
     pub kbd_style: KeyboardFocusStyleDto,
     pub kbd_active: bool,
     pub selected_id: Option<String>,
-    pub action_idx: Option<usize>,
+    pub action: Option<QueueRowAction>,
     pub tracker: KbdDynamicBoundsTracker,
     pub focus_handle: FocusHandle,
     pub on_key_down: QueueKeyDownFn,
@@ -320,15 +320,15 @@ pub fn render_queue_bar(
         let slots = queue_item_action_slots(item, &queued_ids);
         let is_selected_row = kbd_active && kbd.selected_id.as_deref() == Some(iid.as_str());
         if is_selected_row {
-            if let Some(a_idx) = kbd.action_idx.filter(|&i| i < slots.len()) {
-                let tone = if slots[a_idx] == QueueRowAction::Delete {
+            if let Some(act) = kbd.action.filter(|a| slots.contains(a)) {
+                let tone = if act == QueueRowAction::Delete {
                     KbdTone::Danger
                 } else {
                     KbdTone::Neutral
                 };
                 active_spec = Some(
                     KbdDynamicSpec::control(
-                        format!("act-{iid}-{a_idx}"),
+                        format!("act-{iid}-{act:?}"),
                         KbdRailPlacement::BottomCenter,
                     )
                     .with_tone(tone),
@@ -339,7 +339,6 @@ pub fn render_queue_bar(
         }
 
         let mut actions = div().flex().items_center().gap(space::XS).flex_shrink_0();
-        let mut slot_idx = 0usize;
 
         if can_reorder
             && queued_ids.len() > 1
@@ -351,8 +350,7 @@ pub fn render_queue_bar(
                 next_ids.swap(pos, pos - 1);
                 let up_id = SharedString::from(format!("queue-move-up-{iid}"));
                 let tr = kbd.tracker.clone();
-                let key = SharedString::from(format!("act-{iid}-{slot_idx}"));
-                slot_idx += 1;
+                let key = SharedString::from(format!("act-{iid}-{:?}", QueueRowAction::MoveUp));
                 actions = actions.child(
                     div()
                         .id(up_id.clone())
@@ -366,7 +364,13 @@ pub fn render_queue_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (reorder_up)(version, next_ids.clone(), w, cx);
                         })
@@ -384,8 +388,7 @@ pub fn render_queue_bar(
                 next_ids.swap(pos, pos + 1);
                 let down_id = SharedString::from(format!("queue-move-down-{iid}"));
                 let tr = kbd.tracker.clone();
-                let key = SharedString::from(format!("act-{iid}-{slot_idx}"));
-                slot_idx += 1;
+                let key = SharedString::from(format!("act-{iid}-{:?}", QueueRowAction::MoveDown));
                 actions = actions.child(
                     div()
                         .id(down_id.clone())
@@ -399,7 +402,13 @@ pub fn render_queue_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (reorder_down)(version, next_ids.clone(), w, cx);
                         })
@@ -439,13 +448,16 @@ pub fn render_queue_bar(
             let del_id = SharedString::from(format!("queue-delete-btn-{iid}"));
 
             let tr_pri = kbd.tracker.clone();
-            let key_pri = SharedString::from(format!("act-{iid}-{slot_idx}"));
-            slot_idx += 1;
+            let pri_act = if is_failed {
+                QueueRowAction::Retry
+            } else {
+                QueueRowAction::Steer
+            };
+            let key_pri = SharedString::from(format!("act-{iid}-{pri_act:?}"));
             let tr_edit = kbd.tracker.clone();
-            let key_edit = SharedString::from(format!("act-{iid}-{slot_idx}"));
-            slot_idx += 1;
+            let key_edit = SharedString::from(format!("act-{iid}-{:?}", QueueRowAction::Edit));
             let tr_del = kbd.tracker.clone();
-            let key_del = SharedString::from(format!("act-{iid}-{slot_idx}"));
+            let key_del = SharedString::from(format!("act-{iid}-{:?}", QueueRowAction::Delete));
 
             actions = actions
                 .child(
@@ -461,7 +473,13 @@ pub fn render_queue_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (action_fn)(iid_act.clone(), version, w, cx);
                         })
@@ -489,7 +507,13 @@ pub fn render_queue_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (edit_fn)(item_for_edit.clone(), version, w, cx);
                         })
@@ -513,7 +537,13 @@ pub fn render_queue_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (del_fn)(iid_del.clone(), version, w, cx);
                         })

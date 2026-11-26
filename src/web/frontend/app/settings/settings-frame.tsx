@@ -3,6 +3,7 @@ import { type ComponentProps, createContext, type ReactNode, useContext, useEffe
 import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { Notification } from "../shell/notification";
+import { hasOpenDismissiblePanel } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { loadSetting, settingReady } from "./settings-resource-cache";
 
@@ -141,8 +142,9 @@ export function SettingsHeading({
 				event.defaultPrevented ||
 				event.isComposing ||
 				event.keyCode === 229 ||
+				hasOpenDismissiblePanel() ||
 				document.querySelector(
-					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"], [role="listbox"], [role="tooltip"]',
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"], [role="dialog"], [role="alertdialog"], [role="menu"]',
 				)
 			)
 				return;

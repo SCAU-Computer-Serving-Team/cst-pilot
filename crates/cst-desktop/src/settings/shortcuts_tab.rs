@@ -24,11 +24,13 @@ pub fn render_shortcuts_tab(
         ("Alt + M", "打开模型与思考强度选择器"),
         ("行首 /", "唤出斜杠命令与诊断技能补全面板"),
         ("@", "检索当前会话工作目录文件并附加引用"),
+        ("Tab", "补全打开时接受候选项；补全关闭时移出输入焦点"),
+        ("↑ ↓ ← →", "方向键浏览列表与按钮；输入框首末行跳至起止"),
         ("Ctrl + V", "粘贴剪贴板截图或文本"),
-        ("Esc", "逐级关闭悬浮面板（候选态下仅取消拼音）"),
+        ("Esc", "逐级关闭浮层与补全、停止当前生成或退出输入态"),
     ];
 
-    let pref_shortcuts = [("Alt + ↑ / ↓", "上下移动已启用模型顺序")];
+    let pref_shortcuts = [("Alt + ↑ / ↓", "上下移动已启用模型或排队消息顺序")];
 
     div()
         .id("settings-shortcuts-tab")
@@ -51,7 +53,7 @@ pub fn render_shortcuts_tab(
             palette,
         ))
         .child(shortcut_group_list(
-            "模型偏好",
+            "列表与排序",
             &pref_shortcuts,
             mono_family,
             palette,
