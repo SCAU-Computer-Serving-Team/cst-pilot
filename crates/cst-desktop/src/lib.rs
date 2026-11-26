@@ -280,6 +280,8 @@ pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
 
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         if let Ok(win_dir) = cst_os::windows_directory() {
             cmd.env("SystemRoot", &win_dir).env("WINDIR", &win_dir);
         }

@@ -1,3 +1,6 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -177,10 +180,16 @@ fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(msg) => {
-            eprintln!("{msg}");
+            cst_os::attach_parent_console_if_stdio_missing();
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
+
+    if args.standalone_web || args.health_check {
+        cst_os::attach_parent_console_if_stdio_missing();
+    }
 
     let kit_root = match args
         .kit_root
@@ -190,7 +199,8 @@ fn main() -> ExitCode {
     {
         Ok(r) => r,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
@@ -198,7 +208,8 @@ fn main() -> ExitCode {
     if args.sanitize_env
         && let Err(msg) = sanitize_current_process_env(&kit_root)
     {
-        eprintln!("{msg}");
+        let _ = writeln!(std::io::stderr(), "{msg}");
+        let _ = std::io::stderr().flush();
         return ExitCode::FAILURE;
     }
 
@@ -208,7 +219,8 @@ fn main() -> ExitCode {
     {
         Ok(rt) => rt,
         Err(err) => {
-            eprintln!("无法初始化异步运行时：{err}");
+            let _ = writeln!(std::io::stderr(), "无法初始化异步运行时：{err}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
@@ -223,11 +235,13 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
             option_env!("CST_BUILD_VERSION"),
         ) {
             Ok(version) => {
-                println!("cst-pilot {version}");
+                let _ = writeln!(std::io::stdout(), "cst-pilot {version}");
+                let _ = std::io::stdout().flush();
                 ExitCode::SUCCESS
             }
             Err(msg) => {
-                eprintln!("{msg}");
+                let _ = writeln!(std::io::stderr(), "{msg}");
+                let _ = std::io::stderr().flush();
                 ExitCode::FAILURE
             }
         };
@@ -236,19 +250,22 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     let kit = match Kit::new(&kit_root) {
         Ok(k) => k,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
     if let Err(msg) = kit.ensure_default_configs() {
-        eprintln!("{msg}");
+        let _ = writeln!(std::io::stderr(), "{msg}");
+        let _ = std::io::stderr().flush();
         return ExitCode::FAILURE;
     }
 
     let oa_client = match OaClient::official() {
         Ok(c) => c,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
@@ -256,7 +273,8 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     let auth = match AuthRuntime::create(kit.root(), Channel::Gui, oa_client).await {
         Ok(a) => a,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
@@ -271,7 +289,8 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     {
         Ok(h) => h,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
@@ -285,12 +304,18 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     let server = match RunningServer::start(host, config).await {
         Ok(s) => s,
         Err(msg) => {
-            eprintln!("{msg}");
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
 
-    println!("cst-server listening on {}", server.base_url());
+    let _ = writeln!(
+        std::io::stdout(),
+        "cst-server listening on {}",
+        server.base_url()
+    );
+    let _ = std::io::stdout().flush();
     if args.open_browser {
         open_default_browser(&format!("{}/", server.base_url()));
     }

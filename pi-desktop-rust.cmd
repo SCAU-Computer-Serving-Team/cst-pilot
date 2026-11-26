@@ -39,12 +39,35 @@ if errorlevel 1 exit /b %errorlevel%
 goto :run_debug
 
 :run_release
-"%ROOT%target\release\cst-pilot.exe" --kit-root "%ROOT%." %1 %2 %3 %4 %5 %6 %7 %8 %9
-exit /b %errorlevel%
+set "TARGET_EXE=%ROOT%target\release\cst-pilot.exe"
+goto :launch_target
 
 :run_debug
-"%ROOT%target\debug\cst-pilot.exe" --kit-root "%ROOT%." %1 %2 %3 %4 %5 %6 %7 %8 %9
+set "TARGET_EXE=%ROOT%target\debug\cst-pilot.exe"
+goto :launch_target
+
+:launch_target
+set "SYNC_RUN=0"
+call :detect_sync_mode %1 %2 %3 %4 %5 %6 %7 %8 %9
+if "%SYNC_RUN%"=="1" (
+    "%TARGET_EXE%" --kit-root "%ROOT%." %1 %2 %3 %4 %5 %6 %7 %8 %9
+    exit /b %errorlevel%
+)
+start "" "%TARGET_EXE%" --kit-root "%ROOT%." %1 %2 %3 %4 %5 %6 %7 %8 %9
 exit /b %errorlevel%
+
+:detect_sync_mode
+if "%~1"=="" exit /b 0
+if /I "%~1"=="--health-check" (
+    set "SYNC_RUN=1"
+    exit /b 0
+)
+if /I "%~1"=="--ui" (
+    if /I "%~2"=="web" set "SYNC_RUN=1"
+    if /I "%~2"=="tui" set "SYNC_RUN=1"
+)
+shift
+goto :detect_sync_mode
 
 :binary_missing
 echo [cst-pilot] ERROR: desktop binaries were not found under target\ and cargo is not available. 1>&2

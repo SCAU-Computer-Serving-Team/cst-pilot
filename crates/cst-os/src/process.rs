@@ -117,7 +117,7 @@ pub fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// Spawns a detached helper process in its own process group with null stdio handles.
+/// Spawns a detached helper process in its own process group with null stdio handles and no console window.
 pub fn launch_detached(exe: &Path, args: &[OsString], cwd: &Path) -> Result<u32, String> {
     let mut command = std::process::Command::new(exe);
     command
@@ -129,12 +129,108 @@ pub fn launch_detached(exe: &Path, args: &[OsString], cwd: &Path) -> Result<u32,
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0000_0200); // CREATE_NEW_PROCESS_GROUP
+        // CREATE_NO_WINDOW (0x0800_0000) | CREATE_NEW_PROCESS_GROUP (0x0000_0200)
+        command.creation_flags(0x0800_0200);
     }
     command
         .spawn()
         .map(|child| child.id())
         .map_err(|_| "升级辅助进程无法启动。".into())
+}
+
+/// Attaches a `windows_subsystem = "windows"` executable to its parent process's existing console
+/// only when neither `stdout` nor `stderr` is already connected to a valid handle (such as a pipe,
+/// file, `NUL` device, or inherited console).
+///
+/// Never calls `AllocConsole()`, so headless or GUI launches never open a console window.
+pub fn attach_parent_console_if_stdio_missing() -> bool {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::Foundation::{
+            GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+        };
+        use windows::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            FILE_TYPE_UNKNOWN, GetFileType, OPEN_EXISTING,
+        };
+        use windows::Win32::System::Console::{
+            ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_HANDLE,
+            STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+        };
+        use windows::core::PCWSTR;
+
+        fn has_valid_std_handle(id: STD_HANDLE) -> bool {
+            let Ok(handle) = (unsafe { GetStdHandle(id) }) else {
+                return false;
+            };
+            if handle.is_invalid() || handle == HANDLE::default() || handle == INVALID_HANDLE_VALUE
+            {
+                return false;
+            }
+            unsafe { GetFileType(handle) != FILE_TYPE_UNKNOWN }
+        }
+
+        // Preserve any redirected pipe/file/NUL/console standard handles.
+        if has_valid_std_handle(STD_OUTPUT_HANDLE) || has_valid_std_handle(STD_ERROR_HANDLE) {
+            return false;
+        }
+
+        if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_err() {
+            return false;
+        }
+
+        // Under Windows Terminal (ConPTY), `AttachConsole` may leave GUI-subsystem PEB std handles
+        // unset; bind `CONOUT$` / `CONIN$` only for handles that remain invalid.
+        if !has_valid_std_handle(STD_OUTPUT_HANDLE) || !has_valid_std_handle(STD_ERROR_HANDLE) {
+            let conout: Vec<u16> = OsStr::new("CONOUT$").encode_wide().chain([0]).collect();
+            if let Ok(handle) = unsafe {
+                CreateFileW(
+                    PCWSTR(conout.as_ptr()),
+                    GENERIC_READ.0 | GENERIC_WRITE.0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None,
+                )
+            } && !handle.is_invalid()
+                && handle != INVALID_HANDLE_VALUE
+            {
+                if !has_valid_std_handle(STD_OUTPUT_HANDLE) {
+                    let _ = unsafe { SetStdHandle(STD_OUTPUT_HANDLE, handle) };
+                }
+                if !has_valid_std_handle(STD_ERROR_HANDLE) {
+                    let _ = unsafe { SetStdHandle(STD_ERROR_HANDLE, handle) };
+                }
+            }
+        }
+        if !has_valid_std_handle(STD_INPUT_HANDLE) {
+            let conin: Vec<u16> = OsStr::new("CONIN$").encode_wide().chain([0]).collect();
+            if let Ok(handle) = unsafe {
+                CreateFileW(
+                    PCWSTR(conin.as_ptr()),
+                    GENERIC_READ.0 | GENERIC_WRITE.0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    None,
+                )
+            } && !handle.is_invalid()
+                && handle != INVALID_HANDLE_VALUE
+            {
+                let _ = unsafe { SetStdHandle(STD_INPUT_HANDLE, handle) };
+            }
+        }
+
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 /// Queries the Win32 executable image path of `pid` (`None` if the process has exited).
@@ -502,5 +598,11 @@ mod tests {
         let token_info = current_process_token_info().unwrap();
         assert!(!token_info.user_sid.is_empty());
         assert!(token_info.same_user_and_session(&token_info));
+    }
+
+    #[test]
+    fn attach_parent_console_preserves_existing_std_handles() {
+        // Under cargo test, stdout/stderr are connected to a console or redirected pipe.
+        assert!(!attach_parent_console_if_stdio_missing());
     }
 }
