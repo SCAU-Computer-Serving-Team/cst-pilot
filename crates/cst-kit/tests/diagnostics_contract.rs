@@ -204,6 +204,8 @@ fn process(pid: u32, created: u64, cpu: u64, mem: u64) -> ProcessSample {
         name: format!("p{pid}"),
         working_set: Some(mem),
         path: None,
+        read_bytes: None,
+        write_bytes: None,
     }
 }
 fn event(record: u64, id: u16, provider: &str) -> EventRecord {
@@ -213,6 +215,7 @@ fn event(record: u64, id: u16, provider: &str) -> EventRecord {
         id,
         provider: provider.into(),
         time: format!("2026-11-08T01:{:02}:00.000Z", record % 60),
+        time_raw: 134_000_000_000_000_000 + record * 600_000_000,
         level: 2,
         message: Some("应用 崩溃\n详情".repeat(100)),
         machine: Some("mock".into()),
@@ -503,7 +506,13 @@ fn startup_disabled_tristate_and_running_service_order_are_stable() {
             .unwrap()
             .chars()
             .count(),
-        143
+        141
+    );
+    assert!(
+        value["services"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with('…')
     );
     assert!(value["regItems"][0]["disabled"].is_null());
 }
@@ -603,10 +612,12 @@ fn event_filters_counts_bounds_errors_and_detail_contract() {
     }
     let mut source = MockSource::default();
     source.fail("System", 15007);
-    let result = eventlog::run(&source, input(json!({"scope":"query"})), &control()).unwrap();
-    assert_eq!(result["query"]["degraded"], true);
-    assert_eq!(result["query"]["collectionErrors"][0]["code"], 15007);
-    assert!(result["query"]["noMatch"].is_null());
+    assert!(eventlog::run(&source, input(json!({"scope":"query"})), &control()).is_err());
+    // Partial channel failure in `recent` (System fails, Application succeeds) returns degraded result.
+    let partial = eventlog::run(&source, input(json!({"scope":"recent"})), &control()).unwrap();
+    assert_eq!(partial["recent"]["degraded"], true);
+    assert_eq!(partial["recent"]["collectionErrors"][0]["code"], 15007);
+    assert!(partial["recent"]["noMatch"].is_null());
 }
 #[test]
 fn event_formats_only_final_top_after_provider_filter_and_joining_logs() {
@@ -783,6 +794,8 @@ fn event_detail_keeps_newlines_and_caps_twenty_thousand_characters() {
     let message = result["detail"]["msg"].as_str().unwrap();
     assert_eq!(message.chars().count(), 20000);
     assert!(message.contains('\n'));
+    assert_eq!(result["detail"]["msgTruncated"], true);
+    assert_eq!(result["detail"]["originalChars"], 30000);
 }
 
 #[tokio::test]
@@ -1003,4 +1016,66 @@ fn disk_prefers_native_extents_volumes_ioctl_health_and_single_batch_wmi_fallbac
     assert_eq!(pe_info["physicalDisks"][0]["FriendlyName"], "WinPE NVMe");
     assert!(pe_info["physicalDisks"][0]["HealthStatus"].is_null());
     assert!(pe_info.get("degraded").is_none());
+}
+
+#[test]
+fn eventlog_provider_regex_matches_substrings_and_orders_by_filetime_across_dst() {
+    let mut source = MockSource::default();
+    let older = EventRecord {
+        log: "System".into(),
+        record_id: 10,
+        id: 100,
+        provider: "Microsoft-Windows-DiskDiagnostic".into(),
+        // Before DST fallback: local 01:30-04:00 (05:30Z)
+        time: "2026-11-01T01:30:00-04:00".into(),
+        time_raw: 134_065_350_000_000_000,
+        level: 2,
+        message: Some("older event".into()),
+        machine: Some("mock".into()),
+    };
+    let newer = EventRecord {
+        log: "System".into(),
+        record_id: 11,
+        id: 100,
+        provider: "Microsoft-Windows-DiskDiagnostic".into(),
+        // After DST fallback: local 01:15-05:00 (06:15Z, lexically smaller than 01:30-04:00!)
+        time: "2026-11-01T01:15:00-05:00".into(),
+        time_raw: 134_065_377_000_000_000,
+        level: 2,
+        message: Some("newer event".into()),
+        machine: Some("mock".into()),
+    };
+    source.events = vec![older, newer];
+
+    // Substring literal provider regex must match locally (not be pushed down as exact XPath equality).
+    let res = eventlog::run(
+        &source,
+        input(json!({"scope":"query","logName":"System","provider":"Disk"})),
+        &control(),
+    )
+    .unwrap();
+    let q = &res["query"];
+    assert_eq!(q["total"], 2);
+    assert_eq!(q["events"][0]["recordId"], 11);
+    assert_eq!(q["events"][1]["recordId"], 10);
+    assert_eq!(q["firstTime"], "2026-11-01T01:30:00-04:00");
+    assert_eq!(q["lastTime"], "2026-11-01T01:15:00-05:00");
+}
+
+#[test]
+fn driver_core_dmtf_date_rejects_non_ascii_and_invalid_calendar_without_panicking() {
+    let mut source = MockSource::default();
+    source.rows(
+        "Win32_PnPSignedDriver",
+        vec![
+            json!({"DeviceClass":"NET","DeviceName":"NIC1","DriverVersion":"1.0","DriverDate":"20260228000000.000000+000","DriverProviderName":"Vendor"}),
+            json!({"DeviceClass":"NET","DeviceName":"NIC2","DriverVersion":"1.0","DriverDate":"2026年02月28日","DriverProviderName":"Vendor"}),
+            json!({"DeviceClass":"NET","DeviceName":"NIC3","DriverVersion":"1.0","DriverDate":"20261345000000.000000+000","DriverProviderName":"Vendor"}),
+        ],
+    );
+    let res = driver::run(&source, input(json!({"scope":"core"})), &control()).unwrap();
+    let drivers = res["core"]["drivers"].as_array().unwrap();
+    assert_eq!(drivers[0]["date"], "2026-02-28");
+    assert_eq!(drivers[1]["date"], "2026年02月28日");
+    assert_eq!(drivers[2]["date"], "20261345000000.000000+000");
 }

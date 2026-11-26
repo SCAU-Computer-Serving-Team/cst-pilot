@@ -77,18 +77,15 @@ fn allowlist_has_exactly_the_product_tools_without_execution_or_writes() {
         "startup",
         "eventlog",
         "driver",
-        "command_plan",
-        "runbook_deliver",
         "runbook",
         "bitlocker",
         "fffind",
         "ffgrep",
         "web_search",
-        "source_check",
-        "fetch_content",
+        "web_fetch",
         "get_search_content",
     ];
-    assert_eq!(OPEN_TOOL_NAMES.len(), 17);
+    assert_eq!(OPEN_TOOL_NAMES.len(), 14);
     assert_eq!(
         OPEN_TOOL_NAMES.iter().copied().collect::<BTreeSet<_>>(),
         expected.into_iter().collect()
@@ -509,7 +506,8 @@ async fn dns_validation_rejects_mixed_answers_and_pins_only_validated_addresses(
                 HttpRequest {
                     url: "https://public.example".into(),
                     body: None,
-                    headers: vec![]
+                    headers: vec![],
+                    timeout_ms: None,
                 },
                 cancel
             )
@@ -600,7 +598,7 @@ async fn fetch_strips_scripts_and_cache_evicts_old_results_without_disk_writes()
         .fetch(
             FetchInput {
                 url: Some("https://example.com".into()),
-                urls: vec![],
+                ..Default::default()
             },
             CancellationToken::new(),
         )
@@ -614,7 +612,7 @@ async fn fetch_strips_scripts_and_cache_evicts_old_results_without_disk_writes()
         web.fetch(
             FetchInput {
                 url: Some("https://example.com".into()),
-                urls: vec![],
+                ..Default::default()
             },
             CancellationToken::new(),
         )
@@ -646,7 +644,7 @@ async fn errors_and_invalid_requests_do_not_leak_provider_response_bodies() {
         web.fetch(
             FetchInput {
                 url: Some("http://127.0.0.1".into()),
-                urls: vec![]
+                ..Default::default()
             },
             CancellationToken::new()
         )
@@ -773,18 +771,28 @@ async fn sdk_session_keeps_resources_and_allowlist_isolated_through_reload_and_t
             .contains("按大小")
     );
     let read = tools.iter().find(|tool| tool.name == "read").unwrap();
-    let error = (read.execute)(
+    let denied = (read.execute)(
         "denied".into(),
         json!({"path":"../data/config/auth.json"}),
         None,
         None,
     )
     .await
-    .unwrap_err();
-    assert!(!error.contains("SYNTHETIC_AUTH_SECRET"));
+    .unwrap();
+    assert!(denied.is_error);
+    assert!(denied.details["elapsedMs"].is_u64());
+    assert!(
+        !denied.details["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("SYNTHETIC_AUTH_SECRET")
+    );
     let result = (read.execute)("normal".into(), json!({"path":"normal.txt"}), None, None)
         .await
         .unwrap();
+    assert!(!result.is_error);
+    assert_eq!(result.details["kind"], "text");
+    assert!(result.details["elapsedMs"].is_u64());
     assert!(result.content.iter().any(|block| matches!(block, UserContentBlock::Text(text) if text.text.contains("可公开的文件内容"))));
     created.session.reload().await.unwrap();
     assert!(

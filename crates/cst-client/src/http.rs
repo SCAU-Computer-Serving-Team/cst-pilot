@@ -910,6 +910,28 @@ impl AppHttpClient {
             .await
     }
 
+    pub async fn export_session_runbook(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+        tool_call_id: &str,
+        open: bool,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/runbook/export"),
+            Some(&json!({
+                "entryId": entry_id,
+                "toolCallId": tool_call_id,
+                "open": open,
+            })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
     pub async fn open_session_runbook(
         &self,
         session_id: &str,

@@ -1,16 +1,16 @@
 pub mod model;
 mod plan_store;
-pub mod sequence_store;
 pub(crate) mod storage;
 
 use crate::diagnostics::result::diagnostic_result;
-use model::{DeliverInput, PlanInput, RunbookInput};
+use model::RunbookToolInput;
 use pi_session::ToolDefinition;
-use sequence_store::DirectoryLock;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use storage::{Storage, cancelled};
 use tokio_util::sync::CancellationToken;
+
+pub use storage::DirectoryLock;
 
 #[derive(Clone)]
 pub struct RunbookStore {
@@ -18,6 +18,7 @@ pub struct RunbookStore {
     storage: Storage,
     root_state: Arc<crate::kit::KitRootState>,
 }
+
 impl RunbookStore {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, String> {
         let layout = cst_os::KitLayout::new(root.as_ref())?;
@@ -28,6 +29,7 @@ impl RunbookStore {
             root_state,
         })
     }
+
     async fn locked_plans<T, F>(&self, cancel: CancellationToken, task: F) -> Result<T, String>
     where
         T: Send + 'static,
@@ -61,47 +63,17 @@ impl RunbookStore {
         .await
         .map_err(|_| "命令交付工作线程异常退出。".to_string())?
     }
-    async fn locked<T, F>(
-        &self,
-        relative: PathBuf,
-        cancel: CancellationToken,
-        task: F,
-    ) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(&Storage, &Path, &CancellationToken) -> Result<T, String> + Send + 'static,
-    {
-        let activity = self.root_state.gate.enter()?;
-        let writers = self.root_state.runbook_writes.clone();
-        let child = cancel.child_token();
-        let _cancel_on_drop = child.clone().drop_guard();
-        let permit = tokio::select! {
-            biased;
-            _ = cancel.cancelled() => return Err("命令交付已取消。".into()),
-            permit = writers.lock_owned() => permit,
-        };
-        let storage = self.storage.clone();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            let _activity = activity;
-            cancelled(&child)?;
-            let _lease = storage.pin_directory(&relative, true)?;
-            let dir = storage.directory(&relative, false)?;
-            let _lock = DirectoryLock::acquire(&dir)?;
-            cancelled(&child)?;
-            task(&storage, &dir, &child)
-        })
-        .await
-        .map_err(|_| "命令交付工作线程异常退出。".to_string())?
-    }
+}
+
+pub fn is_runbook_tool(name: &str) -> bool {
+    matches!(name, "runbook" | "command_plan" | "runbook_deliver")
 }
 
 pub fn is_runbook_delivery_tool(name: &str) -> bool {
     matches!(name, "runbook" | "runbook_deliver")
 }
 
-/// Extracts the delivered runbook text file path from a `runbook` or `runbook_deliver` tool result.
-pub fn extract_delivered_runbook_file(message: &pi_ai::ToolResultMessage) -> Option<String> {
+fn extract_runbook_object(message: &pi_ai::ToolResultMessage) -> Option<serde_json::Value> {
     if message.is_error {
         return None;
     }
@@ -117,64 +89,43 @@ pub fn extract_delivered_runbook_file(message: &pi_ai::ToolResultMessage) -> Opt
             .join("\n");
         serde_json::from_str::<serde_json::Value>(&joined).ok()
     })?;
-    details_val
-        .get("runbook")
-        .and_then(|r| r.get("file"))
+    details_val.get("runbook").cloned()
+}
+
+/// Extracts the delivered/exported runbook text file path from a `runbook` or legacy `runbook_deliver` tool result.
+pub fn extract_delivered_runbook_file(message: &pi_ai::ToolResultMessage) -> Option<String> {
+    extract_runbook_object(message)?
+        .get("file")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
 }
 
+/// Extracts `(runbookId, version)` from a saved `runbook` or legacy `command_plan` tool result.
+pub fn extract_runbook_plan_ref(message: &pi_ai::ToolResultMessage) -> Option<(String, u64)> {
+    let rb = extract_runbook_object(message)?;
+    let id = rb.get("runbookId")?.as_str()?.to_owned();
+    let version = rb.get("version")?.as_u64()?;
+    Some((id, version))
+}
+
 pub fn definitions(root: &Path) -> Result<Vec<ToolDefinition>, String> {
     let store = RunbookStore::new(root)?;
-    let plan_store = store.clone();
-    let mut plan = ToolDefinition::from_typed(
-        "command_plan",
-        "Command Plan",
-        "保存或修订手动修复方案，返回完整命令、稳定 ID 与版本。只写工具包 data/plans，不执行命令。",
-        move |_, input: PlanInput, cancel, _, _| {
-            let store = plan_store.clone();
-            async move { diagnostic_result(store.plan(input, cancel.unwrap_or_default()).await?) }
-        },
-    );
-    let deliver_store = store.clone();
-    let mut deliver = ToolDefinition::from_typed(
-        "runbook_deliver",
-        "Deliver Runbook",
-        "按已核对的 runbookId 与最新 version 导出 UTF-8 BOM + CRLF 文本。同版本重试沿用原文件，现场修改过的文件不覆盖。",
-        move |_, input: DeliverInput, cancel, _, _| {
-            let store = deliver_store.clone();
-            async move { diagnostic_result(store.deliver(input, cancel.unwrap_or_default()).await?) }
-        },
-    );
     let mut runbook = ToolDefinition::from_typed(
         "runbook",
-        "Command Runbook",
-        "单步交付手动修复清单至 artifacts/<日期>/runbook。序号当天递增；传入已有 sequence 修正原清单，只写 TXT，不执行命令。",
-        move |_, input: RunbookInput, cancel, _, _| {
+        "Runbook",
+        "唯一命令清单工具，管理手动修复命令方案并按需导出 UTF-8 BOM + CRLF 纯文本清单。action=\"plan\"（默认）保存版本化方案至 data/plans（修订传 runbookId+baseVersion，传 exportTxt=true 可同步导出）；action=\"export\" 按 runbookId 与 version 导出至 artifacts/<日期>/runbook/<序号>-<风险档>-<标题>-v<版本>.txt。只写清单不执行命令。",
+        move |_, input: RunbookToolInput, cancel, _, _| {
             let store = store.clone();
-            async move { diagnostic_result(store.write(input, cancel.unwrap_or_default()).await?) }
+            async move { diagnostic_result(store.execute(input, cancel.unwrap_or_default()).await?) }
         },
     );
-    for (definition, snippet) in [
-        (
-            &mut plan,
-            "Prepare or revise a versioned manual repair command plan",
-        ),
-        (
-            &mut deliver,
-            "Export an agreed command plan version as a copy-paste text file",
-        ),
-        (
-            &mut runbook,
-            "Write or revise a sequence-based manual repair text file",
-        ),
-    ] {
-        definition.prompt_snippet = Some(snippet.into());
-        definition.prompt_guidelines = Some(vec![
-            "Read skills/runbook/SKILL.md. Merge commands of the same risk level. Do not include diagnostic data collection, destructive or system-breaking operations. No tool executes commands.".into(),
-            "Use command_plan for every new or revised command batch. Revisions require the exact runbookId and baseVersion plus the full items. On conflict, inspect the latest saved plan first.".into(),
-            "Explain the plan and obtain the member's agreement before runbook_deliver. Use runbook only for an explicit immediate TXT request or an existing sequence-based file. Repeat the returned file path and manual execution requirements.".into(),
-        ]);
-    }
-    Ok(vec![plan, deliver, runbook])
+    runbook.prompt_snippet = Some(
+        "管理手动修复命令方案并按需导出纯文本清单：action=\"plan\"（默认，传 exportTxt=true 可同步导出）与 action=\"export\"（传 runbookId+version）。只写清单不执行命令。"
+            .into(),
+    );
+    runbook.prompt_guidelines = Some(vec![
+        "生成或修订修复命令前先阅读 app/skills/runbook/SKILL.md；合并同风险档命令，不写入诊断采集或破坏系统的操作，工具绝不自动执行命令。".into(),
+        "统一通过唯一工具 runbook 管理方案：新增或修订用 action=\"plan\"（修订须传 runbookId、baseVersion 与完整 items，默认 exportTxt=false 便于队员先核对并在卡片一键导出 TXT）；需立即导出时传 exportTxt=true 或调用 action=\"export\"（传 runbookId 与 version）。".into(),
+    ]);
+    Ok(vec![runbook])
 }

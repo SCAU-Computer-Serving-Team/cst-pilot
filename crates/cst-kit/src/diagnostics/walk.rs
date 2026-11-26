@@ -3,7 +3,7 @@ use super::scan::{
     format_modified_utc, gib, hardlink_rank_key, pct,
 };
 use super::volume_index::{display_path, path_key};
-use super::win_native::{Control, rounded};
+use super::win_native::Control;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs::{self, Metadata};
@@ -1449,7 +1449,6 @@ pub fn usage_with_filter(
     if linked(&meta) || !meta.is_dir() {
         return Err("目标必须是目录且不能是链接或重解析点。".into());
     }
-    let start = Instant::now();
     let initial_dirs = vec![DirRecord {
         parent: None,
         path: root.to_path_buf(),
@@ -1487,7 +1486,7 @@ pub fn usage_with_filter(
             })
         })
         .collect::<Vec<_>>();
-    // Strictly align with `doc/diagnostics/API.md`: `topFiles` items contain `{ path, sizeGB, modified }`.
+    // Strictly align with `doc/tools/API.md`: `topFiles` items contain `{ path, sizeGB, modified }`.
     let top_files = outcome
         .top_files
         .into_iter()
@@ -1529,12 +1528,11 @@ pub fn usage_with_filter(
     };
     let mut stats = json!({
         "filesScanned": outcome.scanned,
-        "elapsedSec": rounded(start.elapsed().as_secs_f64(), 1)
     });
     if limits.entries < usize::MAX {
         stats["budget"] = json!(limits.entries);
     }
-    Ok(json!({
+    let mut result = json!({
         "method": "native-walk",
         "root": display_path(root),
         "totalGB": gib(outcome.total),
@@ -1546,7 +1544,11 @@ pub fn usage_with_filter(
         "truncated": outcome.incomplete,
         "denied": outcome.denied,
         "notice": notice
-    }))
+    });
+    if outcome.exhausted {
+        result["degraded"] = json!(true);
+    }
+    Ok(result)
 }
 
 #[cfg(windows)]

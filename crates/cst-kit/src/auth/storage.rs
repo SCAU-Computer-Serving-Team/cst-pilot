@@ -12,10 +12,7 @@ use serde_json::{Map, Value};
 use tokio::sync::OwnedMutexGuard;
 use tokio_util::sync::CancellationToken;
 
-use crate::runbook::{
-    sequence_store::DirectoryLock,
-    storage::{DirectoryLease, Storage, StorageAtomicExt},
-};
+use crate::runbook::storage::{DirectoryLease, DirectoryLock, Storage, StorageAtomicExt};
 
 /// One transaction covers read/validate/update/atomic commit for all auth JSON files.
 #[derive(Clone)]

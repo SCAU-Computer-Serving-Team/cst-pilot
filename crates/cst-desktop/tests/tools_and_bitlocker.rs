@@ -139,6 +139,7 @@ async fn secret_input_55_byte_zeroize_accessibility_copy_block_and_paste_validat
         "read",
         "fffind",
         "ffgrep",
+        "web_fetch",
         "source_check",
         "fetch_content",
         "get_search_content",

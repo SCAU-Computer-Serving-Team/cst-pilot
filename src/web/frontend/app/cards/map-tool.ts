@@ -134,17 +134,27 @@ const noticeKeys = new Set([
 	"truncation",
 	"omitted",
 	"stats",
+	"elapsedMs",
 ]);
 // 画布未展示的原始字段。
 const hiddenKeys: Record<string, Set<string>> = {
 	eventlog: new Set(["level", "found", "time", "logName"]),
 	disk: new Set(["evt"]),
+	read: new Set(["content", "path"]),
 	fetch_content: new Set(["responseId"]),
-	get_search_content: new Set(["responseId"]),
+	web_fetch: new Set(["responseId"]),
+	get_search_content: new Set(["responseId", "content"]),
 };
 // 同名字段在不同工具里的叫法。
 const toolTitles: Record<string, Record<string, string>> = {
-	get_search_content: { type: "结果类型", offset: "当前偏移", returnedChars: "返回字符", nextOffset: "下一偏移" },
+	get_search_content: {
+		type: "结果类型",
+		offset: "当前偏移",
+		returnedChars: "返回字符",
+		returnedCharacters: "返回字符",
+		totalCharacters: "总字符",
+		nextOffset: "下一偏移",
+	},
 	eventlog: { machine: "机器" },
 };
 // 排行行的指标不展示这些字段（画布只列表名与关键指标）。
@@ -165,7 +175,7 @@ const nameKeys = [
 	"label",
 ];
 const diagnostics = new Set(["disk", "sys", "driver", "eventlog", "startup", "ls", "bitlocker"]);
-const textTools = new Set(["read", "ffgrep", "fffind", "fetch_content", "get_search_content"]);
+const textTools = new Set(["read", "ffgrep", "fffind", "web_fetch", "fetch_content", "get_search_content"]);
 
 export function mapTool(call: Call, result: Message): CardView {
 	const raw =
@@ -191,11 +201,19 @@ export function mapTool(call: Call, result: Message): CardView {
 				? record(detail[scope])
 				: undefined;
 	const source = diagnostics.has(call.name) && nested ? nested : detail;
+	const isNonEmptyError = (value: unknown): boolean => {
+		if (Array.isArray(value)) return value.length > 0;
+		const obj = record(value);
+		return obj ? Object.keys(obj).length > 0 : Boolean(value);
+	};
 	const hasUsefulData = source && Object.entries(source).some(([key, value]) => !noticeKeys.has(key) && value != null);
 	const hasError = !!(detail?.error || source?.error);
 	const partialError =
 		(!!source && Object.values(source).some((value) => !!record(value)?.error)) ||
-		!!(source?.degradedFrom || source?.collectionErrors || source?.smartErrors || source?.counterErrors);
+		isNonEmptyError(source?.degradedFrom) ||
+		isNonEmptyError(source?.collectionErrors) ||
+		isNonEmptyError(source?.smartErrors) ||
+		isNonEmptyError(source?.counterErrors);
 	const partiallySearched =
 		typeof detail?.successfulQueries === "number" &&
 		typeof detail?.queryCount === "number" &&
@@ -271,6 +289,7 @@ export function mapTool(call: Call, result: Message): CardView {
 				continue;
 			}
 			if (key === "collectionErrors" || key === "counterErrors" || key === "smartErrors") {
+				if (!isNonEmptyError(value)) continue;
 				for (const line of errorText(key, value)) notice(`${key}-${at}-${line.length}`, line, "warning");
 				continue;
 			}
@@ -404,7 +423,10 @@ export function mapTool(call: Call, result: Message): CardView {
 			const target = blocks[blocks.findIndex((block) => block.kind === "fields" && block.id === id)];
 			const row = {
 				label: "扫描统计",
-				value: `${words(stats.filesScanned)} 个文件 · 用时 ${words(stats.elapsedSec)}s`,
+				value:
+					stats.elapsedSec != null
+						? `${words(stats.filesScanned)} 个文件 · 用时 ${words(stats.elapsedSec)}s`
+						: `${words(stats.filesScanned)} 个文件`,
 			};
 			if (target?.kind === "fields") target.rows.push(row);
 			else blocks.splice(start, 0, { kind: "fields", id, title: heading, rows: [row] });
@@ -468,16 +490,32 @@ export function mapTool(call: Call, result: Message): CardView {
 		pushNotices(detail);
 	} else if (textTools.has(call.name)) {
 		if (detail) appendGroup(detail, "result", undefined);
-		if (call.name === "read" && call.arguments.path)
+		const readPath = call.name === "read" ? (detail?.path ?? call.arguments.path) : undefined;
+		if (readPath)
 			blocks.unshift({
 				kind: "fields",
 				id: "read-path",
-				rows: [{ label: "绝对路径", value: words(call.arguments.path) }],
+				rows: [{ label: "绝对路径", value: words(readPath) }],
 			});
-		if (raw && !(call.name === "read" && images.length && /^Read image file \[/.test(raw)))
+		const readKind = call.name === "read" && typeof detail?.kind === "string" ? detail.kind : undefined;
+		if (readKind === "text") {
+			if (typeof detail?.content === "string" && detail.content)
+				push({ kind: "text", id: "content", text: detail.content });
+		} else if (call.name === "get_search_content" && typeof detail?.content === "string") {
+			if (detail.content) push({ kind: "text", id: "content", text: detail.content });
+		} else if (
+			raw &&
+			!(call.name === "read" && (readKind === "image" || (images.length && /^Read image file \[/.test(raw))))
+		)
 			push({ kind: "text", id: "content", text: raw });
 		if (call.name === "get_search_content" && detail?.truncated)
-			notice("continue", `JSON 字符片段，非完整结论 · 已截断，续读 offset=${words(detail.nextOffset)}`, "warning");
+			notice(
+				"continue",
+				typeof detail.nextOffset === "number"
+					? `JSON 字符片段，非完整结论 · 已截断，续读 offset=${detail.nextOffset}`
+					: "JSON 字符片段，非完整结论 · 已截断，仅展示部分命中",
+				"warning",
+			);
 		pushNotices(detail);
 	} else if (diagnostics.has(call.name)) {
 		if (call.name === "startup" && record(detail?.startup)) {

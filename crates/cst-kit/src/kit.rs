@@ -5,9 +5,8 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use cst_os::{KitLayout, strip_windows_verbatim_prefix};
 use pi_runtime::{
     CreateAgentSessionOptions, CreateAgentSessionResult, DefaultResourceLoader,
-    DefaultResourceLoaderOptions, FileSettingsStorage, InitialModelPolicy, ReadToolOptions,
-    SettingsManager, SettingsScope, SettingsStorage, SettingsUpdate, create_agent_session,
-    create_read_tool_definition, strip_json_comments,
+    DefaultResourceLoaderOptions, FileSettingsStorage, InitialModelPolicy, SettingsManager,
+    SettingsScope, SettingsStorage, SettingsUpdate, create_agent_session, strip_json_comments,
 };
 use pi_session::{
     Extension, ExtensionFactory, ExtensionInitError, ExtensionRegistrar, SessionBeforeEventOutput,
@@ -18,11 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::auth::{AuthRuntime, Channel, oa::OaClient};
 use crate::telemetry::{TelemetryBinding, TelemetryOptions, TelemetryService, billing::OaBilling};
-use crate::tools::{
-    fff,
-    path_guard::{GuardedReadOperations, PathGuard},
-    web_access::WebAccess,
-};
+use crate::tools::{fff, path_guard::PathGuard, read as read_tool, web_access::WebAccess};
 use crate::update::activity::ActivityGate;
 use crate::update::service::{SessionRegistration, UpdateOptions, UpdateService};
 
@@ -34,15 +29,12 @@ pub const OPEN_TOOL_NAMES: &[&str] = &[
     "startup",
     "eventlog",
     "driver",
-    "command_plan",
-    "runbook_deliver",
     "runbook",
     "bitlocker",
     "fffind",
     "ffgrep",
     "web_search",
-    "source_check",
-    "fetch_content",
+    "web_fetch",
     "get_search_content",
 ];
 
@@ -915,14 +907,7 @@ impl CstPilotExtension {
         bitlocker_host: Option<Arc<dyn crate::bitlocker::BitLockerHostChannel>>,
     ) -> Result<Self, String> {
         let web = WebAccess::from_config(&kit.config_dir().join("web-search.json"))?;
-        let mut read = create_read_tool_definition(
-            kit.root().to_string_lossy(),
-            Some(ReadToolOptions {
-                operations: Some(Arc::new(GuardedReadOperations(kit.guard.clone()))),
-                ..Default::default()
-            }),
-        );
-        read.prompt_snippet = Some("读取文本或图片，禁止读取凭据文件和运行态目录。".into());
+        let read = read_tool::definition(kit.root(), kit.guard.clone());
         let mut tools = vec![read];
         tools.extend(fff::definitions(kit.guard.clone()));
         tools.extend(web.definitions());
@@ -948,6 +933,7 @@ impl CstPilotExtension {
             "CstPilotExtension tool list must match OPEN_TOOL_NAMES"
         );
         kit.activity_gate().wrap(&mut tools);
+        wrap_tool_timing(&mut tools);
         Ok(Self {
             tools,
             credentials,
@@ -960,6 +946,24 @@ impl CstPilotExtension {
 
     pub fn tool_names(&self) -> Vec<String> {
         self.tools.iter().map(|tool| tool.name.clone()).collect()
+    }
+}
+
+fn wrap_tool_timing(tools: &mut [ToolDefinition]) {
+    for tool in tools {
+        let execute = tool.execute.clone();
+        tool.execute = Arc::new(move |id, args, cancel, update, ctx| {
+            let execute = execute.clone();
+            Box::pin(async move {
+                let started = std::time::Instant::now();
+                let outcome = execute(id, args, cancel, update, ctx).await;
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                Ok(match outcome {
+                    Ok(result) => crate::diagnostics::result::inject_elapsed_ms(result, elapsed_ms),
+                    Err(message) => crate::diagnostics::result::error_result(message, elapsed_ms),
+                })
+            })
+        });
     }
 }
 

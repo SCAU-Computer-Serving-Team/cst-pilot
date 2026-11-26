@@ -659,6 +659,9 @@ impl ScanSnapshot {
                 .take(top)
                 .map(|r| json!({"path": r.path, "sizeGB": gib(r.bytes), "modified": r.modified}))
                 .collect::<Vec<_>>(),
+            "stats": {
+                "filesScanned": self.file_count,
+            },
             "notice": format!(
                 "纯 Rust 原生索引统计 {} 条记录，其中文件 {} 个。文件系统：{}。{ext_note}目录排行包含不同深度，父子目录不可相加；陈旧文件为至少 50 MiB 且一年未修改。",
                 self.rows,

@@ -170,7 +170,7 @@ fn io_warms_disk_provider_keeps_healthy_disk_when_process_source_fails() {
             Ok(vec![json!({"Name":"0 C:","PercentIdleTime":0})]),
         ]),
     );
-    let value = sys_load::io(&source, 10, &ctl()).unwrap();
+    let value = sys_load::io(&source, &Hardware::default(), 10, &ctl()).unwrap();
     assert_eq!(value["disks"][0]["disk"], "0 C:");
     assert_eq!(value["degraded"], true);
     assert!(value["intervalSec"].as_f64().unwrap() >= 1.2);
@@ -222,6 +222,39 @@ fn gpu_uses_busiest_engine_across_adapters_and_filters_one_mib_instances() {
     assert_eq!(value["byDedicatedMB"][0]["dedicatedMB"], 5.0);
     assert_eq!(value["byDedicatedMB"].as_array().unwrap().len(), 1);
     assert_eq!(value["adapters"][1]["bus"], "ROOT");
+    assert!(value.get("counterErrors").is_none());
+}
+#[test]
+fn gpu_dual_adapter_probes_lhm_in_parallel_adds_units_and_uses_error_key() {
+    let source = Source::default();
+    source.queries.lock().unwrap().insert(
+        "Win32_VideoController".into(),
+        VecDeque::from([Ok(vec![
+            json!({"Name":"NVIDIA RTX","AdapterCompatibility":"NVIDIA","PNPDeviceID":"PCI\\VEN_10DE"}),
+            json!({"Name":"AMD Radeon Graphics","AdapterCompatibility":"Advanced Micro Devices","PNPDeviceID":"PCI\\VEN_1002"}),
+        ])]),
+    );
+    let hardware = Hardware {
+        nvidia: Ok(Some(json!([{"uuid":"nv-1"}]))),
+        lhm: Ok(json!({
+            "hardware": ["AMD Radeon"],
+            "sensors": [{"hw":"AMD Radeon","name":"GPU Core","type":"Temperature","value":42.5}]
+        })),
+        ..Hardware::default()
+    };
+    let value = sys_load::gpu(&source, &hardware, 10, &ctl()).unwrap();
+    assert_eq!(hardware.lhm_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(value["lhmGpu"]["sensors"][0]["unit"], "°C");
+    assert!(value["nvidia"].is_array());
+    // When LHM fails, lhmGpu reports `error` instead of `notice`.
+    let hardware_err = Hardware {
+        nvidia: Ok(None),
+        lhm: Err("LHM 失败".into()),
+        ..Hardware::default()
+    };
+    let failed = sys_load::gpu(&Source::default(), &hardware_err, 10, &ctl()).unwrap();
+    assert_eq!(failed["lhmGpu"]["error"], "LHM 失败");
+    assert!(failed["lhmGpu"].get("notice").is_none());
 }
 #[test]
 fn gpu_retries_engine_once_but_does_not_repeat_nvidia_or_discard_lhm_errors() {

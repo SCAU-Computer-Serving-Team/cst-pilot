@@ -1,4 +1,6 @@
 use super::{Control, CounterBatch, CounterSample, CounterSet, NativeError};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
 use windows::Win32::System::Performance::*;
@@ -6,6 +8,8 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW,
 };
 use windows::core::{PCWSTR, PWSTR};
+
+static LOCALIZED_PATHS: OnceLock<Mutex<HashMap<&'static str, Vec<u16>>>> = OnceLock::new();
 
 struct Query(PDH_HQUERY);
 impl Query {
@@ -43,7 +47,13 @@ fn aligned(bytes: u32) -> Result<Vec<usize>, String> {
 }
 // AddEnglishCounter/GetCounterInfo localizes both classic and v2 counters. It
 // avoids dependence on a complete English Perflib registry on the host machine.
-fn localize(path: &str) -> Result<Vec<u16>, String> {
+fn localize(path: &'static str) -> Result<Vec<u16>, String> {
+    let cache = LOCALIZED_PATHS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(cached) = guard.get(path)
+    {
+        return Ok(cached.clone());
+    }
     let query = Query::new()?;
     let mut counter = PDH_HCOUNTER::default();
     check(unsafe { PdhAddEnglishCounterW(query.0, PCWSTR(wide(path).as_ptr()), 0, &mut counter) })?;
@@ -63,8 +73,11 @@ fn localize(path: &str) -> Result<Vec<u16>, String> {
         return Err("PDH 计数器元数据长度无效。".into());
     }
     let info = unsafe { &*buffer.as_ptr().cast::<PDH_COUNTER_INFO_W>() };
-    let localized = bounded_string(info.szFullPath, &buffer, size)?;
-    Ok(wide(&localized))
+    let localized = wide(&bounded_string(info.szFullPath, &buffer, size)?);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path, localized.clone());
+    }
+    Ok(localized)
 }
 // All string pointers must point into the PDH-owned result buffer, with a NUL
 // inside that allocation; no unbounded pointer-to-string scan is needed.
@@ -159,7 +172,7 @@ pub fn sample(
     control: &Control,
 ) -> Result<CounterBatch, String> {
     control.check()?;
-    let specs: &[(&str, &str)] = match set {
+    let specs: &[(&'static str, &'static str)] = match set {
         CounterSet::Gpu => &[
             ("engine", r"\GPU Engine(*)\Utilization Percentage"),
             ("memory", r"\GPU Process Memory(*)\Dedicated Usage"),
@@ -171,6 +184,12 @@ pub fn sample(
                 "frequency",
                 r"\Processor Information(*)\% of Maximum Frequency",
             ),
+        ],
+        CounterSet::DiskIo => &[
+            ("queue", r"\PhysicalDisk(*)\Current Disk Queue Length"),
+            ("idle", r"\PhysicalDisk(*)\% Idle Time"),
+            ("read", r"\PhysicalDisk(*)\Disk Read Bytes/sec"),
+            ("write", r"\PhysicalDisk(*)\Disk Write Bytes/sec"),
         ],
     };
     let query = Query::new()?;

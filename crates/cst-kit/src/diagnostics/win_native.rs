@@ -81,7 +81,7 @@ impl std::fmt::Display for NativeError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ProcessSample {
     pub pid: u32,
     pub name: String,
@@ -89,6 +89,29 @@ pub struct ProcessSample {
     pub cpu_100ns: u64,
     pub working_set: Option<u64>,
     pub path: Option<String>,
+    pub read_bytes: Option<u64>,
+    pub write_bytes: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NativeOverview {
+    pub cpu_total_pct: Option<f64>,
+    pub logical_cores: Option<u32>,
+    pub physical_cores: Option<u32>,
+    pub total_mb: Option<f64>,
+    pub free_mb: Option<f64>,
+    pub used_mb: Option<f64>,
+    pub used_pct: Option<f64>,
+    pub nonpaged_mb: Option<f64>,
+    pub paged_mb: Option<f64>,
+    pub pagefile: Option<Vec<Value>>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub cpu: Option<String>,
+    pub bios: Option<String>,
+    pub bios_date: Option<String>,
+    pub uptime: Option<Value>,
+    pub errors: Vec<NativeError>,
 }
 #[derive(Clone, Debug)]
 pub struct SpaceSample {
@@ -135,6 +158,8 @@ pub struct EventQuery {
 pub struct EventRecord {
     pub log: String,
     pub time: String,
+    /// Raw Windows FILETIME (100ns ticks since 1601-01-01 UTC) for monotonic ordering across DST/offset changes.
+    pub time_raw: u64,
     pub record_id: u64,
     pub level: u8,
     pub provider: String,
@@ -161,6 +186,41 @@ pub trait DiagnosticSource: Send + Sync {
         control: &Control,
     ) -> Result<Vec<Value>, NativeError>;
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError>;
+    /// Populate executable image paths only for the final Top-N `(pid, created_ticks)` pairs,
+    /// re-verifying process creation time on the same handle to prevent PID reuse mismatches.
+    fn fill_process_paths(&self, _pids: &mut [(u32, u64, Option<String>)]) {}
+    /// Fast Win32 native overview snapshot (memory, kernel pool, uptime, CPU short dual-sample,
+    /// pagefiles, registry machine/BIOS). Returning `Ok(None)` falls back to WMI.
+    fn native_overview(&self, _control: &Control) -> Result<Option<NativeOverview>, NativeError> {
+        Ok(None)
+    }
+    /// Fast PID -> process image name map (`CreateToolhelp32Snapshot`), avoiding WMI `Win32_Process`.
+    fn native_process_names(
+        &self,
+        _control: &Control,
+    ) -> Result<Option<std::collections::HashMap<u64, String>>, NativeError> {
+        Ok(None)
+    }
+    /// Fast Win32 SCM auto-start service listing (`EnumServicesStatusExW` + `QueryServiceConfigW`).
+    fn native_auto_services(&self, _control: &Control) -> Result<Option<Vec<Value>>, NativeError> {
+        Ok(None)
+    }
+    /// Fast Win32 SCM status lookup for named services (`bthserv`, `Audiosrv`, etc.).
+    fn native_services_by_name(
+        &self,
+        _names: &[&str],
+        _control: &Control,
+    ) -> Result<Option<Vec<Value>>, NativeError> {
+        Ok(None)
+    }
+    /// Fast SetupAPI signed driver listing for the requested device classes.
+    fn native_signed_drivers(
+        &self,
+        _classes: &[&str],
+        _control: &Control,
+    ) -> Result<Option<Vec<Value>>, NativeError> {
+        Ok(None)
+    }
     fn space(&self, drive: Option<&str>, control: &Control) -> Result<SpaceSnapshot, NativeError>;
     /// Native volume -> Windows physical disk number mapping (`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`).
     /// Returning `Ok(None)` lets callers fall back to WMI.
@@ -273,6 +333,49 @@ pub(crate) fn add_errors(value: &mut Value, errors: Vec<NativeError>) {
         value["collectionErrors"] = serde_json::to_value(errors).unwrap_or_default();
     }
 }
+pub(crate) fn format_dmtf_date(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let bytes = trimmed.as_bytes();
+    if bytes.len() == 10
+        && bytes.is_ascii()
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+    {
+        let y: i32 = trimmed[0..4].parse().ok()?;
+        let m: u32 = trimmed[5..7].parse().ok()?;
+        let d: u32 = trimmed[8..10].parse().ok()?;
+        let date = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
+        return Some(date.format("%Y-%m-%d").to_string());
+    }
+    if bytes.len() >= 8 && bytes[..8].iter().all(u8::is_ascii_digit) {
+        let y: i32 = trimmed[0..4].parse().ok()?;
+        let m: u32 = trimmed[4..6].parse().ok()?;
+        let d: u32 = trimmed[6..8].parse().ok()?;
+        let date = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
+        return Some(date.format("%Y-%m-%d").to_string());
+    }
+    // Registry BIOSReleaseDate often uses `MM/DD/YYYY`.
+    if bytes.is_ascii() {
+        let parts: Vec<&str> = trimmed.split('/').collect();
+        if parts.len() == 3 {
+            let (m, d, y): (u32, u32, i32) = (
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            );
+            if (1900..=2200).contains(&y)
+                && let Some(date) = chrono::NaiveDate::from_ymd_opt(y, m, d)
+            {
+                return Some(date.format("%Y-%m-%d").to_string());
+            }
+        }
+    }
+    None
+}
+
 pub(crate) fn collect(
     source: &dyn DiagnosticSource,
     namespace: &str,

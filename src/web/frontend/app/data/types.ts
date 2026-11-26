@@ -22,6 +22,7 @@ export type Message = {
 	toolCallId?: string;
 	toolName?: string;
 	isError?: boolean;
+	durationMs?: number;
 	details?: unknown;
 	stopReason?: string;
 	errorMessage?: string;

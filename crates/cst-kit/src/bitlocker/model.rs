@@ -92,6 +92,7 @@ pub struct Volume {
     pub auto_unlock_enabled: Option<bool>,
     pub auto_unlock_keys_stored: Option<bool>,
     pub key_protectors: Vec<Protector>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_errors: Vec<NativeError>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
@@ -135,6 +136,7 @@ pub struct Snapshot {
     pub collected_at: String,
     pub admin: bool,
     pub volumes: Vec<Volume>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collection_errors: Vec<NativeError>,
 }
 pub fn normalize_id(id: &str) -> Result<String, String> {

@@ -5,7 +5,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use chrono::{DateTime, Local};
-use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
+use cst_client::tool_presenter::{
+    SpecialToolView, ToolCallInput, ToolExecutionMeta, ToolResultInput,
+};
 use cst_client::{
     ClientError, ClientHandle, ComposerDraft, DraftKey, OutboxItem, OutboxItemState,
     SessionViewSnapshot,
@@ -506,6 +508,7 @@ pub struct MessageListView {
     tool_card_expansion: BTreeMap<String, bool>,
     expanded_tool_raw: BTreeSet<String>,
     expanded_special_details: BTreeSet<(String, String)>,
+    exported_runbooks: BTreeMap<String, cst_client::tool_presenter::RunbookDeliveryView>,
     hovered_warnings: BTreeSet<String>,
     secret_inputs: BTreeMap<String, PendingSecretInput>,
     markdown_store: MarkdownStreamStore,
@@ -545,6 +548,7 @@ impl MessageListView {
             tool_card_expansion: BTreeMap::new(),
             expanded_tool_raw: BTreeSet::new(),
             expanded_special_details: BTreeSet::new(),
+            exported_runbooks: BTreeMap::new(),
             hovered_warnings: BTreeSet::new(),
             secret_inputs: BTreeMap::new(),
             markdown_store: MarkdownStreamStore::default(),
@@ -648,6 +652,7 @@ impl MessageListView {
         self.tool_card_expansion.clear();
         self.expanded_tool_raw.clear();
         self.expanded_special_details.clear();
+        self.exported_runbooks.clear();
         self.hovered_warnings.clear();
         self.retain_seen_secret_inputs(false, cx);
         self.copy_tracker = CopyFeedbackTracker::default();
@@ -1748,8 +1753,10 @@ impl MessageListView {
 
         let duration_ms = tool_result_val
             .and_then(|v| {
-                v.get("durationMs")
-                    .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+                v.get("durationMs").or_else(|| {
+                    v.get("details")
+                        .and_then(|d| d.get("elapsedMs").or_else(|| d.get("durationMs")))
+                })
             })
             .and_then(Value::as_u64);
 
@@ -1877,10 +1884,34 @@ impl MessageListView {
             .hovered_warnings
             .contains(&format!("web-search-warn-{}", call.id));
 
+        let mut special = special;
+        if let SpecialToolView::Runbook {
+            planned,
+            delivery,
+            summary,
+            fields,
+            ..
+        } = Arc::make_mut(&mut special)
+            && delivery.is_none()
+            && let Some(local) = self.exported_runbooks.get(&call.id)
+        {
+            *planned = false;
+            *summary = "已生成".to_owned();
+            if fields.is_empty() {
+                fields.push(cst_client::tool_presenter::FieldRow {
+                    label: "文件路径".into(),
+                    value: local.file.clone(),
+                });
+            }
+            *delivery = Some(local.clone());
+        }
+
         let ent_toggle = entity.clone();
         let ent_hover = entity.clone();
         let ent_runbook = entity.clone();
+        let ent_export_runbook = entity.clone();
         let sid_runbook = session.id.clone();
+        let sid_export_runbook = session.id.clone();
         let copy_ref = &self.copy_tracker;
 
         render_special_tool_component(
@@ -1926,11 +1957,80 @@ impl MessageListView {
                 let s_id = sid_runbook.clone();
                 ent_runbook.update(cx, |this, cx| {
                     let c = this.client.clone();
+                    let was_ui_exported = this.exported_runbooks.contains_key(&c_id);
                     cx.spawn(async move |weak, cx| {
-                        if let Err(err) = c.open_session_runbook(s_id, e_id, c_id).await {
-                            let _ = weak.update(cx, |_, cx| {
-                                cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                            });
+                        let res = if was_ui_exported {
+                            c.export_session_runbook(s_id, e_id, c_id, true).await
+                        } else {
+                            c.open_session_runbook(s_id, e_id, c_id).await
+                        };
+                        match res {
+                            Ok(val) => {
+                                if val.get("launched") == Some(&Value::Bool(false))
+                                    && let Some(msg) =
+                                        val.get("launchError").and_then(Value::as_str)
+                                {
+                                    let msg = msg.to_owned();
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(MessageListEvent::ErrorMessage(msg));
+                                    });
+                                }
+                            }
+                            Err(err) => {
+                                let _ = weak.update(cx, |_, cx| {
+                                    cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                                });
+                            }
+                        }
+                    })
+                    .detach();
+                });
+            }),
+            Rc::new(move |e_id, c_id, _, cx| {
+                let s_id = sid_export_runbook.clone();
+                ent_export_runbook.update(cx, |this, cx| {
+                    let c = this.client.clone();
+                    let call_key = c_id.clone();
+                    cx.spawn(async move |weak, cx| {
+                        match c.export_session_runbook(s_id, e_id, c_id, true).await {
+                            Ok(val) => {
+                                if let Some(rb) = val.get("runbook")
+                                    && let Some(file) = rb.get("file").and_then(Value::as_str)
+                                {
+                                    let deliv = cst_client::tool_presenter::RunbookDeliveryView {
+                                        name: rb
+                                            .get("name")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("命令清单.txt")
+                                            .to_owned(),
+                                        file: file.to_owned(),
+                                        level: rb
+                                            .get("levelLabel")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("安全")
+                                            .to_owned(),
+                                        count: rb.get("items").and_then(Value::as_i64),
+                                    };
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.exported_runbooks.insert(call_key, deliv);
+                                        cx.notify();
+                                    });
+                                }
+                                if val.get("launched") == Some(&Value::Bool(false))
+                                    && let Some(msg) =
+                                        val.get("launchError").and_then(Value::as_str)
+                                {
+                                    let msg = msg.to_owned();
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(MessageListEvent::ErrorMessage(msg));
+                                    });
+                                }
+                            }
+                            Err(err) => {
+                                let _ = weak.update(cx, |_, cx| {
+                                    cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                                });
+                            }
                         }
                     })
                     .detach();
@@ -3700,6 +3800,7 @@ impl MessageListView {
                         .and_then(|v| {
                             v.get("durationMs")
                                 .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+                                .or_else(|| v.get("details").and_then(|d| d.get("elapsedMs")))
                         })
                         .and_then(Value::as_u64);
                     let is_err = tool_result_val

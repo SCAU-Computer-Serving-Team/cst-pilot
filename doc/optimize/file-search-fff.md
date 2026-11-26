@@ -1,6 +1,6 @@
 # `fffind` 与 `ffgrep` 文件检索优化
 
-本文记录阶段 9.3 阶段 2A 中 `fffind`、`ffgrep` 与 `PathGuard` 的并发改造、编码支持、同行评审复核及实测对比。架构决策见 [ADR-018](../ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎)，工具规格见 [diagnostics/SPEC.md](../diagnostics/SPEC.md)。
+本文记录阶段 9.3 阶段 2A 中 `fffind`、`ffgrep` 与 `PathGuard` 的并发改造、编码支持、同行评审复核及实测对比。架构决策见 [ADR-018](../ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎)，工具规格见 [tools/SPEC.md](../tools/SPEC.md)。
 
 ## 一、背景
 

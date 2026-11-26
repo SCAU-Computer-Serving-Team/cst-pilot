@@ -134,13 +134,14 @@ pub fn run(
     }
     let mut seen = HashSet::new();
     let mut events: Vec<(EventRecord, Option<EventMessage>)> = Vec::new();
-    let mut counts: HashMap<(String, u16), (usize, String)> = HashMap::new();
+    let mut counts: HashMap<(String, u16), (usize, u64, String)> = HashMap::new();
     let mut total = 0;
     let mut unreadable = 0;
     let mut scan_truncated = false;
     let mut counts_truncated = false;
-    let mut first: Option<String> = None;
-    let mut last: Option<String> = None;
+    let mut first: Option<(u64, String)> = None;
+    let mut last: Option<(u64, String)> = None;
+    let mut channel_errors = 0usize;
     let filter = filter.map(str::to_lowercase);
     for log in &logs {
         control.check()?;
@@ -181,24 +182,35 @@ pub fn run(
                 Some(message)
             };
             total += 1;
-            if first.as_ref().is_none_or(|t| event.time < *t) {
-                first = Some(event.time.clone());
+            let event_order = (event.time_raw, event.time.as_str());
+            if first
+                .as_ref()
+                .is_none_or(|(raw, t)| event_order < (*raw, t.as_str()))
+            {
+                first = Some((event.time_raw, event.time.clone()));
             }
-            if last.as_ref().is_none_or(|t| event.time > *t) {
-                last = Some(event.time.clone());
+            if last
+                .as_ref()
+                .is_none_or(|(raw, t)| event_order > (*raw, t.as_str()))
+            {
+                last = Some((event.time_raw, event.time.clone()));
             }
             let key = (event.provider.clone(), event.id);
             if counts.contains_key(&key) || counts.len() < 100 {
-                let entry = counts.entry(key).or_insert((0, event.time.clone()));
+                let entry = counts
+                    .entry(key)
+                    .or_insert((0, event.time_raw, event.time.clone()));
                 entry.0 += 1;
-                if event.time > entry.1 {
-                    entry.1 = event.time.clone();
+                if event_order > (entry.1, entry.2.as_str()) {
+                    entry.1 = event.time_raw;
+                    entry.2 = event.time.clone();
                 }
             } else {
                 counts_truncated = true;
             }
             let position = events.partition_point(|(current, _)| {
-                (&current.time, current.record_id) >= (&event.time, event.record_id)
+                (current.time_raw, current.time.as_str(), current.record_id)
+                    >= (event.time_raw, event.time.as_str(), event.record_id)
             });
             if position < top {
                 if events.len() == top {
@@ -221,8 +233,19 @@ pub fn run(
                 unreadable += read.unreadable;
                 scan_truncated |= read.truncated;
             }
-            Err(error) => errors.push(error),
+            Err(error) => {
+                channel_errors += 1;
+                errors.push(error);
+            }
         }
+    }
+    if channel_errors == logs.len() {
+        let summary = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(format!("目标事件通道采集全部失败：{summary}"));
     }
     let mut rows = Vec::with_capacity(events.len());
     for (mut event, message) in events {
@@ -233,14 +256,19 @@ pub fn run(
         }
         rows.push(record(&event, 200));
     }
-    let mut count_rows:Vec<_>=counts.into_iter().map(|((provider,id),(n,last))|json!({"key":format!("{provider}/{id}"),"provider":provider,"id":id,"n":n,"last":last})).collect();
+    let mut count_rows: Vec<_> = counts
+        .into_iter()
+        .map(|((provider, id), (n, _, last_time))| {
+            json!({"key":format!("{provider}/{id}"),"provider":provider,"id":id,"n":n,"last":last_time})
+        })
+        .collect();
     count_rows.sort_by(|a, b| {
         b["n"]
             .as_u64()
             .cmp(&a["n"].as_u64())
             .then_with(|| a["key"].as_str().cmp(&b["key"].as_str()))
     });
-    let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":total,"truncated":total>top||scan_truncated,"events":rows,"counts":count_rows,"countsTruncated":counts_truncated,"unreadable":unreadable,"firstTime":first,"lastTime":last,"admin":admin,"notice":"Windows Event Log 原生只读查询；列表消息最多 200 字符，counts 最多 100 组。unreadable 表示消息或记录无法读取，空结果需结合权限与采集错误判读。"});
+    let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":total,"truncated":total>top||scan_truncated,"events":rows,"counts":count_rows,"countsTruncated":counts_truncated,"unreadable":unreadable,"firstTime":first.map(|(_,t)|t),"lastTime":last.map(|(_,t)|t),"admin":admin,"notice":"Windows Event Log 原生只读查询；列表消息最多 200 字符，counts 最多 100 组。unreadable 表示消息或记录无法读取，空结果需结合权限与采集错误判读。"});
     if total == 0 && errors.is_empty() && unreadable == 0 && !scan_truncated {
         value["noMatch"] = json!(true);
     }
@@ -300,12 +328,21 @@ fn detail(
     }
     if let Some(e) = &found {
         value["machine"] = json!(e.machine);
-        if e.message.is_none() {
+        if let Some(msg) = &e.message {
+            let orig_chars = msg.chars().count();
+            if orig_chars > 20_000 {
+                value["msgTruncated"] = json!(true);
+                value["originalChars"] = json!(orig_chars);
+            }
+        } else {
             value["degraded"] = json!(true);
         }
     }
-    value["notice"] =
-        json!("单条事件原文最多 20,000 字符，保留换行；消息资源不可读时 msg 为 null。");
+    value["notice"] = if found.is_none() && read.unreadable > 0 {
+        json!("匹配到事件记录但系统属性渲染失败，无法读取完整详情。")
+    } else {
+        json!("单条事件原文最多 20,000 字符，保留换行；消息资源不可读时 msg 为 null。")
+    };
     Ok(json!({"detail":value}))
 }
 fn ids(ids: &[u16]) -> String {

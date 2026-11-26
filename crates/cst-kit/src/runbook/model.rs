@@ -2,7 +2,7 @@ use chrono::{Local, NaiveDate};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     Safe,
@@ -18,7 +18,8 @@ impl Level {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Shell {
     Cmd,
@@ -32,6 +33,15 @@ impl Shell {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RunbookAction {
+    #[default]
+    Plan,
+    Export,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RunbookItem {
     #[schemars(length(min = 1, max = 300))]
@@ -42,6 +52,26 @@ pub struct RunbookItem {
     #[serde(default)]
     pub admin: bool,
 }
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunbookToolInput {
+    #[serde(default)]
+    pub action: RunbookAction,
+    #[schemars(length(min = 1, max = 48))]
+    pub title: Option<String>,
+    pub level: Option<Level>,
+    #[schemars(length(min = 1, max = 20))]
+    pub items: Option<Vec<RunbookItem>>,
+    pub date: Option<String>,
+    pub runbook_id: Option<String>,
+    pub base_version: Option<u64>,
+    #[schemars(range(min = 1, max = 9_007_199_254_740_991_u64))]
+    pub version: Option<u64>,
+    #[serde(default)]
+    pub export_txt: bool,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlanInput {
@@ -53,7 +83,10 @@ pub struct PlanInput {
     pub date: Option<String>,
     pub runbook_id: Option<String>,
     pub base_version: Option<u64>,
+    #[serde(default)]
+    pub export_txt: bool,
 }
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeliverInput {
@@ -61,22 +94,13 @@ pub struct DeliverInput {
     #[schemars(range(min = 1, max = 9_007_199_254_740_991_u64))]
     pub version: u64,
 }
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RunbookInput {
-    #[schemars(length(min = 1, max = 48))]
-    pub title: String,
-    pub level: Level,
-    #[schemars(length(min = 1, max = 20))]
-    pub items: Vec<RunbookItem>,
-    pub date: Option<String>,
-    #[schemars(range(min = 1, max = 999))]
-    pub sequence: Option<u16>,
-}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub runbook_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u16>,
     pub version: u64,
     pub day: String,
     pub created_at: String,
@@ -134,6 +158,7 @@ pub fn validate(title: &str, items: &[RunbookItem]) -> Result<(String, Vec<Runbo
         .collect::<Result<_, String>>()?;
     Ok((title, items))
 }
+
 fn text(value: &str, field: &str, max: usize) -> Result<String, String> {
     if value.chars().any(|c| {
         matches!(c, '\r' | '\n' | '\u{85}' | '\u{2028}' | '\u{2029}')
@@ -147,6 +172,7 @@ fn text(value: &str, field: &str, max: usize) -> Result<String, String> {
     }
     Ok(value.into())
 }
+
 pub fn build_body(title: &str, level: Level, items: &[RunbookItem], time: &str) -> Vec<u8> {
     let mut lines = vec![
         format!("{title}（{}） {time}", level.label()),
