@@ -683,11 +683,10 @@ impl AppShell {
                                     el.test_support()
                                         .a11y_menuitem("account-menu-settings-btn", "设置")
                                         .hover(|s| s.bg(palette.bg_item_active))
-                                        .on_click(move |_, _, cx| {
+                                        .on_click(move |_, window, cx| {
                                             ent_set.update(cx, |this, cx| {
                                                 this.account_menu_open = false;
-                                                this.set_route(ShellRoute::Settings, cx);
-                                                cx.notify();
+                                                this.open_settings_route(None, false, window, cx);
                                             });
                                         })
                                         .into_any_element()

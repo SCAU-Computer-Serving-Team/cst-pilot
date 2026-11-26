@@ -2476,6 +2476,11 @@ pub fn render_subpage_header_xwjof(
     let track_id_str = SharedString::from(format!("{header_id}-title-track"));
 
     let back_slot = if let Some(back_cb) = on_back {
+        let back_focus = window.use_keyed_state(
+            SharedString::from(format!("{back_id_str}-focus")),
+            cx,
+            |_, cx| cx.focus_handle().tab_stop(true),
+        );
         let (pressed, press_state) = motion::icon_press_state(back_id_str.as_ref(), window, cx);
         let (hovered, hs) = motion::PointerFlag::keyed(format!("hover-{back_id_str}"), window, cx);
         let hover_t = motion::animated_state_progress(back_id_str.clone(), hovered, window, cx);
@@ -2501,7 +2506,7 @@ pub fn render_subpage_header_xwjof(
                     false,
                     Some(hs),
                 )
-                .tab_index(0)
+                .track_focus(back_focus.read(cx))
                 .w(height::COMPACT)
                 .h(height::COMPACT)
                 .rounded(radius::CONTROL)

@@ -550,7 +550,7 @@ impl AppHttpClient {
             "/api/app/update/prepare",
             Some(&json!({})),
             None,
-            Some(Duration::from_secs(300)),
+            Some(Duration::from_secs(660)),
         )
         .await
     }

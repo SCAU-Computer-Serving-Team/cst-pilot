@@ -1090,3 +1090,274 @@ async fn same_root_activity_gate_is_shared_isolated_across_roots_and_blocks_writ
     );
     sess_a1.shutdown().await.unwrap();
 }
+
+struct ErrorFetcher {
+    manifest_err: Mutex<Option<cst_kit::update::UpdateError>>,
+    archive_err: Mutex<Option<cst_kit::update::UpdateError>>,
+    inner: Arc<Network>,
+}
+
+impl ErrorFetcher {
+    fn new(inner: Arc<Network>) -> Arc<Self> {
+        Arc::new(Self {
+            manifest_err: Mutex::new(None),
+            archive_err: Mutex::new(None),
+            inner,
+        })
+    }
+}
+
+impl Fetcher for ErrorFetcher {
+    fn get(
+        &self,
+        url: String,
+        limit: u64,
+        cancel: CancellationToken,
+    ) -> BoxFuture<'_, Result<Download, String>> {
+        self.inner.get(url, limit, cancel)
+    }
+
+    fn fetch(
+        &self,
+        url: String,
+        limit: u64,
+        cancel: CancellationToken,
+    ) -> BoxFuture<'_, Result<Download, cst_kit::update::UpdateError>> {
+        Box::pin(async move {
+            let is_manifest = url.ends_with("/latest");
+            if is_manifest {
+                if let Some(err) = self.manifest_err.lock().unwrap().clone() {
+                    return Err(err);
+                }
+            } else if let Some(err) = self.archive_err.lock().unwrap().clone() {
+                return Err(err);
+            }
+            self.inner.fetch(url, limit, cancel).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn structured_update_errors_and_download_progress_map_cleanly() {
+    let f = Fixture::new();
+    let base = Network::new();
+    let net = ErrorFetcher::new(base.clone());
+    *net.manifest_err.lock().unwrap() = Some(cst_kit::update::UpdateError::ChannelEmpty);
+
+    let kit = Kit::new(&f.0).unwrap();
+    let client =
+        UpdateClient::with_fetcher("https://updates.example/latest", key(), net.clone()).unwrap();
+    let service = UpdateService::new(
+        &f.0,
+        "https://www.cstoa.top",
+        kit.activity_gate().clone(),
+        UpdateOptions::Trusted {
+            client: Arc::new(client),
+            launcher: Arc::new(Launcher::default()),
+        },
+    )
+    .unwrap();
+
+    // 1. 404 channel_empty maps gently to Phase::Current without error_kind.
+    let status = service.check(CancellationToken::new()).await.unwrap();
+    assert_eq!(status.phase, Phase::Current);
+    assert_eq!(status.message, "暂未发布在线更新");
+    assert_eq!(status.error_kind, None);
+
+    // 2. 429 rate_limited preserves Retry-After seconds in message.
+    *net.manifest_err.lock().unwrap() = Some(cst_kit::update::UpdateError::RateLimited {
+        retry_after_secs: Some(30),
+    });
+    let err = service.check(CancellationToken::new()).await.unwrap_err();
+    assert_eq!(err, "请求过于频繁，请于 30 秒后重试");
+    assert_eq!(service.status().phase, Phase::Failed);
+    assert_eq!(service.status().error_kind.as_deref(), Some("check_failed"));
+
+    // 3. Successful check followed by 503 bandwidth_budget_exceeded during prepare.
+    *net.manifest_err.lock().unwrap() = None;
+    *net.archive_err.lock().unwrap() =
+        Some(cst_kit::update::UpdateError::BandwidthBudgetExceeded {
+            retry_after_secs: Some(60),
+        });
+    assert_eq!(
+        service.check(CancellationToken::new()).await.unwrap().phase,
+        Phase::Available
+    );
+    let err = service.prepare(CancellationToken::new()).await.unwrap_err();
+    assert_eq!(err, "当前下载人数较多，更新通道暂歇，请稍后重试");
+    assert_eq!(service.status().phase, Phase::Failed);
+    assert_eq!(
+        service.status().error_kind.as_deref(),
+        Some("download_failed")
+    );
+
+    // 4. Successful prepare emits downloaded_bytes progress via subscribe_status.
+    *net.archive_err.lock().unwrap() = None;
+    let progress_events = Arc::new(Mutex::new(Vec::<Option<u64>>::new()));
+    let captured = progress_events.clone();
+    service.subscribe_status(Arc::new(move |st| {
+        if st.phase == Phase::Preparing || st.phase == Phase::Ready {
+            captured.lock().unwrap().push(st.downloaded_bytes);
+        }
+    }));
+    let ready = service.prepare(CancellationToken::new()).await.unwrap();
+    assert_eq!(ready.phase, Phase::Ready);
+    assert_eq!(ready.downloaded_bytes, ready.archive_bytes);
+    assert!(
+        progress_events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|v| v.is_some_and(|n| n > 0))
+    );
+
+    // 5. Below minUpgradableVersion flags manual_upgrade_required.
+    fs::write(f.0.join("VERSION"), "cst-pilot v0.5.0\n").unwrap();
+    let f2_kit = Kit::new(&f.0).unwrap();
+    let client2 =
+        UpdateClient::with_fetcher("https://updates.example/latest", key(), net.clone()).unwrap();
+    let service2 = UpdateService::new(
+        &f.0,
+        "https://www.cstoa.top",
+        f2_kit.activity_gate().clone(),
+        UpdateOptions::Trusted {
+            client: Arc::new(client2),
+            launcher: Arc::new(Launcher::default()),
+        },
+    )
+    .unwrap();
+    let err = service2.check(CancellationToken::new()).await.unwrap_err();
+    assert_eq!(err, "当前版本过旧，无法原位升级，请重新下载完整便携包");
+    assert_eq!(
+        service2.status().error_kind.as_deref(),
+        Some("manual_upgrade_required")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires live local cst-pilot-server; run with CST_E2E_LOCAL_RELEASE_BASE & CST_E2E_PUBLIC_KEY"]
+async fn live_local_release_server_e2e_channel_empty_or_upgrade_prepare() {
+    let base = std::env::var("CST_E2E_LOCAL_RELEASE_BASE")
+        .expect("CST_E2E_LOCAL_RELEASE_BASE must be set, e.g. http://127.0.0.1:18799");
+    let pub_b64 = std::env::var("CST_E2E_PUBLIC_KEY").expect("CST_E2E_PUBLIC_KEY must be set");
+    let expect_mode = std::env::var("CST_E2E_EXPECT").unwrap_or_else(|_| "upgrade".into());
+    let pub_bytes: [u8; 32] = STANDARD
+        .decode(pub_b64.trim())
+        .unwrap()
+        .as_slice()
+        .try_into()
+        .unwrap();
+    let release_key = ReleaseKey::from_bytes(&pub_bytes).unwrap();
+
+    struct LocalBridgeFetcher {
+        base: String,
+    }
+    impl Fetcher for LocalBridgeFetcher {
+        fn get(
+            &self,
+            url: String,
+            limit: u64,
+            cancel: CancellationToken,
+        ) -> BoxFuture<'_, Result<Download, String>> {
+            Box::pin(async move {
+                self.fetch(url, limit, cancel)
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+        }
+        fn fetch(
+            &self,
+            url: String,
+            _limit: u64,
+            _cancel: CancellationToken,
+        ) -> BoxFuture<'_, Result<Download, cst_kit::update::UpdateError>> {
+            let local_url = if url.ends_with("/api/agent/releases/latest") {
+                format!("{}/v1/releases/channels/stable/latest", self.base)
+            } else if let Some(rest) = url.split("/api/agent/releases/files/").nth(1) {
+                format!("{}/v1/releases/files/{rest}", self.base)
+            } else {
+                panic!("unexpected url: {url}");
+            };
+            Box::pin(async move {
+                let resp = reqwest::Client::builder()
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap()
+                    .get(&local_url)
+                    .send()
+                    .await
+                    .map_err(|_| cst_kit::update::UpdateError::OfflineOrDns)?;
+                let status = resp.status();
+                if status != reqwest::StatusCode::OK {
+                    let retry_after = resp
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned);
+                    let content_type = resp
+                        .headers()
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned);
+                    let body = resp.bytes().await.unwrap_or_default();
+                    return Err(cst_kit::update::network::parse_http_error(
+                        status.as_u16(),
+                        retry_after.as_deref(),
+                        content_type.as_deref(),
+                        &body,
+                    ));
+                }
+                let bytes = resp.bytes().await.unwrap().to_vec();
+                Ok(Download {
+                    body: Box::pin(futures_util::stream::iter(vec![Ok(bytes)])),
+                })
+            })
+        }
+    }
+
+    let f = Fixture::new();
+    let kit = Kit::new(&f.0).unwrap();
+    let client = UpdateClient::with_fetcher(
+        "https://www.cstoa.top/api/agent/releases/latest",
+        release_key,
+        Arc::new(LocalBridgeFetcher { base }),
+    )
+    .unwrap();
+    let service = UpdateService::new(
+        &f.0,
+        "https://www.cstoa.top",
+        kit.activity_gate().clone(),
+        UpdateOptions::Trusted {
+            client: Arc::new(client),
+            launcher: Arc::new(Launcher::default()),
+        },
+    )
+    .unwrap();
+
+    if expect_mode == "empty" {
+        let st = service.check(CancellationToken::new()).await.unwrap();
+        assert_eq!(st.phase, Phase::Current);
+        assert_eq!(st.message, "暂未发布在线更新");
+        assert_eq!(st.error_kind, None);
+    } else {
+        let st = service.check(CancellationToken::new()).await.unwrap();
+        assert_eq!(st.phase, Phase::Available);
+        assert!(st.version.is_some());
+        let progress = Arc::new(Mutex::new(Vec::<Option<u64>>::new()));
+        let captured = progress.clone();
+        service.subscribe_status(Arc::new(move |s| {
+            captured.lock().unwrap().push(s.downloaded_bytes);
+        }));
+        let ready = service.prepare(CancellationToken::new()).await.unwrap();
+        assert_eq!(ready.phase, Phase::Ready);
+        assert_eq!(ready.downloaded_bytes, ready.archive_bytes);
+        assert!(
+            progress
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|v| v.is_some_and(|n| n > 0))
+        );
+    }
+}
