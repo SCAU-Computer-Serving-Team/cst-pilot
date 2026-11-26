@@ -9780,12 +9780,23 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "bytes",
  "chrono",
  "cst-os",
  "cst-updater",
+ "ed25519-dalek",
+ "futures-util",
+ "rand 0.10.3",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+ "zeroize",
  "zip",
 ]
 

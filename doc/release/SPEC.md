@@ -21,11 +21,12 @@
 
 软件内升级引擎（`crates/cst-kit/src/update/`、`crates/cst-updater/`、`cst-server` 更新控制接口 `/api/app/update/*` 与 `cst-updater.exe`）满足以下安全与可靠性要求：
 
-1. **受控联网发现**：升级源地址与官方 Ed25519 公钥分别通过编译期环境变量 `CST_UPDATE_MANIFEST_URL` 与 `CST_UPDATE_PUBLIC_KEY` 注入。两项任一缺失或为空时，升级状态固定为不可用（`Phase::Unavailable`），启动时不发起联网检查，普通会话保持可用。配置齐备时支持启动后台检查与手动检查，仅在远端版本高于本机且本机不低于 `minUpgradableVersion` 时提示可升级，下载与安装须经本地确认。
+1. **受控联网发现与静默首检**：升级源地址与官方 Ed25519 公钥通过编译期环境变量 `CST_UPDATE_MANIFEST_URL`（正式通道 `https://www.cstoa.top/api/agent/releases/latest`，内测通道 `https://www.cstoa.top/api/agent/releases/beta`）与 `CST_UPDATE_PUBLIC_KEY` 注入。两项任一缺失或为空时，升级状态固定为不可用（`Phase::Unavailable`），启动时不发起联网检查，普通会话保持可用。配置齐备时启动后台静默检查，不主动弹出模态框；通道返回 `404 channel_empty` 时归入温和态 `Phase::Current` 并提示「暂未发布在线更新」。仅在远端版本高于本机且本机不低于 `minUpgradableVersion` 时提示可升级，下载与安装须经本地确认。软件更新入口仅在桌面端与内置 TUI 提供，Web 端不暴露更新控制接口。
 2. **编译期信任根与双重验签**：禁止从运行期环境变量或远端清单动态读取信任根与升级源。升级包准备阶段强制校验同时包含三支必需可执行文件（`cst-pilot.exe`、`app/cst-server.exe`、`app/cst-updater.exe`）与全部随包字体文件及有效 SFNT 表头，并依次通过清单签名、`SHA256SUMS` 独立签名、归档哈希及解压后全树逐文件 SHA-256 校验。
-3. **程序区与用户数据区严格隔离**：升级按区域分类保护全部用户数据区（`data/` 与 `artifacts/`），仅对四份预置配置（`data/config/{settings,models-store,telemetry,web-search}.json`）按缺失字段合并 `app/defaults/` 默认项，保留用户已有设置。
-4. **空闲门禁与遥测定稿**：启动交接前先关闭输入与写入门禁（`ActivityGate`），校验无运行中会话、未决收件箱或活动导出任务，并核验宿主进程 PID、创建时间及规范化可执行路径。独立更新器启动后在共享 5 秒预算内完成遥测定稿，不阻塞等待网络上传。
-5. **预写事务替换、双进程自检与自动回滚**：独立更新器等待软件端与后台服务双宿主进程退出后，按 `.state/update/transaction.json` 逐文件备份替换。替换后在共用 15 秒总截止时间的独立 Job Object 中依次执行 `cst-server.exe --health-check` 与 `cst-pilot.exe --health-check`，核验版本输出与静态资产完整性。自检失败、取消或替换中途断电重启时，按事务记录逆序恢复原版本文件（主程序启动时同步检测未闭合事务并拉起 `cst-updater.exe --recover`）。
+3. **离线签名与回环发布工具链**：`crates/xtask` 提供 `keygen`、`dist --require-update-config`、`sign-release` 与 `publish-release` 子命令。离线私钥不进入仓库、构建日志或公网服务器；发布请求仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取管理令牌，流式推送至服务端并自动复验线上清单签名与归档 `HEAD`。
+4. **程序区与用户数据区严格隔离**：升级按区域分类保护全部用户数据区（`data/` 与 `artifacts/`），仅对四份预置配置（`data/config/{settings,models-store,telemetry,web-search}.json`）按缺失字段合并 `app/defaults/` 默认项，保留用户已有设置。
+5. **空闲门禁与遥测定稿**：启动交接前先关闭输入与写入门禁（`ActivityGate`），校验无运行中会话、未决收件箱或活动导出任务，并核验宿主进程 PID、创建时间及规范化可执行路径。独立更新器启动后在共享 5 秒预算内完成遥测定稿，不阻塞等待网络上传。
+6. **预写事务替换、双进程自检与自动回滚**：独立更新器等待软件端与后台服务双宿主进程退出后，按 `.state/update/transaction.json` 逐文件备份替换。替换后在共用 15 秒总截止时间的独立 Job Object 中依次执行 `cst-server.exe --health-check` 与 `cst-pilot.exe --health-check`，核验版本输出与静态资产完整性。自检失败、取消或替换中途断电重启时，按事务记录逆序恢复原版本文件（主程序启动时同步检测未闭合事务并拉起 `cst-updater.exe --recover`）。
 
 ## 干净发行树红线
 

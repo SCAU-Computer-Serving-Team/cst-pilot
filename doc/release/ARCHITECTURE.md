@@ -26,8 +26,8 @@
 | 模块 | 职责 |
 |---|---|
 | `manifest.rs` | 编译期公钥绑定、清单与校验表双重 Ed25519 验签、语义版本与最低升级基线判定 |
-| `network.rs` | 复用 SSRF 的 URL 与 DNS 校验，固定解析后的 IP，关闭环境代理，仅允许同源 HTTPS 重定向，清单与归档各享 10 秒请求预算 |
-| `verify.rs` | 流式下载并限制体积，解压前校验 ZIP 中央目录上限，逐条拒绝链接与越界路径，复核全树 SHA-256 并执行凭据扫描 |
+| `network.rs` | 复用 SSRF 的 URL 与 DNS 校验，固定解析后的 IP，关闭环境代理，仅允许同源 HTTPS 重定向；清单总限时 10 秒、归档建连 10 秒、单块读 30 秒，解析上限 4 KiB 结构化错误码与 `Retry-After` |
+| `verify.rs` | 流式下载并限制体积（总上限 600 秒，客户端 `prepare_update` 等待 660 秒），节流上报已下载字节；解压前校验 ZIP 中央目录上限，逐条拒绝链接与越界路径，复核全树 SHA-256 并执行凭据扫描 |
 | `layout.rs` | 划分只读程序区、四份可合并配置与持久用户数据区，调用 Win32 检查磁盘剩余空间（不少于 2 倍解压体积加归档体积） |
 | `json.rs` | 有界严格 JSON 解析，拒绝重复字段，防止凭据字段被同名后置键覆盖 |
 | `applier.rs` / `io.rs` | 写入 `.state/update/transaction.json` 预写事务，逐文件备份与同卷移动（最多 50 次短暂占用退避），移动前后复核哈希，支持任意边界中断恢复与逆序回滚 |
@@ -47,7 +47,9 @@
 
 ### 更新发现与发布源
 
-当前 `service.rs` 默认清单地址为 `<oaHost>/api/agent/releases/latest`（官方地址 `https://www.cstoa.top`），阶段 9 统一要求编译期同时注入 `CST_UPDATE_MANIFEST_URL` 与 `CST_UPDATE_PUBLIC_KEY`。客户端读取根目录 `VERSION` 中的 `cst-pilot <版本>` 行与签名清单比对。缺少编译期升级参数时状态固定为不可用且不发起网络请求。
+编译期必须同时注入 `CST_UPDATE_MANIFEST_URL` 与 `CST_UPDATE_PUBLIC_KEY`。正式通道指向 `https://www.cstoa.top/api/agent/releases/latest`，内测通道指向 `https://www.cstoa.top/api/agent/releases/beta`，归档文件同源直出 `https://www.cstoa.top/api/agent/releases/files/<version>/cst-pilot-<version>-windows-x64.zip`。缺失任一编译期参数时状态固定为 `Phase::Unavailable`，不发起网络请求。
+
+客户端读取根目录 `VERSION` 中的 `cst-pilot <版本>` 行与签名清单比对。服务端返回 `404 channel_empty` 时进入温和 `Phase::Current`（提示「暂未发布在线更新」）；`429 rate_limited`、`503 bandwidth_budget_exceeded`、`503 service_starting`、`404 release_not_found` 及网络故障按结构化 `UpdateError` 映射为中文短提示，下载进度通过 `cst-server` 全局 SSE `update_changed` 实时广播。
 
 ### 签名清单协议
 
@@ -58,8 +60,12 @@
 | `schemaVersion` / `platform` | 固定为 `1` / `windows-x86_64` |
 | `version` / `minUpgradableVersion` | 语义版本，安装前重读本机 `VERSION` 二次核验 |
 | `builtAt` / `releaseNotes` | RFC 3339 构建时间，更新说明上限 `16 KiB` |
-| `archive` | `{ url, size, unpackedSize, sha256 }`。归档上限 `2 GiB`，解压上限 `8 GiB` / `100,000` 个文件，ZIP 中央目录上限 `64 MiB` |
+| `archive` | `{ url, size, unpackedSize, sha256 }`。归档上限 `2 GiB`，解压上限 `8 GiB` / `100,000` 个文件，ZIP 中央目录上限 `64 MiB`；`unpackedSize` 按 ZIP 全部普通文件条目求和并包含 `app/SHA256SUMS` |
 | `sha256Sums` / `sha256Signature` | `64位小写哈希 + 两个空格 + 相对路径` 全树清单，配 `cst-pilot-release-sums-v1\n` 前缀独立签名 |
+
+### 离线签名与发布工具链
+
+`crates/xtask` 提供四个发布子命令：`keygen` 离线生成 Ed25519 密钥对并拒绝覆盖已有私钥；`dist --require-update-config` 校验并向双次编译注入更新源与公钥，同时将公钥前 16 位 SHA-256 指纹写入 `app/BUILD-INFO.json`；`sign-release` 计算含 `app/SHA256SUMS` 的精确 `unpackedSize`、执行双重签名并调用 `VerifiedPackage::stage_from_archive_bytes` 离线闭环自验；`publish-release` 仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取令牌，经回环通道流式上传 `multipart/form-data`（先 `manifest` 后 `archive`），并在激活后复验公开清单签名与归档 `HEAD`。
 
 ## 随包外部组件与过渡期装配
 

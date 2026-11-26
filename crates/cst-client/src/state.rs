@@ -279,6 +279,8 @@ pub struct UpdateStatusDto {
     #[serde(default)]
     pub message: String,
     #[serde(default)]
+    pub error_kind: Option<String>,
+    #[serde(default)]
     pub launch: Option<LaunchReceipt>,
 }
 
