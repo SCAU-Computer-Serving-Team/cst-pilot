@@ -3,7 +3,9 @@ use std::rc::Rc;
 use cst_client::{
     DesktopSettingsDto, KeyboardFocusStyleDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto,
 };
+use gpui::{FocusHandle, KeyDownEvent, MouseMoveEvent};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     AnyElement, App, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -12,17 +14,31 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::settings::update_dialog::{compute_update_progress_ratio, format_megabytes};
-use crate::theme::kbd_focus::render_kbd_style_icon;
+use crate::theme::kbd_focus::{
+    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdRailPlacement, render_gliding_dynamic_indicator,
+    render_kbd_style_icon,
+};
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 pub type SelectThemeFn = Rc<dyn Fn(ThemeModeDto, &mut Window, &mut App)>;
 pub type SelectKbdFocusStyleFn = Rc<dyn Fn(KeyboardFocusStyleDto, &mut Window, &mut App)>;
 pub type UpdateCardActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
+pub type GeneralKeyDownFn = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
+pub type GeneralMouseMoveFn = Rc<dyn Fn(&MouseMoveEvent, &mut Window, &mut App)>;
+
+pub struct GeneralTabKbdProps {
+    pub focus_handle: FocusHandle,
+    pub kbd_active: bool,
+    pub row_idx: usize,
+    pub tracker: KbdDynamicBoundsTracker,
+    pub on_key_down: GeneralKeyDownFn,
+    pub on_mouse_move: GeneralMouseMoveFn,
+}
 
 /// Renders the `常规` settings tab (`cst-pilot-desktop.pen` 「03 · 设置」 `q8TgB`):
-/// 1. Category heading `常规` (`20/28 @ 600`)
-/// 2. `外观` group (`$bg-workspace` + `8px` radius + `$border-subtle`, three `72px` rows: 界面主题、方向键选中样式、默认启动视图)
-/// 3. `软件更新` group (`72px` `C9or7K` card with `$bg-track-recess` `keDNb` progress fill and neutral outline `s2CZVU` button).
+/// Frameless full-width hairline rows (`52px`) with light-chip option groups (`28px` / `4px` radius,
+/// `$bg-surface` + `$border-subtle` active, zero outer gray pill tracks), read-only `图形窗口`,
+/// and `40px` separated `软件更新 当前 vX.Y.Z` hairline status row with `120×4px` progress track.
 #[allow(clippy::too_many_arguments)]
 pub fn render_general_tab(
     desktop_settings: &DesktopSettingsDto,
@@ -30,93 +46,130 @@ pub fn render_general_tab(
     update_state: Option<&UpdateStateDto>,
     _mono_family: SharedString,
     palette: &DesktopPalette,
+    kbd: GeneralTabKbdProps,
+    window: &mut Window,
+    cx: &mut App,
     on_select_theme: SelectThemeFn,
     on_select_kbd_focus_style: SelectKbdFocusStyleFn,
     on_check_or_open_update: UpdateCardActionFn,
     on_cancel_update: UpdateCardActionFn,
 ) -> impl IntoElement {
+    kbd.tracker.clear();
+
     let phase = update_state
         .map(|u| u.status.phase)
         .unwrap_or(UpdatePhaseDto::Idle);
-    let ver_str = update_state
+    let raw_ver = update_state
         .map(|u| u.current_version.as_str())
         .filter(|s| !s.is_empty())
         .unwrap_or(current_version);
+    let ver_badge = if raw_ver.starts_with('v') || raw_ver.starts_with('V') {
+        format!("当前 {raw_ver}")
+    } else {
+        format!("当前 v{raw_ver}")
+    };
 
     let progress_ratio = compute_update_progress_ratio(update_state);
     let in_flight = matches!(phase, UpdatePhaseDto::Checking | UpdatePhaseDto::Preparing);
     let unavailable = phase == UpdatePhaseDto::Unavailable;
 
-    let status_subtitle = match phase {
-        UpdatePhaseDto::Unavailable => SharedString::from("未配置编译期更新源，自动升级未启用"),
-        UpdatePhaseDto::Checking => SharedString::from("正在检查签名发布清单…"),
-        UpdatePhaseDto::Current => SharedString::from("当前已是最新版本"),
+    let (status_title, status_detail): (SharedString, SharedString) = match phase {
+        UpdatePhaseDto::Unavailable => ("未启用自动更新".into(), "未配置编译期更新源".into()),
+        UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验签名发布清单".into()),
+        UpdatePhaseDto::Current => ("当前已是最新版本".into(), "".into()),
         UpdatePhaseDto::Available => {
             let target = update_state
                 .and_then(|u| u.status.version.as_deref())
                 .unwrap_or("新版本");
-            SharedString::from(format!("发现新版本 {target}，可下载并重启升级"))
+            (
+                format!("发现新版本 {target}").into(),
+                "可下载并重启升级".into(),
+            )
         }
         UpdatePhaseDto::Preparing => {
+            let target = update_state
+                .and_then(|u| u.status.version.as_deref())
+                .map(|v| {
+                    if v.starts_with('v') || v.starts_with('V') {
+                        format!("正在下载 {v}")
+                    } else {
+                        format!("正在下载 v{v}")
+                    }
+                })
+                .unwrap_or_else(|| "正在下载更新包".to_owned());
             let dl = update_state.and_then(|u| u.status.downloaded_bytes);
             let tot = update_state.and_then(|u| u.status.archive_bytes);
-            match (dl, tot) {
-                (Some(d), Some(t)) => SharedString::from(format!(
-                    "正在下载更新包 {} / {}",
+            let detail = match (dl, tot, progress_ratio) {
+                (Some(d), Some(t), Some(ratio)) => format!(
+                    "{}% · {} / {}",
+                    (ratio * 100.0).round() as u32,
                     format_megabytes(d),
                     format_megabytes(t)
-                )),
-                (_, Some(t)) => {
-                    SharedString::from(format!("正在下载更新包（{}）…", format_megabytes(t)))
+                ),
+                (Some(d), Some(t), None) => {
+                    format!("{} / {}", format_megabytes(d), format_megabytes(t))
                 }
-                _ => SharedString::from("正在下载并验签离线更新包…"),
-            }
+                (_, Some(t), _) => format!("总计 {}", format_megabytes(t)),
+                _ => "正在验签离线更新包…".to_owned(),
+            };
+            (target.into(), detail.into())
         }
-        UpdatePhaseDto::Ready => SharedString::from("更新包校验通过，点击重启完成升级"),
+        UpdatePhaseDto::Ready => ("更新包已就绪".into(), "校验通过，重启后完成升级".into()),
         UpdatePhaseDto::Failed => {
             let msg = update_state
                 .map(|u| u.status.message.as_str())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("检查或下载更新失败");
-            SharedString::from(msg.to_owned())
+            ("更新检查失败".into(), msg.to_owned().into())
         }
-        _ => SharedString::from("手动检查签名离线升级包"),
+        _ => ("检查签名更新".into(), "手动检查离线升级包".into()),
     };
 
-    // Neutral outline button `s2CZVU` across all states (no solid accent blue conflict!)
-    let right_update_btn = if in_flight {
-        apply_scale(div(), scale::UI_MEDIUM)
-            .id("settings-update-cancel-btn-ohwrt")
-            .test_support()
-            .a11y_button("settings-update-cancel-btn", "取消更新")
-            .relative()
-            .h(height::CONTROL)
-            .px(space::MD)
-            .rounded(radius::CONTROL)
-            .border_1()
-            .border_color(palette.border_strong)
-            .bg(palette.bg_workspace)
-            .text_color(palette.text_primary)
-            .flex()
-            .items_center()
-            .hover(|s| s.bg(palette.bg_item_hover))
-            .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
-            .child(cjk_inline_label("取消"))
+    let tr_update_btn = kbd.tracker.clone();
+    let right_update_controls = if in_flight {
+        let mut group = div().flex().items_center().gap(space::LG).flex_shrink_0();
+        if let Some(ratio) = progress_ratio {
+            group = group.child(
+                div()
+                    .w(px(120.0))
+                    .h(px(4.0))
+                    .rounded(radius::FULL)
+                    .bg(palette.bg_track_recess)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id("settings-update-progress-fill-kednb")
+                            .test_support()
+                            .h_full()
+                            .w(relative(ratio))
+                            .rounded(radius::FULL)
+                            .bg(palette.accent_solid),
+                    ),
+            );
+        }
+        group
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id("settings-update-cancel-btn-ohwrt")
+                    .test_support()
+                    .a11y_button("settings-update-cancel-btn", "取消更新")
+                    .h(height::COMPACT)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
+                    .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
+                    .child(cjk_inline_label("取消")),
+            )
             .into_any_element()
     } else if unavailable {
-        apply_scale(div(), scale::UI_MEDIUM)
+        apply_scale(div(), scale::UI)
             .id("settings-update-disabled-btn")
             .test_support()
-            .relative()
-            .h(height::CONTROL)
-            .px(space::MD)
-            .rounded(radius::CONTROL)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_surface)
             .text_color(palette.text_muted)
-            .flex()
-            .items_center()
             .child(cjk_inline_label("未启用"))
             .into_any_element()
     } else {
@@ -129,90 +182,57 @@ pub fn render_general_tab(
             .id("settings-update-action-btn")
             .test_support()
             .a11y_button("settings-update-action-btn", btn_label)
-            .relative()
-            .h(height::CONTROL)
-            .px(space::MD)
+            .h(height::COMPACT)
+            .px(space::SM)
             .rounded(radius::CONTROL)
-            .border_1()
-            .border_color(palette.border_strong)
-            .bg(palette.bg_workspace)
             .text_color(palette.text_primary)
             .flex()
             .items_center()
             .hover(|s| s.bg(palette.bg_item_hover))
             .on_click(move |_, w, cx| (on_check_or_open_update)(w, cx))
+            .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
             .child(cjk_inline_label(btn_label))
             .into_any_element()
     };
 
-    let mut update_card = div()
+    let update_row = div()
         .id("settings-update-card-c9or7k")
         .test_support()
-        .a11y_region("settings-update-card", "软件版本与更新")
-        .relative()
+        .a11y_region("settings-update-card", "软件更新")
         .w_full()
-        .h(px(72.0))
-        .px(space::LG)
-        .rounded(radius::ROW)
-        .border_1()
+        .h(px(52.0))
+        .border_b_1()
         .border_color(palette.border_subtle)
-        .bg(palette.bg_workspace)
-        .overflow_hidden()
         .flex()
         .items_center()
-        .justify_between();
-
-    // Underlying left-to-right `$bg-track-recess` download progress fill (`keDNb`)
-    if let Some(ratio) = progress_ratio
-        && in_flight
-    {
-        update_card = update_card.child(
-            div()
-                .id("settings-update-progress-fill-kednb")
-                .test_support()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .left_0()
-                .w(relative(ratio))
-                .bg(palette.bg_track_recess),
-        );
-    }
-
-    update_card = update_card
+        .justify_between()
+        .gap(space::LG)
         .child(
             div()
-                .relative()
+                .flex_1()
+                .min_w_0()
                 .flex()
-                .flex_col()
-                .gap(space::MICRO)
+                .items_end()
+                .gap(space::MD)
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::SM)
-                        .child(
-                            apply_scale(div(), scale::BODY)
-                                .text_color(palette.text_primary)
-                                .child(cjk_inline_label("软件版本与更新")),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(ver_str.to_owned())),
-                        ),
+                    apply_scale(div(), scale::BODY)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label(status_title)),
                 )
-                .child(
+                .children((!status_detail.is_empty()).then(|| {
                     apply_scale(div(), scale::CAPTION)
+                        .pb(px(1.0))
+                        .min_w_0()
+                        .truncate()
                         .text_color(if phase == UpdatePhaseDto::Failed {
                             palette.status_danger
                         } else {
-                            palette.text_secondary
+                            palette.text_muted
                         })
-                        .child(status_subtitle),
-                ),
+                        .child(status_detail)
+                })),
         )
-        .child(right_update_btn);
+        .child(right_update_controls);
 
     let t_sys = Rc::clone(&on_select_theme);
     let t_light = Rc::clone(&on_select_theme);
@@ -222,204 +242,228 @@ pub fn render_general_tab(
     let brackets_active = desktop_settings.keyboard_focus_style == KeyboardFocusStyleDto::Brackets;
     let rail_active = desktop_settings.keyboard_focus_style == KeyboardFocusStyleDto::Rail;
 
+    let active_kbd_spec = if kbd.kbd_active {
+        match kbd.row_idx {
+            0 => {
+                let key = match desktop_settings.theme {
+                    ThemeModeDto::System => "gen-theme-system",
+                    ThemeModeDto::Light => "gen-theme-light",
+                    ThemeModeDto::Dark => "gen-theme-dark",
+                };
+                Some(KbdDynamicSpec::control(key, KbdRailPlacement::BottomCenter))
+            }
+            1 => {
+                let key = if brackets_active {
+                    "gen-kbd-brackets"
+                } else {
+                    "gen-kbd-rail"
+                };
+                Some(KbdDynamicSpec::control(key, KbdRailPlacement::BottomCenter))
+            }
+            2 if !unavailable => Some(KbdDynamicSpec::control(
+                "gen-update",
+                KbdRailPlacement::LeftOutside,
+            )),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let on_key = kbd.on_key_down;
+    let on_move = kbd.on_mouse_move;
+
     div()
         .id("settings-general-tab-q8tgb")
         .test_support()
         .a11y_region("settings-general-tab", "常规设置")
+        .relative()
+        .track_focus(&kbd.focus_handle)
+        .tab_index(0)
+        .on_key_down(move |ev, w, cx| (on_key)(ev, w, cx))
+        .on_mouse_move(move |ev, w, cx| (on_move)(ev, w, cx))
         .w_full()
         .flex()
         .flex_col()
-        .gap(space::GROUP)
-        .child(
-            apply_scale(div(), scale::TITLE)
-                .text_color(palette.text_primary)
-                .child(cjk_inline_label("常规")),
-        )
-        // Group 1: 外观
+        // Frameless 52px hairline rows (no redundant H1 or `外观` subheading)
         .child(
             div()
+                .w_full()
+                .h(px(52.0))
+                .border_b_1()
+                .border_color(palette.border_subtle)
                 .flex()
-                .flex_col()
-                .gap(space::SM)
+                .items_center()
+                .justify_between()
                 .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                    apply_scale(div(), scale::BODY)
                         .text_color(palette.text_primary)
-                        .child(cjk_inline_label("外观")),
+                        .child(cjk_inline_label("界面主题")),
                 )
                 .child(
                     div()
-                        .w_full()
-                        .rounded(radius::ROW)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_workspace)
                         .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .w_full()
-                                .h(px(72.0))
-                                .px(space::LG)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("界面主题")),
-                                )
-                                .child(
-                                    div()
-                                        .h(height::CONTROL)
-                                        .p(space::XS)
-                                        .rounded(radius::ROW)
-                                        .bg(palette.bg_surface)
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::MICRO)
-                                        .child(seg_pill(
-                                            "settings-theme-system",
-                                            IconName::Monitor,
-                                            "跟随系统",
-                                            desktop_settings.theme == ThemeModeDto::System,
-                                            palette,
-                                            move |w, cx| (t_sys)(ThemeModeDto::System, w, cx),
-                                        ))
-                                        .child(seg_pill(
-                                            "settings-theme-light",
-                                            IconName::Sun,
-                                            "浅色",
-                                            desktop_settings.theme == ThemeModeDto::Light,
-                                            palette,
-                                            move |w, cx| (t_light)(ThemeModeDto::Light, w, cx),
-                                        ))
-                                        .child(seg_pill(
-                                            "settings-theme-dark",
-                                            IconName::Moon,
-                                            "深色",
-                                            desktop_settings.theme == ThemeModeDto::Dark,
-                                            palette,
-                                            move |w, cx| (t_dark)(ThemeModeDto::Dark, w, cx),
-                                        )),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .h(px(72.0))
-                                .px(space::LG)
-                                .border_t_1()
-                                .border_color(palette.border_subtle)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("方向键选中样式")),
-                                )
-                                .child(
-                                    div()
-                                        .h(height::CONTROL)
-                                        .p(space::XS)
-                                        .rounded(radius::ROW)
-                                        .bg(palette.bg_surface)
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::MICRO)
-                                        .child(seg_pill_custom(
-                                            "settings-kbd-focus-brackets",
-                                            render_kbd_style_icon(
-                                                KeyboardFocusStyleDto::Brackets,
-                                                if brackets_active {
-                                                    palette.text_primary
-                                                } else {
-                                                    palette.text_secondary
-                                                },
-                                            ),
-                                            "四角",
-                                            brackets_active,
-                                            true,
-                                            palette,
-                                            move |w, cx| {
-                                                (k_brackets)(KeyboardFocusStyleDto::Brackets, w, cx)
-                                            },
-                                        ))
-                                        .child(seg_pill_custom(
-                                            "settings-kbd-focus-rail",
-                                            render_kbd_style_icon(
-                                                KeyboardFocusStyleDto::Rail,
-                                                if rail_active {
-                                                    palette.text_primary
-                                                } else {
-                                                    palette.text_secondary
-                                                },
-                                            ),
-                                            "游标",
-                                            rail_active,
-                                            true,
-                                            palette,
-                                            move |w, cx| {
-                                                (k_rail)(KeyboardFocusStyleDto::Rail, w, cx)
-                                            },
-                                        )),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .h(px(72.0))
-                                .px(space::LG)
-                                .border_t_1()
-                                .border_color(palette.border_subtle)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("默认启动视图")),
-                                )
-                                .child(
-                                    div()
-                                        .h(height::CONTROL)
-                                        .p(space::XS)
-                                        .rounded(radius::ROW)
-                                        .px(space::SM)
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::XS)
-                                        .text_color(palette.text_secondary)
-                                        .child(Icon::new(IconName::Layers).size(px(14.0)))
-                                        .child(
-                                            apply_scale(div(), scale::UI)
-                                                .child(cjk_inline_label("图形")),
-                                        ),
-                                ),
-                        ),
+                        .items_center()
+                        .gap(space::XS)
+                        .child(light_chip_icon(
+                            "settings-theme-system",
+                            "gen-theme-system",
+                            IconName::Monitor,
+                            "跟随系统",
+                            desktop_settings.theme == ThemeModeDto::System,
+                            kbd.kbd_active,
+                            palette,
+                            kbd.tracker.clone(),
+                            move |w, cx| (t_sys)(ThemeModeDto::System, w, cx),
+                        ))
+                        .child(light_chip_icon(
+                            "settings-theme-light",
+                            "gen-theme-light",
+                            IconName::Sun,
+                            "浅色",
+                            desktop_settings.theme == ThemeModeDto::Light,
+                            kbd.kbd_active,
+                            palette,
+                            kbd.tracker.clone(),
+                            move |w, cx| (t_light)(ThemeModeDto::Light, w, cx),
+                        ))
+                        .child(light_chip_icon(
+                            "settings-theme-dark",
+                            "gen-theme-dark",
+                            IconName::Moon,
+                            "深色",
+                            desktop_settings.theme == ThemeModeDto::Dark,
+                            kbd.kbd_active,
+                            palette,
+                            kbd.tracker.clone(),
+                            move |w, cx| (t_dark)(ThemeModeDto::Dark, w, cx),
+                        )),
                 ),
         )
-        // Group 2: 软件更新 (`C9or7K`)
         .child(
             div()
+                .w_full()
+                .h(px(52.0))
+                .border_b_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    apply_scale(div(), scale::BODY)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("方向键选中样式")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .child(light_chip_custom(
+                            "settings-kbd-focus-brackets",
+                            "gen-kbd-brackets",
+                            render_kbd_style_icon(
+                                KeyboardFocusStyleDto::Brackets,
+                                if brackets_active {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_secondary
+                                },
+                            ),
+                            "四角",
+                            brackets_active,
+                            kbd.kbd_active,
+                            palette,
+                            kbd.tracker.clone(),
+                            move |w, cx| (k_brackets)(KeyboardFocusStyleDto::Brackets, w, cx),
+                        ))
+                        .child(light_chip_custom(
+                            "settings-kbd-focus-rail",
+                            "gen-kbd-rail",
+                            render_kbd_style_icon(
+                                KeyboardFocusStyleDto::Rail,
+                                if rail_active {
+                                    palette.text_primary
+                                } else {
+                                    palette.text_secondary
+                                },
+                            ),
+                            "游标",
+                            rail_active,
+                            kbd.kbd_active,
+                            palette,
+                            kbd.tracker.clone(),
+                            move |w, cx| (k_rail)(KeyboardFocusStyleDto::Rail, w, cx),
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .h(px(52.0))
+                .border_b_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    apply_scale(div(), scale::BODY)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("默认启动视图")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .text_color(palette.text_secondary)
+                        .child(cjk_inline_label("图形窗口")),
+                ),
+        )
+        // 40px gap -> 软件更新 当前 vX.Y.Z
+        .child(
+            div()
+                .mt(px(40.0))
                 .flex()
                 .flex_col()
                 .gap(space::SM)
                 .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("软件更新")),
+                    div()
+                        .flex()
+                        .items_end()
+                        .gap(space::MD)
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("软件更新")),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .pb(px(1.0))
+                                .text_color(palette.text_muted)
+                                .child(SharedString::from(ver_badge)),
+                        ),
                 )
-                .child(update_card),
+                .child(update_row),
         )
+        .child(render_gliding_dynamic_indicator(
+            "settings-general",
+            desktop_settings.keyboard_focus_style,
+            active_kbd_spec,
+            kbd.tracker,
+            palette,
+            window,
+            cx,
+        ))
 }
 
-fn seg_pill(
+#[allow(clippy::too_many_arguments)]
+fn light_chip_icon(
     id: &'static str,
+    track_key: &'static str,
     icon: IconName,
     label: &'static str,
     active: bool,
+    kbd_active: bool,
     palette: &DesktopPalette,
+    tracker: KbdDynamicBoundsTracker,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let icon_el = Icon::new(icon)
@@ -430,46 +474,55 @@ fn seg_pill(
             palette.text_secondary
         })
         .into_any_element();
-    seg_pill_custom(id, icon_el, label, active, false, palette, on_click)
+    light_chip_custom(
+        id, track_key, icon_el, label, active, kbd_active, palette, tracker, on_click,
+    )
 }
 
-fn seg_pill_custom(
+#[allow(clippy::too_many_arguments)]
+fn light_chip_custom(
     id: &'static str,
+    track_key: &'static str,
     icon_el: AnyElement,
     label: &'static str,
     active: bool,
-    keyboard: bool,
+    kbd_active: bool,
     palette: &DesktopPalette,
+    tracker: KbdDynamicBoundsTracker,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let base = if active {
         apply_scale(div(), scale::UI_MEDIUM)
-            .bg(palette.bg_elevated)
+            .bg(palette.bg_surface)
             .border_1()
             .border_color(palette.border_subtle)
             .text_color(palette.text_primary)
     } else {
         apply_scale(div(), scale::UI)
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
             .bg(gpui_kit::transparent_black())
             .text_color(palette.text_secondary)
     };
 
-    let mut pill = base.id(id).test_support();
-    if keyboard {
-        let focus_border = palette.border_focus;
-        pill = pill
-            .tab_index(0)
-            .focus_visible(move |style| style.border_1().border_color(focus_border));
-    }
-
-    pill.a11y_tab(id, label, active)
-        .h(height::INLINE)
-        .px(space::MD)
+    base.id(id)
+        .test_support()
+        .a11y_tab(id, label, active)
+        .h(height::COMPACT)
+        .px(px(10.0))
         .rounded(radius::CONTROL)
         .flex()
         .items_center()
-        .gap(space::XS)
+        .gap(space::TIGHT)
+        .hover(move |s| {
+            if active || kbd_active {
+                s
+            } else {
+                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+            }
+        })
         .on_click(move |_, w, cx| on_click(w, cx))
+        .on_prepaint(move |bounds, _, _| tracker.set(track_key, bounds))
         .child(icon_el)
         .child(cjk_inline_label(label))
 }

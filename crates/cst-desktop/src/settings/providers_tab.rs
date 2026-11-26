@@ -1,9 +1,9 @@
 mod editor;
 
 use cst_client::{ClientError, ClientHandle};
-use gpui::{KeyDownEvent, MouseDownEvent};
+use gpui::{KeyDownEvent, MouseDownEvent, MouseMoveEvent, Pixels, Point};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
@@ -15,6 +15,11 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{
+    DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, KbdRailPlacement, KbdTone,
+    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
+    resolve_menu_nav_key,
+};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
@@ -157,10 +162,12 @@ pub enum ProvidersTabEvent {
 pub struct ProvidersTabView {
     client: ClientHandle,
     active_provider_id: Option<String>,
+    adding_provider: bool,
     creating_new_custom: bool,
     inline_edit_mode: bool,
     search_visible: bool,
     search_input: Entity<InputState>,
+    add_search_input: Entity<InputState>,
     provider_id_input: Entity<InputState>,
     provider_name_input: Entity<InputState>,
     base_url_input: Entity<InputState>,
@@ -168,7 +175,24 @@ pub struct ProvidersTabView {
     protocol: CustomApiProtocol,
     protocol_dropdown_open: bool,
     protocol_dropdown_index: usize,
+    protocol_kbd_active: bool,
+    protocol_last_pointer: Option<Point<Pixels>>,
+    protocol_tracker: KbdDynamicBoundsTracker,
     protocol_focus: FocusHandle,
+    protocol_trigger_focus: FocusHandle,
+    list_focus: FocusHandle,
+    list_kbd_active: bool,
+    list_selected_idx: usize,
+    return_focus_idx: usize,
+    list_last_pointer: Option<Point<Pixels>>,
+    list_tracker: KbdDynamicBoundsTracker,
+    confirm_remove: bool,
+    remove_trigger_focus: FocusHandle,
+    remove_cancel_focus: FocusHandle,
+    remove_confirm_focus: FocusHandle,
+    remove_confirm_kbd_active: bool,
+    remove_confirm_last_pointer: Option<Point<Pixels>>,
+    remove_confirm_tracker: KbdDynamicBoundsTracker,
     inline_token_edit: Option<(usize, TokenFieldKind)>,
     inline_token_input: Entity<InputState>,
     revision: Option<String>,
@@ -189,6 +213,7 @@ impl EventEmitter<ProvidersTabEvent> for ProvidersTabView {}
 impl ProvidersTabView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("筛选模型…"));
+        let add_search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索提供商…"));
         let provider_id_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("如 my-gateway"));
         let provider_name_input =
@@ -202,8 +227,8 @@ impl ProvidersTabView {
         });
         let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("128K"));
 
-        let mut subs =
-            vec![cx.subscribe(
+        let mut subs = vec![
+            cx.subscribe(
                 &search_input,
                 |this, _, event: &InputEvent, cx| match event {
                     InputEvent::Change => {
@@ -214,7 +239,21 @@ impl ProvidersTabView {
                     }
                     _ => {}
                 },
-            )];
+            ),
+            cx.subscribe(
+                &add_search_input,
+                |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        this.list_selected_idx = 0;
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    _ => {}
+                },
+            ),
+        ];
         subs.push(
             cx.subscribe(&inline_token_input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Blur) {
@@ -255,10 +294,12 @@ impl ProvidersTabView {
         Self {
             client,
             active_provider_id: None,
+            adding_provider: false,
             creating_new_custom: false,
             inline_edit_mode: false,
             search_visible: false,
             search_input,
+            add_search_input,
             provider_id_input,
             provider_name_input,
             base_url_input,
@@ -266,7 +307,24 @@ impl ProvidersTabView {
             protocol: CustomApiProtocol::OpenaiCompletions,
             protocol_dropdown_open: false,
             protocol_dropdown_index: 0,
+            protocol_kbd_active: false,
+            protocol_last_pointer: None,
+            protocol_tracker: KbdDynamicBoundsTracker::new(),
             protocol_focus: cx.focus_handle(),
+            protocol_trigger_focus: cx.focus_handle().tab_stop(true),
+            list_focus: cx.focus_handle().tab_stop(true),
+            list_kbd_active: false,
+            list_selected_idx: 0,
+            return_focus_idx: 0,
+            list_last_pointer: None,
+            list_tracker: KbdDynamicBoundsTracker::new(),
+            confirm_remove: false,
+            remove_trigger_focus: cx.focus_handle().tab_stop(true),
+            remove_cancel_focus: cx.focus_handle().tab_stop(true),
+            remove_confirm_focus: cx.focus_handle().tab_stop(true),
+            remove_confirm_kbd_active: false,
+            remove_confirm_last_pointer: None,
+            remove_confirm_tracker: KbdDynamicBoundsTracker::new(),
             inline_token_edit: None,
             inline_token_input,
             revision: None,
@@ -326,6 +384,29 @@ impl ProvidersTabView {
         self.page_slide.start(-1.0, cx);
         self.reset_form();
         self.clear_key(window, cx);
+        self.list_selected_idx = self.return_focus_idx;
+        self.list_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn open_remove_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving || self.loading || (self.inline_edit_mode && self.revision.is_none()) {
+            return;
+        }
+        self.confirm_remove = true;
+        self.remove_confirm_kbd_active = true;
+        self.remove_confirm_last_pointer = Some(window.mouse_position());
+        self.remove_cancel_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn cancel_remove_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        self.confirm_remove = false;
+        self.remove_confirm_kbd_active = false;
+        self.remove_trigger_focus.focus(window, cx);
         cx.notify();
     }
 
@@ -337,7 +418,78 @@ impl ProvidersTabView {
     }
 
     pub fn has_dropdown(&self) -> bool {
-        self.protocol_dropdown_open || self.inline_token_edit.is_some()
+        self.protocol_dropdown_open || self.inline_token_edit.is_some() || self.confirm_remove
+    }
+
+    pub fn open_add_provider_catalog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.return_focus_idx = self.list_selected_idx;
+        self.page_slide.start(1.0, cx);
+        self.reset_form();
+        self.adding_provider = true;
+        self.providers_expanded = false;
+        self.list_selected_idx = 0;
+        self.add_search_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
+        self.list_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn focus_from_tabbar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.list_kbd_active = true;
+        self.list_last_pointer = Some(window.mouse_position());
+        self.list_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn dismiss_topmost(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.protocol_dropdown_open {
+            self.protocol_dropdown_open = false;
+            self.protocol_kbd_active = false;
+            self.protocol_trigger_focus.focus(window, cx);
+            cx.notify();
+            return true;
+        }
+        if self.dismiss_dropdowns(cx) {
+            return true;
+        }
+        if self.confirm_remove {
+            if !self.saving {
+                self.cancel_remove_confirm(window, cx);
+            }
+            return true;
+        }
+        if self.adding_provider
+            && self
+                .add_search_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            if self.add_search_input.read(cx).value().is_empty() {
+                self.list_focus.focus(window, cx);
+            } else {
+                self.add_search_input
+                    .update(cx, |i, cx| i.set_value("", window, cx));
+            }
+            cx.notify();
+            return true;
+        }
+        if self.search_visible {
+            self.search_visible = false;
+            self.search_input
+                .update(cx, |i, cx| i.set_value("", window, cx));
+            cx.notify();
+            return true;
+        }
+        if self.creating_new_custom
+            || self.inline_edit_mode
+            || self.active_provider_id.is_some()
+            || self.adding_provider
+        {
+            self.return_to_provider_list(window, cx);
+            return true;
+        }
+        false
     }
 
     pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -349,6 +501,12 @@ impl ProvidersTabView {
         }
         if self.protocol_dropdown_open {
             return false;
+        }
+        if self.adding_provider {
+            self.add_search_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
         }
         if self.creating_new_custom || self.inline_edit_mode {
             self.provider_name_input
@@ -440,14 +598,51 @@ impl ProvidersTabView {
         self.loading = false;
         self.revision = None;
         self.editable_rows.clear();
+        self.adding_provider = false;
         self.inline_edit_mode = false;
         self.creating_new_custom = false;
         self.active_provider_id = None;
         self.search_visible = false;
         self.protocol_dropdown_open = false;
+        self.protocol_kbd_active = false;
+        self.confirm_remove = false;
+        self.remove_confirm_kbd_active = false;
         self.inline_token_edit = None;
         self.key_error = None;
         self.form_error = None;
+    }
+
+    fn toggle_builtin_model_enabled(&mut self, full_id: String, cx: &mut Context<Self>) {
+        let snap = self.client.snapshot();
+        let Some(models) = snap.models.as_ref() else {
+            return;
+        };
+        let mut next: Vec<String> = match models.enabled.as_ref() {
+            Some(list) => list.clone(),
+            None => models
+                .models
+                .iter()
+                .filter(|m| m.credential_ready && m.catalog_present)
+                .map(|m| format!("{}/{}", m.provider, m.id))
+                .collect(),
+        };
+        if let Some(pos) = next.iter().position(|x| x == &full_id) {
+            next.remove(pos);
+        } else {
+            next.push(full_id);
+        }
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = client.set_explicit_model_scope(next).await;
+            let _ = client.refresh_models(None).await;
+            let _ = weak.update(cx, |_, cx| {
+                if let Err(err) = res {
+                    cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn select_provider(
@@ -669,6 +864,9 @@ impl ProvidersTabView {
                         }));
                     }
                     Err(err) => {
+                        this.confirm_remove = false;
+                        this.remove_confirm_kbd_active = false;
+                        this.remove_trigger_focus.focus(window, cx);
                         cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
                     }
                 }
@@ -884,9 +1082,11 @@ impl Render for ProvidersTabView {
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
+        let kbd_style = snap.desktop_settings.keyboard_focus_style;
         let (slide_opacity, slide_dx) = self.page_slide.sample(window, cx);
+        self.list_tracker.clear();
 
-        // 1. Custom / Inline Provider Editor Mode (`Geto8` -> `q8NLwK`)
+        // 1. Custom / Inline Provider Editor Mode (`FxSIA`)
         if self.creating_new_custom || self.inline_edit_mode {
             return div()
                 .id("settings-providers-tab")
@@ -911,20 +1111,408 @@ impl Render for ProvidersTabView {
                         .w_full()
                         .flex()
                         .flex_col()
-                        .gap(space::SM)
+                        .gap(space::MD)
                         .child(self.render_back_bar(&palette, cx))
                         .child(
-                            div().w_full().flex().items_center().gap(space::MD).child(
-                                apply_scale(div(), scale::TITLE)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("自定义提供商")),
-                            ),
+                            apply_scale(div(), scale::TITLE)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("自定义提供商")),
                         ),
                 )
                 .child(self.render_custom_provider_editor(mono_family, &palette, window, cx));
         }
 
-        // 2. Built-in Provider Detail / Credential Management Mode (`T5us8O`)
+        // 2. Add Provider Catalog Mode (`FRRjK`)
+        if self.adding_provider {
+            let providers = snap
+                .auth_providers
+                .as_ref()
+                .map(|p| p.as_slice())
+                .unwrap_or(&[]);
+            let query = self.add_search_input.read(cx).value().trim().to_lowercase();
+            let available: Vec<_> = providers
+                .iter()
+                .filter(|p| p.id != "cstoa" && p.configured != Some(true) && !p.requires_login)
+                .filter(|p| {
+                    query.is_empty()
+                        || p.name.to_lowercase().contains(&query)
+                        || p.id.to_lowercase().contains(&query)
+                })
+                .collect();
+            let total_avail = available.len();
+            const ADD_COLLAPSED_LIMIT: usize = 8;
+            let can_collapse = query.is_empty() && total_avail > ADD_COLLAPSED_LIMIT;
+            let visible_avail: Vec<_> = if can_collapse && !self.providers_expanded {
+                available
+                    .iter()
+                    .take(ADD_COLLAPSED_LIMIT)
+                    .copied()
+                    .collect()
+            } else {
+                available
+            };
+            // Keyboard nav list: index 0 = 自定义提供商, 1..=visible_avail.len() = available providers
+            let kbd_ids: Vec<Option<String>> = std::iter::once(None)
+                .chain(visible_avail.iter().map(|p| Some(p.id.clone())))
+                .collect();
+            let total_kbd_items = kbd_ids.len();
+            let list_focused = self.list_focus.is_focused(window);
+            let active_spec =
+                (list_focused && self.list_kbd_active && total_kbd_items > 0).then(|| {
+                    KbdDynamicSpec::row(format!(
+                        "add-row-{}",
+                        self.list_selected_idx.min(total_kbd_items - 1)
+                    ))
+                    .with_radius(4.0)
+                });
+            let kbd_active = self.list_kbd_active;
+            let search_focused = self
+                .add_search_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            let search_focus_ent = self.add_search_input.clone();
+
+            let tr_custom = self.list_tracker.clone();
+            let custom_row = div()
+                .id("providers-add-custom-row")
+                .test_support()
+                .a11y_button(
+                    "providers-add-custom-row",
+                    "自定义提供商，兼容 OpenAI / Anthropic / Gemini API",
+                )
+                .w_full()
+                .h(px(52.0))
+                .border_b_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::LG)
+                .hover(move |s| {
+                    if kbd_active {
+                        s
+                    } else {
+                        s.bg(palette.bg_item_hover)
+                    }
+                })
+                .on_click(cx.listener(|this, _, w, cx| {
+                    this.open_new_custom_provider(w, cx);
+                }))
+                .on_prepaint(move |bounds, _, _| tr_custom.set("add-row-0", bounds))
+                .child(
+                    div()
+                        .flex()
+                        .items_end()
+                        .gap(space::MD)
+                        .min_w_0()
+                        .child(
+                            apply_scale(div(), scale::BODY)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("自定义提供商")),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .pb(px(1.0))
+                                .truncate()
+                                .text_color(palette.text_muted)
+                                .child("兼容 OpenAI / Anthropic / Gemini API"),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .flex_shrink_0()
+                        .text_color(palette.text_secondary)
+                        .child(apply_scale(div(), scale::UI).child(cjk_inline_label("配置")))
+                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                );
+
+            let mut avail_rows = div().w_full().flex().flex_col();
+            if visible_avail.is_empty() {
+                avail_rows = avail_rows.child(
+                    apply_scale(div(), scale::UI)
+                        .py(space::LG)
+                        .text_color(palette.text_muted)
+                        .child("暂无匹配的提供商"),
+                );
+            } else {
+                for (idx, prov) in visible_avail.iter().enumerate() {
+                    let pid = prov.id.clone();
+                    let tr = self.list_tracker.clone();
+                    let track_key = SharedString::from(format!("add-row-{}", idx + 1));
+                    let row_id = SharedString::from(format!("provider-add-row-{pid}"));
+                    let auth_hint = if prov.supports_oauth && prov.supports_api_key {
+                        "OAuth · API Key"
+                    } else if prov.supports_oauth {
+                        "OAuth"
+                    } else {
+                        "API Key"
+                    };
+                    avail_rows = avail_rows.child(
+                        div()
+                            .id(row_id.clone())
+                            .test_support()
+                            .a11y_listitem(row_id, format!("{}（{auth_hint}）", prov.name), false)
+                            .w_full()
+                            .h(px(48.0))
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::LG)
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.select_provider(pid.clone(), w, cx);
+                            }))
+                            .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_end()
+                                    .gap(space::MD)
+                                    .min_w_0()
+                                    .child(
+                                        apply_scale(div(), scale::BODY)
+                                            .truncate()
+                                            .text_color(palette.text_primary)
+                                            .child(SharedString::from(prov.name.clone())),
+                                    )
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION)
+                                            .pb(px(1.0))
+                                            .flex_shrink_0()
+                                            .text_color(palette.text_muted)
+                                            .child(auth_hint),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::XS)
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .child(cjk_inline_label("连接")),
+                                    )
+                                    .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                            ),
+                    );
+                }
+                if can_collapse {
+                    let expanded = self.providers_expanded;
+                    let toggle_label = if expanded {
+                        SharedString::from("收起列表")
+                    } else {
+                        SharedString::from(format!("查看全部提供商（{total_avail}）"))
+                    };
+                    avail_rows = avail_rows.child(
+                        apply_scale(div(), scale::UI)
+                            .id("providers-toggle-expand-btn")
+                            .test_support()
+                            .a11y_button("providers-toggle-expand-btn", toggle_label.clone())
+                            .w_full()
+                            .h(height::HEADER)
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.providers_expanded = !this.providers_expanded;
+                                cx.notify();
+                            }))
+                            .child(cjk_inline_label(toggle_label))
+                            .child(
+                                Icon::new(if expanded {
+                                    IconName::ChevronUp
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .size(px(14.0))
+                                .text_color(palette.text_secondary),
+                            ),
+                    );
+                }
+            }
+
+            return div()
+                .id("settings-providers-tab")
+                .test_support()
+                .a11y_region("settings-providers-tab", "添加提供商")
+                .relative()
+                .left(slide_dx)
+                .opacity(slide_opacity)
+                .track_focus(&self.list_focus)
+                .tab_index(0)
+                .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, w, cx| {
+                    if !this.list_focus.is_focused(w) {
+                        return;
+                    }
+                    match resolve_menu_nav_key(
+                        ev.keystroke.key.as_str(),
+                        ev.keystroke.modifiers,
+                        ev.is_held,
+                        this.list_selected_idx,
+                        kbd_ids.len(),
+                        false,
+                    ) {
+                        KbdMenuStep::Move(next) => {
+                            this.list_selected_idx = next;
+                            this.list_kbd_active = true;
+                            this.list_last_pointer = Some(w.mouse_position());
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                        KbdMenuStep::Activate(idx) => {
+                            cx.stop_propagation();
+                            match kbd_ids.get(idx).and_then(|x| x.clone()) {
+                                None => this.open_new_custom_provider(w, cx),
+                                Some(pid) => this.select_provider(pid, w, cx),
+                            }
+                        }
+                        _ => {}
+                    }
+                }))
+                .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                    if this.list_kbd_active
+                        && pointer_moved_past_threshold(&mut this.list_last_pointer, ev.position)
+                    {
+                        this.list_kbd_active = false;
+                        cx.notify();
+                    }
+                }))
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::MD)
+                        .child(self.render_back_bar(&palette, cx))
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    apply_scale(div(), scale::TITLE)
+                                        .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("添加提供商")),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .id("providers-add-refresh-btn")
+                                        .test_support()
+                                        .a11y_button("providers-add-refresh-btn", "更新模型")
+                                        .h(height::COMPACT)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_secondary)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::XS)
+                                        .hover(|s| {
+                                            s.bg(palette.bg_item_hover)
+                                                .text_color(palette.text_primary)
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.trigger_refresh_models(cx);
+                                        }))
+                                        .child(Icon::new(IconName::RefreshCw).size(px(13.0)))
+                                        .child(cjk_inline_label("更新模型")),
+                                ),
+                        ),
+                )
+                .child(div().mt(space::MD).w_full().child(custom_row))
+                .child(
+                    div()
+                        .mt(px(32.0))
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .flex()
+                                .items_end()
+                                .gap(space::SM)
+                                .mb(space::SM)
+                                .child(
+                                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                                        .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("可添加的提供商")),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .pb(px(1.0))
+                                        .text_color(palette.text_muted)
+                                        .child(SharedString::from(total_avail.to_string())),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("providers-add-search-box")
+                                .w_full()
+                                .h(px(40.0))
+                                .border_b_1()
+                                .border_color(if search_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .on_click(move |_, w, cx| {
+                                    search_focus_ent.focus_handle(cx).focus(w, cx);
+                                })
+                                .child(
+                                    Icon::new(IconName::Search)
+                                        .size(px(14.0))
+                                        .text_color(palette.text_muted),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.add_search_input)
+                                            .accessibility_id("providers-add-search-input")
+                                            .aria_label("搜索提供商")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                ),
+                        )
+                        .child(avail_rows),
+                )
+                .child(render_gliding_dynamic_indicator(
+                    "providers-add-list",
+                    kbd_style,
+                    active_spec,
+                    self.list_tracker.clone(),
+                    &palette,
+                    window,
+                    cx,
+                ));
+        }
+
+        // 3. Built-in Provider Detail / Credential Management Mode (`QOtGr` / `J9tNX3` / `xogtT`)
         if let Some(ref pid) = self.active_provider_id {
             let pid_owned = pid.clone();
             let prov_entry = snap
@@ -935,119 +1523,143 @@ impl Render for ProvidersTabView {
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| pid_owned.clone());
             let is_configured = prov_entry.and_then(|p| p.configured) == Some(true);
-            let filter_q = self.search_input.read(cx).value().to_lowercase();
-            let catalog_models: Vec<_> = snap
+            let filter_q = self.search_input.read(cx).value().trim().to_lowercase();
+            let all_provider_models: Vec<_> = snap
                 .models
                 .as_ref()
                 .map(|m| {
                     m.catalog
                         .iter()
-                        .filter(|mc| {
-                            mc.provider == pid_owned
-                                && (filter_q.is_empty()
-                                    || mc.id.to_lowercase().contains(&filter_q)
-                                    || mc.name.to_lowercase().contains(&filter_q))
-                        })
+                        .filter(|mc| mc.provider == pid_owned)
                         .cloned()
                         .collect()
                 })
                 .unwrap_or_default();
+            let total_models_count = all_provider_models.len();
+            let catalog_models: Vec<_> = all_provider_models
+                .into_iter()
+                .filter(|mc| {
+                    filter_q.is_empty()
+                        || mc.id.to_lowercase().contains(&filter_q)
+                        || mc.name.to_lowercase().contains(&filter_q)
+                })
+                .collect();
+            let enabled_set: Option<std::collections::HashSet<String>> = snap
+                .models
+                .as_ref()
+                .and_then(|m| m.enabled.as_ref())
+                .map(|list| list.iter().cloned().collect());
 
-            let mut model_table = div().w_full().flex().flex_col().child(
-                div()
-                    .w_full()
-                    .h(height::CONTROL)
-                    .border_b_1()
-                    .border_color(palette.border_subtle)
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .flex_1()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("模型 ID")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .flex_1()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("显示名称")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(76.0))
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("上下文窗口")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("思考")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("图片")),
-                    ),
-            );
+            let url_focused = self
+                .base_url_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            let key_focused = self
+                .api_key_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
 
-            for m in &catalog_models {
-                let has_image = m.input.iter().any(|x| x == "image");
-                model_table = model_table.child(
-                    div()
-                        .h(px(44.0))
-                        .border_b_1()
-                        .border_color(palette.border_hairline)
-                        .flex()
-                        .items_center()
-                        .gap(space::SM)
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(m.id.clone())),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI)
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(m.name.clone())),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .w(px(76.0))
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(format_token_window(
-                                    m.context_window.unwrap_or(128_000),
-                                ))),
-                        )
-                        .child(
-                            div()
-                                .w(px(40.0))
-                                .flex()
-                                .justify_center()
-                                .child(readonly_capability_box(m.reasoning, &palette)),
-                        )
-                        .child(
-                            div()
-                                .w(px(40.0))
-                                .flex()
-                                .justify_center()
-                                .child(readonly_capability_box(has_image, &palette)),
-                        ),
+            let mut model_rows = div().w_full().flex().flex_col();
+            if catalog_models.is_empty() {
+                model_rows = model_rows.child(
+                    apply_scale(div(), scale::UI)
+                        .py(space::LG)
+                        .text_color(palette.text_muted)
+                        .child("暂无匹配的可用模型"),
                 );
+            } else {
+                for m in &catalog_models {
+                    let full_id = format!("{}/{}", m.provider, m.id);
+                    let is_enabled = match &enabled_set {
+                        Some(set) => set.contains(&full_id),
+                        None => true,
+                    };
+                    let fid_toggle = full_id.clone();
+                    let chk_id = SharedString::from(format!("provider-model-chk-{}", m.id));
+                    let display_name = if m.name.trim().is_empty() {
+                        m.id.clone()
+                    } else {
+                        m.name.clone()
+                    };
+                    let ctx_spec = format!(
+                        "{} 上下文",
+                        format_token_window(m.context_window.unwrap_or(128_000))
+                    );
+                    model_rows = model_rows.child(
+                        div()
+                            .w_full()
+                            .h(px(52.0))
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::MD)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::MD)
+                                    .child(capability_checkbox(
+                                        chk_id,
+                                        SharedString::from(format!("启用模型：{display_name}")),
+                                        is_enabled,
+                                        &palette,
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.toggle_builtin_model_enabled(
+                                                fid_toggle.clone(),
+                                                cx,
+                                            );
+                                        }),
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex()
+                                            .items_end()
+                                            .gap(space::MD)
+                                            .child(
+                                                apply_scale(div(), scale::BODY)
+                                                    .truncate()
+                                                    .text_color(if is_enabled {
+                                                        palette.text_primary
+                                                    } else {
+                                                        palette.text_secondary
+                                                    })
+                                                    .child(SharedString::from(display_name)),
+                                            )
+                                            .child(
+                                                apply_scale(div(), scale::CAPTION)
+                                                    .pb(px(1.0))
+                                                    .truncate()
+                                                    .text_color(palette.text_muted)
+                                                    .child(SharedString::from(m.id.clone())),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_muted)
+                                    .child(SharedString::from(ctx_spec)),
+                            ),
+                    );
+                }
             }
+
+            let enabled_in_provider = match &enabled_set {
+                Some(set) => catalog_models
+                    .iter()
+                    .filter(|m| set.contains(&format!("{}/{}", m.provider, m.id)))
+                    .count(),
+                None => catalog_models.len(),
+            };
 
             return div()
                 .id("settings-providers-tab")
@@ -1059,83 +1671,117 @@ impl Render for ProvidersTabView {
                 .opacity(slide_opacity)
                 .flex()
                 .flex_col()
-                .gap(space::MD)
-                .child(
-                    apply_scale(div(), scale::TITLE)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("提供商")),
-                )
-                .child(self.render_back_bar(&palette, cx))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::MD)
-                        .child(
-                            apply_scale(div(), scale::BODY_SEMIBOLD)
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(prov_name)),
-                        )
-                        .children(is_configured.then(|| {
-                            div()
-                                .h(height::INLINE)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .bg(palette.bg_surface)
-                                .flex()
-                                .items_center()
-                                .gap(space::XS)
-                                .child(
-                                    div()
-                                        .w(px(6.0))
-                                        .h(px(6.0))
-                                        .rounded(radius::FULL)
-                                        .bg(palette.status_success),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .text_color(palette.text_secondary)
-                                        .child(cjk_inline_label("已连接")),
-                                )
-                        })),
-                )
                 .child(
                     div()
                         .w_full()
                         .flex()
                         .flex_col()
-                        .gap(space::TIGHT)
+                        .gap(space::MD)
+                        .child(self.render_back_bar(&palette, cx))
                         .child(
                             div()
                                 .flex()
-                                .gap(space::SM)
+                                .items_end()
+                                .gap(space::MD)
                                 .child(
+                                    apply_scale(div(), scale::TITLE)
+                                        .text_color(palette.text_primary)
+                                        .child(SharedString::from(prov_name)),
+                                )
+                                .children(is_configured.then(|| {
                                     div()
-                                        .flex_1()
-                                        .h(height::FIELD)
-                                        .px(space::XS)
-                                        .rounded(radius::CONTROL)
-                                        .border_1()
-                                        .border_color(if self.key_error.is_some() {
-                                            palette.status_danger
-                                        } else {
-                                            palette.border_strong
-                                        })
-                                        .bg(palette.bg_workspace)
+                                        .pb(px(3.0))
                                         .flex()
                                         .items_center()
+                                        .gap(space::TIGHT)
                                         .child(
-                                            Input::new(&self.api_key_input)
-                                                .accessibility_id("providers-apikey-input")
-                                                .content_type(InputContentType::Password)
-                                                .aria_label("服务 API Key")
-                                                .appearance(false)
-                                                .bordered(false)
-                                                .focus_bordered(false)
-                                                .w_full()
-                                                .h_full()
-                                                .mask_toggle(),
-                                        ),
+                                            div()
+                                                .w(px(6.0))
+                                                .h(px(6.0))
+                                                .rounded(radius::FULL)
+                                                .bg(palette.status_success),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::CAPTION)
+                                                .text_color(palette.text_secondary)
+                                                .child(cjk_inline_label("已连接")),
+                                        )
+                                })),
+                        ),
+                )
+                // 24px gap -> frameless 52px hairline rows (no `连接与凭据` heading)
+                .child(
+                    div()
+                        .mt(px(24.0))
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(if url_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("服务地址")),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.base_url_input)
+                                            .accessibility_id("providers-baseurl-input")
+                                            .aria_label("服务地址")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(if self.key_error.is_some() {
+                                    palette.status_danger
+                                } else if key_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("API 密钥")),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.api_key_input)
+                                            .accessibility_id("providers-apikey-input")
+                                            .content_type(InputContentType::Password)
+                                            .aria_label("服务 API Key")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0()
+                                            .mask_toggle(),
+                                    ),
                                 )
                                 .child(
                                     apply_scale(div(), scale::UI_MEDIUM)
@@ -1149,14 +1795,14 @@ impl Render for ProvidersTabView {
                                                 "保存密钥"
                                             },
                                         )
-                                        .h(height::FIELD)
-                                        .px(space::LG)
+                                        .h(height::COMPACT)
+                                        .px(space::SM)
                                         .rounded(radius::CONTROL)
-                                        .bg(palette.accent_solid)
-                                        .text_color(palette.text_on_accent)
+                                        .text_color(palette.accent_ink)
                                         .flex()
                                         .items_center()
-                                        .hover(|s| s.bg(palette.accent_hover))
+                                        .flex_shrink_0()
+                                        .hover(|s| s.bg(palette.bg_item_hover))
                                         .on_click(cx.listener(|this, _, w, cx| {
                                             this.save_builtin_api_key(w, cx);
                                         }))
@@ -1172,66 +1818,186 @@ impl Render for ProvidersTabView {
                                 .id("providers-apikey-error-text")
                                 .test_support()
                                 .a11y_status("providers-apikey-error-text", err.clone())
+                                .mt(space::XS)
                                 .text_color(palette.status_danger)
                                 .child(err)
                         })),
                 )
-                .child(self.render_model_list_header("模型列表", &palette, cx))
-                .children(self.search_visible.then(|| {
-                    let search_focused = self
-                        .search_input
-                        .read(cx)
-                        .focus_handle(cx)
-                        .is_focused(window);
-                    let search_focus_ent = self.search_input.clone();
+                // 40px gap -> 可用模型
+                .child(
                     div()
-                        .id("providers-builtin-search-box")
+                        .mt(px(40.0))
                         .w_full()
-                        .h(height::FIELD)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(if search_focused {
-                            palette.border_focus
-                        } else {
-                            palette.border_strong
-                        })
-                        .bg(palette.bg_workspace)
                         .flex()
-                        .items_center()
+                        .flex_col()
                         .gap(space::SM)
-                        .on_click(move |_, w, cx| {
-                            search_focus_ent.focus_handle(cx).focus(w, cx);
-                        })
                         .child(
-                            Icon::new(IconName::Search)
-                                .size(px(14.0))
-                                .text_color(palette.text_muted),
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_end()
+                                        .gap(space::SM)
+                                        .child(
+                                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                                .text_color(palette.text_primary)
+                                                .child(cjk_inline_label("可用模型")),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::CAPTION)
+                                                .pb(px(1.0))
+                                                .text_color(palette.text_muted)
+                                                .child(SharedString::from(format!(
+                                                    "{enabled_in_provider} / {total_models_count}"
+                                                ))),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::XS)
+                                        .child(
+                                            div()
+                                                .id("providers-hdr-search-btn")
+                                                .test_support()
+                                                .a11y_toggle_button(
+                                                    "providers-hdr-search-btn",
+                                                    "搜索模型",
+                                                    self.search_visible,
+                                                )
+                                                .w(height::COMPACT)
+                                                .h(height::COMPACT)
+                                                .rounded(radius::CONTROL)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .hover(|s| s.bg(palette.bg_item_hover))
+                                                .on_click(cx.listener(|this, _, w, cx| {
+                                                    this.search_visible = !this.search_visible;
+                                                    if this.search_visible {
+                                                        this.search_input
+                                                            .update(cx, |i, cx| i.focus(w, cx));
+                                                    }
+                                                    cx.notify();
+                                                }))
+                                                .child(
+                                                    Icon::new(IconName::Search)
+                                                        .size(px(14.0))
+                                                        .text_color(palette.text_secondary),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .id("providers-hdr-refresh-btn")
+                                                .test_support()
+                                                .a11y_button(
+                                                    "providers-hdr-refresh-btn",
+                                                    "刷新模型目录",
+                                                )
+                                                .w(height::COMPACT)
+                                                .h(height::COMPACT)
+                                                .rounded(radius::CONTROL)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .hover(|s| s.bg(palette.bg_item_hover))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.trigger_refresh_models(cx);
+                                                }))
+                                                .child(
+                                                    Icon::new(IconName::RefreshCw)
+                                                        .size(px(14.0))
+                                                        .text_color(palette.text_secondary),
+                                                ),
+                                        ),
+                                ),
                         )
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Input::new(&self.search_input)
-                                    .accessibility_id("providers-search-input")
-                                    .aria_label("筛选模型")
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false)
-                                    .p_0(),
-                            ),
-                        )
-                }))
-                .child(model_table)
+                        .children(self.search_visible.then(|| {
+                            let search_focused = self
+                                .search_input
+                                .read(cx)
+                                .focus_handle(cx)
+                                .is_focused(window);
+                            let search_focus_ent = self.search_input.clone();
+                            div()
+                                .id("providers-builtin-search-box")
+                                .w_full()
+                                .h(px(40.0))
+                                .border_b_1()
+                                .border_color(if search_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .on_click(move |_, w, cx| {
+                                    search_focus_ent.focus_handle(cx).focus(w, cx);
+                                })
+                                .child(
+                                    Icon::new(IconName::Search)
+                                        .size(px(14.0))
+                                        .text_color(palette.text_muted),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.search_input)
+                                            .accessibility_id("providers-search-input")
+                                            .aria_label("筛选模型")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .text_color(palette.text_muted)
+                                        .child(SharedString::from(format!(
+                                            "{} / {total_models_count}",
+                                            catalog_models.len()
+                                        ))),
+                                )
+                                .child(
+                                    div()
+                                        .id("providers-builtin-search-close")
+                                        .w(px(20.0))
+                                        .h(px(20.0))
+                                        .rounded(radius::CONTROL)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.search_input
+                                                .update(cx, |i, cx| i.set_value("", w, cx));
+                                            this.search_visible = false;
+                                            cx.notify();
+                                            cx.stop_propagation();
+                                        }))
+                                        .child(
+                                            Icon::new(IconName::X)
+                                                .size(px(13.0))
+                                                .text_color(palette.text_muted),
+                                        ),
+                                )
+                        }))
+                        .child(model_rows),
+                )
                 .children(is_configured.then(|| {
-                    render_remove_credentials_card(
-                        &palette,
-                        cx.listener(|this, _, window, cx| {
-                            this.remove_active_provider_credentials(window, cx);
-                        }),
+                    div().mt(px(40.0)).w_full().child(
+                        self.render_remove_credentials_section(&palette, kbd_style, window, cx),
                     )
                 }));
         }
 
-        // 3. Main Merged Provider List (`$bg-workspace` + `8px` radius + `72px` rows)
+        // 4. Configured Providers List (`Q4QFim`) — frameless 64px hairline rows, no repeated H1
         let cstoa_signed_in = snap.account.as_ref().is_some_and(|a| a.signed_in);
         let (cstoa_meta, cstoa_meta_color) = if cstoa_signed_in {
             let acc = snap.account.as_ref().unwrap();
@@ -1245,132 +2011,149 @@ impl Render for ProvidersTabView {
             ("扫码登录 · 未登录".to_owned(), palette.status_warning)
         };
 
-        let mut merged_card = div()
-            .w_full()
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_workspace)
-            .flex()
-            .flex_col()
-            // First row retains `providers-cstoa-pinned-card` ID for test compatibility
-            .child(
-                div()
-                    .id("providers-cstoa-pinned-card")
-                    .test_support()
-                    .w_full()
-                    .h(px(72.0))
-                    .px(space::LG)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(space::LG)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::MICRO)
-                            .min_w_0()
-                            .child(
-                                apply_scale(div(), scale::BODY)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("计维CSTOA")),
-                            )
-                            .child(
-                                apply_scale(div(), scale::CAPTION)
-                                    .text_color(cstoa_meta_color)
-                                    .child(SharedString::from(cstoa_meta)),
-                            ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("providers-cstoa-action-btn")
-                            .test_support()
-                            .a11y_button(
-                                "providers-cstoa-action-btn",
-                                if cstoa_signed_in {
-                                    "管理 计维CSTOA 账号"
-                                } else {
-                                    "扫码登录 计维CSTOA"
-                                },
-                            )
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
-                                    signed_in: cstoa_signed_in,
-                                });
-                            }))
-                            .child(cjk_inline_label(if cstoa_signed_in {
-                                "管理"
-                            } else {
-                                "扫码登录"
-                            })),
-                    ),
-            );
-
         let providers = snap
             .auth_providers
             .as_ref()
             .map(|p| p.as_slice())
             .unwrap_or(&[]);
-        // Configured providers first (keeping original order within each group) so active providers stay above the fold.
-        let mut ordered_others: Vec<_> = providers.iter().filter(|p| p.id != "cstoa").collect();
-        ordered_others.sort_by_key(|p| {
-            if p.configured == Some(true) || p.requires_login {
-                0u8
+        let configured_others: Vec<_> = providers
+            .iter()
+            .filter(|p| p.id != "cstoa" && (p.configured == Some(true) || p.requires_login))
+            .collect();
+        #[derive(Clone)]
+        enum ProviderListTarget {
+            Cstoa,
+            Configured(String),
+            AddProvider,
+        }
+        let configured_total = 1 + configured_others.len();
+        let kbd_targets: Vec<ProviderListTarget> = std::iter::once(ProviderListTarget::Cstoa)
+            .chain(
+                configured_others
+                    .iter()
+                    .map(|p| ProviderListTarget::Configured(p.id.clone())),
+            )
+            .chain(std::iter::once(ProviderListTarget::AddProvider))
+            .collect();
+        let clamped_idx = self.list_selected_idx.min(kbd_targets.len() - 1);
+        let list_focused = self.list_focus.is_focused(window);
+        let active_spec =
+            (list_focused && self.list_kbd_active && !kbd_targets.is_empty()).then(|| {
+                match kbd_targets[clamped_idx] {
+                    ProviderListTarget::AddProvider => {
+                        KbdDynamicSpec::control("cfg-row-add", KbdRailPlacement::BottomCenter)
+                    }
+                    _ => KbdDynamicSpec::row(format!("cfg-row-{clamped_idx}")).with_radius(4.0),
+                }
+            });
+        let kbd_active = self.list_kbd_active;
+        let tr_cstoa = self.list_tracker.clone();
+
+        let mut rows_list = div().w_full().flex().flex_col().child(
+            div()
+                .id("providers-cstoa-pinned-card")
+                .test_support()
+                .w_full()
+                .h(px(64.0))
+                .border_b_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::LG)
+                .hover(move |s| {
+                    if kbd_active {
+                        s
+                    } else {
+                        s.bg(palette.bg_item_hover)
+                    }
+                })
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
+                        signed_in: cstoa_signed_in,
+                    });
+                }))
+                .on_prepaint(move |bounds, _, _| tr_cstoa.set("cfg-row-0", bounds))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::MICRO)
+                        .min_w_0()
+                        .child(
+                            apply_scale(div(), scale::BODY)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("计维CSTOA")),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(cstoa_meta_color)
+                                .child(SharedString::from(cstoa_meta)),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("providers-cstoa-action-btn")
+                        .test_support()
+                        .a11y_button(
+                            "providers-cstoa-action-btn",
+                            if cstoa_signed_in {
+                                "管理 计维CSTOA 账号"
+                            } else {
+                                "扫码登录 计维CSTOA"
+                            },
+                        )
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .text_color(palette.text_secondary)
+                        .child(apply_scale(div(), scale::UI).child(cjk_inline_label(
+                            if cstoa_signed_in {
+                                "管理"
+                            } else {
+                                "扫码登录"
+                            },
+                        )))
+                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                ),
+        );
+
+        for (idx, prov) in configured_others.iter().enumerate() {
+            let pid = prov.id.clone();
+            let pid_btn = pid.clone();
+            let tr = self.list_tracker.clone();
+            let track_key = SharedString::from(format!("cfg-row-{}", idx + 1));
+            let (status_label, status_color, action_label) = if prov.requires_login {
+                ("凭据已失效，请重新配置", palette.status_warning, "重新登录")
             } else {
-                1u8
-            }
-        });
-        const PROVIDERS_COLLAPSED_LIMIT: usize = 5;
-        let total_providers_count = 1 + ordered_others.len();
-        let can_collapse_providers = total_providers_count > PROVIDERS_COLLAPSED_LIMIT;
-        let head_limit = PROVIDERS_COLLAPSED_LIMIT.saturating_sub(1);
-        let render_provider_row =
-            |prov: &cst_client::ProviderStatusDto, interactive: bool, cx: &mut Context<Self>| {
-                let pid = prov.id.clone();
-                let pid_btn = pid.clone();
-                let (status_label, status_color) = if prov.requires_login {
-                    ("凭据已失效，请重新配置", palette.status_warning)
-                } else if prov.configured == Some(true) {
-                    ("已就绪", palette.status_success)
-                } else {
-                    ("尚未配置凭据", palette.status_warning)
-                };
-
-                let row_id = SharedString::from(if interactive {
-                    format!("provider-row-{pid}")
-                } else {
-                    format!("provider-row-{pid}-exit")
-                });
-                let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
-                let manage_id = SharedString::from(if interactive {
-                    format!("provider-manage-btn-{pid_btn}")
-                } else {
-                    format!("provider-manage-btn-{pid_btn}-exit")
-                });
-                let manage_label = SharedString::from(format!("管理 {}", prov.name));
-
-                let row = div()
+                ("已连接", palette.text_secondary, "管理")
+            };
+            let row_id = SharedString::from(format!("provider-row-{pid}"));
+            let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
+            rows_list = rows_list.child(
+                div()
                     .id(row_id.clone())
+                    .test_support()
+                    .a11y_listitem(row_id, format!("{}（{status_label}）", prov.name), false)
                     .w_full()
-                    .h(px(72.0))
-                    .px(space::LG)
-                    .border_t_1()
+                    .h(px(64.0))
+                    .border_b_1()
                     .border_color(palette.border_subtle)
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(space::LG)
+                    .hover(move |s| {
+                        if kbd_active {
+                            s
+                        } else {
+                            s.bg(palette.bg_item_hover)
+                        }
+                    })
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.select_provider(pid.clone(), w, cx);
+                    }))
+                    .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
                     .child(
                         div()
                             .flex()
@@ -1387,127 +2170,89 @@ impl Render for ProvidersTabView {
                                     .text_color(status_color)
                                     .child(cjk_inline_label(status_label)),
                             ),
-                    );
-                let manage_btn = apply_scale(div(), scale::UI_MEDIUM)
-                    .id(manage_id.clone())
-                    .h(height::CONTROL)
-                    .px(space::MD)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(palette.bg_workspace)
-                    .text_color(palette.text_primary)
-                    .flex()
-                    .items_center()
-                    .child(cjk_inline_label("管理"));
-                let manage_btn_any = if interactive {
-                    manage_btn
-                        .test_support()
-                        .a11y_button(manage_id, manage_label)
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            this.select_provider(pid_btn.clone(), w, cx);
-                            cx.stop_propagation();
-                        }))
-                        .into_any_element()
-                } else {
-                    manage_btn.into_any_element()
-                };
-                let row = row.child(manage_btn_any);
-                if interactive {
-                    row.test_support()
-                        .a11y_listitem(row_id, row_label, false)
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            this.select_provider(pid.clone(), w, cx);
-                        }))
-                        .into_any_element()
-                } else {
-                    row.into_any_element()
-                }
-            };
-
-        for prov in ordered_others.iter().take(head_limit) {
-            merged_card = merged_card.child(render_provider_row(prov, true, cx));
-        }
-
-        if can_collapse_providers {
-            let overflow_providers: Vec<cst_client::ProviderStatusDto> = ordered_others
-                .iter()
-                .skip(head_limit)
-                .map(|p| (*p).clone())
-                .collect();
-            if let Some(collapsed_section) = motion::animated_collapse_with_exit(
-                "providers-expand-list",
-                self.providers_expanded,
-                window,
-                cx,
-                |interactive, _, cx| {
-                    let mut list = div().w_full().flex().flex_col();
-                    for prov in &overflow_providers {
-                        list = list.child(render_provider_row(prov, interactive, cx));
-                    }
-                    list.into_any_element()
-                },
-            ) {
-                merged_card = merged_card.child(collapsed_section);
-            }
-
-            let expanded = self.providers_expanded;
-            let toggle_label = if expanded {
-                SharedString::from("收起列表")
-            } else {
-                SharedString::from(format!("查看全部提供商（{total_providers_count}）"))
-            };
-            merged_card = merged_card.child(
-                apply_scale(div(), scale::UI)
-                    .id("providers-toggle-expand-btn")
-                    .test_support()
-                    .a11y_button("providers-toggle-expand-btn", toggle_label.clone())
-                    .w_full()
-                    .h(height::HEADER)
-                    .px(space::LG)
-                    .border_t_1()
-                    .border_color(palette.border_subtle)
-                    .text_color(palette.text_secondary)
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.providers_expanded = !this.providers_expanded;
-                        cx.notify();
-                    }))
-                    .child(cjk_inline_label(toggle_label))
-                    .child(motion::animated_chevron(
-                        "providers-expand-chevron",
-                        expanded,
-                        true,
-                        px(14.0),
-                        palette.text_secondary,
-                        window,
-                        cx,
-                    )),
+                    )
+                    .child(
+                        div()
+                            .id(manage_id.clone())
+                            .test_support()
+                            .a11y_button(manage_id, format!("{action_label} {}", prov.name))
+                            .flex()
+                            .items_center()
+                            .gap(space::XS)
+                            .text_color(palette.text_secondary)
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.select_provider(pid_btn.clone(), w, cx);
+                                cx.stop_propagation();
+                            }))
+                            .child(
+                                apply_scale(div(), scale::UI).child(cjk_inline_label(action_label)),
+                            )
+                            .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                    ),
             );
         }
-
-        let configured_count = usize::from(cstoa_signed_in)
-            + providers
-                .iter()
-                .filter(|p| p.id != "cstoa" && p.configured == Some(true))
-                .count();
 
         div()
             .id("settings-providers-tab")
             .test_support()
             .a11y_region("settings-providers-tab", "提供商设置")
-            .w_full()
             .relative()
             .left(slide_dx)
             .opacity(slide_opacity)
+            .track_focus(&self.list_focus)
+            .tab_index(0)
+            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, w, cx| {
+                if !this.list_focus.is_focused(w) {
+                    return;
+                }
+                match resolve_menu_nav_key(
+                    ev.keystroke.key.as_str(),
+                    ev.keystroke.modifiers,
+                    ev.is_held,
+                    this.list_selected_idx,
+                    kbd_targets.len(),
+                    false,
+                ) {
+                    KbdMenuStep::Move(next) => {
+                        this.list_selected_idx = next;
+                        this.list_kbd_active = true;
+                        this.list_last_pointer = Some(w.mouse_position());
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    KbdMenuStep::Activate(idx) => {
+                        cx.stop_propagation();
+                        this.return_focus_idx = idx;
+                        match kbd_targets.get(idx) {
+                            Some(ProviderListTarget::Cstoa) => {
+                                cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
+                                    signed_in: cstoa_signed_in,
+                                });
+                            }
+                            Some(ProviderListTarget::Configured(pid)) => {
+                                this.select_provider(pid.clone(), w, cx);
+                            }
+                            Some(ProviderListTarget::AddProvider) => {
+                                this.open_add_provider_catalog(w, cx);
+                            }
+                            None => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.list_kbd_active
+                    && pointer_moved_past_threshold(&mut this.list_last_pointer, ev.position)
+                {
+                    this.list_kbd_active = false;
+                    cx.notify();
+                }
+            }))
+            .w_full()
             .flex()
             .flex_col()
-            .gap(space::GROUP)
+            .gap(space::SM)
             .child(
                 div()
                     .w_full()
@@ -1515,128 +2260,278 @@ impl Render for ProvidersTabView {
                     .items_center()
                     .justify_between()
                     .child(
-                        apply_scale(div(), scale::TITLE)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("提供商")),
+                        div()
+                            .flex()
+                            .items_end()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::BODY_SEMIBOLD)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("已配置")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .pb(px(1.0))
+                                    .text_color(palette.text_muted)
+                                    .child(SharedString::from(configured_total.to_string())),
+                            ),
                     )
-                    .child(
+                    .child({
+                        let tr_add = self.list_tracker.clone();
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-new-custom-btn")
                             .test_support()
                             .a11y_button("providers-new-custom-btn", "添加提供商")
-                            .h(height::CONTROL)
-                            .px(space::MD)
+                            .tab_index(0)
+                            .h(height::COMPACT)
+                            .px(space::SM)
                             .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
                             .text_color(palette.text_primary)
                             .flex()
                             .items_center()
                             .gap(space::XS)
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.open_new_custom_provider(w, cx);
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                                if !ev.is_held
+                                    && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                    && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                                {
+                                    cx.stop_propagation();
+                                    this.open_add_provider_catalog(w, cx);
+                                }
                             }))
+                            .on_click(cx.listener(|this, _, w, cx| {
+                                this.open_add_provider_catalog(w, cx);
+                            }))
+                            .on_prepaint(move |bounds, _, _| tr_add.set("cfg-row-add", bounds))
                             .child(
                                 Icon::new(IconName::Plus)
                                     .size(px(14.0))
                                     .text_color(palette.text_secondary),
                             )
-                            .child(cjk_inline_label("添加提供商")),
-                    ),
+                            .child(cjk_inline_label("添加提供商"))
+                    }),
             )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(space::SM)
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                apply_scale(div(), scale::BODY_SEMIBOLD)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("提供商列表")),
-                            )
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .text_color(palette.text_secondary)
-                                    .child(cjk_inline_label(format!(
-                                        "{configured_count} 个已配置"
-                                    ))),
-                            ),
-                    )
-                    .child(merged_card),
-            )
+            .child(rows_list)
+            .child(render_gliding_dynamic_indicator(
+                "providers-configured-list",
+                kbd_style,
+                active_spec,
+                self.list_tracker.clone(),
+                &palette,
+                window,
+                cx,
+            ))
     }
 }
 
-fn render_remove_credentials_card<F>(palette: &DesktopPalette, on_remove: F) -> impl IntoElement
-where
-    F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
-{
-    div()
-        .id("providers-remove-credentials-card-gawme")
-        .test_support()
-        .w_full()
-        .min_h(px(72.0))
-        .px(space::LG)
-        .py(space::MD)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_subtle)
-        .bg(palette.bg_special)
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(space::LG)
-        .child(
+impl ProvidersTabView {
+    pub(super) fn render_remove_credentials_section(
+        &self,
+        palette: &DesktopPalette,
+        kbd_style: cst_client::KeyboardFocusStyleDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        self.remove_confirm_tracker.clear();
+        let cancel_focused = self.remove_cancel_focus.is_focused(window);
+        let confirm_focused = self.remove_confirm_focus.is_focused(window);
+        let confirm_kbd_active = self.confirm_remove
+            && self.remove_confirm_kbd_active
+            && (cancel_focused || confirm_focused);
+        let active_spec = confirm_kbd_active.then(|| {
+            if confirm_focused {
+                KbdDynamicSpec::control("rm-confirm", KbdRailPlacement::BottomCenter)
+                    .with_tone(KbdTone::Danger)
+            } else {
+                KbdDynamicSpec::control("rm-cancel", KbdRailPlacement::BottomCenter)
+            }
+        });
+        let right_el = if self.confirm_remove {
+            let tr_cancel = self.remove_confirm_tracker.clone();
+            let tr_confirm = self.remove_confirm_tracker.clone();
             div()
-                .flex()
-                .flex_col()
-                .gap(space::MICRO)
-                .min_w_0()
-                .child(
-                    apply_scale(div(), scale::BODY_MEDIUM)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("移除此服务凭据")),
-                )
-                .child(
-                    apply_scale(div(), scale::CAPTION)
-                        .text_color(palette.text_secondary)
-                        .child("移除后本机保存的 API Key 将立即清除，关联模型从选择器中隐藏。"),
-                ),
-        )
-        .child(
-            apply_scale(div(), scale::UI)
-                .id("providers-remove-cred-btn")
-                .test_support()
-                .a11y_button("providers-remove-cred-btn", "移除凭据")
-                .h(height::CONTROL)
-                .px(space::MD)
-                .rounded(radius::CONTROL)
-                .border_1()
-                .border_color(palette.border_strong)
-                .bg(palette.bg_workspace)
-                .text_color(palette.status_danger)
+                .relative()
                 .flex()
                 .items_center()
                 .gap(space::SM)
                 .flex_shrink_0()
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                    let cur = usize::from(this.remove_confirm_focus.is_focused(w));
+                    match resolve_dialog_nav_key(
+                        ev.keystroke.key.as_str(),
+                        ev.keystroke.modifiers,
+                        ev.is_held,
+                        cur,
+                        2,
+                    ) {
+                        DialogNavStep::Move(next) => {
+                            this.remove_confirm_kbd_active = true;
+                            this.remove_confirm_last_pointer = Some(w.mouse_position());
+                            if next == 0 {
+                                this.remove_cancel_focus.focus(w, cx);
+                            } else {
+                                this.remove_confirm_focus.focus(w, cx);
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                        DialogNavStep::Activate(slot) => {
+                            cx.stop_propagation();
+                            if slot == 0 {
+                                this.cancel_remove_confirm(w, cx);
+                            } else {
+                                this.remove_active_provider_credentials(w, cx);
+                            }
+                        }
+                        DialogNavStep::TabActivated => {
+                            this.remove_confirm_kbd_active = true;
+                            this.remove_confirm_last_pointer = Some(w.mouse_position());
+                            cx.notify();
+                        }
+                        DialogNavStep::Ignore => {}
+                    }
+                }))
+                .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                    if this.remove_confirm_kbd_active
+                        && pointer_moved_past_threshold(
+                            &mut this.remove_confirm_last_pointer,
+                            ev.position,
+                        )
+                    {
+                        this.remove_confirm_kbd_active = false;
+                        cx.notify();
+                    }
+                }))
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("providers-remove-cancel-btn")
+                        .test_support()
+                        .a11y_button("providers-remove-cancel-btn", "取消移除")
+                        .track_focus(&self.remove_cancel_focus)
+                        .tab_index(0)
+                        .h(height::COMPACT)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_secondary)
+                        .flex()
+                        .items_center()
+                        .hover(move |s| {
+                            if confirm_kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                            }
+                        })
+                        .on_click(cx.listener(|this, _, w, cx| {
+                            this.cancel_remove_confirm(w, cx);
+                        }))
+                        .on_prepaint(move |bounds, _, _| tr_cancel.set("rm-cancel", bounds))
+                        .child(cjk_inline_label("取消")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .id("providers-remove-confirm-btn")
+                        .test_support()
+                        .a11y_button("providers-remove-confirm-btn", "确认移除")
+                        .track_focus(&self.remove_confirm_focus)
+                        .tab_index(0)
+                        .h(height::COMPACT)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.status_danger)
+                        .flex()
+                        .items_center()
+                        .hover(move |s| {
+                            if confirm_kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.status_danger_subtle)
+                            }
+                        })
+                        .on_click(cx.listener(|this, _, w, cx| {
+                            this.remove_active_provider_credentials(w, cx);
+                        }))
+                        .on_prepaint(move |bounds, _, _| tr_confirm.set("rm-confirm", bounds))
+                        .child(cjk_inline_label(if self.saving {
+                            "移除中…"
+                        } else {
+                            "确认移除"
+                        })),
+                )
+                .child(render_gliding_dynamic_indicator(
+                    "providers-remove-confirm",
+                    kbd_style,
+                    active_spec,
+                    self.remove_confirm_tracker.clone(),
+                    palette,
+                    window,
+                    cx,
+                ))
+                .into_any_element()
+        } else {
+            apply_scale(div(), scale::UI)
+                .id("providers-remove-cred-btn")
+                .test_support()
+                .a11y_button("providers-remove-cred-btn", "移除")
+                .track_focus(&self.remove_trigger_focus)
+                .tab_index(0)
+                .h(height::COMPACT)
+                .px(space::SM)
+                .rounded(radius::CONTROL)
+                .text_color(palette.status_danger)
+                .flex()
+                .items_center()
+                .gap(space::TIGHT)
+                .flex_shrink_0()
                 .hover(|s| s.bg(palette.status_danger_subtle))
-                .on_click(on_remove)
+                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
+                    if !ev.is_held
+                        && ev.keystroke.modifiers == gpui::Modifiers::default()
+                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.stop_propagation();
+                        this.open_remove_confirm(w, cx);
+                    }
+                }))
+                .on_click(cx.listener(|this, _, w, cx| {
+                    this.open_remove_confirm(w, cx);
+                }))
                 .child(
                     Icon::new(IconName::Trash)
-                        .size(px(16.0))
+                        .size(px(14.0))
                         .text_color(palette.status_danger),
                 )
-                .child(cjk_inline_label("移除凭据")),
-        )
+                .child(cjk_inline_label("移除"))
+                .into_any_element()
+        };
+
+        div()
+            .id("providers-remove-credentials-card-gawme")
+            .test_support()
+            .w_full()
+            .h(px(44.0))
+            .border_t_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(space::LG)
+            .child(
+                apply_scale(div(), scale::CAPTION)
+                    .min_w_0()
+                    .truncate()
+                    .text_color(palette.text_muted)
+                    .child("移除后将隐藏该服务下的关联模型"),
+            )
+            .child(right_el)
+    }
 }
 
 fn capability_checkbox<F>(
@@ -1671,32 +2566,6 @@ where
         .items_center()
         .justify_center()
         .on_click(on_click)
-        .children(checked.then(|| {
-            Icon::new(IconName::Check)
-                .size(px(11.0))
-                .text_color(palette.text_on_accent)
-        }))
-}
-
-fn readonly_capability_box(checked: bool, palette: &DesktopPalette) -> impl IntoElement {
-    div()
-        .w(px(16.0))
-        .h(px(16.0))
-        .rounded(radius::CONTROL)
-        .border_1()
-        .border_color(if checked {
-            palette.accent_solid
-        } else {
-            palette.border_subtle
-        })
-        .bg(if checked {
-            palette.accent_solid
-        } else {
-            palette.bg_workspace
-        })
-        .flex()
-        .items_center()
-        .justify_center()
         .children(checked.then(|| {
             Icon::new(IconName::Check)
                 .size(px(11.0))

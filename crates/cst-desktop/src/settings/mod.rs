@@ -10,7 +10,9 @@ use std::rc::Rc;
 use cst_client::{
     ClientHandle, DesktopSettingsPatchDto, KeyboardFocusStyleDto, ThemeModeDto, UpdatePhaseDto,
 };
+use gpui::{FocusHandle, KeyDownEvent, MouseMoveEvent, Pixels, Point};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
@@ -19,10 +21,14 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::settings::general_tab::render_general_tab;
+use crate::settings::general_tab::{GeneralTabKbdProps, render_general_tab};
 use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
+use crate::theme::kbd_focus::{
+    DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdRailPlacement,
+    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
+};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
     render_subpage_header_xwjof, scale, space,
@@ -119,6 +125,15 @@ pub struct SettingsView {
     category: SettingsCategory,
     page_slide: motion::PageSlide,
     tab_rects: Rc<[Cell<(f32, f32)>; 4]>,
+    tab_focuses: [FocusHandle; 4],
+    tab_kbd_active: bool,
+    tab_last_pointer: Option<Point<Pixels>>,
+    tab_kbd_tracker: KbdDynamicBoundsTracker,
+    general_focus: FocusHandle,
+    general_row_idx: usize,
+    general_kbd_active: bool,
+    general_last_pointer: Option<Point<Pixels>>,
+    general_tracker: KbdDynamicBoundsTracker,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
     keyboard_style_saving: bool,
@@ -159,11 +174,28 @@ impl SettingsView {
             }
         }));
 
+        let tab_focuses = [
+            cx.focus_handle().tab_stop(true),
+            cx.focus_handle().tab_stop(true),
+            cx.focus_handle().tab_stop(true),
+            cx.focus_handle().tab_stop(true),
+        ];
+        let general_focus = cx.focus_handle().tab_stop(true);
+
         Self {
             client,
             category: SettingsCategory::General,
             page_slide: motion::PageSlide::default(),
             tab_rects: Rc::new(Default::default()),
+            tab_focuses,
+            tab_kbd_active: false,
+            tab_last_pointer: None,
+            tab_kbd_tracker: KbdDynamicBoundsTracker::new(),
+            general_focus,
+            general_row_idx: 0,
+            general_kbd_active: false,
+            general_last_pointer: None,
+            general_tracker: KbdDynamicBoundsTracker::new(),
             providers_tab,
             preferences_tab,
             keyboard_style_saving: false,
@@ -247,8 +279,206 @@ impl SettingsView {
                 .update(cx, |pt, cx| pt.dismiss_dropdowns(window, cx)),
             SettingsCategory::Providers => self
                 .providers_tab
-                .update(cx, |pt, cx| pt.dismiss_dropdowns(cx)),
+                .update(cx, |pt, cx| pt.dismiss_topmost(window, cx)),
             _ => false,
+        }
+    }
+
+    fn focused_tab_idx(&self, window: &Window) -> Option<usize> {
+        self.tab_focuses.iter().position(|fh| fh.is_focused(window))
+    }
+
+    fn handle_tab_bar_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cur) = self.focused_tab_idx(window) else {
+            return;
+        };
+        if event.keystroke.modifiers == gpui::Modifiers::default()
+            && event.keystroke.key.as_str() == "down"
+        {
+            self.tab_kbd_active = false;
+            match self.category {
+                SettingsCategory::General => {
+                    self.general_row_idx = 0;
+                    self.general_kbd_active = true;
+                    self.general_last_pointer = Some(window.mouse_position());
+                    self.general_focus.focus(window, cx);
+                }
+                SettingsCategory::Providers => {
+                    self.providers_tab
+                        .update(cx, |pt, cx| pt.focus_from_tabbar(window, cx));
+                }
+                SettingsCategory::Preferences => {
+                    self.preferences_tab
+                        .update(cx, |pt, cx| pt.focus_from_tabbar(window, cx));
+                }
+                SettingsCategory::Shortcuts => {}
+            }
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        match resolve_dialog_nav_key(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            event.is_held,
+            cur,
+            SettingsCategory::ALL.len(),
+        ) {
+            DialogNavStep::Move(next) => {
+                self.tab_kbd_active = true;
+                self.tab_last_pointer = Some(window.mouse_position());
+                self.tab_focuses[next].focus(window, cx);
+                self.set_category(SettingsCategory::ALL[next], cx);
+                cx.stop_propagation();
+            }
+            DialogNavStep::Activate(idx) => {
+                self.tab_kbd_active = true;
+                self.tab_last_pointer = Some(window.mouse_position());
+                self.set_category(SettingsCategory::ALL[idx], cx);
+                cx.stop_propagation();
+            }
+            DialogNavStep::TabActivated => {
+                self.tab_kbd_active = true;
+                self.tab_last_pointer = Some(window.mouse_position());
+                cx.notify();
+            }
+            DialogNavStep::Ignore => {}
+        }
+    }
+
+    fn trigger_update_check_or_open(&mut self, cx: &mut Context<Self>) {
+        let cur_phase = self
+            .client
+            .snapshot()
+            .update_state
+            .as_ref()
+            .map(|u| u.status.phase);
+        if matches!(
+            cur_phase,
+            Some(UpdatePhaseDto::Available | UpdatePhaseDto::Ready)
+        ) {
+            cx.emit(SettingsViewEvent::OpenUpdateDialog);
+            return;
+        }
+        let c = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = c.check_update().await;
+            let _ = c.refresh_globals().await;
+            let _ = weak.update(cx, |_, cx| {
+                match res {
+                    Ok(st)
+                        if matches!(
+                            st.phase,
+                            UpdatePhaseDto::Available | UpdatePhaseDto::Ready
+                        ) =>
+                    {
+                        cx.emit(SettingsViewEvent::OpenUpdateDialog);
+                    }
+                    Ok(_) => {
+                        cx.emit(SettingsViewEvent::Notice("当前已是最新版本。".into()));
+                    }
+                    Err(err) => {
+                        cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn handle_general_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.keystroke.modifiers != gpui::Modifiers::default() {
+            return;
+        }
+        let snap = self.client.snapshot();
+        let phase = snap
+            .update_state
+            .as_ref()
+            .map(|u| u.status.phase)
+            .unwrap_or(UpdatePhaseDto::Idle);
+        let unavailable = phase == UpdatePhaseDto::Unavailable;
+        let max_row = if unavailable { 1 } else { 2 };
+        let themes = [
+            ThemeModeDto::System,
+            ThemeModeDto::Light,
+            ThemeModeDto::Dark,
+        ];
+        match event.keystroke.key.as_str() {
+            "up" => {
+                if self.general_row_idx == 0 {
+                    self.general_kbd_active = false;
+                    self.tab_kbd_active = true;
+                    self.tab_last_pointer = Some(window.mouse_position());
+                    self.tab_focuses[self.category.index()].focus(window, cx);
+                } else {
+                    self.general_row_idx = self.general_row_idx.saturating_sub(1);
+                    self.general_kbd_active = true;
+                    self.general_last_pointer = Some(window.mouse_position());
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "down" => {
+                self.general_row_idx = (self.general_row_idx + 1).min(max_row);
+                self.general_kbd_active = true;
+                self.general_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "left" | "right" => {
+                let forward = event.keystroke.key.as_str() == "right";
+                self.general_kbd_active = true;
+                self.general_last_pointer = Some(window.mouse_position());
+                match self.general_row_idx {
+                    0 => {
+                        let cur = themes
+                            .iter()
+                            .position(|&t| t == snap.desktop_settings.theme)
+                            .unwrap_or(0);
+                        let next = if forward {
+                            (cur + 1).min(themes.len() - 1)
+                        } else {
+                            cur.saturating_sub(1)
+                        };
+                        if next != cur {
+                            cx.emit(SettingsViewEvent::ThemeChanged(themes[next]));
+                        }
+                    }
+                    1 => {
+                        let next = if forward {
+                            KeyboardFocusStyleDto::Rail
+                        } else {
+                            KeyboardFocusStyleDto::Brackets
+                        };
+                        if next != snap.desktop_settings.keyboard_focus_style {
+                            self.save_keyboard_style(next, cx);
+                        }
+                    }
+                    _ => {}
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            "enter" | "space" if !event.is_held && self.general_row_idx == 2 && !unavailable => {
+                if matches!(phase, UpdatePhaseDto::Checking | UpdatePhaseDto::Preparing) {
+                    cx.emit(SettingsViewEvent::CancelUpdate);
+                } else {
+                    self.trigger_update_check_or_open(cx);
+                }
+                cx.stop_propagation();
+            }
+            _ => {}
         }
     }
 
@@ -282,6 +512,9 @@ impl Render for SettingsView {
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
+        let kbd_style = snap.desktop_settings.keyboard_focus_style;
+
+        self.tab_kbd_tracker.clear();
 
         let rects = [
             self.tab_rects[0].get(),
@@ -323,10 +556,21 @@ impl Render for SettingsView {
             .border_color(palette.border_subtle)
             .flex()
             .items_center()
-            .gap(space::GROUP);
+            .gap(space::GROUP)
+            .on_key_down(cx.listener(Self::handle_tab_bar_key))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.tab_kbd_active
+                    && pointer_moved_past_threshold(&mut this.tab_last_pointer, ev.position)
+                {
+                    this.tab_kbd_active = false;
+                    cx.notify();
+                }
+            }));
 
-        for cat in SettingsCategory::ALL {
+        for (idx, cat) in SettingsCategory::ALL.iter().copied().enumerate() {
             let active = self.category == cat;
+            let tr = self.tab_kbd_tracker.clone();
+            let key = SharedString::from(format!("tab-{idx}"));
             let text_el = if active {
                 apply_scale(div(), scale::BODY_SEMIBOLD)
                     .text_color(palette.text_primary)
@@ -342,13 +586,17 @@ impl Render for SettingsView {
                     .id(SharedString::from(format!("settings-tab-{:?}", cat)))
                     .test_support()
                     .a11y_tab(cat.a11y_id(), cat.label(), active)
+                    .track_focus(&self.tab_focuses[idx])
+                    .tab_index(0)
                     .relative()
                     .h_full()
                     .flex()
                     .items_center()
                     .on_click(cx.listener(move |this, _, _, cx| {
+                        this.tab_kbd_active = false;
                         this.set_category(cat, cx);
                     }))
+                    .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                     .child(text_el)
                     .children((active && !tabs_measured).then(|| {
                         div()
@@ -388,11 +636,30 @@ impl Render for SettingsView {
             );
         }
 
+        let focused_tab = self
+            .tab_kbd_active
+            .then(|| self.focused_tab_idx(window))
+            .flatten()
+            .map(|idx| {
+                KbdDynamicSpec::control(format!("tab-{idx}"), KbdRailPlacement::BottomCenter)
+            });
+        tab_bar = tab_bar.child(render_gliding_dynamic_indicator(
+            "settings-tabbar",
+            kbd_style,
+            focused_tab,
+            self.tab_kbd_tracker.clone(),
+            &palette,
+            window,
+            cx,
+        ));
+
         let entity = cx.entity();
         let e_theme = entity.clone();
         let e_kbd_style = entity.clone();
         let e_check = entity.clone();
         let e_cancel = entity.clone();
+        let e_gen_key = entity.clone();
+        let e_gen_move = entity.clone();
 
         let content_el = match self.category {
             SettingsCategory::General => render_general_tab(
@@ -401,55 +668,44 @@ impl Render for SettingsView {
                 snap.update_state.as_deref(),
                 mono_family,
                 &palette,
+                GeneralTabKbdProps {
+                    focus_handle: self.general_focus.clone(),
+                    kbd_active: self.general_kbd_active && self.general_focus.is_focused(window),
+                    row_idx: self.general_row_idx,
+                    tracker: self.general_tracker.clone(),
+                    on_key_down: Rc::new(move |ev, w, cx| {
+                        e_gen_key.update(cx, |this, cx| this.handle_general_key(ev, w, cx));
+                    }),
+                    on_mouse_move: Rc::new(move |ev, _w, cx| {
+                        e_gen_move.update(cx, |this, cx| {
+                            if this.general_kbd_active
+                                && pointer_moved_past_threshold(
+                                    &mut this.general_last_pointer,
+                                    ev.position,
+                                )
+                            {
+                                this.general_kbd_active = false;
+                                cx.notify();
+                            }
+                        });
+                    }),
+                },
+                window,
+                cx,
                 Rc::new(move |theme: ThemeModeDto, _, cx| {
-                    e_theme.update(cx, |_, cx| cx.emit(SettingsViewEvent::ThemeChanged(theme)));
+                    e_theme.update(cx, |this, cx| {
+                        this.general_kbd_active = false;
+                        cx.emit(SettingsViewEvent::ThemeChanged(theme));
+                    });
                 }),
                 Rc::new(move |style: KeyboardFocusStyleDto, _, cx| {
-                    e_kbd_style.update(cx, |this, cx| this.save_keyboard_style(style, cx));
+                    e_kbd_style.update(cx, |this, cx| {
+                        this.general_kbd_active = false;
+                        this.save_keyboard_style(style, cx);
+                    });
                 }),
                 Rc::new(move |_, cx| {
-                    e_check.update(cx, |this, cx| {
-                        let cur_phase = this
-                            .client
-                            .snapshot()
-                            .update_state
-                            .as_ref()
-                            .map(|u| u.status.phase);
-                        if matches!(
-                            cur_phase,
-                            Some(UpdatePhaseDto::Available | UpdatePhaseDto::Ready)
-                        ) {
-                            cx.emit(SettingsViewEvent::OpenUpdateDialog);
-                            return;
-                        }
-                        let c = this.client.clone();
-                        cx.spawn(async move |weak, cx| {
-                            let res = c.check_update().await;
-                            let _ = c.refresh_globals().await;
-                            let _ = weak.update(cx, |_, cx| {
-                                match res {
-                                    Ok(st)
-                                        if matches!(
-                                            st.phase,
-                                            UpdatePhaseDto::Available | UpdatePhaseDto::Ready
-                                        ) =>
-                                    {
-                                        cx.emit(SettingsViewEvent::OpenUpdateDialog);
-                                    }
-                                    Ok(_) => {
-                                        cx.emit(SettingsViewEvent::Notice(
-                                            "当前已是最新版本。".into(),
-                                        ));
-                                    }
-                                    Err(err) => {
-                                        cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
-                                    }
-                                }
-                                cx.notify();
-                            });
-                        })
-                        .detach();
-                    });
+                    e_check.update(cx, |this, cx| this.trigger_update_check_or_open(cx));
                 }),
                 Rc::new(move |_, cx| {
                     e_cancel.update(cx, |_, cx| {
@@ -481,6 +737,14 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.tab_kbd_active
+                    && pointer_moved_past_threshold(&mut this.tab_last_pointer, ev.position)
+                {
+                    this.tab_kbd_active = false;
+                    cx.notify();
+                }
+            }))
             .child(render_subpage_header_xwjof(
                 "settings-subpage-header",
                 IconName::Settings,
@@ -511,7 +775,7 @@ impl Render for SettingsView {
                             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
                             .flex()
                             .flex_col()
-                            .gap(space::GROUP)
+                            .gap(px(20.0))
                             .child(tab_bar)
                             .child(content_wrap),
                     ),

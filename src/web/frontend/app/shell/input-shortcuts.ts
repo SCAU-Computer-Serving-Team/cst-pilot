@@ -15,7 +15,29 @@ const PRIMARY_INPUT_SELECTORS = [
 	`.login-panel input${TEXT_INPUT_EXCLUSIONS}`,
 ];
 
+const POPOVER_INPUT_CONTAINERS = [
+	".settings-default-popover",
+	".settings-provider-popover",
+	".composer-popover",
+	".tree-filter-popover",
+];
+
 const MODAL_INPUT_SELECTOR = `textarea, [contenteditable="true"], [contenteditable=""], [contenteditable], input${TEXT_INPUT_EXCLUSIONS}`;
+
+export function isModelPickerShortcut(event: {
+	ctrlKey: boolean;
+	altKey: boolean;
+	metaKey: boolean;
+	shiftKey: boolean;
+	key: string;
+	code?: string;
+	isComposing?: boolean;
+	keyCode?: number;
+}): boolean {
+	if (event.isComposing || event.keyCode === 229) return false;
+	if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+	return event.key.toLowerCase() === "m" || event.code === "KeyM";
+}
 
 export function isFocusInputShortcut(event: {
 	ctrlKey: boolean;
@@ -64,6 +86,14 @@ export function findPrimaryInput(doc: Document): HTMLElement | null {
 
 	const summaryScrim = doc.querySelector(".summary-scrim");
 	if (summaryScrim) return firstFocusable(summaryScrim, MODAL_INPUT_SELECTOR);
+
+	for (const selector of POPOVER_INPUT_CONTAINERS) {
+		const popover = doc.querySelector(selector);
+		if (popover) {
+			const hit = firstFocusable(popover, MODAL_INPUT_SELECTOR);
+			if (hit) return hit;
+		}
+	}
 
 	const main = doc.querySelector("main") ?? doc.body;
 	if (!main) return null;

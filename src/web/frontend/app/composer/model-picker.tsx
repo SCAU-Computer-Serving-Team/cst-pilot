@@ -1,8 +1,18 @@
 import { Button, ListBox, Popover } from "@heroui/react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
-import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type KeyboardEvent as ReactKeyboardEvent,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import type { ModelChoice } from "../data/model-selection";
 import type { Model } from "../data/web-state";
+import { isModelPickerShortcut } from "../shell/input-shortcuts";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import {
@@ -47,29 +57,101 @@ export function ModelPicker({
 	pageRef.current = page;
 	const escapeSubpageGuard = useRef(false);
 	const returnFocus = useRef<Exclude<Page, "main"> | null>(null);
+	const priorFocusRef = useRef<{ element: HTMLElement; range: Range | null } | null>(null);
+	const popoverDialogRef = useRef<HTMLDivElement>(null);
 	const triggerButton = useRef<HTMLButtonElement>(null);
 	const modelButton = useRef<HTMLButtonElement>(null);
 	const thinkingButton = useRef<HTMLButtonElement>(null);
 	const listBox = useRef<HTMLDivElement>(null);
+	const mainContainerRef = useRef<HTMLDivElement>(null);
+	const mainItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const optionsItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const kbdStyle = useKeyboardFocusStyle();
+	const [kbdActive, setKbdActive] = useState(false);
+	const [mainActiveId, setMainActiveId] = useState<"models" | "thinking">("models");
+	const [optionActiveId, setOptionActiveId] = useState<string | null>(null);
+	const clearKbd = useCallback(() => setKbdActive(false), []);
+	usePointerMutex(open && kbdActive, clearKbd);
 	const shell = useWorkspaceShell();
+	const restorePriorFocus = useCallback((onlyIfWithinPicker: boolean) => {
+		const saved = priorFocusRef.current;
+		priorFocusRef.current = null;
+		const active = document.activeElement;
+		const withinPicker =
+			active === document.body ||
+			active === null ||
+			Boolean(popoverDialogRef.current?.contains(active)) ||
+			active === triggerButton.current;
+		if (onlyIfWithinPicker && !withinPicker) return;
+		const target = saved?.element?.isConnected ? saved.element : triggerButton.current;
+		window.setTimeout(() => {
+			if (!target?.isConnected) return;
+			target.focus({ preventScroll: true });
+			if (saved?.range && saved.element === target) {
+				try {
+					const sel = window.getSelection();
+					if (sel) {
+						sel.removeAllRanges();
+						sel.addRange(saved.range);
+					}
+				} catch {
+					/* 选区失效时仅保留焦点 */
+				}
+			}
+		}, 0);
+	}, []);
 	useEffect(() => {
 		if (shell?.appActive) {
 			navigation.current++;
+			priorFocusRef.current = null;
 			setOpen(false);
 		}
 	}, [shell?.appActive]);
-	usePanelDismiss(
+	useEffect(() => {
+		const onAltM = (event: KeyboardEvent) => {
+			if (!isModelPickerShortcut(event)) return;
+			if (document.querySelector(".standby-scrim, .palette-scrim, dialog[open], .summary-scrim")) return;
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.repeat) return;
+			if (openRef.current) {
+				navigation.current++;
+				setOpen(false);
+				restorePriorFocus(true);
+				return;
+			}
+			const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+			let savedRange: Range | null = null;
+			if (active?.isContentEditable) {
+				const sel = window.getSelection();
+				if (sel && sel.rangeCount > 0) savedRange = sel.getRangeAt(0).cloneRange();
+			}
+			priorFocusRef.current = active ? { element: active, range: savedRange } : null;
+			navigation.current++;
+			returnFocus.current = "models";
+			setMainActiveId("models");
+			setKbdActive(true);
+			setPage("main");
+			setOpen(true);
+			onOpen();
+		};
+		window.addEventListener("keydown", onAltM, true);
+		return () => window.removeEventListener("keydown", onAltM, true);
+	}, [onOpen, restorePriorFocus]);
+	const panelDismiss = usePanelDismiss(
 		open,
 		() => {
 			navigation.current++;
 			setOpen(false);
+			restorePriorFocus(true);
 		},
 		triggerButton,
 	);
-	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，保证子列表 Esc 只退回主菜单，主菜单 Esc 归还入口焦点。
+	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，仅在当前选择器位于全局浮层栈顶时消费 Esc。
 	useLayoutEffect(() => {
 		function onEscape(event: KeyboardEvent) {
 			if (!openRef.current || event.key !== "Escape") return;
+			if (!panelDismiss.isTop()) return;
 			// 输入法组合态下的 Esc 只应交给输入法，拦截传播以阻止第三方 Popover 误关闭，且不调用 preventDefault。
 			if (event.isComposing || event.keyCode === 229) {
 				escapeSubpageGuard.current = true;
@@ -96,11 +178,11 @@ export function ModelPicker({
 			}
 			navigation.current++;
 			setOpen(false);
-			window.setTimeout(() => triggerButton.current?.focus(), 0);
+			restorePriorFocus(true);
 		}
 		window.addEventListener("keydown", onEscape, true);
 		return () => window.removeEventListener("keydown", onEscape, true);
-	}, []);
+	}, [panelDismiss, restorePriorFocus]);
 	useLayoutEffect(() => {
 		if (!open || page === "main" || busy) return;
 		function focusList() {
@@ -113,10 +195,43 @@ export function ModelPicker({
 	}, [open, page, busy]);
 	useLayoutEffect(() => {
 		if (open && page === "main" && returnFocus.current) {
-			(returnFocus.current === "models" ? modelButton : thinkingButton).current?.focus();
+			const target = returnFocus.current;
+			setMainActiveId(target);
+			(target === "models" ? modelButton : thinkingButton).current?.focus();
 			returnFocus.current = null;
 		}
 	}, [open, page]);
+	function handleMainKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			const next = mainActiveId === "models" ? "thinking" : "models";
+			setKbdActive(true);
+			setMainActiveId(next);
+			(next === "models" ? modelButton : thinkingButton).current?.focus({ preventScroll: true });
+			return;
+		}
+		if (event.key === "ArrowRight") {
+			event.preventDefault();
+			if (mainActiveId === "models" && !models.length) return;
+			setKbdActive(true);
+			navigation.current++;
+			setListPage(mainActiveId);
+			setPage(mainActiveId);
+		}
+	}
+	function handleOptionsKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "ArrowLeft") {
+			event.preventDefault();
+			setKbdActive(true);
+			back();
+			return;
+		}
+		if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Home" || event.key === "End") {
+			setKbdActive(true);
+		}
+	}
 	function back() {
 		returnFocus.current = page === "main" ? null : page;
 		navigation.current++;
@@ -208,6 +323,7 @@ export function ModelPicker({
 				containerPadding={16}
 			>
 				<Popover.Dialog
+					ref={popoverDialogRef}
 					aria-label={page === "models" ? "选择模型" : page === "thinking" ? "选择思考强度" : "模型与思考强度"}
 					className="model-picker-dialog"
 					aria-busy={busy}
@@ -216,17 +332,25 @@ export function ModelPicker({
 				>
 					<div className="model-picker-pages t-page-slide" data-page={page === "main" ? "1" : "2"}>
 						<div
+							ref={mainContainerRef}
 							className="model-picker-main t-page"
 							data-page-id="1"
+							data-kbd-active={kbdActive && page === "main" ? "true" : undefined}
 							aria-hidden={page !== "main"}
 							inert={page !== "main"}
+							onKeyDown={handleMainKeyDown}
 						>
 							<Button
-								ref={modelButton}
+								ref={(node) => {
+									modelButton.current = node;
+									if (node) mainItemRefs.current.set("models", node);
+									else mainItemRefs.current.delete("models");
+								}}
 								variant="ghost"
 								className="menu-row model-picker-model"
 								aria-label="选择模型"
 								isDisabled={!models.length}
+								onFocus={() => setMainActiveId("models")}
 								onPress={() => {
 									navigation.current++;
 									setListPage("models");
@@ -243,10 +367,15 @@ export function ModelPicker({
 								</span>
 							</Button>
 							<Button
-								ref={thinkingButton}
+								ref={(node) => {
+									thinkingButton.current = node;
+									if (node) mainItemRefs.current.set("thinking", node);
+									else mainItemRefs.current.delete("thinking");
+								}}
 								variant="ghost"
 								className="menu-row model-picker-thinking"
 								aria-label="选择思考强度"
+								onFocus={() => setMainActiveId("thinking")}
 								onPress={() => {
 									navigation.current++;
 									setListPage("thinking");
@@ -259,12 +388,21 @@ export function ModelPicker({
 									<ChevronRight size={14} aria-hidden="true" />
 								</span>
 							</Button>
+							<KbdFocusOverlay
+								containerRef={mainContainerRef}
+								itemRefs={mainItemRefs}
+								targetId={open && page === "main" && kbdActive ? mainActiveId : null}
+								style={kbdStyle}
+								railPlacement="inside"
+							/>
 						</div>
 						<div
 							className="model-picker-options t-page"
 							data-page-id="2"
+							data-kbd-active={kbdActive && page !== "main" ? "true" : undefined}
 							aria-hidden={page === "main"}
 							inert={page === "main"}
+							onKeyDown={handleOptionsKeyDown}
 						>
 							<button type="button" className="menu-row model-picker-back" onClick={back}>
 								<ChevronLeft size={14} aria-hidden="true" />
@@ -286,7 +424,16 @@ export function ModelPicker({
 								}}
 							>
 								{options.map((option) => (
-									<ListBox.Item key={option.id} id={option.id} textValue={option.title}>
+									<ListBox.Item
+										key={option.id}
+										id={option.id}
+										textValue={option.title}
+										ref={(node: HTMLElement | null) => {
+											if (node) optionsItemRefs.current.set(option.id, node);
+											else optionsItemRefs.current.delete(option.id);
+										}}
+										onFocus={() => setOptionActiveId(option.id)}
+									>
 										<span className="model-picker-option-label" title={option.title}>
 											{option.label}
 										</span>
@@ -303,6 +450,17 @@ export function ModelPicker({
 									</ListBox.Item>
 								))}
 							</ListBox>
+							<KbdFocusOverlay
+								containerRef={listBox}
+								itemRefs={optionsItemRefs}
+								targetId={
+									open && page !== "main" && kbdActive
+										? (optionActiveId ?? selectedKey ?? options[0]?.id ?? null)
+										: null
+								}
+								style={kbdStyle}
+								railPlacement="inside"
+							/>
 						</div>
 					</div>
 				</Popover.Dialog>

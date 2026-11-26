@@ -1,6 +1,14 @@
 import { Button } from "@heroui/react";
 import { ArrowUp, Command, FileText, PencilLine, Plus, Sparkles, Square, X } from "lucide-react";
-import { type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+	type ClipboardEvent,
+	type DragEvent,
+	type KeyboardEvent,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
 import { anyModelConfigured, claimMissingKeyPrompt } from "../auth/model-key-prompt";
@@ -14,6 +22,8 @@ import { PreviewableImage } from "../images/image-preview";
 import { ConfirmDialog } from "../shell/app-dialogs";
 import { ErrorNotice } from "../shell/error-notice";
 import { handleContentEditableVerticalArrow } from "../shell/input-shortcuts";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { resolveToolbarNavKey } from "../shell/keyboard-navigation";
 import { hasOpenDismissiblePanel, usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { chipCaretSpace, editorHtml, extractPayload, parseEditor, replaceTrailingFileQuery } from "./composer-editor";
@@ -140,6 +150,19 @@ export function Composer({
 	const [fileIndex, setFileIndex] = useState(0);
 	const [filesVisible, setFilesVisible] = useState(true);
 	const [chipCount, setChipCount] = useState(0);
+	const kbdStyle = useKeyboardFocusStyle();
+	const [compKbdActive, setCompKbdActive] = useState(true);
+	const clearCompKbd = useCallback(() => setCompKbdActive(false), []);
+	const slashListRef = useRef<HTMLFieldSetElement>(null);
+	const slashItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const fileListRef = useRef<HTMLFieldSetElement>(null);
+	const fileItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const footerRef = useRef<HTMLDivElement>(null);
+	const footerItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const [footerKbdActive, setFooterKbdActive] = useState(false);
+	const [footerActiveId, setFooterActiveId] = useState<string | null>(null);
+	const clearFooterKbd = useCallback(() => setFooterKbdActive(false), []);
+	usePointerMutex(footerKbdActive, clearFooterKbd);
 	const suggestions =
 		chipCount === 0 && suggestionsVisible && /^\/[\w:-]*$/.test(text)
 			? commands.filter((item) => item.startsWith(text))
@@ -791,28 +814,41 @@ export function Composer({
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 		if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest(".chip-remove")) return;
 		if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Tab" && (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)) return;
 			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
-			if (event.key === "ArrowUp")
+			if (event.key === "ArrowUp") {
+				setCompKbdActive(true);
 				setFileIndex((value) => (value - 1 + fileSuggestions.length) % fileSuggestions.length);
-			else if (event.key === "ArrowDown") setFileIndex((value) => (value + 1) % fileSuggestions.length);
-			else if (event.key === "Escape") setFilesVisible(false);
+			} else if (event.key === "ArrowDown") {
+				setCompKbdActive(true);
+				setFileIndex((value) => (value + 1) % fileSuggestions.length);
+			} else if (event.key === "Escape") setFilesVisible(false);
 			else selectFile((fileSuggestions[fileIndex] ?? fileSuggestions[0]).path);
 			return;
 		}
 		if (suggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+			if (event.key === "Tab" && (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey)) return;
 			if (event.key === "Escape" && !suggestionsDismiss.isTop()) return;
 			event.preventDefault();
-			if (event.key === "ArrowUp") setCommandIndex((value) => (value - 1 + suggestions.length) % suggestions.length);
-			else if (event.key === "ArrowDown") setCommandIndex((value) => (value + 1) % suggestions.length);
-			else if (event.key === "Escape") setSuggestionsVisible(false);
+			if (event.key === "ArrowUp") {
+				setCompKbdActive(true);
+				setCommandIndex((value) => (value - 1 + suggestions.length) % suggestions.length);
+			} else if (event.key === "ArrowDown") {
+				setCompKbdActive(true);
+				setCommandIndex((value) => (value + 1) % suggestions.length);
+			} else if (event.key === "Escape") setSuggestionsVisible(false);
 			else selectCommand(suggestions[commandIndex] ?? suggestions[0]);
 			return;
 		}
-		if (event.key === "Escape" && running) {
+		if (event.key === "Escape") {
 			if (hasOpenDismissiblePanel()) return;
 			event.preventDefault();
-			void onStop?.();
+			if (running) {
+				void onStop?.();
+			} else {
+				editorRef.current?.blur();
+			}
 			return;
 		}
 		if (event.key === "Enter" && !event.shiftKey) {
@@ -837,6 +873,46 @@ export function Composer({
 		setPendingQueueEdit(null);
 	}, [shell?.appActive]);
 	const suggestionsOpen = suggestions.length > 0 || fileSuggestions.length > 0;
+	usePointerMutex(suggestionsOpen && compKbdActive, clearCompKbd);
+	useEffect(() => {
+		if (suggestionsOpen) setCompKbdActive(true);
+	}, [suggestionsOpen]);
+	function handleFooterKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "Tab") {
+			setFooterKbdActive(true);
+			return;
+		}
+		const container = footerRef.current;
+		if (!container) return;
+		const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+		if (!buttons.length) return;
+		const curIdx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+		if (curIdx < 0) return;
+		const nextIdx = resolveToolbarNavKey(
+			{
+				key: event.key,
+				defaultPrevented: event.defaultPrevented,
+				isComposing: event.nativeEvent.isComposing,
+				keyCode: event.keyCode,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				altKey: event.altKey,
+				shiftKey: event.shiftKey,
+			},
+			curIdx,
+			buttons.length,
+		);
+		if (nextIdx === null || nextIdx === curIdx) return;
+		event.preventDefault();
+		const target = buttons[nextIdx];
+		if (!target) return;
+		const key = `footer-${nextIdx}`;
+		footerItemRefs.current.set(key, target);
+		setFooterKbdActive(true);
+		setFooterActiveId(key);
+		target.focus({ preventScroll: true });
+	}
 	const suggestionsDismiss = usePanelDismiss(
 		suggestionsOpen,
 		() => {
@@ -984,7 +1060,12 @@ export function Composer({
 					}}
 				/>
 				{!!suggestions.length && (
-					<fieldset className="tier-2-glass command-suggestions" aria-label="命令补全">
+					<fieldset
+						ref={slashListRef}
+						className="tier-2-glass command-suggestions"
+						data-kbd-active={compKbdActive ? "true" : undefined}
+						aria-label="命令补全"
+					>
 						{([false, true] as const).map((skill) => {
 							const group = suggestions.filter((item) => item.startsWith("/skill:") === skill);
 							return group.length ? (
@@ -993,6 +1074,10 @@ export function Composer({
 									{group.map((item) => (
 										<Button
 											key={item}
+											ref={(node) => {
+												if (node) slashItemRefs.current.set(item, node);
+												else slashItemRefs.current.delete(item);
+											}}
 											className={`command-option ${suggestions.indexOf(item) === commandIndex ? "command-active" : ""}`}
 											variant="ghost"
 											onPress={() => selectCommand(item)}
@@ -1009,15 +1094,31 @@ export function Composer({
 								</div>
 							) : null;
 						})}
+						<KbdFocusOverlay
+							containerRef={slashListRef}
+							itemRefs={slashItemRefs}
+							targetId={compKbdActive ? (suggestions[commandIndex] ?? suggestions[0] ?? null) : null}
+							style={kbdStyle}
+							railPlacement="inside"
+						/>
 					</fieldset>
 				)}
 				{!!fileSuggestions.length && (
-					<fieldset className="tier-2-glass command-suggestions file-suggestions" aria-label="文件引用补全">
+					<fieldset
+						ref={fileListRef}
+						className="tier-2-glass command-suggestions file-suggestions"
+						data-kbd-active={compKbdActive ? "true" : undefined}
+						aria-label="文件引用补全"
+					>
 						<div className="command-group">
 							<span className="command-group-title">最近文件</span>
 							{fileSuggestions.map((file, index) => (
 								<Button
 									key={file.path}
+									ref={(node) => {
+										if (node) fileItemRefs.current.set(file.path, node);
+										else fileItemRefs.current.delete(file.path);
+									}}
 									className={`command-option ${index === fileIndex ? "command-active" : ""}`}
 									variant="ghost"
 									onPress={() => selectFile(file.path)}
@@ -1028,14 +1129,48 @@ export function Composer({
 								</Button>
 							))}
 						</div>
+						<KbdFocusOverlay
+							containerRef={fileListRef}
+							itemRefs={fileItemRefs}
+							targetId={
+								compKbdActive ? (fileSuggestions[fileIndex]?.path ?? fileSuggestions[0]?.path ?? null) : null
+							}
+							style={kbdStyle}
+							railPlacement="inside"
+						/>
 					</fieldset>
 				)}
 				{error && <ErrorNotice key={error} input message={error} onDismiss={() => setError("")} />}
-				<div className="composer-actions">
+				<div
+					ref={footerRef}
+					role="toolbar"
+					aria-label="输入框操作栏"
+					className="composer-actions"
+					style={{ position: "relative" }}
+					onKeyDown={handleFooterKeyDown}
+					onFocus={(event) => {
+						const container = footerRef.current;
+						if (!container || !(event.target instanceof HTMLButtonElement)) return;
+						const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+						const idx = buttons.indexOf(event.target);
+						if (idx >= 0) {
+							const key = `footer-${idx}`;
+							footerItemRefs.current.set(key, event.target);
+							setFooterActiveId(key);
+						}
+					}}
+					onBlur={(event) => {
+						const next = event.relatedTarget;
+						if (next instanceof Node && footerRef.current?.contains(next)) return;
+						setFooterActiveId(null);
+						setFooterKbdActive(false);
+					}}
+				>
 					<input
 						ref={fileInput}
 						className="visually-hidden"
 						type="file"
+						tabIndex={-1}
 						accept="image/png,image/jpeg,image/gif,image/webp"
 						multiple
 						aria-label="选择图片"
@@ -1092,6 +1227,14 @@ export function Composer({
 							<ArrowUp size={14} aria-hidden="true" />
 						)}
 					</Button>
+					<KbdFocusOverlay
+						containerRef={footerRef}
+						itemRefs={footerItemRefs}
+						targetId={footerKbdActive ? footerActiveId : null}
+						style={kbdStyle}
+						railPlacement="bottom"
+						bracketOutset={3}
+					/>
 				</div>
 			</section>
 		</div>

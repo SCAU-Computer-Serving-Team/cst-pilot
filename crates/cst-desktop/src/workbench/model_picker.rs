@@ -1,9 +1,10 @@
 use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
 
-use cst_client::{ModelChoiceDto, ModelsSnapshot};
-use gpui::{Font, FontWeight, Hsla, Pixels, TextRun};
+use cst_client::{KeyboardFocusStyleDto, ModelChoiceDto, ModelsSnapshot};
+use gpui::{Font, FontWeight, Hsla, MouseMoveEvent, Pixels, TextRun};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::{
@@ -15,6 +16,9 @@ use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::shell::open_url_in_trusted_browser;
+use crate::theme::kbd_focus::{
+    KbdDynamicBoundsTracker, KbdDynamicSpec, render_gliding_dynamic_indicator,
+};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
@@ -556,6 +560,7 @@ pub fn render_context_quota_popover(
 pub type SelectModelFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
 pub type SelectThinkingFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type ChangePickerPageFn = Rc<dyn Fn(ModelPickerPage, &mut Window, &mut App)>;
+pub type PickerPointerMoveFn = Rc<dyn Fn(&MouseMoveEvent, &mut Window, &mut App)>;
 
 const PICKER_MIN_WIDTH: f32 = 224.0;
 const PICKER_MAX_WIDTH: f32 = 320.0;
@@ -840,6 +845,9 @@ pub fn render_model_picker_popover(
     open_epoch: u64,
     page: ModelPickerPage,
     highlighted_idx: usize,
+    kbd_style: KeyboardFocusStyleDto,
+    kbd_active: bool,
+    kbd_tracker: KbdDynamicBoundsTracker,
     scroll_handle: &gpui_kit::ScrollHandle,
     scoped_models: &[ModelChoiceDto],
     current_provider: &str,
@@ -853,9 +861,11 @@ pub fn render_model_picker_popover(
     on_goto_page: ChangePickerPageFn,
     on_select_model: SelectModelFn,
     on_select_thinking: SelectThinkingFn,
+    on_mouse_move: PickerPointerMoveFn,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
+    kbd_tracker.clear();
     let viewport = window.viewport_size();
     let (target_width, target_height) = measure_model_picker_dimensions(
         page,
@@ -918,10 +928,33 @@ pub fn render_model_picker_popover(
         .flex_col()
         .gap(space::MICRO);
 
+    let active_kbd_spec = if interactive && kbd_active {
+        match page {
+            ModelPickerPage::Main => Some(KbdDynamicSpec::row(format!(
+                "main-{}",
+                highlighted_idx.min(1)
+            ))),
+            ModelPickerPage::Models if !scoped_models.is_empty() => Some(KbdDynamicSpec::row(
+                format!("model-{}", highlighted_idx.min(scoped_models.len() - 1)),
+            )),
+            ModelPickerPage::Thinking => {
+                let len = effective_thinking_levels(thinking_levels).len();
+                (len > 0).then(|| {
+                    KbdDynamicSpec::row(format!("thinking-{}", highlighted_idx.min(len - 1)))
+                })
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     match page {
         ModelPickerPage::Main => {
             let goto_m = Rc::clone(&on_goto_page);
             let goto_t = Rc::clone(&on_goto_page);
+            let tr_m = kbd_tracker.clone();
+            let tr_t = kbd_tracker.clone();
             let models_row = apply_scale(div(), scale::CAPTION_MEDIUM)
                 .id(if interactive {
                     "model-picker-goto-models"
@@ -932,11 +965,6 @@ pub fn render_model_picker_popover(
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
-                .bg(if highlighted_idx == 0 {
-                    palette.bg_item_active
-                } else {
-                    gpui_kit::transparent_black()
-                })
                 .flex()
                 .items_center()
                 .justify_between()
@@ -975,11 +1003,6 @@ pub fn render_model_picker_popover(
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
-                .bg(if highlighted_idx == 1 {
-                    palette.bg_item_active
-                } else {
-                    gpui_kit::transparent_black()
-                })
                 .flex()
                 .items_center()
                 .justify_between()
@@ -1013,8 +1036,15 @@ pub fn render_model_picker_popover(
                             "model-picker-goto-models",
                             format!("模型：{current_model_label}"),
                         )
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| (goto_m)(ModelPickerPage::Models, w, cx))
+                        .on_prepaint(move |bounds, _, _| tr_m.set("main-0", bounds))
                         .into_any_element()
                 } else {
                     models_row.into_any_element()
@@ -1026,8 +1056,15 @@ pub fn render_model_picker_popover(
                             "model-picker-goto-thinking",
                             format!("思考强度：{}", thinking_level_label(current_thinking)),
                         )
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| (goto_t)(ModelPickerPage::Thinking, w, cx))
+                        .on_prepaint(move |bounds, _, _| tr_t.set("main-1", bounds))
                         .into_any_element()
                 } else {
                     thinking_row.into_any_element()
@@ -1090,11 +1127,12 @@ pub fn render_model_picker_popover(
             } else {
                 for (idx, m) in scoped_models.iter().enumerate() {
                     let is_cur = m.provider == current_provider && m.id == current_model_id;
-                    let is_hi = idx == highlighted_idx;
                     let prov = m.provider.clone();
                     let prov_display = SharedString::from(m.provider.clone());
                     let mid = m.id.clone();
                     let sel_fn = Rc::clone(&on_select_model);
+                    let tr_row = kbd_tracker.clone();
+                    let key_row = SharedString::from(format!("model-{idx}"));
                     let label = if m.name.trim().is_empty() {
                         m.id.clone()
                     } else {
@@ -1110,11 +1148,6 @@ pub fn render_model_picker_popover(
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if is_hi {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
@@ -1143,10 +1176,17 @@ pub fn render_model_picker_popover(
                     scroll = scroll.child(if interactive {
                         row.test_support()
                             .a11y_listitem(opt_id, format!("{prov} · {label}"), is_cur)
-                            .hover(|s| s.bg(palette.bg_item_active))
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
                             .on_click(move |_, w, cx| {
                                 (sel_fn)(prov.clone(), mid.clone(), w, cx);
                             })
+                            .on_prepaint(move |bounds, _, _| tr_row.set(key_row.clone(), bounds))
                             .into_any_element()
                     } else {
                         row.into_any_element()
@@ -1204,9 +1244,10 @@ pub fn render_model_picker_popover(
 
             for (idx, lv) in levels.iter().enumerate() {
                 let is_cur = lv.eq_ignore_ascii_case(current_thinking);
-                let is_hi = idx == highlighted_idx;
                 let lv_owned = lv.clone();
                 let sel_fn = Rc::clone(&on_select_thinking);
+                let tr_row = kbd_tracker.clone();
+                let key_row = SharedString::from(format!("thinking-{idx}"));
                 let opt_id =
                     SharedString::from(format!("thinking-option-{}", lv.to_ascii_lowercase()));
                 let lv_label = thinking_level_label(lv);
@@ -1222,11 +1263,6 @@ pub fn render_model_picker_popover(
                     .h(height::CONTROL)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
-                    .bg(if is_hi {
-                        palette.bg_item_active
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
@@ -1242,10 +1278,17 @@ pub fn render_model_picker_popover(
                 list = list.child(if interactive {
                     row.test_support()
                         .a11y_listitem(opt_id, lv_label, is_cur)
-                        .hover(|s| s.bg(palette.bg_item_active))
+                        .hover(move |s| {
+                            if kbd_active {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover)
+                            }
+                        })
                         .on_click(move |_, w, cx| {
                             (sel_fn)(lv_owned.clone(), w, cx);
                         })
+                        .on_prepaint(move |bounds, _, _| tr_row.set(key_row.clone(), bounds))
                         .into_any_element()
                 } else {
                     row.into_any_element()
@@ -1259,6 +1302,18 @@ pub fn render_model_picker_popover(
         }
     }
 
+    if interactive {
+        page_body = page_body.child(render_gliding_dynamic_indicator(
+            "composer-model-picker",
+            kbd_style,
+            active_kbd_spec,
+            kbd_tracker,
+            palette,
+            window,
+            cx,
+        ));
+    }
+
     let card = card.child(page_body);
     if interactive {
         card.test_support()
@@ -1266,6 +1321,7 @@ pub fn render_model_picker_popover(
             .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
             .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_move(move |ev, w, cx| (on_mouse_move)(ev, w, cx))
             .on_click(|_, _, cx| cx.stop_propagation())
             .into_any_element()
     } else {

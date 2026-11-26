@@ -3,12 +3,16 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use cst_client::{ClientError, ClientHandle, ComposerDraft, DraftKey, InlineToken as DraftToken};
+use cst_client::{
+    ClientError, ClientHandle, ComposerDraft, DraftKey, InlineToken as DraftToken,
+    KeyboardFocusStyleDto,
+};
 use gpui::{
     ClipboardEntry, ClipboardItem, EntityInputHandler, ExternalPaths, ImageSource, KeyDownEvent,
-    ObjectFit, PathPromptOptions, StyledImage as _,
+    MouseMoveEvent, ObjectFit, PathPromptOptions, Pixels, Point, StyledImage as _,
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::motion::{Transition, TransitionState};
 use gpui_kit::component::input::{
     Enter, IndentInline, InlineToken as UiInlineToken, InputContent, InputEvent, MoveDown, MoveUp,
@@ -24,6 +28,11 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{
+    DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, KbdRailPlacement, KbdTone,
+    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
+    resolve_menu_nav_key,
+};
 use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
@@ -35,7 +44,8 @@ use crate::workbench::model_picker::{
     render_model_picker_popover, resolve_scoped_models, thinking_level_label,
 };
 use crate::workbench::queue_bar::{
-    ParsedQueueSnapshot, QueueBarCallbacks, QueueMutation, VisibleQueueItem, render_queue_bar,
+    ParsedQueueSnapshot, QueueBarCallbacks, QueueBarKbdProps, QueueMutation, QueueRowAction,
+    VisibleQueueItem, queue_item_action_slots, render_queue_bar,
 };
 
 #[derive(Debug, Clone)]
@@ -216,8 +226,14 @@ pub struct ComposerView {
     picker_presence: TransitionState<f32>,
     picker_page: ModelPickerPage,
     picker_hi_idx: usize,
+    picker_kbd_active: bool,
+    picker_last_pointer: Option<Point<Pixels>>,
+    picker_tracker: KbdDynamicBoundsTracker,
     picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
+    comp_kbd_active: bool,
+    comp_last_pointer: Option<Point<Pixels>>,
+    comp_tracker: KbdDynamicBoundsTracker,
     context_popover_open: bool,
     context_presence: TransitionState<f32>,
     context_prior_focus: Option<FocusHandle>,
@@ -227,8 +243,20 @@ pub struct ComposerView {
     quota_loading: bool,
     queue_pending: Option<(String, ParsedQueueSnapshot)>,
     queue_receipt: Option<(String, ParsedQueueSnapshot)>,
+    pending_queue_reorder: Option<(String, Vec<String>)>,
+    queue_focus: FocusHandle,
+    queue_kbd_active: bool,
+    queue_last_pointer: Option<Point<Pixels>>,
+    queue_tracker: KbdDynamicBoundsTracker,
+    queue_selected_id: Option<String>,
+    queue_action: Option<QueueRowAction>,
+    attach_btn_focus: FocusHandle,
     model_btn_focus: FocusHandle,
     context_btn_focus: FocusHandle,
+    send_btn_focus: FocusHandle,
+    footer_kbd_active: bool,
+    footer_last_pointer: Option<Point<Pixels>>,
+    footer_tracker: KbdDynamicBoundsTracker,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -279,8 +307,11 @@ impl ComposerView {
                 .auto_grow(1, 8)
         });
 
+        let attach_btn_focus = cx.focus_handle().tab_stop(true);
         let model_btn_focus = cx.focus_handle().tab_stop(true);
         let context_btn_focus = cx.focus_handle().tab_stop(true);
+        let send_btn_focus = cx.focus_handle().tab_stop(true);
+        let queue_focus = cx.focus_handle().tab_stop(true);
 
         let sub = cx.subscribe_in(&textarea, window, Self::on_textarea_event);
         let obs = cx.observe_in(&textarea, window, |this, textarea, window, cx| {
@@ -314,8 +345,14 @@ impl ComposerView {
             picker_presence: TransitionState::default(),
             picker_page: ModelPickerPage::Main,
             picker_hi_idx: 0,
+            picker_kbd_active: false,
+            picker_last_pointer: None,
+            picker_tracker: KbdDynamicBoundsTracker::new(),
             picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
+            comp_kbd_active: false,
+            comp_last_pointer: None,
+            comp_tracker: KbdDynamicBoundsTracker::new(),
             context_popover_open: false,
             context_presence: TransitionState::default(),
             context_prior_focus: None,
@@ -325,8 +362,20 @@ impl ComposerView {
             quota_loading: false,
             queue_pending: None,
             queue_receipt: None,
+            pending_queue_reorder: None,
+            queue_focus,
+            queue_kbd_active: false,
+            queue_last_pointer: None,
+            queue_tracker: KbdDynamicBoundsTracker::new(),
+            queue_selected_id: None,
+            queue_action: None,
+            attach_btn_focus,
             model_btn_focus,
             context_btn_focus,
+            send_btn_focus,
+            footer_kbd_active: false,
+            footer_last_pointer: None,
+            footer_tracker: KbdDynamicBoundsTracker::new(),
             _subscriptions: vec![sub, obs],
         };
         view.pull_from_workspace(window, cx);
@@ -421,6 +470,47 @@ impl ComposerView {
         changed
     }
 
+    pub fn open_model_picker_shortcut(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.is_ime_composing(window, cx) {
+            return false;
+        }
+        #[cfg(feature = "test-support")]
+        crate::ux_probe::mark_input("model_picker");
+        self.clear_completion();
+        self.context_popover_open = false;
+        self.context_prior_focus = None;
+        if self.picker_open {
+            if let Some(prev) = self.close_picker() {
+                prev.focus(window, cx);
+            } else {
+                self.focus_handle(cx).focus(window, cx);
+            }
+        } else {
+            self.picker_open = true;
+            self.picker_open_epoch = self.picker_open_epoch.wrapping_add(1);
+            self.set_picker_page(ModelPickerPage::Main);
+            self.picker_kbd_active = true;
+            self.picker_last_pointer = Some(window.mouse_position());
+            self.picker_prior_focus = window.focused(cx);
+            self.model_btn_focus.focus(window, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    pub fn blur_if_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.focus_handle(cx).is_focused(window) || self.is_ime_composing(window, cx) {
+            return false;
+        }
+        window.blur(cx);
+        cx.notify();
+        true
+    }
+
     /// Closes the single topmost open composer popover (`completion` / `picker` / `context`) and restores focus.
     pub fn dismiss_topmost_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.clear_completion() {
@@ -429,7 +519,9 @@ impl ComposerView {
         }
         if self.picker_open {
             if self.picker_page != ModelPickerPage::Main {
+                let back_idx = usize::from(self.picker_page == ModelPickerPage::Thinking);
                 self.set_picker_page(ModelPickerPage::Main);
+                self.picker_hi_idx = back_idx;
                 cx.notify();
                 return true;
             }
@@ -545,6 +637,8 @@ impl ComposerView {
 
     fn clear_completion(&mut self) -> bool {
         self.completion_source = None;
+        self.comp_kbd_active = false;
+        self.comp_last_pointer = None;
         let searching = self.file_search_task.take().is_some();
         self.completion.take().is_some() || searching
     }
@@ -621,8 +715,10 @@ impl ComposerView {
         } else {
             (*index + len - 1) % len
         };
-        self.completion_scroll
-            .scroll_to_item(*index + usize::from(separator.is_some_and(|i| *index >= i)));
+        let scroll_row = *index + usize::from(separator.is_some_and(|i| *index >= i));
+        self.comp_kbd_active = true;
+        self.comp_last_pointer = Some(window.mouse_position());
+        self.completion_scroll.scroll_to_item(scroll_row);
         cx.stop_propagation();
         cx.notify();
     }
@@ -632,33 +728,23 @@ impl ComposerView {
             cx.propagate();
             return;
         }
-        cx.stop_propagation();
         if self.is_ime_composing(window, cx) {
+            cx.stop_propagation();
             return;
         }
         if self.completion.is_some() && self.completion_is_current(cx) {
+            cx.stop_propagation();
             self.accept_selected_completion(window, cx);
             return;
         }
-
-        self.clear_completion();
-        self.close_picker();
-        self.context_popover_open = false;
-        self.context_prior_focus = None;
-        let st = self.textarea.read(cx);
-        let pos = st.cursor();
-        self.completion_source = Some((st.content(), pos));
-        self.completion_scroll = ScrollHandle::new();
-        self.completion = Some(CompletionPopupState::Slash {
-            replace_range: pos..pos,
-            items: SLASH_CATALOG.to_vec(),
-            selected_idx: 0,
-        });
-        cx.notify();
+        // No active completion menu: let Tab move focus out of the composer into footer controls.
+        cx.propagate();
     }
 
     fn close_picker(&mut self) -> Option<FocusHandle> {
         self.picker_open = false;
+        self.picker_kbd_active = false;
+        self.picker_last_pointer = None;
         self.picker_prior_focus.take()
     }
 
@@ -674,10 +760,16 @@ impl ComposerView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.picker_open
-            || !self.model_btn_focus.is_focused(window)
-            || event.keystroke.modifiers.number_of_modifiers() != 0
+        if !self.picker_open || !self.model_btn_focus.is_focused(window) {
+            return;
+        }
+        if event.keystroke.key.as_str() == "tab"
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.platform
         {
+            // Keep focus trapped inside the open model picker popover until Esc/selection closes it.
+            cx.stop_propagation();
             return;
         }
         let snap = self.client.snapshot();
@@ -693,31 +785,65 @@ impl ComposerView {
             ModelPickerPage::Models => scoped.len(),
             ModelPickerPage::Thinking => levels.len(),
         };
-        let index = self.picker_hi_idx.min(count.saturating_sub(1));
-        match event.keystroke.key.as_str() {
-            "down" if count > 0 => self.picker_hi_idx = (index + 1) % count,
-            "up" if count > 0 => self.picker_hi_idx = (index + count - 1) % count,
-            "home" if count > 0 => self.picker_hi_idx = 0,
-            "end" if count > 0 => self.picker_hi_idx = count - 1,
-            "down" | "up" | "home" | "end" => {}
-            "enter" if !event.is_held => match self.picker_page {
-                ModelPickerPage::Main => self.set_picker_page(if index == 0 {
+        let step = resolve_menu_nav_key(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            event.is_held,
+            self.picker_hi_idx,
+            count,
+            true,
+        );
+        match step {
+            KbdMenuStep::Move(next) => {
+                self.picker_hi_idx = next;
+                self.picker_kbd_active = true;
+                self.picker_last_pointer = Some(window.mouse_position());
+            }
+            KbdMenuStep::SubRight => {
+                if self.picker_page != ModelPickerPage::Main {
+                    return;
+                }
+                let index = self.picker_hi_idx.min(1);
+                self.set_picker_page(if index == 0 {
                     ModelPickerPage::Models
                 } else {
                     ModelPickerPage::Thinking
-                }),
-                ModelPickerPage::Models => {
-                    if let Some(model) = scoped.get(index) {
-                        self.select_model(model.provider.clone(), model.id.clone(), cx);
+                });
+                self.picker_kbd_active = true;
+                self.picker_last_pointer = Some(window.mouse_position());
+            }
+            KbdMenuStep::BackLeft => {
+                if self.picker_page == ModelPickerPage::Main {
+                    return;
+                }
+                let back_idx = usize::from(self.picker_page == ModelPickerPage::Thinking);
+                self.set_picker_page(ModelPickerPage::Main);
+                self.picker_hi_idx = back_idx;
+                self.picker_kbd_active = true;
+                self.picker_last_pointer = Some(window.mouse_position());
+            }
+            KbdMenuStep::Activate(index) => {
+                self.picker_kbd_active = true;
+                self.picker_last_pointer = Some(window.mouse_position());
+                match self.picker_page {
+                    ModelPickerPage::Main => self.set_picker_page(if index == 0 {
+                        ModelPickerPage::Models
+                    } else {
+                        ModelPickerPage::Thinking
+                    }),
+                    ModelPickerPage::Models => {
+                        if let Some(model) = scoped.get(index) {
+                            self.select_model(model.provider.clone(), model.id.clone(), cx);
+                        }
+                    }
+                    ModelPickerPage::Thinking => {
+                        if let Some(level) = levels.get(index) {
+                            self.select_thinking(level.clone(), window, cx);
+                        }
                     }
                 }
-                ModelPickerPage::Thinking => {
-                    if let Some(level) = levels.get(index) {
-                        self.select_thinking(level.clone(), window, cx);
-                    }
-                }
-            },
-            _ => return,
+            }
+            KbdMenuStep::ReorderUp | KbdMenuStep::ReorderDown | KbdMenuStep::Ignore => return,
         }
         if self.picker_page == ModelPickerPage::Models {
             self.picker_scroll.scroll_to_item(self.picker_hi_idx);
@@ -819,9 +945,9 @@ impl ComposerView {
                 .detach();
             }
         }
-        self.close_picker()
-            .unwrap_or_else(|| self.model_btn_focus.clone())
-            .focus(window, cx);
+        self.set_picker_page(ModelPickerPage::Main);
+        self.picker_hi_idx = 1;
+        self.model_btn_focus.focus(window, cx);
         cx.notify();
     }
 
@@ -1239,7 +1365,18 @@ impl ComposerView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.queue_pending.is_some() || self.draft_key != DraftKey::Session(sid.clone()) {
+        if self.draft_key != DraftKey::Session(sid.clone()) {
+            return;
+        }
+        if self.queue_pending.is_some() {
+            if let QueueMutation::Reorder(ids) = mutation
+                && let Some((ref pending_sid, ref mut pending_queue)) = self.queue_pending
+                && *pending_sid == sid
+            {
+                *pending_queue = QueueMutation::Reorder(ids.clone()).project(pending_queue.clone());
+                self.pending_queue_reorder = Some((sid, ids));
+                cx.notify();
+            }
             return;
         }
         let snap = self.client.snapshot();
@@ -1257,7 +1394,7 @@ impl ComposerView {
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let result = mutation.send(client, sid.clone(), version).await;
-            let _ = weak.update_in(cx, |this, _window, cx| {
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.queue_pending = None;
                 match result {
                     Ok(response) => {
@@ -1265,14 +1402,376 @@ impl ComposerView {
                             this.queue_receipt =
                                 Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
                         }
+                        if let Some((next_sid, next_ids)) = this.pending_queue_reorder.take()
+                            && next_sid == sid
+                        {
+                            let latest_snap = this.client.snapshot();
+                            let latest_queue = this.queue_snapshot(
+                                &next_sid,
+                                latest_snap
+                                    .loaded_sessions
+                                    .get(&next_sid)
+                                    .and_then(|s| s.queue.as_ref()),
+                            );
+                            if latest_queue.reorderable_ids() != next_ids {
+                                this.mutate_queue(
+                                    next_sid,
+                                    latest_queue.version,
+                                    QueueMutation::Reorder(next_ids),
+                                    window,
+                                    cx,
+                                );
+                                return;
+                            }
+                        }
                     }
-                    Err(err) => cx.emit(ComposerHostEvent::ErrorMessage(err.to_string())),
+                    Err(err) => {
+                        this.pending_queue_reorder = None;
+                        cx.emit(ComposerHostEvent::ErrorMessage(err.to_string()));
+                    }
                 }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+
+    fn open_attach_dialog(&self, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(SharedString::from("选择图片附件")),
+        });
+        let ent = cx.entity();
+        cx.spawn(async move |_, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await {
+                ent.update(cx, |this, cx| {
+                    this.attach_image_paths(paths, cx);
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn toggle_context_popover(
+        &mut self,
+        provider: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        #[cfg(feature = "test-support")]
+        crate::ux_probe::mark_input("context_popover");
+        self.clear_completion();
+        self.close_picker();
+        self.context_popover_open = !self.context_popover_open;
+        if self.context_popover_open {
+            self.context_prior_focus = window.focused(cx);
+            self.context_btn_focus.focus(window, cx);
+            self.refresh_quota_for_provider(provider, false, cx);
+            if let DraftKey::Session(ref sid) = self.draft_key {
+                self.client.refresh_session_usage(sid.clone());
+            }
+        } else {
+            self.context_prior_focus = None;
+        }
+        cx.notify();
+    }
+
+    fn toggle_model_picker(&mut self, from_kbd: bool, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "test-support")]
+        crate::ux_probe::mark_input("model_picker");
+        self.clear_completion();
+        self.context_popover_open = false;
+        self.context_prior_focus = None;
+        if self.picker_open {
+            self.close_picker();
+        } else {
+            self.picker_open = true;
+            self.picker_open_epoch = self.picker_open_epoch.wrapping_add(1);
+            self.set_picker_page(ModelPickerPage::Main);
+            self.picker_kbd_active = from_kbd;
+            self.picker_last_pointer = from_kbd.then(|| window.mouse_position());
+            self.picker_prior_focus = window.focused(cx);
+            self.model_btn_focus.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn handle_queue_key(
+        &mut self,
+        sid: &str,
+        queue: &ParsedQueueSnapshot,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if queue.items.is_empty() {
+            return;
+        }
+        let cur_idx = self
+            .queue_selected_id
+            .as_deref()
+            .and_then(|id| queue.items.iter().position(|item| item.id == id))
+            .unwrap_or(0);
+        let item = &queue.items[cur_idx];
+        let queued_ids = queue.reorderable_ids();
+        let slots = queue_item_action_slots(item, &queued_ids);
+        let step = resolve_menu_nav_key(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            event.is_held,
+            cur_idx,
+            queue.items.len(),
+            true,
+        );
+        match step {
+            KbdMenuStep::Move(next) => {
+                self.queue_selected_id = Some(queue.items[next].id.clone());
+                self.queue_action = None;
+                self.queue_kbd_active = true;
+                self.queue_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                cx.notify();
+            }
+            KbdMenuStep::SubRight => {
+                if slots.is_empty() {
+                    return;
+                }
+                let cur_pos = self
+                    .queue_action
+                    .and_then(|act| slots.iter().position(|&s| s == act));
+                let next_a = match cur_pos {
+                    None => 0,
+                    Some(i) => (i + 1).min(slots.len() - 1),
+                };
+                self.queue_selected_id = Some(item.id.clone());
+                self.queue_action = slots.get(next_a).copied();
+                self.queue_kbd_active = true;
+                self.queue_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                cx.notify();
+            }
+            KbdMenuStep::BackLeft => {
+                let cur_pos = self
+                    .queue_action
+                    .and_then(|act| slots.iter().position(|&s| s == act));
+                let next_a = match cur_pos {
+                    None | Some(0) => None,
+                    Some(i) => slots.get(i - 1).copied(),
+                };
+                self.queue_selected_id = Some(item.id.clone());
+                self.queue_action = next_a;
+                self.queue_kbd_active = true;
+                self.queue_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                cx.notify();
+            }
+            KbdMenuStep::ReorderUp | KbdMenuStep::ReorderDown => {
+                if let Some(pos) = queued_ids.iter().position(|id| id == &item.id) {
+                    let target = if step == KbdMenuStep::ReorderUp {
+                        pos.checked_sub(1)
+                    } else {
+                        (pos + 1 < queued_ids.len()).then_some(pos + 1)
+                    };
+                    if let Some(swap_pos) = target {
+                        let mut next_ids = queued_ids.clone();
+                        next_ids.swap(pos, swap_pos);
+                        let next_slots = queue_item_action_slots(item, &next_ids);
+                        // Preserve action identity across reorder; fall back to row if that action disappeared.
+                        self.queue_action = self.queue_action.filter(|a| next_slots.contains(a));
+                        self.queue_selected_id = Some(item.id.clone());
+                        self.queue_kbd_active = true;
+                        self.queue_last_pointer = Some(window.mouse_position());
+                        self.mutate_queue(
+                            sid.to_owned(),
+                            queue.version,
+                            QueueMutation::Reorder(next_ids),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }
+            }
+            KbdMenuStep::Activate(_) => {
+                let Some(act) = self.queue_action.filter(|a| slots.contains(a)) else {
+                    self.queue_action = slots.first().copied();
+                    if self.queue_action.is_some() {
+                        self.queue_selected_id = Some(item.id.clone());
+                        self.queue_kbd_active = true;
+                        self.queue_last_pointer = Some(window.mouse_position());
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                    return;
+                };
+                cx.stop_propagation();
+                match act {
+                    QueueRowAction::MoveUp => {
+                        if let Some(pos) = queued_ids.iter().position(|id| id == &item.id)
+                            && pos > 0
+                        {
+                            let mut next_ids = queued_ids.clone();
+                            next_ids.swap(pos, pos - 1);
+                            self.mutate_queue(
+                                sid.to_owned(),
+                                queue.version,
+                                QueueMutation::Reorder(next_ids),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    QueueRowAction::MoveDown => {
+                        if let Some(pos) = queued_ids.iter().position(|id| id == &item.id)
+                            && pos + 1 < queued_ids.len()
+                        {
+                            let mut next_ids = queued_ids.clone();
+                            next_ids.swap(pos, pos + 1);
+                            self.mutate_queue(
+                                sid.to_owned(),
+                                queue.version,
+                                QueueMutation::Reorder(next_ids),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    QueueRowAction::Steer => {
+                        self.mutate_queue(
+                            sid.to_owned(),
+                            queue.version,
+                            QueueMutation::Steer(item.id.clone()),
+                            window,
+                            cx,
+                        );
+                    }
+                    QueueRowAction::Retry => {
+                        self.mutate_queue(
+                            sid.to_owned(),
+                            queue.version,
+                            QueueMutation::Retry(item.id.clone()),
+                            window,
+                            cx,
+                        );
+                    }
+                    QueueRowAction::Edit => {
+                        if self.queue_pending.is_none()
+                            && self.draft_key == DraftKey::Session(sid.to_owned())
+                        {
+                            cx.emit(ComposerHostEvent::RequestEditQueueItem {
+                                session_id: sid.to_owned(),
+                                item: item.clone(),
+                                version: queue.version,
+                            });
+                        }
+                    }
+                    QueueRowAction::Delete => {
+                        self.mutate_queue(
+                            sid.to_owned(),
+                            queue.version,
+                            QueueMutation::Delete(item.id.clone()),
+                            window,
+                            cx,
+                        );
+                    }
+                }
+            }
+            KbdMenuStep::Ignore => {
+                if event.keystroke.key.as_str() == "tab"
+                    && !event.keystroke.modifiers.control
+                    && !event.keystroke.modifiers.alt
+                    && !event.keystroke.modifiers.platform
+                {
+                    self.queue_kbd_active = false;
+                }
+            }
+        }
+    }
+
+    fn footer_focused_slot(&self, window: &Window) -> Option<usize> {
+        if self.attach_btn_focus.is_focused(window) {
+            Some(0)
+        } else if self.context_btn_focus.is_focused(window) {
+            Some(1)
+        } else if self.model_btn_focus.is_focused(window) {
+            Some(2)
+        } else if self.send_btn_focus.is_focused(window) {
+            Some(3)
+        } else {
+            None
+        }
+    }
+
+    fn handle_footer_key(
+        &mut self,
+        provider: String,
+        abort_session_id: Option<String>,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picker_open || self.context_popover_open {
+            return;
+        }
+        let Some(cur) = self.footer_focused_slot(window) else {
+            return;
+        };
+        let focuses = [
+            &self.attach_btn_focus,
+            &self.context_btn_focus,
+            &self.model_btn_focus,
+            &self.send_btn_focus,
+        ];
+        match resolve_dialog_nav_key(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            event.is_held,
+            cur,
+            focuses.len(),
+        ) {
+            DialogNavStep::Move(next) => {
+                focuses[next].focus(window, cx);
+                self.footer_kbd_active = true;
+                self.footer_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                cx.notify();
+            }
+            DialogNavStep::Activate(slot) => {
+                self.footer_kbd_active = true;
+                self.footer_last_pointer = Some(window.mouse_position());
+                cx.stop_propagation();
+                match slot {
+                    0 => self.open_attach_dialog(cx),
+                    1 => self.toggle_context_popover(provider, window, cx),
+                    2 => self.toggle_model_picker(true, window, cx),
+                    3 => {
+                        if let Some(sid_abort) = abort_session_id {
+                            let c = self.client.clone();
+                            cx.spawn(async move |weak, cx| {
+                                if let Err(e) = c.abort_session(sid_abort).await {
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
+                                    });
+                                }
+                            })
+                            .detach();
+                        } else {
+                            self.trigger_submit_from_button(window, cx);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            DialogNavStep::TabActivated => {
+                self.footer_kbd_active = true;
+                self.footer_last_pointer = Some(window.mouse_position());
+                cx.notify();
+            }
+            DialogNavStep::Ignore => {}
+        }
     }
 
     /// Atomically deletes the queued item using optimistic-lock `version` and backfills its content
@@ -1458,21 +1957,39 @@ impl ComposerView {
         }));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_completion_popover(
         &self,
         _mono_family: SharedString,
         palette: &DesktopPalette,
+        kbd_style: KeyboardFocusStyleDto,
         _transparency_enabled: bool,
         _scale_factor: f32,
         entity: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut App,
     ) -> Option<gpui_kit::AnyElement> {
         let comp = self.completion.as_ref()?;
+        self.comp_tracker.clear();
+        let kbd_active = self.comp_kbd_active;
+        let ent_move = entity.clone();
         let mut pop = div()
             .id("composer-completion-popover-p2bit")
             .test_support()
             .occlude()
+            .relative()
             .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_move(move |ev: &MouseMoveEvent, _w, cx| {
+                ent_move.update(cx, |this, cx| {
+                    if this.comp_kbd_active
+                        && pointer_moved_past_threshold(&mut this.comp_last_pointer, ev.position)
+                    {
+                        this.comp_kbd_active = false;
+                        cx.notify();
+                    }
+                });
+            })
             .w_full()
             .p(space::XS)
             .rounded(radius::ROW)
@@ -1483,12 +2000,20 @@ impl ComposerView {
             .flex_col()
             .gap(space::MICRO);
 
+        let mut active_spec: Option<KbdDynamicSpec> = None;
+
         match comp {
             CompletionPopupState::Slash {
                 items,
                 selected_idx,
                 ..
             } => {
+                if kbd_active && !items.is_empty() {
+                    active_spec = Some(KbdDynamicSpec::row(format!(
+                        "comp-{}",
+                        (*selected_idx).min(items.len() - 1)
+                    )));
+                }
                 let mut scroll = div()
                     .id("composer-slash-list")
                     .track_scroll(&self.completion_scroll)
@@ -1515,6 +2040,8 @@ impl ComposerView {
                     }
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
+                    let tr = self.comp_tracker.clone();
+                    let row_key = SharedString::from(format!("comp-{idx}"));
                     let icon = icon_for_token_key(item.short_label);
                     let slash_id = SharedString::from(format!("slash-item-{}", item.short_label));
                     let slash_label =
@@ -1527,7 +2054,7 @@ impl ComposerView {
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
-                            .bg(if is_sel {
+                            .bg(if is_sel && !kbd_active {
                                 palette.bg_track_recess
                             } else {
                                 gpui_kit::transparent_black()
@@ -1536,7 +2063,13 @@ impl ComposerView {
                             .items_center()
                             .justify_between()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Slash {
@@ -1549,6 +2082,7 @@ impl ComposerView {
                                     this.accept_selected_completion(w, cx);
                                 });
                             })
+                            .on_prepaint(move |bounds, _, _| tr.set(row_key.clone(), bounds))
                             .child(
                                 div()
                                     .flex()
@@ -1586,6 +2120,12 @@ impl ComposerView {
                 selected_idx,
                 ..
             } => {
+                if kbd_active && !paths.is_empty() {
+                    active_spec = Some(KbdDynamicSpec::row(format!(
+                        "comp-{}",
+                        (*selected_idx).min(paths.len() - 1)
+                    )));
+                }
                 let mut scroll = div()
                     .id("composer-files-list")
                     .track_scroll(&self.completion_scroll)
@@ -1598,6 +2138,8 @@ impl ComposerView {
                 for (idx, path) in paths.iter().enumerate() {
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
+                    let tr = self.comp_tracker.clone();
+                    let row_key = SharedString::from(format!("comp-{idx}"));
                     let file_id = SharedString::from(format!("file-completion-item-{idx}"));
                     scroll = scroll.child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
@@ -1607,7 +2149,7 @@ impl ComposerView {
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
-                            .bg(if is_sel {
+                            .bg(if is_sel && !kbd_active {
                                 palette.bg_item_active
                             } else {
                                 gpui_kit::transparent_black()
@@ -1616,7 +2158,13 @@ impl ComposerView {
                             .flex()
                             .items_center()
                             .gap(space::SM)
-                            .hover(|s| s.bg(palette.bg_item_active))
+                            .hover(move |s| {
+                                if kbd_active {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover)
+                                }
+                            })
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Files {
@@ -1629,6 +2177,7 @@ impl ComposerView {
                                     this.accept_selected_completion(w, cx);
                                 });
                             })
+                            .on_prepaint(move |bounds, _, _| tr.set(row_key.clone(), bounds))
                             .child(
                                 Icon::new(IconName::FileText)
                                     .size(px(13.0))
@@ -1640,6 +2189,16 @@ impl ComposerView {
                 pop = pop.child(scroll);
             }
         }
+
+        pop = pop.child(render_gliding_dynamic_indicator(
+            "composer-comp",
+            kbd_style,
+            active_spec,
+            self.comp_tracker.clone(),
+            palette,
+            window,
+            cx,
+        ));
 
         Some(
             div()
@@ -1673,6 +2232,7 @@ impl Render for ComposerView {
         let mono_family = theme_global.mono_font_family;
 
         let snap = self.client.snapshot();
+        let kbd_style = snap.desktop_settings.keyboard_focus_style;
         let active_session = match &self.draft_key {
             DraftKey::Session(sid) => snap.loaded_sessions.get(sid).cloned(),
             DraftKey::NewSession => None,
@@ -1726,10 +2286,44 @@ impl Render for ComposerView {
             let q3 = (entity.clone(), sid.clone());
             let q4 = (entity.clone(), sid.clone());
             let q_edit = (entity.clone(), sid.clone());
+            let q_key = (entity.clone(), sid.clone(), parsed_queue.clone());
+            let q_move = entity.clone();
+            let queue_focused = self.queue_focus.is_focused(window);
+            let queue_selected_id = self
+                .queue_selected_id
+                .clone()
+                .filter(|id| parsed_queue.items.iter().any(|item| &item.id == id))
+                .or_else(|| parsed_queue.items.first().map(|item| item.id.clone()));
             render_queue_bar(
                 parsed_queue,
                 sid,
                 &palette,
+                QueueBarKbdProps {
+                    kbd_style,
+                    kbd_active: queue_focused && self.queue_kbd_active,
+                    selected_id: queue_selected_id,
+                    action: self.queue_action,
+                    tracker: self.queue_tracker.clone(),
+                    focus_handle: self.queue_focus.clone(),
+                    on_key_down: Rc::new(move |ev, w, cx| {
+                        q_key.0.update(cx, |this, cx| {
+                            this.handle_queue_key(&q_key.1, &q_key.2, ev, w, cx);
+                        });
+                    }),
+                    on_mouse_move: Rc::new(move |ev, _w, cx| {
+                        q_move.update(cx, |this, cx| {
+                            if this.queue_kbd_active
+                                && pointer_moved_past_threshold(
+                                    &mut this.queue_last_pointer,
+                                    ev.position,
+                                )
+                            {
+                                this.queue_kbd_active = false;
+                                cx.notify();
+                            }
+                        });
+                    }),
+                },
                 window,
                 cx,
                 QueueBarCallbacks {
@@ -1826,6 +2420,7 @@ impl Render for ComposerView {
                         .id(thumb_id.clone())
                         .test_support()
                         .a11y_button(thumb_id, thumb_label)
+                        .tab_index(0)
                         .relative()
                         .w(px(80.0))
                         .h(px(64.0))
@@ -1856,6 +2451,7 @@ impl Render for ComposerView {
                                 .id(thumb_rm_id.clone())
                                 .test_support()
                                 .a11y_button(thumb_rm_id, thumb_rm_label)
+                                .tab_index(0)
                                 .absolute()
                                 .top(space::XS)
                                 .right(space::XS)
@@ -2038,6 +2634,11 @@ impl Render for ComposerView {
             });
 
         // 4. Bottom `28px` action bar (`QG05v`)
+        self.footer_tracker.clear();
+        let tr_attach = self.footer_tracker.clone();
+        let tr_ctx = self.footer_tracker.clone();
+        let tr_model = self.footer_tracker.clone();
+        let tr_send = self.footer_tracker.clone();
         let ent_attach = entity.clone();
         let (attach_pressed, attach_press) =
             motion::icon_press_state("composer-attach-btn", window, cx);
@@ -2046,6 +2647,8 @@ impl Render for ComposerView {
             .test_support()
             .a11y_button("composer-attach-btn", "添加图片附件")
             .desktop_tooltip("composer-attach-btn", "添加图片附件")
+            .track_focus(&self.attach_btn_focus)
+            .tab_index(0)
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -2055,22 +2658,9 @@ impl Render for ComposerView {
             .hover(|s| s.bg(palette.bg_item_hover))
             .on_icon_press(attach_press)
             .on_click(move |_, _, cx| {
-                let rx = cx.prompt_for_paths(PathPromptOptions {
-                    files: true,
-                    directories: false,
-                    multiple: true,
-                    prompt: Some(SharedString::from("选择图片附件")),
-                });
-                let ent = ent_attach.clone();
-                cx.spawn(async move |cx| {
-                    if let Ok(Ok(Some(paths))) = rx.await {
-                        ent.update(cx, |this, cx| {
-                            this.attach_image_paths(paths, cx);
-                        });
-                    }
-                })
-                .detach();
+                ent_attach.update(cx, |this, cx| this.open_attach_dialog(cx));
             })
+            .on_prepaint(move |bounds, _, _| tr_attach.set("footer-0", bounds))
             .child(motion::animated_icon_press(
                 "composer-attach-btn",
                 attach_pressed,
@@ -2083,32 +2673,19 @@ impl Render for ComposerView {
 
         let ent_ctx_btn = entity.clone();
         let prov_for_ctx = cur_provider.clone();
-        let context_ring = render_context_ring_button(
-            percent_opt,
-            &self.context_btn_focus,
-            &palette,
-            move |w, cx| {
-                let p = prov_for_ctx.clone();
-                ent_ctx_btn.update(cx, |this, cx| {
-                    #[cfg(feature = "test-support")]
-                    crate::ux_probe::mark_input("context_popover");
-                    this.clear_completion();
-                    this.close_picker();
-                    this.context_popover_open = !this.context_popover_open;
-                    if this.context_popover_open {
-                        this.context_prior_focus = w.focused(cx);
-                        this.context_btn_focus.focus(w, cx);
-                        this.refresh_quota_for_provider(p, false, cx);
-                        if let DraftKey::Session(ref sid) = this.draft_key {
-                            this.client.refresh_session_usage(sid.clone());
-                        }
-                    } else {
-                        this.context_prior_focus = None;
-                    }
-                    cx.notify();
-                });
-            },
-        );
+        let context_ring = div()
+            .on_prepaint(move |bounds, _, _| tr_ctx.set("footer-1", bounds))
+            .child(render_context_ring_button(
+                percent_opt,
+                &self.context_btn_focus,
+                &palette,
+                move |w, cx| {
+                    let p = prov_for_ctx.clone();
+                    ent_ctx_btn.update(cx, |this, cx| {
+                        this.toggle_context_popover(p, w, cx);
+                    });
+                },
+            ));
 
         let ent_picker_btn = entity.clone();
         let model_btn = apply_scale(div(), scale::CAPTION)
@@ -2138,23 +2715,10 @@ impl Render for ComposerView {
             })
             .on_click(move |_, w, cx| {
                 ent_picker_btn.update(cx, |this, cx| {
-                    #[cfg(feature = "test-support")]
-                    crate::ux_probe::mark_input("model_picker");
-                    this.clear_completion();
-                    this.context_popover_open = false;
-                    this.context_prior_focus = None;
-                    if this.picker_open {
-                        this.close_picker();
-                    } else {
-                        this.picker_open = true;
-                        this.picker_open_epoch = this.picker_open_epoch.wrapping_add(1);
-                        this.set_picker_page(ModelPickerPage::Main);
-                        this.picker_prior_focus = w.focused(cx);
-                        this.model_btn_focus.focus(w, cx);
-                    }
-                    cx.notify();
+                    this.toggle_model_picker(false, w, cx);
                 });
             })
+            .on_prepaint(move |bounds, _, _| tr_model.set("footer-2", bounds))
             .child(
                 div()
                     .max_w(px(148.0))
@@ -2194,6 +2758,7 @@ impl Render for ComposerView {
             (DraftKey::Session(sid), true) => Some(sid.clone()),
             _ => None,
         };
+        let abort_session_id_for_key = abort_session_id.clone();
         let is_abort_mode = abort_session_id.is_some();
 
         let ent_send = entity.clone();
@@ -2209,6 +2774,8 @@ impl Render for ComposerView {
             .test_support()
             .a11y_button("composer-send-btn-b0mrik", send_label)
             .desktop_tooltip("composer-send-btn-b0mrik", send_label)
+            .track_focus(&self.send_btn_focus)
+            .tab_index(0)
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -2236,6 +2803,7 @@ impl Render for ComposerView {
                     ent_send.update(cx, |this, cx| this.trigger_submit_from_button(w, cx));
                 }
             })
+            .on_prepaint(move |bounds, _, _| tr_send.set("footer-3", bounds))
             .child(motion::animated_icon_press(
                 "composer-send-btn-b0mrik",
                 send_pressed,
@@ -2329,6 +2897,7 @@ impl Render for ComposerView {
             let ent_page = entity.clone();
             let ent_sel_m = entity.clone();
             let ent_sel_t = entity.clone();
+            let ent_move_p = entity.clone();
             let levels = active_thinking_levels(models_ref, &cur_provider, &cur_model_id);
             div()
                 .absolute()
@@ -2345,6 +2914,9 @@ impl Render for ComposerView {
                     self.picker_open_epoch,
                     self.picker_page,
                     self.picker_hi_idx,
+                    kbd_style,
+                    self.picker_kbd_active,
+                    self.picker_tracker.clone(),
                     &self.picker_scroll,
                     &scoped_models,
                     &cur_provider,
@@ -2366,6 +2938,19 @@ impl Render for ComposerView {
                     }),
                     Rc::new(move |level, w, cx| {
                         ent_sel_t.update(cx, |this, cx| this.select_thinking(level, w, cx));
+                    }),
+                    Rc::new(move |ev, _w, cx| {
+                        ent_move_p.update(cx, |this, cx| {
+                            if this.picker_kbd_active
+                                && pointer_moved_past_threshold(
+                                    &mut this.picker_last_pointer,
+                                    ev.position,
+                                )
+                            {
+                                this.picker_kbd_active = false;
+                                cx.notify();
+                            }
+                        });
                     }),
                     window,
                     cx,
@@ -2393,13 +2978,54 @@ impl Render for ComposerView {
             .child(send_btn)
             .children(ctx_popover_opt);
 
+        let footer_slot =
+            (!self.picker_open && !self.context_popover_open && self.footer_kbd_active)
+                .then(|| self.footer_focused_slot(window))
+                .flatten();
+        let footer_spec = footer_slot.map(|slot| {
+            let tone = if slot == 3 {
+                KbdTone::Accent
+            } else {
+                KbdTone::Neutral
+            };
+            KbdDynamicSpec::control(format!("footer-{slot}"), KbdRailPlacement::BottomCenter)
+                .with_tone(tone)
+        });
+        let footer_prov = cur_provider.clone();
         let action_bar = div()
+            .relative()
             .h(height::COMPACT)
             .flex()
             .items_center()
             .justify_between()
+            .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, w, cx| {
+                this.handle_footer_key(
+                    footer_prov.clone(),
+                    abort_session_id_for_key.clone(),
+                    ev,
+                    w,
+                    cx,
+                );
+            }))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.footer_kbd_active
+                    && pointer_moved_past_threshold(&mut this.footer_last_pointer, ev.position)
+                {
+                    this.footer_kbd_active = false;
+                    cx.notify();
+                }
+            }))
             .child(attach_btn)
-            .child(right_cluster);
+            .child(right_cluster)
+            .child(render_gliding_dynamic_indicator(
+                "composer-footer",
+                kbd_style,
+                footer_spec,
+                self.footer_tracker.clone(),
+                &palette,
+                window,
+                cx,
+            ));
 
         let focus_t =
             motion::animated_state_progress("composer-card-focus", is_focused, window, cx);
@@ -2524,9 +3150,12 @@ impl Render for ComposerView {
         if let Some(comp_pop) = self.render_completion_popover(
             mono_family,
             &palette,
+            kbd_style,
             transparency_enabled,
             scale_factor,
             &entity,
+            window,
+            cx,
         ) {
             wrapper = wrapper.child(comp_pop);
         }

@@ -22,7 +22,7 @@ import {
 import { ErrorNotice } from "../shell/error-notice";
 import { readDurationMs } from "../shell/motion-tokens";
 import { Notification } from "../shell/notification";
-import { usePanelDismiss } from "../shell/panel-dismiss";
+import { hasOpenDismissiblePanel, usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
 import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
 import { branchSummaryChoice, type NavigateResult, summaryBody, summaryTagText } from "../tree/branch-summary";
@@ -267,11 +267,35 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		const { messageId, ...payload } = config;
 		outbox.enqueue({ ...payload, id: messageId, sessionId, text });
 	}
-	async function stop() {
+	const stop = useCallback(async () => {
 		if (!sessionId) return;
 		await apiJson(sessionPath(sessionId, "/abort"), { method: "POST" });
 		await refresh();
-	}
+	}, [refresh, sessionId]);
+	// 级联 Esc 第 5 级：生成期间即使焦点在排队栏、底栏或消息流中，按 Esc 也能停止流式输出。
+	useEffect(() => {
+		if (example || !runningNow || shell?.appActive || shell?.overlay) return;
+		const onEscape = (event: KeyboardEvent) => {
+			if (
+				event.key !== "Escape" ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				hasOpenDismissiblePanel() ||
+				document.querySelector(
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"], [role="dialog"], [role="alertdialog"], [role="menu"]',
+				)
+			) {
+				return;
+			}
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.closest(".composer-input, .turn-inline-editor")) return;
+			event.preventDefault();
+			void stop();
+		};
+		window.addEventListener("keydown", onEscape);
+		return () => window.removeEventListener("keydown", onEscape);
+	}, [example, runningNow, shell?.appActive, shell?.overlay, stop]);
 	async function command(name: "compact", text: string) {
 		if (!sessionId) return;
 		if (name === "compact")

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isFocusInputShortcut, isPlainVerticalArrow } from "./input-shortcuts.ts";
+import { isFocusInputShortcut, isModelPickerShortcut, isPlainVerticalArrow } from "./input-shortcuts.ts";
 
 test("Ctrl+J 快捷键匹配逻辑排除多余修饰键与输入法组合态", () => {
 	assert.equal(
@@ -55,5 +55,31 @@ test("纯上下方向键判定排除 Shift 选区与其他修饰键", () => {
 			isComposing: true,
 		}),
 		null,
+	);
+});
+
+test("Alt+M 快捷键匹配逻辑排除多余修饰键与输入法组合态", () => {
+	assert.equal(
+		isModelPickerShortcut({ ctrlKey: false, altKey: true, metaKey: false, shiftKey: false, key: "m" }),
+		true,
+	);
+	assert.equal(
+		isModelPickerShortcut({ ctrlKey: false, altKey: true, metaKey: false, shiftKey: false, key: "M", code: "KeyM" }),
+		true,
+	);
+	assert.equal(
+		isModelPickerShortcut({ ctrlKey: true, altKey: true, metaKey: false, shiftKey: false, key: "m" }),
+		false,
+	);
+	assert.equal(
+		isModelPickerShortcut({
+			ctrlKey: false,
+			altKey: true,
+			metaKey: false,
+			shiftKey: false,
+			key: "m",
+			isComposing: true,
+		}),
+		false,
 	);
 });

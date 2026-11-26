@@ -1,78 +1,134 @@
-import { ToggleButton, ToggleButtonGroup, Tooltip } from "@heroui/react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { useWorkspaceShell } from "../shell/workspace-shell-context";
+import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useRef, useState } from "react";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { resolveToolbarNavKey } from "../shell/keyboard-navigation";
 
 export function SettingsSegment({
 	label,
 	value,
 	items,
 	disabled = false,
+	busy = false,
 	onChange,
+	onVerticalNav,
 }: {
 	label: string;
 	value: string;
 	items: readonly { id: string; label: string; icon?: LucideIcon }[];
 	disabled?: boolean;
+	busy?: boolean;
 	onChange: (value: string) => void;
+	onVerticalNav?: (direction: -1 | 1) => void;
 }) {
-	const shell = useWorkspaceShell();
-	const tooltipsDisabled = Boolean(shell?.appActive);
-	const bar = useRef<HTMLDivElement>(null);
-	const movePill = useCallback((animate: boolean) => {
-		const pill = bar.current?.querySelector<HTMLElement>(".t-tabs-pill");
-		const tab = bar.current?.querySelector<HTMLElement>('.t-tab[data-selected="true"]');
-		if (!pill || !tab) return;
-		const previous = pill.style.transition;
-		if (!animate) pill.style.transition = "none";
-		pill.style.transform = `translateX(${tab.offsetLeft}px)`;
-		pill.style.width = `${tab.offsetWidth}px`;
-		if (!animate) {
-			void pill.offsetWidth;
-			pill.style.transition = previous;
+	const groupRef = useRef<HTMLDivElement>(null);
+	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const kbdStyle = useKeyboardFocusStyle();
+	const [focusedId, setFocusedId] = useState<string | null>(null);
+	const [kbdActive, setKbdActive] = useState(false);
+	const clearKbd = useCallback(() => setKbdActive(false), []);
+	usePointerMutex(kbdActive, clearKbd);
+
+	function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (
+			onVerticalNav &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey &&
+			(event.key === "ArrowUp" || event.key === "ArrowDown")
+		) {
+			event.preventDefault();
+			setKbdActive(false);
+			onVerticalNav(event.key === "ArrowUp" ? -1 : 1);
+			return;
 		}
-	}, []);
-	useLayoutEffect(() => movePill(false), [movePill]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: value 改变后按新选中项的位置移动高亮。
-	useLayoutEffect(() => movePill(true), [value, movePill]);
-	useEffect(() => {
-		const element = bar.current;
-		if (!element) return;
-		const observer = new ResizeObserver(() => movePill(false));
-		observer.observe(element);
-		return () => observer.disconnect();
-	}, [movePill]);
+		if (disabled || busy) return;
+		const buttons = [...(groupRef.current?.querySelectorAll<HTMLElement>(".settings-chip") ?? [])];
+		if (!buttons.length) return;
+		const cur = Math.max(0, buttons.indexOf(document.activeElement as HTMLElement));
+		const nextIdx = resolveToolbarNavKey(
+			{
+				key: event.key,
+				defaultPrevented: event.defaultPrevented,
+				isComposing: event.nativeEvent.isComposing,
+				keyCode: event.keyCode,
+				ctrlKey: event.ctrlKey,
+				metaKey: event.metaKey,
+				altKey: event.altKey,
+				shiftKey: event.shiftKey,
+			},
+			cur,
+			buttons.length,
+		);
+		if (nextIdx !== null) {
+			event.preventDefault();
+			setKbdActive(true);
+			const item = items[nextIdx];
+			if (item) {
+				setFocusedId(item.id);
+				buttons[nextIdx]?.focus();
+				if (item.id !== value) onChange(item.id);
+			}
+		}
+	}
+
 	return (
-		<ToggleButtonGroup
-			className="settings-segment t-tabs"
+		<div
+			ref={groupRef}
+			role="toolbar"
 			aria-label={label}
-			selectionMode="single"
-			disallowEmptySelection
-			selectedKeys={[value]}
-			isDisabled={disabled}
-			ref={bar}
-			onSelectionChange={(keys) => {
-				const key = [...keys][0];
-				if (typeof key === "string") onChange(key);
+			aria-busy={busy || undefined}
+			className="settings-chip-group"
+			data-kbd-active={kbdActive && focusedId !== null ? "true" : undefined}
+			onKeyDown={handleKeyDown}
+			onBlur={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+					setFocusedId(null);
+					setKbdActive(false);
+				}
 			}}
 		>
-			<span className="t-tabs-pill" aria-hidden="true" />
-			{items.map((item) =>
-				item.icon ? (
-					<Tooltip key={item.id} delay={300} closeDelay={0} isDisabled={tooltipsDisabled}>
-						<ToggleButton id={item.id} className="t-tab settings-icon-tab" aria-label={item.label}>
-							<span>
-								<item.icon size={16} aria-hidden="true" />
-							</span>
-						</ToggleButton>
-						<Tooltip.Content className="app-tooltip">{item.label}</Tooltip.Content>
-					</Tooltip>
-				) : (
-					<ToggleButton key={item.id} id={item.id} className="t-tab">
-						{item.label}
-					</ToggleButton>
-				),
-			)}
-		</ToggleButtonGroup>
+			{items.map((item) => {
+				const selected = item.id === value;
+				const IconComp = item.icon;
+				return (
+					<button
+						key={item.id}
+						ref={(node) => {
+							if (node) itemRefs.current.set(item.id, node);
+							else itemRefs.current.delete(item.id);
+						}}
+						type="button"
+						aria-pressed={selected}
+						aria-disabled={disabled || busy || undefined}
+						tabIndex={selected ? 0 : -1}
+						disabled={disabled}
+						className="settings-chip"
+						data-selected={selected || undefined}
+						onFocus={(event) => {
+							setFocusedId(item.id);
+							if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
+						}}
+						onClick={() => {
+							if (disabled || busy) return;
+							setKbdActive(false);
+							if (!selected) onChange(item.id);
+						}}
+					>
+						{IconComp && <IconComp size={14} aria-hidden="true" />}
+						<span>{item.label}</span>
+					</button>
+				);
+			})}
+			<KbdFocusOverlay
+				containerRef={groupRef}
+				itemRefs={itemRefs}
+				targetId={kbdActive ? focusedId : null}
+				style={kbdStyle}
+				railPlacement="bottom"
+				bracketOutset={3}
+			/>
+		</div>
 	);
 }

@@ -1422,12 +1422,24 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("settings-providers-tab").visible());
         assert!(window.find("providers-cstoa-pinned-card").visible());
 
-        // Click `+` to open borderless hairline custom gateway editor with 3 icon-only header buttons
+        // Navigate to `+ 添加提供商` via keyboard (`down` -> `enter`) -> Add Provider catalog (`FRRjK`)
+        window.press("down", cx);
         window.click("providers-new-custom-btn", cx);
+        assert!(window.find("providers-add-custom-row").visible());
+        window.click("providers-add-custom-row", cx);
         assert!(window.find("providers-hdr-search-btn").visible());
         assert!(window.find("providers-hdr-refresh-btn").visible());
         assert!(window.find("providers-hdr-add-model-btn").visible());
         assert!(window.find("providers-hairline-edit-table").visible());
+        // Protocol dropdown trigger is keyboard-activatable and Esc restores focus cleanly
+        window.click("custom-protocol-dropdown-trigger", cx);
+        assert!(window.find("custom-protocol-popover").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("custom-protocol-popover").is_none());
+        assert_eq!(
+            window.find("custom-protocol-dropdown-trigger").focused(),
+            Some(true)
+        );
     })
     .unwrap();
 
@@ -1687,7 +1699,7 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .await;
 
-    // Dismiss modal to background -> inspect `Settings · 常规` `72px` `C9or7K` card (`keDNb` + `oHWRT` cancel!)
+    // Dismiss modal to background -> inspect `Settings · 常规` `52px` hairline update row (`keDNb` + `oHWRT` cancel!)
     cx.update_window(win_handle, |_, window, cx| {
         window.click("update-dialog-background-btn", cx);
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
@@ -1698,7 +1710,7 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         window.render_frame(cx);
 
         let card = window.find("settings-update-card-c9or7k");
-        assert_eq!(f32::from(card.bounds().size.height), 72.0);
+        assert_eq!(f32::from(card.bounds().size.height), 52.0);
         assert!(window.find("settings-update-progress-fill-kednb").visible());
         assert!(window.find("settings-update-cancel-btn-ohwrt").visible());
 
