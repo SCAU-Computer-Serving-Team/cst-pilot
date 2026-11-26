@@ -118,6 +118,9 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
 
     let out_dir =
         out_dir.ok_or("必须通过 --out <dir> 指定隔离输出目录（例如 E:\\tmp\\<日期>\\dist）。")?;
+    if require_update_config && skip_cargo_build {
+        return Err("--require-update-config 不能与 --skip-cargo-build 同时使用，必须使用本次环境变量重新编译全部二进制。".into());
+    }
     cst_updater::manifest::version(&version)?;
     Ok(DistArgs {
         out_dir,

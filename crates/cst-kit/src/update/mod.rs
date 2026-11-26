@@ -48,6 +48,17 @@ impl UpdateClient {
         &self.key
     }
 
+    fn ensure_same_origin(&self, archive_url: &str) -> Result<(), UpdateError> {
+        let source =
+            network::release_url(&self.source).map_err(|_| UpdateError::DisallowedAddress)?;
+        let archive =
+            network::release_url(archive_url).map_err(|_| UpdateError::DisallowedAddress)?;
+        if archive.origin() != source.origin() {
+            return Err(UpdateError::PortalOrCrossOriginRedirect { status: None });
+        }
+        Ok(())
+    }
+
     pub(crate) async fn check_detailed(
         &self,
         current: &str,
@@ -69,6 +80,7 @@ impl UpdateClient {
                 }
             }
         })?;
+        self.ensure_same_origin(&release.info().archive.url)?;
         release
             .available_from(current)
             .map(|available| available.then_some(release))
@@ -110,6 +122,7 @@ impl UpdateClient {
                 .map_err(|_| UpdateError::VerificationFailed {
                     stage: "manifest_reverify",
                 })?;
+        self.ensure_same_origin(&checked.info().archive.url)?;
         let current = layout::read_version(root).map_err(|_| UpdateError::Other)?;
         let available = checked.available_from(&current).map_err(|err| {
             if err.contains("最低版本") {

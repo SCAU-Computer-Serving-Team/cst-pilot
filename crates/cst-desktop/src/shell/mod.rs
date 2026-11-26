@@ -1525,11 +1525,19 @@ impl AppShell {
         }
 
         // 2. Keep startup check silent on `Available`; auto-launch only after explicit user confirmation (`auto_launch_when_ready`).
-        if let Some(ref us) = self.snapshot.update_state
-            && us.status.phase == UpdatePhaseDto::Ready
-            && self.update_dialog.auto_launch_when_ready
-        {
-            self.trigger_update_launch_handoff(window, cx);
+        // Also complete orderly exit if SSE delivers a trusted `ExitRequired` receipt while `/launch` HTTP response was lost.
+        if let Some(ref us) = self.snapshot.update_state {
+            if us.status.phase == UpdatePhaseDto::Ready && self.update_dialog.auto_launch_when_ready
+            {
+                self.trigger_update_launch_handoff(window, cx);
+            } else if us.status.phase == UpdatePhaseDto::ExitRequired
+                && us.status.launch.is_some()
+                && (self.update_dialog.launch_pending
+                    || self.update_dialog.handoff_locked
+                    || self.update_dialog.open)
+            {
+                self.complete_update_handoff_exit(window, cx);
+            }
         }
     }
 
@@ -2472,12 +2480,13 @@ impl AppShell {
 
     fn trigger_update_prepare(&mut self, cx: &mut Context<Self>) {
         if !self.update_dialog.open
-            || self.update_dialog.request_pending
+            || self.update_dialog.prepare_pending
+            || self.update_dialog.cancel_pending
             || self.update_handoff_active()
         {
             return;
         }
-        self.update_dialog.request_pending = true;
+        self.update_dialog.prepare_pending = true;
         self.update_dialog.busy_error = None;
         self.update_dialog.auto_launch_when_ready = true;
         let client = self.client.clone();
@@ -2485,10 +2494,14 @@ impl AppShell {
             let res = client.prepare_update().await;
             let _ = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
-                this.update_dialog.request_pending = false;
+                this.update_dialog.prepare_pending = false;
                 if let Err(err) = res {
                     this.update_dialog.auto_launch_when_ready = false;
-                    this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
+                    // Ignore expected conflict error when user explicitly cancelled an in-flight download.
+                    let phase = this.snapshot.update_state.as_ref().map(|u| u.status.phase);
+                    if phase == Some(UpdatePhaseDto::Failed) {
+                        this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
+                    }
                 }
                 cx.notify();
             });
@@ -2497,10 +2510,10 @@ impl AppShell {
     }
 
     fn trigger_update_cancel(&mut self, cx: &mut Context<Self>) {
-        if self.update_dialog.request_pending || self.update_handoff_active() {
+        if self.update_dialog.cancel_pending || self.update_handoff_active() {
             return;
         }
-        self.update_dialog.request_pending = true;
+        self.update_dialog.cancel_pending = true;
         self.update_dialog.auto_launch_when_ready = false;
         self.update_dialog.busy_error = None;
         let op_id = self
@@ -2513,7 +2526,7 @@ impl AppShell {
             let res = client.cancel_update(op_id.as_deref()).await;
             let _ = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
-                this.update_dialog.request_pending = false;
+                this.update_dialog.cancel_pending = false;
                 if let Err(err) = res {
                     this.show_workspace_error(err.to_string(), cx);
                 }
@@ -2521,6 +2534,19 @@ impl AppShell {
             });
         })
         .detach();
+    }
+
+    fn complete_update_handoff_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.allow_immediate_close && self.update_dialog.handoff_locked {
+            return;
+        }
+        self.update_dialog.open = true;
+        self.update_dialog.handoff_locked = true;
+        self.update_dialog.launch_pending = false;
+        self.allow_immediate_close = true;
+        cx.notify();
+        window.remove_window();
+        cx.quit();
     }
 
     fn trigger_update_launch_handoff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2546,13 +2572,7 @@ impl AppShell {
                 this.update_dialog.launch_pending = false;
                 match res {
                     Ok(_) => {
-                        // Receipt received: lock UI with `"正在重启完成更新…"` and immediately close window & quit!
-                        this.update_dialog.open = true;
-                        this.update_dialog.handoff_locked = true;
-                        this.allow_immediate_close = true;
-                        cx.notify();
-                        window.remove_window();
-                        cx.quit();
+                        this.complete_update_handoff_exit(window, cx);
                     }
                     Err(ClientError::Conflict { message, .. }) => {
                         this.update_dialog.open = true;
@@ -2561,6 +2581,16 @@ impl AppShell {
                         cx.notify();
                     }
                     Err(err) => {
+                        // If SSE already delivered the trusted ExitRequired receipt, finish exit rather than staying locked.
+                        let has_exit_receipt =
+                            this.snapshot.update_state.as_ref().is_some_and(|u| {
+                                u.status.phase == UpdatePhaseDto::ExitRequired
+                                    && u.status.launch.is_some()
+                            });
+                        if has_exit_receipt {
+                            this.complete_update_handoff_exit(window, cx);
+                            return;
+                        }
                         this.update_dialog.open = true;
                         this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
                         this.restore_surface_focus(None, window, cx);

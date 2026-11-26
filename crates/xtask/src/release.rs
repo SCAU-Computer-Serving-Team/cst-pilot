@@ -28,6 +28,10 @@ pub const ENV_MANIFEST_URL: &str = "CST_UPDATE_MANIFEST_URL";
 pub const ENV_PUBLIC_KEY: &str = "CST_UPDATE_PUBLIC_KEY";
 pub const ENV_PRIVATE_KEY_FILE: &str = "CST_RELEASE_PRIVATE_KEY_FILE";
 pub const ENV_ADMIN_TOKEN: &str = "CST_RELEASE_ADMIN_TOKEN";
+const MAX_SERVER_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_SHA256SUMS_BYTES: u64 = 6 * 1024 * 1024;
+const MAX_ADMIN_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_PUBLIC_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct UpdateBuildConfig {
@@ -327,10 +331,18 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         Some(v) => v.clone(),
         None => cst_updater::layout::read_version(&args.dist_dir)?,
     };
+    if version.contains('+') {
+        return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
+    }
     let parsed_ver = cst_updater::manifest::version(&version)?;
     let parsed_min = cst_updater::manifest::version(&args.min_upgradable)?;
     if parsed_min > parsed_ver {
         return Err("min-upgradable 版本不能高于目标版本。".into());
+    }
+    if same_existing_file(&args.out_path, &args.private_key_file)
+        || same_existing_file(&args.out_path, &args.zip_path)
+    {
+        return Err("--out 输出路径不能指向私钥文件或发行 ZIP 文件。".into());
     }
 
     let base_url = args.base_url.trim().trim_end_matches('/');
@@ -340,6 +352,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     }
 
     let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
+    let signing_pub_fp = public_key_fingerprint(signing_key.verifying_key().as_bytes());
     cst_updater::verify::verify_clean_dist_tree(&args.dist_dir, &version)?;
 
     let sums_bytes = fs::read(args.dist_dir.join(SHA256SUMS_PATH))
@@ -351,6 +364,24 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         .map_err(|e| format!("无法读取 {BUILD_INFO_PATH}：{e}"))?;
     let build_info: serde_json::Value =
         serde_json::from_slice(&build_info_bytes).map_err(|_| "BUILD-INFO.json 格式无效。")?;
+    if build_info
+        .get("updateEnabled")
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+    {
+        return Err(
+            "BUILD-INFO.json 表明该构建未启用在线更新（updateEnabled=false），请使用 --require-update-config 重新构建后再签名。".into(),
+        );
+    }
+    if let Some(built_fp) = build_info
+        .get("updatePublicKeyFingerprint")
+        .and_then(serde_json::Value::as_str)
+        && built_fp != signing_pub_fp
+    {
+        return Err(format!(
+            "签名私钥对应公钥指纹（{signing_pub_fp}）与构建内嵌公钥指纹（{built_fp}）不一致，拒绝签名。"
+        ));
+    }
     let built_at = build_info
         .get("builtAt")
         .and_then(serde_json::Value::as_str)
@@ -369,6 +400,15 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         return Err("更新说明超过 16 KiB 上限。".into());
     }
 
+    let zip_meta = fs::metadata(&args.zip_path)
+        .map_err(|e| format!("无法读取发行 ZIP {}：{e}", args.zip_path.display()))?;
+    if zip_meta.len() == 0 || zip_meta.len() > MAX_SERVER_ARCHIVE_BYTES {
+        return Err(format!(
+            "发行 ZIP 体积（{} 字节）超出服务端默认上限（{} 字节）。",
+            zip_meta.len(),
+            MAX_SERVER_ARCHIVE_BYTES
+        ));
+    }
     let zip_bytes = fs::read(&args.zip_path)
         .map_err(|e| format!("无法读取发行 ZIP {}：{e}", args.zip_path.display()))?;
     let archive_size = zip_bytes.len() as u64;
@@ -433,13 +473,23 @@ fn sign_domain(signing_key: &SigningKey, domain: &[u8], data: &[u8]) -> String {
     STANDARD.encode(signing_key.sign(&buf).to_bytes())
 }
 
+fn same_existing_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
+}
+
 fn inspect_zip_unpacked_size(zip_bytes: &[u8], expected_sums: &str) -> Result<u64, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
         .map_err(|e| format!("发行 ZIP 格式无效：{e}"))?;
     let mut unpacked_size = 0u64;
     let mut saw_sums = false;
     for i in 0..archive.len() {
-        let mut entry = archive
+        let entry = archive
             .by_index(i)
             .map_err(|e| format!("读取发行 ZIP 条目失败：{e}"))?;
         if entry.is_dir() {
@@ -449,11 +499,15 @@ fn inspect_zip_unpacked_size(zip_bytes: &[u8], expected_sums: &str) -> Result<u6
             .checked_add(entry.size())
             .ok_or("发行 ZIP 解压总字节数溢出。")?;
         if entry.name() == format!("cst-pilot/{SHA256SUMS_PATH}") {
+            if entry.size() > MAX_SHA256SUMS_BYTES {
+                return Err(format!("ZIP 内 {SHA256SUMS_PATH} 超过 6 MiB 上限。"));
+            }
             let mut inner = Vec::new();
             entry
+                .take(MAX_SHA256SUMS_BYTES + 1)
                 .read_to_end(&mut inner)
                 .map_err(|e| format!("读取 ZIP 内 {SHA256SUMS_PATH} 失败：{e}"))?;
-            if inner != expected_sums.as_bytes() {
+            if inner.len() as u64 > MAX_SHA256SUMS_BYTES || inner != expected_sums.as_bytes() {
                 return Err(format!(
                     "发行 ZIP 内的 {SHA256SUMS_PATH} 与发行目录不一致。"
                 ));
@@ -642,6 +696,12 @@ pub async fn publish_release(
     if !matches!(upload_url.scheme(), "http" | "https") {
         return Err("--admin-url 仅允许 http 或 https。".into());
     }
+    if upload_url.query().is_some() || upload_url.fragment().is_some() {
+        return Err(
+            "--admin-url 不能预先携带查询参数或片段，请通过 --channel 与 --no-activate 指定。"
+                .into(),
+        );
+    }
     if upload_url.scheme() == "http" {
         let is_loopback = matches!(
             upload_url.host_str(),
@@ -725,12 +785,13 @@ pub async fn publish_release(
         args.channel,
         args.activate
     );
+    let mut auth_val =
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", admin_token.as_str()))
+            .map_err(|_| "管理令牌包含非法 HTTP 头字符。".to_owned())?;
+    auth_val.set_sensitive(true);
     let resp = client
         .post(upload_url)
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", admin_token.as_str()),
-        )
+        .header(reqwest::header::AUTHORIZATION, auth_val)
         .header(
             reqwest::header::CONTENT_TYPE,
             format!("multipart/form-data; boundary={boundary}"),
@@ -742,20 +803,40 @@ pub async fn publish_release(
         .map_err(|e| format!("上传发布包失败：{e}"))?;
 
     let status = resp.status();
-    let resp_bytes = resp
-        .bytes()
+    let resp_bytes = read_bounded_response(resp, MAX_ADMIN_RESPONSE_BYTES)
         .await
         .map_err(|e| format!("读取发布响应失败：{e}"))?;
     if status != reqwest::StatusCode::CREATED {
-        let detail = String::from_utf8_lossy(&resp_bytes);
+        let code = serde_json::from_slice::<serde_json::Value>(&resp_bytes)
+            .ok()
+            .and_then(|v| v.get("error")?.get("code")?.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "unknown".to_owned());
         return Err(format!(
-            "服务端拒绝发布（HTTP {}）：{detail}",
+            "服务端拒绝发布（HTTP {}, error.code={code}）。",
             status.as_u16()
         ));
     }
+    let ack: serde_json::Value =
+        serde_json::from_slice(&resp_bytes).map_err(|_| "发布响应不是合法 JSON。")?;
+    let ack_channel = ack.get("channel").and_then(serde_json::Value::as_str);
+    let ack_activated = ack.get("activated").and_then(serde_json::Value::as_bool);
+    let ack_version = ack
+        .get("record")
+        .and_then(|r| r.get("version"))
+        .and_then(serde_json::Value::as_str);
+    if ack_channel != Some(args.channel.as_str())
+        || ack_activated != Some(args.activate)
+        || ack_version != Some(verified.info().version.as_str())
+    {
+        return Err(format!(
+            "服务端返回发布结果与预期不符（channel={ack_channel:?}, activated={ack_activated:?}, version={ack_version:?}）。"
+        ));
+    }
     println!(
-        "[xtask] Upload accepted (201 Created): {}",
-        String::from_utf8_lossy(&resp_bytes).trim()
+        "[xtask] Upload accepted (201 Created): version={} channel={} activated={}",
+        verified.info().version,
+        args.channel,
+        args.activate
     );
 
     if args.activate {
@@ -791,15 +872,14 @@ pub async fn publish_release(
                 manifest_resp.status().as_u16()
             ));
         }
-        let remote_manifest = manifest_resp
-            .bytes()
+        let remote_manifest = read_bounded_response(manifest_resp, MAX_PUBLIC_MANIFEST_BYTES)
             .await
             .map_err(|e| format!("读取公开清单正文失败：{e}"))?;
         let remote_verified = release_key
             .verify(&remote_manifest)
             .map_err(|e| format!("发布后公开清单验签失败：{e}"))?;
         if remote_verified.info().version != verified.info().version
-            || remote_manifest.as_ref() != manifest_bytes.as_slice()
+            || remote_manifest.as_slice() != manifest_bytes.as_slice()
         {
             return Err("发布后公开清单内容或版本与本地签名清单不一致。".into());
         }
@@ -835,6 +915,23 @@ pub async fn publish_release(
     }
 
     Ok(())
+}
+
+async fn read_bounded_response(
+    mut resp: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(format!("响应体超过 {limit} 字节上限。"));
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if out.len().saturating_add(chunk.len()) > limit {
+            return Err(format!("响应体超过 {limit} 字节上限。"));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 pub fn write_zip_entries_unpacked_size(
@@ -1072,8 +1169,13 @@ mod tests {
                 .position(|w| w == b"name=\"archive\"")
                 .unwrap();
             assert!(manifest_pos < archive_pos);
-            let resp = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}";
-            sock.write_all(resp).await.unwrap();
+            let body_json =
+                r#"{"channel":"stable","activated":true,"record":{"version":"v0.9.9"}}"#;
+            let resp = format!(
+                "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body_json}",
+                body_json.len()
+            );
+            sock.write_all(resp.as_bytes()).await.unwrap();
             drop(sock);
 
             // 2. GET /v1/releases/channels/stable/latest

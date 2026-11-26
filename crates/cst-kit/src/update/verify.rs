@@ -10,7 +10,16 @@ use tokio_util::sync::CancellationToken;
 pub use cst_updater::verify::{Stage, VerifiedPackage, verify_tree};
 
 use crate::update::manifest::VerifiedRelease;
-use crate::update::network::{Fetcher, UpdateError};
+use crate::update::network::{Fetcher, UpdateError, looks_like_html_body};
+
+fn classify_write_io_error(err: &std::io::Error) -> UpdateError {
+    if err.kind() == std::io::ErrorKind::StorageFull || matches!(err.raw_os_error(), Some(39 | 112))
+    {
+        UpdateError::InsufficientDiskSpace
+    } else {
+        UpdateError::Other
+    }
+}
 
 fn stopped(cancel: &CancellationToken) -> Result<(), UpdateError> {
     if cancel.is_cancelled() {
@@ -84,6 +93,9 @@ where
                     UpdateError::OfflineOrDns
                 }
             })?;
+            if count == 0 && looks_like_html_body(&chunk) {
+                return Err(UpdateError::PortalOrCrossOriginRedirect { status: Some(200) });
+            }
             count = count
                 .checked_add(chunk.len() as u64)
                 .filter(|n| *n <= release.info.archive.size)
@@ -92,13 +104,13 @@ where
                 })?;
             file.write_all(&chunk)
                 .await
-                .map_err(|_| UpdateError::InsufficientDiskSpace)?;
+                .map_err(|e| classify_write_io_error(&e))?;
             hash.update(&chunk);
             on_progress(count);
         }
         file.sync_all()
             .await
-            .map_err(|_| UpdateError::InsufficientDiskSpace)?;
+            .map_err(|e| classify_write_io_error(&e))?;
         if count != release.info.archive.size
             || format!("{:x}", hash.finalize()) != release.info.archive.sha256
         {

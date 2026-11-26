@@ -169,26 +169,38 @@ pub fn render_general_tab(
                     ),
             );
         }
-        group
-            .child(
-                apply_scale(div(), scale::UI)
-                    .id("settings-update-cancel-btn-ohwrt")
-                    .test_support()
-                    .a11y_button("settings-update-cancel-btn", "取消更新")
-                    .h(height::COMPACT)
-                    .px(px(10.0))
-                    .mr(px(-10.0))
-                    .rounded(radius::CONTROL)
-                    .text_color(palette.text_secondary)
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .active(|s| s.bg(palette.bg_active_press))
-                    .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
-                    .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
-                    .child(cjk_inline_label("取消")),
-            )
-            .into_any_element()
+        if phase == UpdatePhaseDto::Preparing {
+            group
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("settings-update-cancel-btn-ohwrt")
+                        .test_support()
+                        .a11y_button("settings-update-cancel-btn", "取消更新")
+                        .h(height::COMPACT)
+                        .px(px(10.0))
+                        .mr(px(-10.0))
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_secondary)
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                        .active(|s| s.bg(palette.bg_active_press))
+                        .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
+                        .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
+                        .child(cjk_inline_label("取消")),
+                )
+                .into_any_element()
+        } else {
+            group
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("settings-update-checking-label")
+                        .test_support()
+                        .text_color(palette.text_muted)
+                        .child(cjk_inline_label("检查中")),
+                )
+                .into_any_element()
+        }
     } else if unavailable || restarting || manual_upgrade_required {
         let readonly_label = if unavailable {
             "未启用"
