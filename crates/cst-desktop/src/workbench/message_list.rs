@@ -523,6 +523,7 @@ pub struct MessageListView {
     inline_edit: Option<InlineBubbleEdit>,
     locate_highlight: Option<LocateHighlightState>,
     locate_clear_task: Option<Task<()>>,
+    live_elapsed_timer_task: Option<Task<()>>,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -561,6 +562,7 @@ impl MessageListView {
             inline_edit: None,
             locate_highlight: None,
             locate_clear_task: None,
+            live_elapsed_timer_task: None,
         }
     }
 
@@ -651,6 +653,7 @@ impl MessageListView {
         self.copy_tracker = CopyFeedbackTracker::default();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
+        self.live_elapsed_timer_task = None;
         self.grouped_turn_cache = None;
         self.prepared_session_cache = None;
         self.attachment_cache.clear();
@@ -2546,14 +2549,22 @@ impl MessageListView {
                                             ));
                                     }
                                 } else {
-                                    for tp in &segment.parts {
+                                    let inert_md_style =
+                                        super::markdown_view::build_markdown_style_inert(palette);
+                                    for (part_idx, tp) in segment.parts.iter().enumerate() {
                                         expanded_col =
-                                            expanded_col.child(render_process_part_inert(
+                                            expanded_col.child(self.render_process_part_inert(
+                                                &turn_key,
+                                                &segment_id,
+                                                part_idx,
                                                 tp,
                                                 tool_results,
+                                                messages_generation,
                                                 is_live_turn,
                                                 mono_family.clone(),
+                                                &inert_md_style,
                                                 palette,
+                                                cx,
                                             ));
                                     }
                                 }
@@ -3131,10 +3142,12 @@ impl Render for MessageListView {
 
         let snap = self.client.snapshot();
         let Some(ref sid) = self.session_id.clone() else {
+            self.live_elapsed_timer_task = None;
             return div().size_full().into_any_element();
         };
 
         let Some(session) = snap.loaded_sessions.get(sid).cloned() else {
+            self.live_elapsed_timer_task = None;
             self.grouped_turn_cache = None;
             self.prepared_session_cache = None;
             // Session data was not ready immediately; animate once it finishes loading.
@@ -3268,6 +3281,53 @@ impl Render for MessageListView {
         }
 
         let live_turn_idx = active_prepared_turn_index(turns, session.running);
+        if live_turn_idx.is_some() {
+            if self.live_elapsed_timer_task.is_none() {
+                let win_handle = window.window_handle();
+                self.live_elapsed_timer_task = Some(cx.spawn(async move |weak, cx| {
+                    loop {
+                        cx.background_executor().timer(Duration::from_secs(1)).await;
+                        let keep_going = weak
+                            .update(cx, |this, cx| {
+                                let Some(ref sid) = this.session_id else {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                };
+                                let still_running = this
+                                    .client
+                                    .snapshot()
+                                    .loaded_sessions
+                                    .get(sid)
+                                    .is_some_and(|s| s.running);
+                                if !still_running {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                }
+                                let Ok(active) = win_handle.update(cx, |_, window, _| {
+                                    let vp = window.viewport_size();
+                                    window.is_window_active()
+                                        && window.is_visible()
+                                        && f32::from(vp.width) > 1.0
+                                        && f32::from(vp.height) > 1.0
+                                }) else {
+                                    this.live_elapsed_timer_task = None;
+                                    return false;
+                                };
+                                if active {
+                                    cx.notify();
+                                }
+                                true
+                            })
+                            .unwrap_or(false);
+                        if !keep_going {
+                            break;
+                        }
+                    }
+                }));
+            }
+        } else {
+            self.live_elapsed_timer_task = None;
+        }
         if self.auto_follow_bottom && (revision_changed || live_turn_idx.is_some()) {
             self.scroll_handle.scroll_to_bottom();
         } else if !self.auto_follow_bottom {
@@ -3393,10 +3453,18 @@ impl Render for MessageListView {
                 div()
                     .id("located-search-hit-turn")
                     .test_support()
+                    .relative()
                     .w_full()
-                    .border_l_2()
-                    .border_color(bar_color)
-                    .pl(space::MD)
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(-10.0))
+                            .w(px(2.0))
+                            .rounded(radius::FULL)
+                            .bg(bar_color),
+                    )
                     .child(turn_el)
                     .into_any_element()
             } else {
@@ -3555,59 +3623,132 @@ impl Render for MessageListView {
     }
 }
 
-fn render_process_part_inert(
-    tp: &TurnPart,
-    tool_results: &BTreeMap<String, Value>,
-    live: bool,
-    mono_family: SharedString,
-    palette: &DesktopPalette,
-) -> gpui::AnyElement {
-    match &tp.part {
-        ConversationPart::Thinking(_) => apply_scale(div(), scale::UI)
-            .h(height::INLINE)
-            .flex()
-            .items_center()
-            .gap(space::SM)
-            .text_color(palette.text_secondary)
-            .child(cjk_inline_label("已思考"))
-            .child(
-                Icon::new(IconName::ChevronRight)
-                    .size(px(14.0))
-                    .text_color(palette.text_secondary),
-            )
-            .into_any_element(),
-        ConversationPart::Text(txt) => apply_scale(div(), scale::UI)
-            .text_color(palette.text_secondary)
-            .child(SharedString::from(txt.clone()))
-            .into_any_element(),
-        ConversationPart::Tools(calls) => {
-            let mut group_col = div().w_full().flex().flex_col().gap(space::XS);
-            for call in calls {
-                let tool_result_val = tool_results.get(&call.id);
-                let duration_ms = tool_result_val
-                    .and_then(|v| {
-                        v.get("durationMs")
-                            .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
-                    })
-                    .and_then(Value::as_u64);
-                let is_err = tool_result_val
-                    .and_then(|v| v.get("isError"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                group_col = group_col.child(render_normal_tool_row_inert(
-                    &call.name,
-                    Some(&call.arguments),
-                    duration_ms,
-                    tool_result_val.is_some(),
-                    is_err,
-                    live,
-                    mono_family.clone(),
-                    palette,
-                ));
+impl MessageListView {
+    #[allow(clippy::too_many_arguments)]
+    fn render_process_part_inert(
+        &mut self,
+        turn_key: &str,
+        seg_key: &str,
+        part_idx: usize,
+        tp: &TurnPart,
+        tool_results: &BTreeMap<String, Value>,
+        result_revision: u64,
+        live: bool,
+        mono_family: SharedString,
+        markdown_style: &TextViewStyle,
+        palette: &DesktopPalette,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        match &tp.part {
+            ConversationPart::Thinking(t) => {
+                let think_key = format!("{seg_key}:think:{part_idx}");
+                let open = self.expanded_thinking.contains(&think_key);
+                let hdr = apply_scale(div(), scale::UI)
+                    .h(height::INLINE)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .text_color(palette.text_secondary)
+                    .child(cjk_inline_label("已思考"))
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .size(px(14.0))
+                        .text_color(palette.text_secondary),
+                    );
+                if open {
+                    let content = if t.redacted && t.thinking.trim().is_empty() {
+                        "思考内容已按模型策略省略。".to_owned()
+                    } else {
+                        t.thinking.clone()
+                    };
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::XS)
+                        .child(hdr)
+                        .child(render_copyable_text_block_inert(
+                            content,
+                            false,
+                            mono_family,
+                            palette,
+                        ))
+                        .into_any_element()
+                } else {
+                    hdr.into_any_element()
+                }
             }
-            group_col.into_any_element()
+            ConversationPart::Text(txt) => {
+                let stream_key = format!("proc:{turn_key}:{seg_key}:{}:{part_idx}", tp.entry_key);
+                let md_entity = self.markdown_store.sync_entry(&stream_key, txt, cx);
+                super::markdown_view::render_assistant_markdown_inert(
+                    &md_entity,
+                    palette,
+                    markdown_style.clone(),
+                )
+                .into_any_element()
+            }
+            ConversationPart::Tools(calls) => {
+                let mut group_col = div().w_full().flex().flex_col().gap(space::XS);
+                for call in calls {
+                    let tool_result_val = tool_results.get(&call.id);
+                    let duration_ms = tool_result_val
+                        .and_then(|v| {
+                            v.get("durationMs")
+                                .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+                        })
+                        .and_then(Value::as_u64);
+                    let is_err = tool_result_val
+                        .and_then(|v| v.get("isError"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let standalone = is_standalone_tool(call, tool_result_val);
+                    let is_expanded = self
+                        .tool_card_expansion
+                        .get(&format!("tool-card-{}", call.id))
+                        .copied()
+                        .unwrap_or(standalone);
+                    let is_raw_expanded = self
+                        .expanded_tool_raw
+                        .contains(&format!("tool-raw-{}", call.id));
+                    let card_view = if is_expanded {
+                        tool_result_val.map(|res_val| {
+                            self.client.with_presenter_cache(|cache| {
+                                if let Some(hit) =
+                                    cache.get_cached_normal(&call.id, result_revision)
+                                {
+                                    return hit;
+                                }
+                                let input = to_tool_call_input(call);
+                                let parsed_res = ToolResultInput::from_message_json(res_val);
+                                cache.get_or_map_normal(&input, &parsed_res, result_revision)
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    group_col = group_col.child(render_normal_tool_row_inert(
+                        &call.name,
+                        Some(&call.arguments),
+                        card_view.as_deref(),
+                        duration_ms,
+                        tool_result_val.is_some(),
+                        is_err,
+                        live,
+                        is_expanded,
+                        is_raw_expanded,
+                        mono_family.clone(),
+                        palette,
+                    ));
+                }
+                group_col.into_any_element()
+            }
+            _ => div().into_any_element(),
         }
-        _ => div().into_any_element(),
     }
 }
 

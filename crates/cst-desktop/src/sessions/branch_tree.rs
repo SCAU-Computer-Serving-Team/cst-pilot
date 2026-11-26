@@ -17,7 +17,7 @@ use gpui_kit::{
 use serde_json::{Map, Value, json};
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{
     KbdRowTarget, pointer_moved_past_threshold, render_gliding_row_indicator,
 };
@@ -1058,6 +1058,7 @@ pub struct BranchTreeView {
     pending_target_id: Option<String>,
     summary_selected_idx: usize,
     custom_prompt_mode: bool,
+    last_summary_custom_mode: bool,
     custom_prompt_input: Entity<InputState>,
     enter_anim_start: Option<Instant>,
     focus_handle: FocusHandle,
@@ -1109,6 +1110,7 @@ impl BranchTreeView {
             pending_target_id: None,
             summary_selected_idx: 0,
             custom_prompt_mode: false,
+            last_summary_custom_mode: false,
             custom_prompt_input,
             enter_anim_start,
             focus_handle: cx.focus_handle(),
@@ -1906,7 +1908,13 @@ impl BranchTreeView {
                             .flex()
                             .items_center()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(move |s| {
+                                s.bg(if sel == 0 {
+                                    palette.bg_item_active
+                                } else {
+                                    palette.bg_item_hover
+                                })
+                            })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.execute_navigate(t_direct.clone(), false, None, window, cx);
                             }))
@@ -1936,7 +1944,13 @@ impl BranchTreeView {
                             .flex()
                             .items_center()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(move |s| {
+                                s.bg(if sel == 1 {
+                                    palette.bg_item_active
+                                } else {
+                                    palette.bg_item_hover
+                                })
+                            })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.execute_navigate(t_summary.clone(), true, None, window, cx);
                             }))
@@ -1966,7 +1980,13 @@ impl BranchTreeView {
                             .flex()
                             .items_center()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(move |s| {
+                                s.bg(if sel == 2 {
+                                    palette.bg_item_active
+                                } else {
+                                    palette.bg_item_hover
+                                })
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.custom_prompt_mode = true;
                                 this.custom_prompt_input.update(cx, |inp, cx| {
@@ -1985,7 +2005,7 @@ impl BranchTreeView {
             .into_any_element()
         };
 
-        render_frosted_surface(
+        render_frosted_scrim(
             "branch-summary-scrim-dz0fp",
             FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
@@ -1993,7 +2013,6 @@ impl BranchTreeView {
             scale_factor,
         )
         .rounded(radius::ROW)
-        .opacity(0.01 + 0.99 * scrim_progress)
         .test_support()
         .absolute()
         .top_0()
@@ -2106,16 +2125,217 @@ impl BranchTreeView {
                         _ => {}
                     }
                 }))
-                .child(motion::animate_modal_enter(
-                    if in_custom {
-                        "branch-custom-prompt-modal-anim"
-                    } else {
-                        "branch-summary-modal-anim"
-                    },
+                .child(motion::apply_modal_motion(
                     div().child(modal_body),
+                    scrim_progress,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
         )
+        .into_any_element()
+    }
+
+    fn render_summary_mode_modal_inert(
+        scrim_progress: f32,
+        in_custom: bool,
+        custom_prompt_text: &str,
+        sel: usize,
+        palette: &DesktopPalette,
+        transparency_enabled: bool,
+        scale_factor: f32,
+    ) -> gpui_kit::AnyElement {
+        let modal_body = if in_custom {
+            render_frosted_surface(
+                "branch-custom-prompt-modal-exit",
+                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .w(px(440.0))
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("自定义提示词总结")),
+                    )
+                    .child(
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .w_full()
+                    .h(px(96.0))
+                    .px(space::MD)
+                    .py(px(10.0))
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(if custom_prompt_text.is_empty() {
+                        palette.text_muted
+                    } else {
+                        palette.text_primary
+                    })
+                    .overflow_hidden()
+                    .child(SharedString::from(custom_prompt_text.to_owned())),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("取消")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.accent_solid)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("执行总结")),
+                    ),
+            )
+            .into_any_element()
+        } else {
+            render_frosted_surface(
+                "branch-summary-modal-c1wymw-exit",
+                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .w(px(424.0))
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .pl(space::MD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("选择")),
+                    )
+                    .child(
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                div().w_full().flex().flex_col().gap(space::MICRO).children(
+                    [
+                        (0usize, IconName::RotateCcw, "直接回退"),
+                        (1usize, IconName::Sparkles, "总结"),
+                        (2usize, IconName::PencilLine, "自定义提示词总结"),
+                    ]
+                    .into_iter()
+                    .map(|(idx, icon, label)| {
+                        apply_scale(div(), scale::UI)
+                            .w_full()
+                            .h(height::FIELD)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .bg(if sel == idx {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .gap(space::MD)
+                            .child(
+                                Icon::new(icon)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label(label))
+                    }),
+                ),
+            )
+            .into_any_element()
+        };
+
+        render_frosted_scrim(
+            "branch-summary-scrim-dz0fp-exit",
+            FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
+            palette.bg_scrim,
+            transparency_enabled,
+            scale_factor,
+        )
+        .rounded(radius::ROW)
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(motion::apply_modal_motion(
+            div().child(modal_body),
+            scrim_progress,
+            scale_factor,
+            palette.craft_stack_shadows(),
+        ))
         .into_any_element()
     }
 }
@@ -2789,13 +3009,69 @@ impl Render for BranchTreeView {
         }
 
         // Flat filter dropdown popover positioned below filter trigger
-        let filter_popover = self.filter_dropdown_open.then(|| {
-            let mut menu = div()
-                .id("tree-filter-dropdown-menu")
-                .test_support()
-                .role(gpui::Role::Menu)
-                .accessibility_id("tree-filter-dropdown-menu")
-                .aria_label("视图过滤选项")
+        let filter_open = self.filter_dropdown_open;
+        let filter_p = motion::surface_presence(
+            "branch-filter-pop-p",
+            filter_open,
+            motion::POPOVER_OPEN,
+            window,
+            cx,
+        );
+        let filter_popover = (filter_open || filter_p > 0.001).then(|| {
+            let mut menu_rows: Vec<gpui_kit::AnyElement> = Vec::new();
+            for mode in TreeFilterMode::ALL_MODES {
+                let active = self.filter_mode == mode;
+                let base_row = apply_scale(div(), scale::UI)
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .bg(if active {
+                        palette.bg_item_active
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(cjk_inline_label(mode.label()))
+                    .children(active.then(|| {
+                        Icon::new(IconName::Check)
+                            .size(px(14.0))
+                            .text_color(palette.accent_ink)
+                    }));
+                let row = if filter_open {
+                    let hover_bg = if active {
+                        palette.bg_item_active
+                    } else {
+                        palette.bg_item_hover
+                    };
+                    base_row
+                        .id(SharedString::from(format!("tree-filter-{:?}", mode)))
+                        .test_support()
+                        .a11y_menuitem(mode.a11y_id(), mode.label())
+                        .hover(move |s| s.bg(hover_bg))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.filter_mode = mode;
+                            this.filter_dropdown_open = false;
+                            this.collapsed_heads.clear();
+                            this.keyboard_active = false;
+                            this.focus_handle.focus(window, cx);
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                } else {
+                    base_row.into_any_element()
+                };
+                menu_rows.push(row);
+            }
+
+            let menu_base = div()
+                .id(if filter_open {
+                    "tree-filter-dropdown-menu"
+                } else {
+                    "tree-filter-dropdown-menu-exit"
+                })
                 .w(px(164.0))
                 .p(space::TIGHT)
                 .rounded(radius::ROW)
@@ -2805,87 +3081,89 @@ impl Render for BranchTreeView {
                 .flex()
                 .flex_col()
                 .gap(space::MICRO)
-                .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
+                .children(menu_rows);
+            let menu = if filter_open {
+                menu_base
+                    .test_support()
+                    .role(gpui::Role::Menu)
+                    .accessibility_id("tree-filter-dropdown-menu")
+                    .aria_label("视图过滤选项")
+                    .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .into_any_element()
+            } else {
+                menu_base.into_any_element()
+            };
 
-            for mode in TreeFilterMode::ALL_MODES {
-                let active = self.filter_mode == mode;
-                menu = menu.child(
-                    apply_scale(div(), scale::UI)
-                        .id(SharedString::from(format!("tree-filter-{:?}", mode)))
-                        .test_support()
-                        .a11y_menuitem(mode.a11y_id(), mode.label())
-                        .h(height::CONTROL)
-                        .px(space::SM)
-                        .rounded(radius::CONTROL)
-                        .bg(if active {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
-                        .text_color(palette.text_primary)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.filter_mode = mode;
-                            this.filter_dropdown_open = false;
-                            this.collapsed_heads.clear();
-                            this.keyboard_active = false;
-                            this.focus_handle.focus(window, cx);
-                            cx.notify();
-                        }))
-                        .child(cjk_inline_label(mode.label()))
-                        .children(active.then(|| {
-                            Icon::new(IconName::Check)
-                                .size(px(14.0))
-                                .text_color(palette.accent_ink)
-                        })),
-                );
-            }
-
-            div()
-                .id("tree-filter-dropdown-backdrop")
+            let animated = motion::apply_popover_motion(
+                div().rounded(radius::ROW).child(menu),
+                filter_p,
+                -6.0,
+                scale_factor,
+                palette.flat_popover_shadows(),
+            );
+            let wrap = div()
                 .absolute()
                 .top_0()
                 .left_0()
                 .right_0()
                 .bottom_0()
-                .on_mouse_down(
-                    gpui::MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.filter_dropdown_open = false;
-                        cx.notify();
-                    }),
-                )
-                .child(div().absolute().top(px(92.0)).left(px(276.0)).child(
-                    motion::animate_popover_enter(
-                        "tree-filter-dropdown-anim",
-                        menu,
-                        palette.flat_popover_shadows(),
-                        -6.0,
-                    ),
-                ))
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(92.0))
+                        .left(px(276.0))
+                        .child(animated),
+                );
+            if filter_open {
+                wrap.id("tree-filter-dropdown-backdrop")
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.filter_dropdown_open = false;
+                            cx.notify();
+                        }),
+                    )
+                    .into_any_element()
+            } else {
+                wrap.into_any_element()
+            }
         });
 
+        let summary_open = self.pending_target_id.is_some();
+        if summary_open {
+            self.last_summary_custom_mode = self.custom_prompt_mode;
+        }
         let summary_scrim_p = motion::surface_presence(
             "branch-summary-scrim-p",
-            self.pending_target_id.is_some(),
+            summary_open,
             motion::MODAL_OPEN,
             window,
             cx,
         );
-        let summary_modal_opt = self.pending_target_id.clone().map(|tid| {
-            self.render_summary_mode_modal(
+        let summary_modal_opt = if let Some(tid) = self.pending_target_id.clone() {
+            Some(self.render_summary_mode_modal(
                 summary_scrim_p,
                 &tid,
                 &palette,
                 transparency_enabled,
                 scale_factor,
                 cx,
-            )
-        });
+            ))
+        } else if summary_scrim_p > 0.001 {
+            let custom_text = self.custom_prompt_input.read(cx).value().to_string();
+            Some(Self::render_summary_mode_modal_inert(
+                summary_scrim_p,
+                self.last_summary_custom_mode,
+                &custom_text,
+                self.summary_selected_idx,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+            ))
+        } else {
+            None
+        };
 
         let kbd_style = snap.desktop_settings.keyboard_focus_style;
         let kbd_target = keyboard_row.map(|idx| {

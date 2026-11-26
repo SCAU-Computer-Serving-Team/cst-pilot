@@ -21,6 +21,7 @@ export function SessionEntry({
 	managing,
 	selected,
 	disabled,
+	inactive = false,
 	preview,
 	index,
 	viewTransition,
@@ -35,6 +36,7 @@ export function SessionEntry({
 	managing: boolean;
 	selected: boolean;
 	disabled: boolean;
+	inactive?: boolean;
 	preview: boolean;
 	index: number;
 	viewTransition?: boolean;
@@ -44,6 +46,7 @@ export function SessionEntry({
 	onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
 	onOpenMenu: (x: number, y: number, toggle?: boolean) => void;
 }) {
+	const rowRef = useRef<HTMLDivElement>(null);
 	const timerRef = useRef<number | null>(null);
 	const originRef = useRef<{ x: number; y: number } | null>(null);
 	const suppressClickRef = useRef(false);
@@ -57,14 +60,19 @@ export function SessionEntry({
 	}, []);
 
 	useEffect(() => () => cancelLongPress(), [cancelLongPress]);
+	// 切换批量管理、禁用、折叠隐藏或预览状态时立即取消挂起的长按，避免折叠/切态后弹出菜单。
+	useEffect(() => {
+		if (managing || disabled || inactive || preview) cancelLongPress();
+	}, [managing, disabled, inactive, preview, cancelLongPress]);
 
 	function startLongPress(x: number, y: number) {
-		if (disabled || preview) return;
+		if (disabled || inactive || preview) return;
 		cancelLongPress();
 		suppressClickRef.current = false;
 		originRef.current = { x, y };
 		timerRef.current = window.setTimeout(() => {
 			timerRef.current = null;
+			if (!rowRef.current || rowRef.current.closest("[inert]")) return;
 			suppressClickRef.current = true;
 			onOpenMenu(x, y);
 		}, LONG_PRESS_MS);
@@ -111,24 +119,29 @@ export function SessionEntry({
 	}
 
 	const title = session.title.trim() || "新对话";
-	const content = (
-		<>
-			<span className="session-check-control" aria-hidden="true">
-				<Check size={12} />
-			</span>
-			<span className="sidebar-selection-text">{title}</span>
-		</>
-	);
 	return (
 		<div
+			ref={rowRef}
 			className="sidebar-session-row"
 			data-menu-open={menuOpen || undefined}
 			data-active={(!managing && active) || undefined}
 			style={{ "--startup-row": Math.min(index + 1, 11) } as CSSProperties}
 		>
+			{/* 持久视觉层：管理模式切换时不销毁 DOM，保证 240ms 勾选与文本滑移过渡执行 */}
+			<div
+				className={`sidebar-session-visual ${managing ? "sidebar-session-visual--select" : active ? "selected" : ""}`}
+				data-selected={(managing && selected) || undefined}
+				data-disabled={(managing && disabled) || undefined}
+				aria-hidden="true"
+			>
+				<span className="session-check-control">
+					<Check size={12} />
+				</span>
+				<span className="sidebar-selection-text">{title}</span>
+			</div>
 			{managing ? (
 				<label
-					className="sidebar-session sidebar-session-select"
+					className="sidebar-session sidebar-session-select sidebar-session-hit"
 					data-session-id={session.id}
 					data-selected={selected || undefined}
 					data-disabled={disabled || undefined}
@@ -154,6 +167,7 @@ export function SessionEntry({
 					<input
 						className="session-native-check"
 						type="checkbox"
+						aria-label={title}
 						checked={selected}
 						disabled={disabled}
 						onChange={() => {
@@ -164,12 +178,11 @@ export function SessionEntry({
 							onToggle();
 						}}
 					/>
-					{content}
 				</label>
 			) : (
 				<>
 					<Link
-						className={`sidebar-session ${active ? "selected" : ""}`}
+						className={`sidebar-session sidebar-session-hit ${active ? "selected" : ""}`}
 						data-session-id={session.id}
 						aria-current={active ? "page" : undefined}
 						to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
@@ -195,7 +208,7 @@ export function SessionEntry({
 							onNavigate?.(event);
 						}}
 					>
-						{content}
+						<span className="sidebar-session-sr">{title}</span>
 					</Link>
 					{showMoreButton && !preview && (
 						<button

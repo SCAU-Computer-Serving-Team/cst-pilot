@@ -619,8 +619,22 @@ impl MarkdownStreamStore {
 }
 
 pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
+    build_markdown_style_with_scroll(palette, true)
+}
+
+/// Visual-only Markdown style for `150ms` inert collapse snapshots: disables horizontal table
+/// scrolling and hover highlights while keeping identical typography, borders, and spacing.
+pub fn build_markdown_style_inert(palette: &DesktopPalette) -> TextViewStyle {
+    build_markdown_style_with_scroll(palette, false)
+}
+
+fn build_markdown_style_with_scroll(palette: &DesktopPalette, interactive: bool) -> TextViewStyle {
     let mut table_style = StyleRefinement::default().rounded(radius::ROW);
-    table_style.overflow.x = Some(Overflow::Scroll);
+    table_style.overflow.x = Some(if interactive {
+        Overflow::Scroll
+    } else {
+        Overflow::Hidden
+    });
 
     let table_head_style = StyleRefinement::default()
         .font_weight(FontWeight::MEDIUM)
@@ -715,7 +729,11 @@ pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
         .with_table(table_style)
         .with_table_head(table_head_style)
         .with_table_cell(table_cell_style)
-        .with_table_row_hover(palette.bg_item_hover)
+        .with_table_row_hover(if interactive {
+            palette.bg_item_hover
+        } else {
+            gpui::transparent_black()
+        })
         .with_code_block(code_block_style)
         .with_dark(palette.mode.is_dark())
 }
@@ -994,6 +1012,154 @@ pub fn render_assistant_markdown_with_copy_notice(
                 .on_link_click(|url, _event, _window, _cx| {
                     open_url_in_trusted_browser(url.as_ref());
                 }),
+        )
+}
+
+/// Visual-only inert Markdown snapshot used during `150ms` process-drawer collapse exit:
+/// non-selectable, no-op link click handler (suppressing gpui-base's default `cx.open_url`),
+/// non-scrolling tables, syntax-highlighted code bodies without copy buttons, and no a11y/test hooks.
+pub fn render_assistant_markdown_inert(
+    state: &Entity<TextViewState>,
+    palette: &DesktopPalette,
+    style: TextViewStyle,
+) -> impl IntoElement {
+    let palette_copy = *palette;
+    let state_entity_id = state.entity_id();
+    let extensions = MarkdownExtensions::default()
+        .parser_revision(1)
+        .block_parser(|node, parse_cx| {
+            let markdown_ast::Node::Code(code) = node else {
+                return None;
+            };
+            let span_start = node
+                .position()
+                .map(|p| parse_cx.offset() + p.start.offset)
+                .unwrap_or(0);
+            let lang = code
+                .lang
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| SharedString::from(s.to_owned()));
+            let code_text = SharedString::from(code.value.clone());
+            let raw_md = parse_cx
+                .node_source(node)
+                .map(str::to_owned)
+                .unwrap_or_else(|| wrap_fenced_code_markdown(&code.value));
+            Some(
+                MarkdownNode::new(
+                    "cst-code-block",
+                    FencedCodeData {
+                        code: code_text.clone(),
+                        lang,
+                        span_start,
+                    },
+                )
+                .text(code_text)
+                .markdown(raw_md),
+            )
+        })
+        .block_renderer("cst-code-block", move |node, window, cx| {
+            let Some(data) = node.data::<FencedCodeData>() else {
+                return div().into_any_element();
+            };
+            let span_start = node
+                .source_range()
+                .map(|r| r.start)
+                .unwrap_or(data.span_start);
+            let code_str = data.code.clone();
+            let lang_label = data.lang.clone();
+            let mono_family = cx
+                .try_global::<crate::theme::DesktopThemeGlobal>()
+                .map(|g| g.mono_font_family.clone())
+                .unwrap_or_else(|| SharedString::from(typography::MONO_FONT_FAMILY));
+            let fenced_source = wrap_fenced_code_markdown(code_str.as_ref());
+
+            let body_cache = window.use_keyed_state(
+                SharedString::from(format!("md-code-body-{state_entity_id:?}-{span_start}")),
+                cx,
+                |_, cx| {
+                    let initial = fenced_source.clone();
+                    let body_state = cx.new(|cx| {
+                        TextViewState::markdown(&initial, cx)
+                            .selectable(false)
+                            .selection_format(SelectionFormat::Plain)
+                    });
+                    CodeBodyCache {
+                        fenced_source: initial,
+                        state: body_state,
+                    }
+                },
+            );
+            let body_state = body_cache.read(cx).state.clone();
+            let lang_for_hl = lang_label.clone();
+            let body_highlighter: SharedHighlighter = Arc::new(move |block: &CodeBlock| {
+                highlight_code_block(block.code().as_ref(), lang_for_hl.as_deref(), &palette_copy)
+            });
+
+            let header = div()
+                .w_full()
+                .h(px(36.0))
+                .pl(px(14.0))
+                .pr(space::SM)
+                .border_b_1()
+                .border_color(palette_copy.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::SM)
+                .child(
+                    div()
+                        .font_family(mono_family.clone())
+                        .text_size(scale::CAPTION.font_size)
+                        .line_height(scale::CAPTION.line_height)
+                        .text_color(palette_copy.text_muted)
+                        .child(lang_label.unwrap_or_default()),
+                );
+            div()
+                .w_full()
+                .min_w_0()
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette_copy.border_subtle)
+                .bg(palette_copy.bg_surface)
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(header)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .font_family(mono_family.clone())
+                        .child(
+                            TextView::new(&body_state)
+                                .style(build_code_body_style(&palette_copy, &mono_family))
+                                .selectable(false)
+                                .scrollable(false)
+                                .shared_code_block_highlighter(body_highlighter)
+                                .on_link_click(|_, _, _, _| {}),
+                        ),
+                )
+                .into_any_element()
+        });
+
+    div()
+        .text_size(scale::BODY.font_size)
+        .line_height(px(26.0))
+        .font_weight(scale::BODY.weight)
+        .w_full()
+        .min_w_0()
+        .text_color(palette.text_primary)
+        .child(
+            TextView::new(state)
+                .style(style)
+                .selectable(false)
+                .scrollable(false)
+                .motion(TextViewMotion::default())
+                .markdown_extensions(extensions)
+                .shared_code_block_highlighter(shared_markdown_code_highlighter(palette.mode))
+                .on_link_click(|_, _, _, _| {}),
         )
 }
 

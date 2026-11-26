@@ -20,6 +20,10 @@ export function Thinking({
 }) {
 	const [expanded, setExpanded] = useState(format === "png");
 	const [opened, setOpened] = useState(!!format);
+	// 曾经走过流式逐词渲染的思考块在定稿或切入工具后继续保留词节点，避免清空用户选区。
+	const [streamMounted, setStreamMounted] = useState(!format && live);
+	if (!format && live && !streamMounted) setStreamMounted(true);
+	const streaming = !format && live;
 	return (
 		<TranscriptDisclosure
 			format={format}
@@ -39,9 +43,9 @@ export function Thinking({
 			}
 		>
 			{opened && !part.redacted && (
-				<section className="tool-text">
+				<section className="tool-text" data-streaming={streaming ? "true" : undefined}>
 					<CodeBlock className="tool-raw">
-						{format ? part.thinking : <StreamWords text={part.thinking} />}
+						{format || !streamMounted ? part.thinking : <StreamWords text={part.thinking} />}
 					</CodeBlock>
 				</section>
 			)}

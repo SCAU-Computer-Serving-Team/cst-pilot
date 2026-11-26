@@ -386,6 +386,9 @@ mod imp {
             return Ok(());
         }
         SUPPORTS_SM50.store(true, Ordering::Relaxed);
+        if opacity <= 0.001 {
+            return Ok(());
+        }
 
         let Some(scissor) = compute_scissor_rect(ctx) else {
             return Ok(());
@@ -494,6 +497,9 @@ mod imp {
             return Ok(());
         }
         SUPPORTS_SM50.store(true, Ordering::Relaxed);
+        if spec.opacity <= 0.001 {
+            return Ok(());
+        }
 
         let Some(scissor) = compute_scissor_rect(ctx) else {
             return Ok(());

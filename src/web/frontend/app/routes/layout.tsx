@@ -1,5 +1,5 @@
 import { CheckCircle2, CircleAlert, Globe, PanelLeft, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate, useSearchParams, useViewTransitionState } from "react-router";
 import { AccountProvider } from "../account/use-account";
 import { apiJson, sessionPath } from "../data/api";
@@ -20,6 +20,7 @@ import { Notification, NotificationRegion } from "../shell/notification";
 import { SessionsProvider, useWorkspaceSessions } from "../shell/sessions-context";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
+import { type PresenceState, usePresenceExit } from "../shell/use-presence-exit";
 import { WorkspaceShellProvider } from "../shell/workspace-shell-context";
 
 /** 侧栏折叠偏好：1 = 收起，0 = 展开；无记录时按窗口宽度定初值。 */
@@ -40,28 +41,51 @@ function useMediaQuery(query: string) {
 }
 
 /** 通道待机全屏遮罩 + 居中 384px 卡片（对齐 cst-pilot-web.pen `sYHwZ` / `WO6NQ`）。 */
-function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> | void }) {
+function ChannelStandbyOverlay({
+	exiting,
+	state,
+	surfaceRef,
+	onRefresh,
+}: {
+	exiting: boolean;
+	state: PresenceState;
+	surfaceRef: (node: HTMLElement | null) => void;
+	onRefresh: () => Promise<void> | void;
+}) {
 	const cardRef = useRef<HTMLDivElement>(null);
 	const actionRef = useRef<HTMLButtonElement>(null);
+	const restoreTimerRef = useRef<number | null>(null);
 	const [checking, setChecking] = useState(false);
-	useEffect(() => {
+	// 使用 useLayoutEffect 在关闭首帧同步撤销 Tab 限制并回焦，避免被动效果延迟拦截按键或错抢新浮层焦点。
+	useLayoutEffect(() => {
+		if (restoreTimerRef.current !== null) {
+			window.clearTimeout(restoreTimerRef.current);
+			restoreTimerRef.current = null;
+		}
+		if (exiting) return;
 		const previous = document.activeElement;
 		actionRef.current?.focus({ preventScroll: true });
 		// 原生顶层 <dialog> 在同一提交中关闭时可能竞争焦点，下一任务兜底确保待机主按钮持焦。
 		const focusTimer = window.setTimeout(() => {
-			if (cardRef.current && !cardRef.current.contains(document.activeElement)) {
+			if (
+				cardRef.current &&
+				!cardRef.current.closest("[inert]") &&
+				!cardRef.current.contains(document.activeElement)
+			) {
 				actionRef.current?.focus({ preventScroll: true });
 			}
 		}, 0);
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (
+				event.defaultPrevented ||
 				event.key !== "Tab" ||
 				event.ctrlKey ||
 				event.altKey ||
 				event.metaKey ||
 				event.isComposing ||
 				event.keyCode === 229 ||
-				!cardRef.current
+				!cardRef.current ||
+				cardRef.current.closest("[inert]")
 			)
 				return;
 			const items = focusableElements(cardRef.current);
@@ -81,17 +105,29 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 			window.removeEventListener("keydown", onKeyDown, true);
 			if (previous instanceof HTMLElement && previous !== document.body && previous.isConnected) {
 				const restore = () => {
+					restoreTimerRef.current = null;
+					if (document.querySelector("dialog[open], .standby-scrim, .summary-scrim, .palette-scrim")) return;
 					if (previous.isConnected && !previous.closest("[inert]")) {
 						previous.focus({ preventScroll: true });
 					}
 				};
 				restore();
-				if (document.activeElement !== previous) window.setTimeout(restore, 0);
+				if (document.activeElement !== previous) {
+					restoreTimerRef.current = window.setTimeout(restore, 0);
+				}
+			}
+		};
+	}, [exiting]);
+	useEffect(() => {
+		return () => {
+			if (restoreTimerRef.current !== null) {
+				window.clearTimeout(restoreTimerRef.current);
+				restoreTimerRef.current = null;
 			}
 		};
 	}, []);
 	async function handleRefresh() {
-		if (checking) return;
+		if (checking || exiting) return;
 		setChecking(true);
 		try {
 			await onRefresh();
@@ -100,7 +136,18 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 		}
 	}
 	return (
-		<div className="standby-scrim tier-3-scrim">
+		<div
+			ref={surfaceRef}
+			className="standby-layer"
+			data-state={state}
+			data-exiting={exiting ? "true" : undefined}
+			inert={exiting || undefined}
+			aria-hidden={exiting || undefined}
+		>
+			<div
+				className={exiting ? "standby-backdrop tier-3-scrim" : "standby-scrim standby-backdrop tier-3-scrim"}
+				aria-hidden="true"
+			/>
 			<div
 				ref={cardRef}
 				className="standby-card tier-3-dialog"
@@ -108,7 +155,7 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 				aria-modal="true"
 				aria-labelledby="channel-standby-title"
 				aria-describedby="channel-standby-desc"
-				tabIndex={-1}
+				tabIndex={exiting ? undefined : -1}
 			>
 				<div className="dialog-title-row dialog-title-row--info">
 					<Globe size={16} aria-hidden="true" />
@@ -120,7 +167,7 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 						ref={actionRef}
 						type="button"
 						className="tier-1-btn-primary"
-						disabled={checking}
+						disabled={checking || exiting}
 						onClick={() => void handleRefresh()}
 					>
 						{checking ? "正在检查…" : "重新检查"}
@@ -649,6 +696,8 @@ function WorkspaceShell({
 		return () => window.clearTimeout(timer);
 	}, [collapsed]);
 
+	const standbyPresence = usePresenceExit(appActive ? true : null);
+
 	return (
 		<AccountProvider enabled={activeChannel}>
 			<WorkspaceShellProvider value={shellContext}>
@@ -764,7 +813,14 @@ function WorkspaceShell({
 							onDismiss={() => setPaletteMode(null)}
 						/>
 					)}
-					{appActive && <ChannelStandbyOverlay onRefresh={() => sessionsState.refresh()} />}
+					{standbyPresence.mounted && (
+						<ChannelStandbyOverlay
+							exiting={standbyPresence.exiting}
+							state={standbyPresence.state}
+							surfaceRef={standbyPresence.surfaceRef}
+							onRefresh={() => sessionsState.refresh()}
+						/>
+					)}
 				</NotificationRegion>
 			</WorkspaceShellProvider>
 		</AccountProvider>
