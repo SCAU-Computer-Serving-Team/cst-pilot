@@ -61,10 +61,12 @@
 
 ## fffind 与 ffgrep
 
-| 工具 | 核心参数 | 返回契约（均含 `elapsedMs`） |
+两工具注册独立入参 DTO 与 `output_schema`，并在注入 `elapsedMs` 后按整条 `matches` 原子裁剪 `50 KiB`，模型文本与 `structured_content` 共用同一有界对象；`method` 与每卷 `indexStatus` 写入本地 `details`。详细 Schema 与示例见 [file-search-fff.md](../optimize/file-search-fff.md)。
+
+| 工具 | 核心参数（标 `*` 为必填） | 返回契约（均含 `elapsedMs`） |
 |---|---|---|
-| `fffind` | `{ pattern, path?, exclude?, limit?, caseSensitive? }`（`path` 支持目录、文件或通配过滤；`limit` 默认 30、范围 1–1000；不接受 `include`） | `{ matches: { path }[], truncated: boolean, skipped: number, notice?: string, elapsedMs }`；按相关性排序，全弱匹配附 `notice` |
-| `ffgrep` | `{ pattern, path?, exclude?, limit?, context?, caseSensitive?, literal? }`（`path` 支持目录、文件或通配过滤；`limit` 默认 30、范围 1–1000；`context` 0–20 且计入返回条数；不接受 `include`） | `{ matches: { path, line, text, matched }[], truncated: boolean, skipped: number, skippedLargeFiles?: number, degraded?: boolean, notice?: string, elapsedMs }`；支持 UTF-16 LE/BE BOM 与 GB18030，单文件限 `10 MiB`，总读取达 `256 MiB` 时保留命中并置 `truncated: true`、`degraded: true` |
+| `fffind` | `{ path*, pattern?, kind?: "file"\|"dir"\|"any", ext?, exclude?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?: "relevance"\|"modified"\|"size", caseSensitive?, limit? }`（`path` 传 `"*"` 扫全电脑或传盘符/目录/文件；`limit` 1–1000 默认 30；`maxDepth` 1–1024；越界与冲突组合直接报错） | `{ root, scannedRoots?, partialRoots?, skippedRoots?: { root, reason }[], matches: { path, kind, sizeBytes, modified }[], truncated, truncatedReason?: "timeout"\|"output_bytes"\|"limit", degraded?, skipped, notice?, elapsedMs }`；`sizeBytes` 为默认流逻辑字节（目录 `null`），`modified` 为本机偏移 RFC3339 |
+| `ffgrep` | `{ pattern*, path*, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit? }`（`path` 传目录或单文件，单文件不可传 `include`/`exclude`；正则省略 `caseSensitive` 默认 `false`；`context` 0–20 默认 0；`limit` 1–1000 默认 30） | `{ root, matches: { path, line, text, matched }[], truncated, truncatedReason?: "timeout"\|"read_budget"\|"visited_limit"\|"output_bytes"\|"limit"\|"line_limit", degraded?, skipped, skippedLargeFiles?, notice?, elapsedMs }`；目录单文件限 `10 MiB`，单文件模式 `256 KiB` 块流式扫描，多因共存按 `timeout > read_budget > visited_limit > output_bytes > limit > line_limit` 优先输出 |
 
 ## sys
 

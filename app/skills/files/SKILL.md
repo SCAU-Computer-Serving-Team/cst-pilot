@@ -10,8 +10,8 @@ description: 本地文件读取与检索：读文本与图片（read）、找文
 | 目标 | 调用 | 结束条件 |
 |---|---|---|
 | 已知文件路径，读日志、配置或截图 | `read({ path, offset?, limit? })` | 读完所需行区间或图片元信息，若被截断且有 `nextOffset` 则继续分页 |
-| 只知文件名片段或大致目录 | `fffind({ pattern, path?, exclude?, limit?, caseSensitive? })` | 找到目标文件路径，或交代被忽略与跳过的范围 |
-| 在多份文本中搜错误码或关键字 | `ffgrep({ pattern, path?, exclude?, limit?, context?, caseSensitive?, literal? })` | 定位匹配文件与行号，再按需用 `read` 查上下文 |
+| 全电脑或指定目录找文件与目录 | `fffind({ path, pattern?, kind?, ext?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?, exclude?, caseSensitive?, limit? })` | 找到目标绝对路径、体积与修改时间，或交代跳过与未扫完卷 |
+| 在指定目录或单日志中搜错误码或关键字 | `ffgrep({ pattern, path, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit? })` | 定位匹配文件与行号，再按需对大文件定向 `ffgrep` 或 `read` |
 
 ## read：文本分页与图片读取
 
@@ -24,26 +24,41 @@ description: 本地文件读取与检索：读文本与图片（read）、找文
 
 显式含 UTF-16 BOM 或二进制空字节的文件会直接报错（`isError: true`）；带 BOM 的 UTF-16 文本可改用 `ffgrep` 检索。`read` 无 30 秒固定超时。
 
-## fffind 与 ffgrep：路径查找与内容检索
+## fffind：全电脑与目录路径检索
 
-两工具共用同一参数结构，拒绝未知字段，不接受 `include` 参数。包含过滤直接写在 `path` 通配表达式中。
+`fffind` 使用独立参数结构并拒绝未知字段，`path` 必填。
 
 | 参数 | 作用说明 |
 |---|---|
-| `pattern` | 必填，上限 4096 字节。`fffind` 支持空格多词交集，传空或 `*` 列举文件；`ffgrep` 不可为空，默认正则匹配 |
-| `path` | 可选，目录路径、文件路径或通配过滤（如 `C:/Logs/**/*.log`）；省略从当前工作目录开始 |
-| `exclude` | 可选，排除通配数组，正斜杠匹配，末尾加 `/` 排除整目录 |
-| `limit` | 可选，返回条数上限，默认 `30`，范围 `1–1000` |
-| `caseSensitive` | 可选，两工具均生效；省略时含大写字母自动区分大小写 |
-| `context` | 可选，仅影响 `ffgrep`；命中行前后上下文行数（`0–20`，默认 `0`），上下文行计入返回条数且 `matched: false` |
-| `literal` | 可选，仅影响 `ffgrep`；默认 `false`，设 `true` 按字面子串匹配 |
+| `path` | 必填。传 `"*"` 扫描本机全部可见固定盘与可移动盘（跳过光驱与网络盘）；传盘符（如 `"C:"`、`"C:\\"`）、目录或单文件路径扫描指定范围。拒绝 UNC、网络映射盘与内嵌通配符 |
+| `pattern` | 可选，UTF-8 上限 4096 字节。支持完整精确名、通配符（`*`、`?`、`[]`、`{}`）与空格多词模糊匹配；省略或传 `"*"`/`"**"` 表示不按名称筛选；空串、纯空白或非法通配符直接报错 |
+| `kind` / `ext` | `kind` 可选 `"file"`（默认）、`"dir"`、`"any"`；`ext` 为最后一段扩展名白名单（如 `["dmp", "log"]`，最多 32 项）。`kind: "dir"` 不可与 `ext`、体积或 `sortBy: "size"` 同传 |
+| `maxDepth` | 可选整数 `1–1024`，根深度为 0，`1` 仅看直接子项；单文件根不可传 |
+| `modifiedWithinHours` | 可选正数（`0 < N <= 87600`），按调用时刻 UTC 闭区间 `[now-N, now]` 筛选，未来与未知时间不命中 |
+| `minSizeMiB` / `maxSizeMiB` | 可选非负二进制 MiB（`1 MiB = 1048576 B`），含端点换算整字节；`maxSizeMiB: 0` 仅匹配空文件 |
+| `sortBy` | 可选 `"relevance"`、`"modified"`、`"size"`，省略时按名称、时间、大小条件自动推断 |
+| `exclude` / `caseSensitive` / `limit` | `exclude` 为排除通配数组（尾 `/` 剪枝目录）；`caseSensitive` 在 Windows 默认 `false`；`limit` 范围 `1–1000`（默认 `30`，越界报错） |
 
-返回字段与停止条件：
+返回字段：`root`（规范绝对路径或 `"*"`）、`scannedRoots?`、`partialRoots?`、`skippedRoots?: { root, reason }[]`、`matches[]: { path, kind, sizeBytes, modified }`、`truncated`、`truncatedReason?`（`"timeout"` / `"output_bytes"` / `"limit"`）、`degraded?`、`skipped`、`notice?`、`elapsedMs`。`matches[].path` 统一输出正斜杠规范绝对路径，可直接传给 `read` 或 `ffgrep`。
 
-1. **`fffind`**：`matches[]: { path }`（按文件名相关性降序）、`truncated`、`skipped`、`notice?`（仅找到弱相关匹配时提示收窄范围）、`elapsedMs`。
-2. **`ffgrep`**：`matches[]: { path, line, text, matched }`（仅 `matched: true` 为命中行）、`truncated`、`skipped`、`skippedLargeFiles?`、`degraded?`、`notice?`、`elapsedMs`。自动解码 UTF-16 LE/BE BOM、UTF-8 与 GB18030，跳过无 BOM 含空字节的二进制文件。
-3. **遍历与预算**：两工具遵守 `.gitignore`、`.ignore`、`.fdignore`，跳过 `.git`、符号链接与未驻留云文件，最多遍历 50 万项，输出上限 50 KiB，超时 30 秒（超时返回 `isError: true`）。`ffgrep` 单文件上限 10 MiB（超限计入 `skippedLargeFiles`，改用 `read` 分段查看），单行上限 8 KiB（超限计入 `skipped`），单次总读取上限 256 MiB（达到上限保留已命中项并置 `truncated: true` 与 `degraded: true`）。
-4. **零命中判读**：查找无结果时核对 `skipped`、`skippedLargeFiles` 与忽略规则；对已知具体文件可直接在 `path` 传文件路径定向检索。
+## ffgrep：指定目录与单文件大日志内容检索
+
+`ffgrep` 使用独立参数结构并拒绝未知字段，`pattern` 与 `path` 双必填。
+
+| 参数 | 作用说明 |
+|---|---|
+| `pattern` | 必填，非空，UTF-8 上限 4096 字节，按单行匹配（空白字符作为正文保留） |
+| `path` | 必填，目标目录或单个文件路径，拒绝 UNC、网络映射盘与内嵌通配符 |
+| `include` / `exclude` | 可选通配数组（最多 64 项），仅目录模式允许传入（单文件传入报错）。`include` 不含 `/` 匹配任意层级文件名；`exclude` 尾 `/` 剪枝目录且优先于 `include` |
+| `modifiedWithinHours` | 可选正数（`0 < N <= 87600`），在打开文件前按修改时间过滤旧文件并在句柄上复核 |
+| `literal` / `caseSensitive` | `literal` 默认 `false`（设 `true` 字面匹配）；`caseSensitive` 在字面模式下省略时智能大小写，正则模式下省略时固定 `false` |
+| `context` / `limit` | `context` 范围 `0–20`（默认 `0`），`limit` 范围 `1–1000`（默认 `30`，越界报错）；触及 `limit` 时优先保留命中行 |
+
+返回字段与边界：
+
+1. **返回字段**：`root`、`matches[]: { path, line, text, matched }`、`truncated`、`truncatedReason?`（优先级 `timeout > read_budget > visited_limit > output_bytes > limit > line_limit`）、`degraded?`、`skipped`、`skippedLargeFiles?`、`notice?`、`elapsedMs`。
+2. **遍历与大日志**：两工具不读取 `.gitignore` 或 `.ignore`，仅跳过 `.git`、重解析目录与云占位目录。`ffgrep` 目录模式跳过大于 10 MiB 的单文件（独立计入 `skippedLargeFiles`）；直接将单个大日志路径传给 `ffgrep` 时自动启用 256 KiB 分块流式扫描，支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030，单行上限 8 KiB，总读取上限 256 MiB，30 秒返回期限内保留已命中行。
+3. **零命中判读**：查找无结果时先核对 `partialRoots`、`skippedRoots`、`skipped` 与 `skippedLargeFiles`；目录模式跳过大日志时直接对该单文件调用 `ffgrep` 或 `read`。
 
 ## 访问拦截范围
 
