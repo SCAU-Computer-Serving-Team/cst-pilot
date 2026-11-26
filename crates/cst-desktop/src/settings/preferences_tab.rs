@@ -11,7 +11,7 @@ use gpui::{
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState, MoveDown, MoveUp};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -20,8 +20,9 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::kbd_focus::{
-    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, pointer_moved_past_threshold,
-    render_gliding_dynamic_indicator, resolve_menu_nav_key,
+    KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, KbdRailPlacement,
+    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_menu_nav_key,
+    scroll_dynamic_target_into_view,
 };
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
@@ -33,6 +34,7 @@ use self::scope::ModelScope;
 pub enum PreferencesTabEvent {
     Notice(String),
     ErrorMessage(String),
+    ReturnToTabBar,
 }
 
 #[derive(Clone)]
@@ -78,8 +80,18 @@ pub struct PreferencesTabView {
     pending_default: Option<(String, String)>,
     default_revision: u64,
     refreshing_catalog: bool,
+    body_scroll: gpui::ScrollHandle,
+    can_collapse_models: bool,
+    pending_scroll_to_index: Option<usize>,
     default_trigger_focus: FocusHandle,
     filter_trigger_focus: FocusHandle,
+    select_all_focus: FocusHandle,
+    refresh_btn_focus: FocusHandle,
+    expand_btn_focus: FocusHandle,
+    controls_kbd_active: bool,
+    suppress_controls_focus_kbd: bool,
+    controls_last_pointer: Option<Point<Pixels>>,
+    controls_tracker: KbdDynamicBoundsTracker,
     picker_focus: FocusHandle,
     picker_index: usize,
     picker_keyboard_nav: bool,
@@ -91,7 +103,7 @@ pub struct PreferencesTabView {
     list_kbd_active: bool,
     list_last_pointer: Option<Point<Pixels>>,
     list_tracker: KbdDynamicBoundsTracker,
-    _search_subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
     focus_handle: FocusHandle,
 }
 
@@ -104,21 +116,48 @@ impl Focusable for PreferencesTabView {
 }
 
 impl PreferencesTabView {
-    pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        client: ClientHandle,
+        body_scroll: gpui::ScrollHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型…"));
-        let search_subscription =
-            cx.subscribe(
-                &search_input,
-                |this, _, event: &InputEvent, cx| match event {
-                    InputEvent::Change => {
-                        cx.notify();
-                    }
-                    InputEvent::Focus => {
-                        this.dismiss_dropdowns_on_outside_click(cx);
-                    }
-                    _ => {}
-                },
-            );
+        let mut subscriptions = vec![cx.subscribe(
+            &search_input,
+            |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    cx.notify();
+                }
+                InputEvent::Focus => {
+                    this.dismiss_dropdowns_on_outside_click(cx);
+                }
+                _ => {}
+            },
+        )];
+        let default_trigger_focus = cx.focus_handle().tab_stop(true);
+        let filter_trigger_focus = cx.focus_handle().tab_stop(true);
+        let select_all_focus = cx.focus_handle().tab_stop(true);
+        let refresh_btn_focus = cx.focus_handle().tab_stop(true);
+        let expand_btn_focus = cx.focus_handle().tab_stop(true);
+        for handle in [
+            &default_trigger_focus,
+            &filter_trigger_focus,
+            &select_all_focus,
+            &refresh_btn_focus,
+            &expand_btn_focus,
+        ] {
+            subscriptions.push(cx.on_focus(handle, window, |this, window, cx| {
+                if this.suppress_controls_focus_kbd {
+                    this.suppress_controls_focus_kbd = false;
+                    return;
+                }
+                this.controls_kbd_active = true;
+                this.list_kbd_active = false;
+                this.controls_last_pointer = Some(window.mouse_position());
+                cx.notify();
+            }));
+        }
         Self {
             client,
             search_input,
@@ -143,8 +182,18 @@ impl PreferencesTabView {
             pending_default: None,
             default_revision: 0,
             refreshing_catalog: false,
-            default_trigger_focus: cx.focus_handle().tab_stop(true),
-            filter_trigger_focus: cx.focus_handle().tab_stop(true),
+            body_scroll,
+            can_collapse_models: false,
+            pending_scroll_to_index: None,
+            default_trigger_focus,
+            filter_trigger_focus,
+            select_all_focus,
+            refresh_btn_focus,
+            expand_btn_focus,
+            controls_kbd_active: false,
+            suppress_controls_focus_kbd: false,
+            controls_last_pointer: None,
+            controls_tracker: KbdDynamicBoundsTracker::new(),
             picker_focus: cx.focus_handle(),
             picker_index: 0,
             picker_keyboard_nav: false,
@@ -156,7 +205,7 @@ impl PreferencesTabView {
             list_kbd_active: false,
             list_last_pointer: None,
             list_tracker: KbdDynamicBoundsTracker::new(),
-            _search_subscription: search_subscription,
+            _subscriptions: subscriptions,
             focus_handle: cx.focus_handle().tab_stop(true),
         }
     }
@@ -165,10 +214,16 @@ impl PreferencesTabView {
         self.default_dropdown_open || self.filter_dropdown_open
     }
 
+    pub fn consume_composing_escape(&self, window: &mut Window, cx: &mut gpui_kit::App) {
+        crate::sessions::consume_composing_escape(&self.search_input, window, cx);
+    }
+
     pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.has_dropdown() {
             return false;
         }
+        self.controls_kbd_active = false;
+        self.list_kbd_active = false;
         self.search_input
             .update(cx, |inp, cx| inp.focus(window, cx));
         cx.notify();
@@ -176,12 +231,17 @@ impl PreferencesTabView {
     }
 
     pub fn focus_from_tabbar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.list_kbd_active = true;
-        self.list_last_pointer = Some(window.mouse_position());
-        if self.selected_row_id.is_none() {
-            self.selected_row_id = self.visible_row_ids.first().cloned();
-        }
-        self.focus_handle.focus(window, cx);
+        self.controls_kbd_active = true;
+        self.list_kbd_active = false;
+        self.controls_last_pointer = Some(window.mouse_position());
+        self.default_trigger_focus.focus(window, cx);
+        scroll_dynamic_target_into_view(
+            &self.body_scroll,
+            &self.controls_tracker,
+            "pref-default-trigger",
+            16.0,
+            window,
+        );
         cx.notify();
     }
 
@@ -189,8 +249,93 @@ impl PreferencesTabView {
         self.default_dropdown_open = false;
         self.filter_dropdown_open = false;
         self.picker_keyboard_nav = false;
+        self.controls_kbd_active = false;
         self.list_kbd_active = false;
         self.models_expanded = false;
+        cx.notify();
+    }
+
+    pub fn dismiss_topmost(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_dropdown() {
+            let was_kbd = self.picker_keyboard_nav;
+            self.dismiss_dropdowns(window, cx);
+            if was_kbd {
+                self.controls_kbd_active = true;
+                self.controls_last_pointer = Some(window.mouse_position());
+                cx.notify();
+            }
+            return true;
+        }
+        if self
+            .search_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window)
+        {
+            if !self.search_input.read(cx).value().is_empty() {
+                self.search_input
+                    .update(cx, |i, cx| i.set_value("", window, cx));
+            } else {
+                self.controls_kbd_active = false;
+                self.list_kbd_active = true;
+                self.list_last_pointer = Some(window.mouse_position());
+                if self.selected_row_id.is_none() {
+                    self.selected_row_id = self.visible_row_ids.first().cloned();
+                }
+                self.focus_handle.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    fn active_controls_kbd_spec(&self, window: &Window) -> Option<KbdDynamicSpec> {
+        if !self.controls_kbd_active || self.has_dropdown() {
+            return None;
+        }
+        if self.default_trigger_focus.is_focused(window) {
+            return Some(KbdDynamicSpec::control(
+                "pref-default-trigger",
+                KbdRailPlacement::BottomCenter,
+            ));
+        }
+        if self.select_all_focus.is_focused(window) {
+            return Some(KbdDynamicSpec::control(
+                "pref-select-all",
+                KbdRailPlacement::BottomCenter,
+            ));
+        }
+        if self.refresh_btn_focus.is_focused(window) {
+            return Some(KbdDynamicSpec::control(
+                "pref-refresh",
+                KbdRailPlacement::BottomCenter,
+            ));
+        }
+        if self.filter_trigger_focus.is_focused(window) {
+            return Some(KbdDynamicSpec::control(
+                "pref-filter-trigger",
+                KbdRailPlacement::BottomCenter,
+            ));
+        }
+        if self.expand_btn_focus.is_focused(window) {
+            return Some(KbdDynamicSpec::hairline_row("pref-expand-btn"));
+        }
+        None
+    }
+
+    fn focus_list_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.visible_row_ids.is_empty() {
+            return;
+        }
+        let clamped = index.min(self.visible_row_ids.len() - 1);
+        self.selected_row_id = self.visible_row_ids.get(clamped).cloned();
+        self.controls_kbd_active = false;
+        self.list_kbd_active = true;
+        self.list_last_pointer = Some(window.mouse_position());
+        self.focus_handle.focus(window, cx);
+        self.list_scroll
+            .scroll_to_item(clamped, ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -198,12 +343,19 @@ impl PreferencesTabView {
         if !self.has_dropdown() {
             return false;
         }
+        let was_kbd = self.picker_keyboard_nav;
+        self.suppress_controls_focus_kbd = !was_kbd;
         if self.default_dropdown_open {
             self.default_trigger_focus.focus(window, cx);
         } else {
             self.filter_trigger_focus.focus(window, cx);
         }
         self.dismiss_dropdowns_on_outside_click(cx);
+        if was_kbd {
+            self.controls_kbd_active = true;
+            self.controls_last_pointer = Some(window.mouse_position());
+            cx.notify();
+        }
         true
     }
 
@@ -664,6 +816,13 @@ impl PreferencesTabView {
         }
         let ks = &event.keystroke;
         if self.visible_row_ids.is_empty() {
+            if ks.modifiers == gpui::Modifiers::default() && ks.key.as_str() == "up" {
+                self.list_kbd_active = false;
+                self.controls_kbd_active = false;
+                self.search_input.update(cx, |i, cx| i.focus(window, cx));
+                cx.stop_propagation();
+                cx.notify();
+            }
             return;
         }
         let cur_vis_idx = self
@@ -671,6 +830,35 @@ impl PreferencesTabView {
             .as_deref()
             .and_then(|id| self.visible_row_ids.iter().position(|x| x == id))
             .unwrap_or(0);
+        if ks.modifiers == gpui::Modifiers::default() {
+            if ks.key.as_str() == "up" && cur_vis_idx == 0 {
+                self.list_kbd_active = false;
+                self.controls_kbd_active = false;
+                self.search_input.update(cx, |i, cx| i.focus(window, cx));
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+            if ks.key.as_str() == "down"
+                && cur_vis_idx + 1 == self.visible_row_ids.len()
+                && self.can_collapse_models
+            {
+                self.list_kbd_active = false;
+                self.controls_kbd_active = true;
+                self.controls_last_pointer = Some(window.mouse_position());
+                self.expand_btn_focus.focus(window, cx);
+                scroll_dynamic_target_into_view(
+                    &self.body_scroll,
+                    &self.controls_tracker,
+                    "pref-expand-btn",
+                    16.0,
+                    window,
+                );
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
         match resolve_menu_nav_key(
             ks.key.as_str(),
             ks.modifiers,
@@ -681,6 +869,7 @@ impl PreferencesTabView {
         ) {
             KbdMenuStep::Move(next) => {
                 self.selected_row_id = self.visible_row_ids.get(next).cloned();
+                self.controls_kbd_active = false;
                 self.list_kbd_active = true;
                 self.list_last_pointer = Some(window.mouse_position());
                 self.list_scroll
@@ -691,6 +880,7 @@ impl PreferencesTabView {
             KbdMenuStep::Activate(idx) => {
                 if let Some(fid) = self.visible_row_ids.get(idx).cloned() {
                     self.selected_row_id = Some(fid.clone());
+                    self.controls_kbd_active = false;
                     self.list_kbd_active = true;
                     self.list_last_pointer = Some(window.mouse_position());
                     self.toggle_model_enabled(fid, cx);
@@ -703,6 +893,7 @@ impl PreferencesTabView {
                 }) else {
                     return;
                 };
+                self.controls_kbd_active = false;
                 self.list_kbd_active = true;
                 self.list_last_pointer = Some(window.mouse_position());
                 let delta = if ks.key.as_str() == "up" { -1 } else { 1 };
@@ -719,6 +910,13 @@ impl Render for PreferencesTabView {
         self.sync_from_snapshot();
         self.picker_tracker.clear();
         self.list_tracker.clear();
+        self.controls_tracker.clear();
+        let controls_kbd = self.controls_kbd_active;
+        let tr_default = self.controls_tracker.clone();
+        let tr_filter = self.controls_tracker.clone();
+        let tr_select_all = self.controls_tracker.clone();
+        let tr_refresh = self.controls_tracker.clone();
+        let tr_expand = self.controls_tracker.clone();
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let snap = self.client.snapshot();
@@ -1050,13 +1248,35 @@ impl Render for PreferencesTabView {
                         self.default_dropdown_open,
                     )
                     .track_focus(&self.default_trigger_focus)
-                    .tab_index(0)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if super::activates_button(event) {
+                        let alt_down = !event.is_held
+                            && event.keystroke.key.as_str() == "down"
+                            && event.keystroke.modifiers.alt
+                            && !event.keystroke.modifiers.control
+                            && !event.keystroke.modifiers.shift
+                            && !event.keystroke.modifiers.platform;
+                        if super::activates_button(event) || alt_down {
                             this.toggle_dropdown(true, default_index, window, cx);
                             this.picker_keyboard_nav = true;
                             this.picker_last_pointer = Some(window.mouse_position());
                             cx.stop_propagation();
+                        } else if event.keystroke.modifiers == gpui::Modifiers::default() {
+                            match event.keystroke.key.as_str() {
+                                "up" => {
+                                    this.controls_kbd_active = false;
+                                    cx.emit(PreferencesTabEvent::ReturnToTabBar);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                                "down" => {
+                                    this.controls_kbd_active = false;
+                                    this.list_kbd_active = false;
+                                    this.search_input.update(cx, |i, cx| i.focus(window, cx));
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                                _ => {}
+                            }
                         }
                     }))
                     .h(height::COMPACT)
@@ -1071,13 +1291,21 @@ impl Render for PreferencesTabView {
                     .flex()
                     .items_center()
                     .gap(space::TIGHT)
-                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .hover(move |s| {
+                        if controls_kbd {
+                            s
+                        } else {
+                            s.bg(palette.bg_item_hover)
+                        }
+                    })
                     .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        this.controls_kbd_active = false;
                         this.toggle_dropdown(true, default_index, window, cx);
                     }))
+                    .on_prepaint(move |bounds, _, _| tr_default.set("pref-default-trigger", bounds))
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .max_w(px(280.0))
@@ -1388,6 +1616,7 @@ impl Render for PreferencesTabView {
 
         // Restrict keyboard/button reorder boundaries to the currently rendered preview slice
         // so Alt+Up/Down never pushes the focused row out of the collapsed preview.
+        self.can_collapse_models = can_collapse_models;
         self.visible_row_ids = visible_full_ids
             .iter()
             .take(display_row_count)
@@ -1397,6 +1626,14 @@ impl Render for PreferencesTabView {
             .into_iter()
             .take(display_row_count)
             .collect();
+        if let Some(scroll_idx) = self.pending_scroll_to_index.take()
+            && !self.visible_row_ids.is_empty()
+        {
+            let clamped = scroll_idx.min(self.visible_row_ids.len() - 1);
+            self.selected_row_id = self.visible_row_ids.get(clamped).cloned();
+            self.list_scroll
+                .scroll_to_item(clamped, ScrollStrategy::Nearest);
+        }
 
         let search_focused = self
             .search_input
@@ -1429,6 +1666,42 @@ impl Render for PreferencesTabView {
                     .flex()
                     .items_center()
                     .gap(space::SM)
+                    .capture_action(cx.listener(|this, _: &MoveDown, window, cx| {
+                        if this
+                            .search_input
+                            .read(cx)
+                            .focus_handle(cx)
+                            .is_focused(window)
+                            && !crate::sessions::input_is_composing(&this.search_input, window, cx)
+                            && !this.visible_row_ids.is_empty()
+                        {
+                            this.focus_list_at(0, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+                    .capture_action(cx.listener(|this, _: &MoveUp, window, cx| {
+                        if this
+                            .search_input
+                            .read(cx)
+                            .focus_handle(cx)
+                            .is_focused(window)
+                            && !crate::sessions::input_is_composing(&this.search_input, window, cx)
+                        {
+                            this.controls_kbd_active = true;
+                            this.list_kbd_active = false;
+                            this.controls_last_pointer = Some(window.mouse_position());
+                            this.default_trigger_focus.focus(window, cx);
+                            scroll_dynamic_target_into_view(
+                                &this.body_scroll,
+                                &this.controls_tracker,
+                                "pref-default-trigger",
+                                16.0,
+                                window,
+                            );
+                            cx.stop_propagation();
+                            cx.notify();
+                        }
+                    }))
                     .on_click(move |_, w, cx| {
                         search_focus_ent.focus_handle(cx).focus(w, cx);
                     })
@@ -1484,13 +1757,41 @@ impl Render for PreferencesTabView {
                         self.filter_dropdown_open,
                     )
                     .track_focus(&self.filter_trigger_focus)
-                    .tab_index(0)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if super::activates_button(event) {
+                        let alt_down = !event.is_held
+                            && event.keystroke.key.as_str() == "down"
+                            && event.keystroke.modifiers.alt
+                            && !event.keystroke.modifiers.control
+                            && !event.keystroke.modifiers.shift
+                            && !event.keystroke.modifiers.platform;
+                        if super::activates_button(event) || alt_down {
                             this.toggle_dropdown(false, filter_index, window, cx);
                             this.picker_keyboard_nav = true;
                             this.picker_last_pointer = Some(window.mouse_position());
                             cx.stop_propagation();
+                        } else if event.keystroke.modifiers == gpui::Modifiers::default() {
+                            match event.keystroke.key.as_str() {
+                                "up" => {
+                                    this.controls_kbd_active = true;
+                                    this.list_kbd_active = false;
+                                    this.controls_last_pointer = Some(window.mouse_position());
+                                    this.default_trigger_focus.focus(window, cx);
+                                    scroll_dynamic_target_into_view(
+                                        &this.body_scroll,
+                                        &this.controls_tracker,
+                                        "pref-default-trigger",
+                                        16.0,
+                                        window,
+                                    );
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                                "down" if !this.visible_row_ids.is_empty() => {
+                                    this.focus_list_at(0, window, cx);
+                                    cx.stop_propagation();
+                                }
+                                _ => {}
+                            }
                         }
                     }))
                     .h(height::COMPACT)
@@ -1510,13 +1811,21 @@ impl Render for PreferencesTabView {
                     .flex()
                     .items_center()
                     .gap(space::XS)
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .hover(move |s| {
+                        if controls_kbd {
+                            s
+                        } else {
+                            s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                        }
+                    })
                     .active(|s| s.bg(palette.bg_active_press))
                     .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
+                        this.controls_kbd_active = false;
                         this.toggle_dropdown(false, filter_index, window, cx);
                     }))
+                    .on_prepaint(move |bounds, _, _| tr_filter.set("pref-filter-trigger", bounds))
                     .child(
                         div()
                             .max_w(px(160.0))
@@ -1586,38 +1895,74 @@ impl Render for PreferencesTabView {
                                     "全选可见模型"
                                 },
                             )
-                            .tab_index(0)
+                            .track_focus(&self.select_all_focus)
                             .h(height::COMPACT)
                             .px(px(10.0))
                             .rounded(radius::CONTROL)
                             .text_color(palette.text_secondary)
                             .flex()
                             .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .hover(move |s| {
+                                if controls_kbd {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                                }
+                            })
                             .active(|s| s.bg(palette.bg_active_press))
                             .on_key_down({
                                 let vis_kbd = vis_for_toggle.clone();
-                                cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
-                                    if !ev.is_held
-                                        && ev.keystroke.modifiers == gpui::Modifiers::default()
-                                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                                    {
+                                cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
+                                    if super::activates_button(ev) {
                                         cx.stop_propagation();
+                                        this.controls_kbd_active = true;
+                                        this.controls_last_pointer = Some(window.mouse_position());
                                         if all_visible_enabled {
                                             this.clear_visible(vis_kbd.clone(), cx);
                                         } else {
                                             this.select_all_visible(vis_kbd.clone(), cx);
                                         }
+                                    } else if ev.keystroke.modifiers == gpui::Modifiers::default() {
+                                        match ev.keystroke.key.as_str() {
+                                            "right" => {
+                                                this.controls_kbd_active = true;
+                                                this.controls_last_pointer =
+                                                    Some(window.mouse_position());
+                                                this.refresh_btn_focus.focus(window, cx);
+                                                cx.stop_propagation();
+                                                cx.notify();
+                                            }
+                                            "up" => {
+                                                this.controls_kbd_active = true;
+                                                this.controls_last_pointer =
+                                                    Some(window.mouse_position());
+                                                this.default_trigger_focus.focus(window, cx);
+                                                cx.stop_propagation();
+                                                cx.notify();
+                                            }
+                                            "down" => {
+                                                this.controls_kbd_active = false;
+                                                this.search_input
+                                                    .update(cx, |i, cx| i.focus(window, cx));
+                                                cx.stop_propagation();
+                                                cx.notify();
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                 })
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
+                                this.controls_kbd_active = false;
                                 if all_visible_enabled {
                                     this.clear_visible(vis_for_toggle.clone(), cx);
                                 } else {
                                     this.select_all_visible(vis_for_toggle.clone(), cx);
                                 }
                             }))
+                            .on_prepaint(move |bounds, _, _| {
+                                tr_select_all.set("pref-select-all", bounds)
+                            })
                             .child(cjk_inline_label(if all_visible_enabled {
                                 "清空"
                             } else {
@@ -1629,28 +1974,63 @@ impl Render for PreferencesTabView {
                             .id("pref-refresh-btn")
                             .test_support()
                             .a11y_button("pref-refresh-btn", "刷新模型列表")
-                            .tab_index(0)
+                            .track_focus(&self.refresh_btn_focus)
                             .h(height::COMPACT)
                             .px(px(10.0))
                             .rounded(radius::CONTROL)
                             .text_color(palette.text_secondary)
                             .flex()
                             .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .hover(move |s| {
+                                if controls_kbd {
+                                    s
+                                } else {
+                                    s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                                }
+                            })
                             .active(|s| s.bg(palette.bg_active_press))
                             .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
-                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                if !ev.is_held
-                                    && ev.keystroke.modifiers == gpui::Modifiers::default()
-                                    && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                                {
+                            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                                if super::activates_button(ev) {
                                     cx.stop_propagation();
+                                    this.controls_kbd_active = true;
+                                    this.controls_last_pointer = Some(window.mouse_position());
                                     this.refresh_catalog(cx);
+                                } else if ev.keystroke.modifiers == gpui::Modifiers::default() {
+                                    match ev.keystroke.key.as_str() {
+                                        "left" => {
+                                            this.controls_kbd_active = true;
+                                            this.controls_last_pointer =
+                                                Some(window.mouse_position());
+                                            this.select_all_focus.focus(window, cx);
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }
+                                        "up" => {
+                                            this.controls_kbd_active = true;
+                                            this.controls_last_pointer =
+                                                Some(window.mouse_position());
+                                            this.default_trigger_focus.focus(window, cx);
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }
+                                        "down" => {
+                                            this.controls_kbd_active = true;
+                                            this.controls_last_pointer =
+                                                Some(window.mouse_position());
+                                            this.filter_trigger_focus.focus(window, cx);
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }))
                             .on_click(cx.listener(|this, _, _, cx| {
+                                this.controls_kbd_active = false;
                                 this.refresh_catalog(cx);
                             }))
+                            .on_prepaint(move |bounds, _, _| tr_refresh.set("pref-refresh", bounds))
                             .child(cjk_inline_label(if self.refreshing_catalog {
                                 "刷新中…"
                             } else {
@@ -1667,7 +2047,7 @@ impl Render for PreferencesTabView {
                     self.visible_row_ids
                         .iter()
                         .position(|x| x == id)
-                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(4.0))
+                        .map(|idx| KbdDynamicSpec::hairline_row(format!("pref-row-{idx}")))
                 })
             })
             .flatten();
@@ -1881,7 +2261,7 @@ impl Render for PreferencesTabView {
                                                             .items_center()
                                                             .justify_center()
                                                             .hover(move |s| {
-                                                                if can_move_up {
+                                                                if can_move_up && !kbd_active {
                                                                     s.bg(palette.bg_item_hover)
                                                                 } else {
                                                                     s
@@ -1933,7 +2313,7 @@ impl Render for PreferencesTabView {
                                                             .items_center()
                                                             .justify_center()
                                                             .hover(move |s| {
-                                                                if can_move_down {
+                                                                if can_move_down && !kbd_active {
                                                                     s.bg(palette.bg_item_hover)
                                                                 } else {
                                                                     s
@@ -2084,24 +2464,28 @@ impl Render for PreferencesTabView {
                 } else {
                     SharedString::from(format!("查看全部模型（{total_matching_rows}）"))
                 };
+                let expand_kbd_focused = self.expand_btn_focus.is_focused(window) && controls_kbd;
                 let (expand_hovered, expand_hover_state) =
                     motion::hairline_hover_state("pref-expand-models", window, cx);
                 let expand_t = motion::hairline_hover_progress(
                     "pref-expand-models",
-                    expand_hovered,
+                    expand_hovered && !controls_kbd && !self.list_kbd_active,
                     window,
                     cx,
                 );
                 let expand_border =
                     motion::lerp_hsla(palette.border_subtle, palette.accent_solid, expand_t);
-                let expand_fg =
-                    motion::lerp_hsla(palette.text_secondary, palette.text_primary, expand_t);
+                let expand_fg = if expand_kbd_focused {
+                    palette.text_primary
+                } else {
+                    motion::lerp_hsla(palette.text_secondary, palette.text_primary, expand_t)
+                };
                 list_body = list_body.child(
                     apply_scale(div(), scale::UI)
                         .id("pref-toggle-expand-models-btn")
                         .test_support()
                         .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
-                        .tab_index(0)
+                        .track_focus(&self.expand_btn_focus)
                         .w_full()
                         .h(height::HEADER)
                         .border_b_1()
@@ -2117,22 +2501,39 @@ impl Render for PreferencesTabView {
                         .on_hover(move |&is_hovered, _, cx| {
                             motion::PointerFlag::set(&expand_hover_state, is_hovered, cx);
                         })
-                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                            if !ev.is_held
-                                && ev.keystroke.modifiers == gpui::Modifiers::default()
-                                && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                            {
+                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                            if super::activates_button(ev) {
                                 cx.stop_propagation();
-                                this.models_expanded = !this.models_expanded;
+                                let expanding = !this.models_expanded;
+                                this.models_expanded = expanding;
                                 this.list_scroll = UniformListScrollHandle::new();
+                                if expanding {
+                                    this.pending_scroll_to_index = Some(PREF_COLLAPSED_MODEL_LIMIT);
+                                    this.controls_kbd_active = false;
+                                    this.list_kbd_active = true;
+                                    this.list_last_pointer = Some(window.mouse_position());
+                                    this.focus_handle.focus(window, cx);
+                                } else {
+                                    this.controls_kbd_active = true;
+                                    this.controls_last_pointer = Some(window.mouse_position());
+                                }
                                 cx.notify();
+                            } else if ev.keystroke.modifiers == gpui::Modifiers::default()
+                                && ev.keystroke.key.as_str() == "up"
+                                && !this.visible_row_ids.is_empty()
+                            {
+                                this.focus_list_at(this.visible_row_ids.len() - 1, window, cx);
+                                cx.stop_propagation();
                             }
                         }))
                         .on_click(cx.listener(|this, _, _, cx| {
+                            this.controls_kbd_active = false;
+                            this.list_kbd_active = false;
                             this.models_expanded = !this.models_expanded;
                             this.list_scroll = UniformListScrollHandle::new();
                             cx.notify();
                         }))
+                        .on_prepaint(move |bounds, _, _| tr_expand.set("pref-expand-btn", bounds))
                         .child(cjk_inline_label(toggle_label))
                         .child(
                             Icon::new(if expanded {
@@ -2161,8 +2562,27 @@ impl Render for PreferencesTabView {
             .id("settings-preferences-tab")
             .test_support()
             .a11y_region("settings-preferences-tab", "模型偏好设置")
+            .relative()
             .track_focus(&self.focus_handle)
-            .tab_index(0)
+            .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                if ev.keystroke.key.as_str() == "tab"
+                    && !ev.keystroke.modifiers.control
+                    && !ev.keystroke.modifiers.alt
+                    && !ev.keystroke.modifiers.platform
+                {
+                    this.controls_kbd_active = true;
+                    this.controls_last_pointer = Some(window.mouse_position());
+                    cx.notify();
+                }
+            }))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| {
+                if this.controls_kbd_active
+                    && pointer_moved_past_threshold(&mut this.controls_last_pointer, ev.position)
+                {
+                    this.controls_kbd_active = false;
+                    cx.notify();
+                }
+            }))
             .on_key_down(cx.listener(Self::on_key_down))
             .w_full()
             .flex()
@@ -2191,5 +2611,14 @@ impl Render for PreferencesTabView {
                             .child(list_body),
                     ),
             )
+            .child(render_gliding_dynamic_indicator(
+                "pref-controls",
+                kbd_style,
+                self.active_controls_kbd_spec(window),
+                self.controls_tracker.clone(),
+                &palette,
+                window,
+                cx,
+            ))
     }
 }

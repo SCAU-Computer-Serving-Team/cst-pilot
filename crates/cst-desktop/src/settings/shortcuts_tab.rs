@@ -1,13 +1,21 @@
+use std::rc::Rc;
+
+use gpui::{FocusHandle, KeyDownEvent};
 use gpui_kit::{
-    InteractiveElement, IntoElement, ParentElement, SharedString, Styled, TestSupportExt, div, px,
+    App, InteractiveElement, IntoElement, ParentElement, SharedString, Styled, TestSupportExt,
+    Window, div, px,
 };
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, render_kbd_zcgs3, scale, space};
 
+pub type ShortcutsKeyDownFn = Rc<dyn Fn(&KeyDownEvent, &mut Window, &mut App)>;
+
 pub fn render_shortcuts_tab(
     mono_family: SharedString,
     palette: &DesktopPalette,
+    focus_handle: &FocusHandle,
+    on_key_down: ShortcutsKeyDownFn,
 ) -> impl IntoElement {
     let global_shortcuts = [
         ("Ctrl + P", "打开命令面板与常见导航操作"),
@@ -36,6 +44,8 @@ pub fn render_shortcuts_tab(
         .id("settings-shortcuts-tab")
         .test_support()
         .a11y_region("settings-shortcuts-tab", "快捷键列表")
+        .track_focus(focus_handle)
+        .on_key_down(move |ev, w, cx| (on_key_down)(ev, w, cx))
         .w_full()
         .flex()
         .flex_col()

@@ -179,6 +179,8 @@ struct Step6MockState {
     scoped_gate: Option<Arc<tokio::sync::Notify>>,
     scoped_fail: bool,
     enabled_models: Option<Vec<String>>,
+    rich_catalog: bool,
+    settings_patches: Vec<Value>,
 }
 
 impl Default for Step6MockState {
@@ -204,6 +206,8 @@ impl Default for Step6MockState {
             scoped_gate: None,
             scoped_fail: false,
             enabled_models: None,
+            rich_catalog: false,
+            settings_patches: Vec::new(),
         }
     }
 }
@@ -558,15 +562,23 @@ impl Step6MockBackend {
                                     guard.cstoa_logout_calls += 1;
                                     ("HTTP/1.1 200 OK", json!({ "providerId": "cstoa", "type": null }))
                                 }
-                                ("GET", "/api/auth") => (
-                                    "HTTP/1.1 200 OK",
-                                    json!({
-                                        "providers": [
-                                            { "id": "cstoa", "name": "CSTOA", "configured": guard.cstoa_signed_in, "supportsOAuth": true },
-                                            { "id": "deepseek", "name": "DeepSeek", "configured": guard.credential_ready, "supportsApiKey": true }
-                                        ]
-                                    }),
-                                ),
+                                ("GET", "/api/auth") => {
+                                    let mut providers = vec![
+                                        json!({ "id": "cstoa", "name": "CSTOA", "configured": guard.cstoa_signed_in, "supportsOAuth": true }),
+                                        json!({ "id": "deepseek", "name": "DeepSeek", "configured": guard.credential_ready, "supportsApiKey": true }),
+                                    ];
+                                    if guard.rich_catalog {
+                                        for idx in 1..=10 {
+                                            providers.push(json!({
+                                                "id": format!("prov-{idx}"),
+                                                "name": format!("Provider {idx}"),
+                                                "configured": false,
+                                                "supportsApiKey": true
+                                            }));
+                                        }
+                                    }
+                                    ("HTTP/1.1 200 OK", json!({ "providers": providers }))
+                                }
                                 ("GET", p) if p.starts_with("/api/account") => (
                                     "HTTP/1.1 200 OK",
                                     json!({
@@ -605,28 +617,48 @@ impl Step6MockBackend {
                                         ("HTTP/1.1 200 OK", json!({ "enabled": patterns }))
                                     }
                                 }
-                                ("GET", p) if p.starts_with("/api/models") => (
-                                    "HTTP/1.1 200 OK",
-                                    json!({
-                                        "enabled": guard.enabled_models,
-                                        "models": [{
+                                ("GET", p) if p.starts_with("/api/models") => {
+                                    let models = if guard.rich_catalog {
+                                        (1..=7)
+                                            .map(|idx| {
+                                                json!({
+                                                    "provider": "deepseek",
+                                                    "id": format!("m{idx}"),
+                                                    "name": format!("DeepSeek Model {idx}"),
+                                                    "credentialReady": guard.credential_ready
+                                                })
+                                            })
+                                            .collect::<Vec<_>>()
+                                    } else {
+                                        vec![json!({
                                             "provider": "deepseek",
                                             "id": "deepseek-chat",
                                             "name": "DeepSeek V3",
                                             "credentialReady": guard.credential_ready
-                                        }],
-                                        "catalog": [{
-                                            "provider": "deepseek",
-                                            "id": "deepseek-chat",
-                                            "name": "DeepSeek V3",
-                                            "credentialReady": guard.credential_ready
-                                        }]
-                                    }),
-                                ),
+                                        })]
+                                    };
+                                    (
+                                        "HTTP/1.1 200 OK",
+                                        json!({
+                                            "enabled": guard.enabled_models,
+                                            "models": models,
+                                            "catalog": models
+                                        }),
+                                    )
+                                }
                                 ("GET", "/api/app/settings") => (
                                     "HTTP/1.1 200 OK",
                                     json!({ "theme": "light", "defaultView": "gui", "sidebarCollapsed": false, "windowMaximized": false }),
                                 ),
+                                ("POST", "/api/app/settings") | ("PUT", "/api/app/settings") | ("PATCH", "/api/app/settings") => {
+                                    if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                        guard.settings_patches.push(v);
+                                    }
+                                    (
+                                        "HTTP/1.1 200 OK",
+                                        json!({ "theme": "light", "defaultView": "gui", "sidebarCollapsed": false, "windowMaximized": false }),
+                                    )
+                                }
                                 ("POST", "/api/ui-hints/missing-key-prompt/claim") => (
                                     "HTTP/1.1 200 OK",
                                     json!({ "prompt": false }),
@@ -1919,4 +1951,314 @@ async fn headless_settings_optimistic_model_toggle_coalescing_and_rollback(
         window.try_find("workspace-top-error-bar").is_some()
     })
     .await;
+}
+
+#[gpui_kit::test]
+async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestAppContext) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = Step6MockBackend::start();
+    {
+        let mut st = backend.state.lock().unwrap();
+        st.credential_ready = true;
+        st.rich_catalog = true;
+        st.enabled_models = Some(vec!["deepseek/m1".into(), "deepseek/m2".into()]);
+    }
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+    backend.rt().block_on(handle.refresh_models(None)).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    let press = |cx: &mut gpui_kit::TestAppContext, key: &str| {
+        cx.update_window(win_handle, |_, window, cx| {
+            window.press(key, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+    };
+    let click = |cx: &mut gpui_kit::TestAppContext, id: &'static str| {
+        cx.update_window(win_handle, |_, window, cx| {
+            window.click(id, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+    };
+    let has_el = |cx: &mut gpui_kit::TestAppContext, id: &'static str| -> bool {
+        cx.update_window(win_handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find(id).is_some()
+        })
+        .unwrap()
+    };
+
+    // 1. Entry (`Ctrl+,`), top-level Esc -> NavigateBack (D1), and VPWAF 4-tab keyboard switching
+    let initial_route = cx
+        .update_window(win_handle, |_, window, cx| {
+            window.render_frame(cx);
+            shell.read(cx).route()
+        })
+        .unwrap();
+    assert_ne!(initial_route, ShellRoute::Settings);
+
+    press(cx, "ctrl-,");
+    cx.update(|cx| {
+        assert_eq!(shell.read(cx).route(), ShellRoute::Settings);
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert_eq!(
+            sv.category(),
+            cst_desktop::settings::SettingsCategory::General
+        );
+        assert!(
+            sv.is_tab_kbd_active(),
+            "Ctrl+, must activate VPWAF keyboard indicator"
+        );
+    });
+
+    // D1: Top-level Esc on Settings navigates back to previous route
+    press(cx, "escape");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).route(),
+            initial_route,
+            "Top-level Esc on Settings must execute NavigateBack"
+        );
+    });
+
+    // Re-enter via Ctrl+, and traverse General tab rows (`Home`/`End`/`Enter`/`Space`/`↑` back to VPWAF)
+    press(cx, "ctrl-,");
+    press(cx, "down");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert!(sv.is_general_kbd_active());
+        assert_eq!(sv.general_row_index(), 0);
+    });
+    press(cx, "end");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).settings_view().read(cx).general_row_index(),
+            2
+        );
+    });
+    press(cx, "home");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).settings_view().read(cx).general_row_index(),
+            0
+        );
+    });
+
+    // Cycle theme & keyboard focus style via Enter / Space
+    press(cx, "enter");
+    press(cx, "down");
+    press(cx, "space");
+
+    // Return to VPWAF via Up from row 0
+    press(cx, "up");
+    press(cx, "up");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert!(
+            sv.is_tab_kbd_active(),
+            "Up from General row 0 must return to VPWAF"
+        );
+        assert!(!sv.is_general_kbd_active());
+    });
+
+    // 2. Providers tab: D2 visual order ([0: AddProvider, 1: CSTOA, 2: DeepSeek])
+    press(cx, "right");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).settings_view().read(cx).category(),
+            cst_desktop::settings::SettingsCategory::Providers
+        );
+    });
+    // VPWAF ↓ lands on index 1 (CSTOA), ↑ visits index 0 (AddProvider), ↑ returns to VPWAF
+    press(cx, "down");
+    cx.update(|cx| {
+        let pt = shell
+            .read(cx)
+            .settings_view()
+            .read(cx)
+            .providers_tab()
+            .read(cx);
+        assert!(pt.is_list_kbd_active());
+        assert_eq!(pt.list_selected_index(), 1);
+    });
+    press(cx, "up");
+    cx.update(|cx| {
+        let pt = shell
+            .read(cx)
+            .settings_view()
+            .read(cx)
+            .providers_tab()
+            .read(cx);
+        assert_eq!(pt.list_selected_index(), 0);
+    });
+    press(cx, "up");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert!(
+            sv.is_tab_kbd_active(),
+            "Up from Providers index 0 (AddProvider) must return to VPWAF"
+        );
+    });
+
+    // Enter Add Provider Catalog (`FRRjK`) via keyboard on index 0
+    press(cx, "down");
+    press(cx, "up");
+    press(cx, "enter");
+    assert!(
+        has_el(cx, "providers-add-custom-row"),
+        "Enter on index 0 must open Add Provider Catalog"
+    );
+    assert!(
+        has_el(cx, "providers-toggle-expand-btn"),
+        "Add catalog with 10 unconfigured providers must show expand toggle"
+    );
+
+    // Reach expand toggle via End and expand via Enter
+    press(cx, "end");
+    press(cx, "enter");
+    assert!(
+        has_el(cx, "provider-add-row-prov-10"),
+        "Enter on expand toggle must reveal collapsed providers"
+    );
+
+    // Open Custom Provider Editor (`FxSIA`) via Home -> Enter on index 0 (`自定义提供商`)
+    press(cx, "home");
+    press(cx, "enter");
+    assert!(
+        has_el(cx, "providers-hairline-edit-table"),
+        "Enter on custom row must open Custom Provider Editor"
+    );
+
+    // Protocol dropdown trigger supports Alt+Down -> popover, Down -> Enter restores focus
+    click(cx, "custom-protocol-dropdown-trigger");
+    assert!(has_el(cx, "custom-protocol-popover"));
+    press(cx, "escape");
+    assert!(!has_el(cx, "custom-protocol-popover"));
+    press(cx, "alt-down");
+    assert!(
+        has_el(cx, "custom-protocol-popover"),
+        "Alt+Down on focused protocol trigger must open popover"
+    );
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(!has_el(cx, "custom-protocol-popover"));
+
+    // Exit Custom Editor via Esc -> returns to Configured Providers List (`Q4QFim`)
+    press(cx, "escape");
+    assert!(has_el(cx, "providers-cstoa-pinned-card"));
+
+    // Enter DeepSeek Built-in Detail (`QOtGr`) via keyboard (index 0 -> 1 -> 2 -> Enter)
+    press(cx, "down");
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(
+        has_el(cx, "provider-model-chk-m1"),
+        "Enter on configured DeepSeek row must open built-in detail"
+    );
+    // Toggle first model via Space (0ms optimistic), then Backspace back to configured list
+    press(cx, "space");
+    press(cx, "backspace");
+    assert!(
+        has_el(cx, "providers-cstoa-pinned-card"),
+        "Backspace on built-in detail must return to configured list"
+    );
+
+    // Return from Providers list to VPWAF (Home -> index 0 -> Up -> VPWAF)
+    press(cx, "home");
+    press(cx, "up");
+    cx.update(|cx| {
+        assert!(shell.read(cx).settings_view().read(cx).is_tab_kbd_active());
+    });
+
+    // 3. Preferences tab (`lTWwV`): Alt+Down on default trigger, ↓ chain through search into list, expand button
+    press(cx, "right");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).settings_view().read(cx).category(),
+            cst_desktop::settings::SettingsCategory::Preferences
+        );
+    });
+    press(cx, "down");
+    press(cx, "alt-down");
+    assert!(
+        has_el(cx, "pref-default-model-popover"),
+        "Alt+Down on default model trigger must open popover"
+    );
+    press(cx, "escape");
+    assert!(!has_el(cx, "pref-default-model-popover"));
+
+    // From default trigger: Up returns to VPWAF
+    press(cx, "up");
+    cx.update(|cx| {
+        assert!(
+            shell.read(cx).settings_view().read(cx).is_tab_kbd_active(),
+            "Up from Preferences default model trigger must return to VPWAF"
+        );
+    });
+
+    // Re-enter Preferences: Down (trigger) -> Down (search) -> Down (list row 0) -> End -> Down (expand btn) -> Enter
+    press(cx, "down");
+    press(cx, "down");
+    press(cx, "down");
+    assert!(has_el(cx, "pref-toggle-expand-models-btn"));
+    press(cx, "end");
+    press(cx, "down");
+    press(cx, "enter");
+    assert!(
+        has_el(cx, "pref-unchecked-deepseek/m7"),
+        "Enter on Preferences expand button must expand full model list"
+    );
+
+    // Return to VPWAF: Home (row 0) -> Up (search) -> Up (default trigger) -> Up (VPWAF)
+    press(cx, "home");
+    press(cx, "up");
+    press(cx, "up");
+    press(cx, "up");
+    cx.update(|cx| {
+        assert!(shell.read(cx).settings_view().read(cx).is_tab_kbd_active());
+    });
+
+    // 4. Shortcuts tab (`zQxOv`): Down enters body, Up at top returns to VPWAF, top-level Esc navigates back
+    press(cx, "right");
+    cx.update(|cx| {
+        assert_eq!(
+            shell.read(cx).settings_view().read(cx).category(),
+            cst_desktop::settings::SettingsCategory::Shortcuts
+        );
+    });
+    press(cx, "down");
+    cx.update(|cx| {
+        assert!(!shell.read(cx).settings_view().read(cx).is_tab_kbd_active());
+    });
+    press(cx, "up");
+    cx.update(|cx| {
+        assert!(
+            shell.read(cx).settings_view().read(cx).is_tab_kbd_active(),
+            "Up at top of Shortcuts tab must return to VPWAF"
+        );
+    });
+
+    press(cx, "escape");
+    cx.update(|cx| {
+        assert_eq!(shell.read(cx).route(), initial_route);
+    });
 }

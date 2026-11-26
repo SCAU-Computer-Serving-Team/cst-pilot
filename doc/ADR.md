@@ -170,3 +170,10 @@
 - **结论**：拆分为独立 `FffindInput` 与 `FfgrepInput`，`path` 均设为必填。`fffind` 传 `"*"` 扫描全电脑本地卷，支持 `maxDepth`、`kind`、`ext`、`minSizeMiB`/`maxSizeMiB`、`modifiedWithinHours`、`sortBy` 并返回 `sizeBytes`/`modified`；提权 NTFS 启用对象与名称边分离的内存索引加 USN V2 增量同步，其余走双梯队并行 Win32 遍历。`ffgrep` 补齐正牌 `include`、时间过滤与单文件 `256 KiB` 持久化流式解码。两工具关闭 `.gitignore`、首版拒绝 UNC、整条裁剪 `50 KiB` 并输出 `structured_content`。
 - **依据**：解决默认目录漏检、通配符零命中、50 万条目截断与大日志跳过问题，同时满足零磁盘残留与单句柄安全守卫。
 - **放弃**：共用 `SearchInput`；`path` 内嵌通配符；无 USN 卷静态快照；`modifiedBeforeHours` 与 `encoding` 参数占位。
+
+## ADR-026：设置页键盘导航收口与无框细线聚焦约定
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（`feat/settings-kbd-complete` 实施）
+- **结论**：设置顶层无浮层与子页时按 `Esc` 返回上一页。`提供商` 按视觉自上而下排布，索引 `0` 为添加、`1` 为 `CSTOA`，从顶栏 `↓` 落索引 `1`。细线跳转行键盘聚焦保 `$border-subtle` 底线并提亮动作字样。下拉触发器改用 `Enter`/`Space`/`Alt+↓`。
+- **依据**：收口设置页全部键盘盲区，消除滑移框与蓝色底线双高光。
+- **放弃**：顶层 `Esc` 滞留设置页；添加项置底；聚焦态底线变蓝；单 `↓` 展开下拉。
