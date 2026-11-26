@@ -2177,7 +2177,7 @@ impl Render for PreferencesTabView {
                                 let tr = this.list_tracker.clone();
                                 let row_track_key =
                                     SharedString::from(format!("pref-row-{vis_idx}"));
-                                let kbd_active = this.list_kbd_active;
+                                let kbd_active = this.list_kbd_active || this.controls_kbd_active;
                                 match &rows_arc[vis_idx] {
                                     PrefRowItem::Enabled {
                                         ordered_idx,
