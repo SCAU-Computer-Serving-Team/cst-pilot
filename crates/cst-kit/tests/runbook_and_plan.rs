@@ -723,3 +723,72 @@ async fn public_definitions_are_schema_checked_and_never_replay_writes() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn execute_rejects_mismatched_action_fields_and_legacy_plan_gets_free_sequence() {
+    let fixture = Fixture::new();
+    let store = fixture.store();
+
+    // action=export with plan-only fields must fail.
+    let bad_export: RunbookToolInput = serde_json::from_value(json!({
+        "action": "export",
+        "runbookId": uuid::Uuid::new_v4().to_string(),
+        "version": 1,
+        "title": "unexpected"
+    }))
+    .unwrap();
+    assert!(
+        store
+            .execute(bad_export, CancellationToken::new())
+            .await
+            .is_err()
+    );
+
+    // Pre-seed sequence 01 on 2026-11-08, then write a legacy v1.json without `sequence`.
+    let first = store
+        .plan(decode(input()), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(first["runbook"]["sequence"], 1);
+
+    let legacy_id = uuid::Uuid::new_v4().to_string();
+    let legacy_dir = fixture.path(format!("data/plans/{legacy_id}"));
+    fs::create_dir_all(&legacy_dir).unwrap();
+    fs::write(
+        legacy_dir.join("v1.json"),
+        serde_json::to_vec(&json!({
+            "runbookId": legacy_id,
+            "version": 1,
+            "day": "2026-11-08",
+            "createdAt": "2026-11-08T01:00:00.000Z",
+            "timeText": "2026-11-08 09:00",
+            "title": "旧版方案",
+            "level": "safe",
+            "levelLabel": "安全",
+            "commands": [{
+                "summary": "检查网络",
+                "command": "ipconfig /all",
+                "shell": "cmd",
+                "admin": false
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Exporting legacy plan without sequence allocates next free sequence (02), not colliding with 01.
+    let exp1 = store
+        .export_version(legacy_id.clone(), 1, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(exp1["runbook"]["sequence"], 2);
+    assert_eq!(exp1["runbook"]["name"], "02-安全-旧版方案-v1.txt");
+
+    // Re-exporting the same legacy plan is idempotent and reuses sequence 02.
+    let exp2 = store
+        .export_version(legacy_id, 1, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(exp2["runbook"]["sequence"], 2);
+    assert_eq!(exp2["runbook"]["file"], exp1["runbook"]["file"]);
+}

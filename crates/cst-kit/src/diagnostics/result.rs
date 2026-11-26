@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 
 use crate::tools::MAX_OUTPUT_BYTES;
 
-fn is_protected_key(key: &str) -> bool {
+fn is_identity_key(key: &str) -> bool {
     matches!(
         key,
         "elapsedMs"
@@ -13,8 +13,6 @@ fn is_protected_key(key: &str) -> bool {
             | "outputNotice"
             | "degraded"
             | "degradedFrom"
-            | "error"
-            | "notice"
             | "file"
             | "dir"
             | "name"
@@ -35,6 +33,10 @@ fn is_protected_key(key: &str) -> bool {
     )
 }
 
+fn is_protected_key(key: &str) -> bool {
+    is_identity_key(key) || matches!(key, "error" | "notice")
+}
+
 pub fn serialize_bounded_json(value: &Value) -> Result<String, String> {
     let original = serde_json::to_string(value).map_err(|_| "诊断结果无法编码。")?;
     if original.len() <= MAX_OUTPUT_BYTES {
@@ -48,8 +50,7 @@ pub fn serialize_bounded_json(value: &Value) -> Result<String, String> {
             return Ok(text);
         }
     }
-    // Second pass: if protected strings themselves caused overflow at limit=0, allow trimming
-    // protected strings while keeping essential paths/IDs/elapsedMs.
+    // Second pass: keep identity keys (paths/IDs/elapsedMs) intact, allow trimming long error/notice strings.
     for limit in [64, 32, 16, 8, 4, 2, 1, 0] {
         let mut reduced = reduce(value, limit, 0, false, false);
         attach_truncation_meta(&mut reduced, original.len());
@@ -66,9 +67,15 @@ pub fn serialize_bounded_json(value: &Value) -> Result<String, String> {
         json!("结果字段过多，请缩小查询范围。"),
     );
     if let Some(obj) = value.as_object() {
-        for key in ["elapsedMs", "degraded", "degradedFrom", "error"] {
-            if let Some(val) = obj.get(key) {
-                fallback.insert(key.into(), val.clone());
+        if let Some(ms) = obj.get("elapsedMs").and_then(Value::as_u64) {
+            fallback.insert("elapsedMs".into(), json!(ms));
+        }
+        if let Some(deg) = obj.get("degraded").and_then(Value::as_bool) {
+            fallback.insert("degraded".into(), json!(deg));
+        }
+        for key in ["degradedFrom", "error"] {
+            if let Some(s) = obj.get(key).and_then(Value::as_str) {
+                fallback.insert(key.into(), json!(clip_chars_with_ellipsis(s, 512)));
             }
         }
         if let Some(rb) = obj.get("runbook").and_then(Value::as_object) {
@@ -85,7 +92,9 @@ pub fn serialize_bounded_json(value: &Value) -> Result<String, String> {
                 "levelLabel",
                 "items",
             ] {
-                if let Some(val) = rb.get(key) {
+                if let Some(val) = rb.get(key)
+                    && serde_json::to_string(val).is_ok_and(|s| s.len() <= 2048)
+                {
                     rb_min.insert(key.into(), val.clone());
                 }
             }
@@ -103,10 +112,20 @@ pub fn serialize_bounded_json(value: &Value) -> Result<String, String> {
         "originalBytes": original.len(),
         "outputNotice": "结果字段过多，请缩小查询范围。"
     });
-    if let Some(ms) = value.get("elapsedMs") {
-        minimal["elapsedMs"] = ms.clone();
+    if let Some(ms) = value.get("elapsedMs").and_then(Value::as_u64) {
+        minimal["elapsedMs"] = json!(ms);
     }
     Ok(minimal.to_string())
+}
+
+fn clip_chars_with_ellipsis(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_owned()
+    } else {
+        let mut out: String = text.chars().take(max_chars).collect();
+        out.push('…');
+        out
+    }
 }
 
 fn attach_truncation_meta(reduced: &mut Value, original_bytes: usize) {
@@ -168,7 +187,15 @@ pub fn inject_elapsed_ms(mut result: AgentToolResult, elapsed_ms: u64) -> AgentT
     }
 
     if let Some(UserContentBlock::Text(first)) = result.content.first_mut() {
-        if let Ok(Value::Object(mut obj)) = serde_json::from_str::<Value>(&first.text) {
+        if result.details.is_object()
+            && serde_json::from_str::<Value>(&first.text).is_ok_and(|parsed| parsed.is_object())
+        {
+            // Always serialize from the complete source `result.details` in a single pass
+            // so `originalBytes` is never distorted by double truncation.
+            if let Ok(bounded) = serialize_bounded_json(&result.details) {
+                first.text = bounded;
+            }
+        } else if let Ok(Value::Object(mut obj)) = serde_json::from_str::<Value>(&first.text) {
             obj.insert("elapsedMs".into(), json!(elapsed_ms));
             if let Ok(bounded) = serialize_bounded_json(&Value::Object(obj)) {
                 first.text = bounded;
@@ -203,7 +230,11 @@ fn reduce(
             values
                 .iter()
                 .map(|(k, v)| {
-                    let child_protected = is_protected_key(k);
+                    let child_protected = if keep_protected_strings {
+                        is_protected_key(k)
+                    } else {
+                        is_identity_key(k)
+                    };
                     (
                         k.clone(),
                         reduce(v, limit, depth + 1, child_protected, keep_protected_strings),
@@ -211,10 +242,8 @@ fn reduce(
                 })
                 .collect(),
         ),
-        Value::String(text)
-            if (!protected || !keep_protected_strings) && text.chars().count() > limit * 8 =>
-        {
-            json!(text.chars().take(limit * 8).collect::<String>() + "…")
+        Value::String(text) if !protected && text.chars().count() > limit * 8 => {
+            json!(clip_chars_with_ellipsis(text, limit * 8))
         }
         other => other.clone(),
     }
@@ -308,5 +337,29 @@ mod tests {
         assert!(err.is_error);
         assert_eq!(err.details["error"], "权限不足");
         assert_eq!(err.details["elapsedMs"], 7);
+    }
+
+    #[test]
+    fn inject_elapsed_ms_truncates_in_single_pass_preserving_original_bytes() {
+        let rows: Vec<Value> = (0..600)
+            .map(|i| json!({"i": i, "text": "payload-data-".repeat(20)}))
+            .collect();
+        let source = json!({"items": rows, "notice": "keep-me"});
+        let expected_orig_min = serde_json::to_string(&source).unwrap().len();
+        assert!(expected_orig_min > MAX_OUTPUT_BYTES);
+
+        let initial = diagnostic_result(source).unwrap();
+        let injected = inject_elapsed_ms(initial, 321);
+        let UserContentBlock::Text(t) = &injected.content[0] else {
+            panic!("expected text");
+        };
+        assert!(t.text.len() <= MAX_OUTPUT_BYTES);
+        let parsed: Value = serde_json::from_str(&t.text).unwrap();
+        assert_eq!(parsed["elapsedMs"], 321);
+        assert_eq!(parsed["outputTruncated"], true);
+        assert!(
+            parsed["originalBytes"].as_u64().unwrap() as usize >= expected_orig_min,
+            "originalBytes must reflect complete source details, not already-truncated text"
+        );
     }
 }

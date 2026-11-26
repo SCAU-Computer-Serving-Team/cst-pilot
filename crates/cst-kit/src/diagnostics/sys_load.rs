@@ -27,28 +27,47 @@ pub fn io(
                 control.sleep(remaining)?;
             }
             let second = match source.processes(control) {
-                Ok(rows) => rows,
+                Ok(rows) if rows.iter().any(|p| p.read_bytes.is_some()) => rows,
+                Ok(_) => {
+                    errors.push(error(
+                        "Process",
+                        "第二次进程快照回退到无 I/O 计数器模式，无法完成进程读写差分。",
+                    ));
+                    Vec::new()
+                }
                 Err(e) => {
                     errors.push(e);
                     Vec::new()
                 }
             };
             let elapsed = started.elapsed().as_secs_f64();
+            let mut disk_ok = false;
             let mut physical = match pdh_batch {
                 Ok(b) => {
                     errors.extend(b.errors.clone());
-                    pdh_disks(&b)
+                    let rows = pdh_disks(&b);
+                    if !rows.is_empty() {
+                        disk_ok = true;
+                    }
+                    rows
                 }
                 Err(e) => {
                     errors.push(error("PhysicalDisk", &e));
                     Vec::new()
                 }
             };
-            if physical.is_empty() {
+            if !disk_ok {
+                let err_before = errors.len();
                 let wmi_disks = collect(source, CIMV2, IO_DISK, control, &mut errors);
+                if errors.len() == err_before {
+                    disk_ok = true;
+                }
                 physical = wmi_physical_disks(&wmi_disks);
             }
             control.check()?;
+            if second.is_empty() && !disk_ok {
+                return Err("进程与物理盘 I/O 采集全部失败。".into());
+            }
             let mut result = io_native_result(&first, &second, physical, elapsed, top);
             add_errors(&mut result, errors);
             return Ok(result);
@@ -271,14 +290,20 @@ pub fn gpu(
     control: &Control,
 ) -> Result<Value, String> {
     let mut errors = Vec::new();
-    let adapters = collect(
-        source,
+    let adapters_res = source.query(
         CIMV2,
         "SELECT Name,AdapterCompatibility,DriverVersion,Status,PNPDeviceID FROM Win32_VideoController",
         control,
-        &mut errors,
     );
-    let probe_lhm_parallel = has_non_nvidia_physical_adapter(&adapters);
+    let adapters_failed = adapters_res.is_err();
+    let adapters = match adapters_res {
+        Ok(rows) => rows,
+        Err(e) => {
+            errors.push(e);
+            Vec::new()
+        }
+    };
+    let probe_lhm_parallel = adapters_failed || has_non_nvidia_physical_adapter(&adapters);
     let (mut counters, nvidia, lhm_parallel) = std::thread::scope(|scope| {
         let nv = scope.spawn(|| hardware.nvidia(control));
         let lhm_handle =
@@ -331,7 +356,9 @@ pub fn gpu(
             ))
         }
     };
+    let pdh_ok = !counters.samples.is_empty() || counters.errors.is_empty();
     let mut value = gpu_result_with_names(&counters, &adapters, &name_map, top);
+    let nvidia_has_data = matches!(nvidia, Ok(Some(Value::Array(_))));
     let nvidia = match nvidia {
         Ok(v) => v.unwrap_or(Value::Null),
         Err(e) => {
@@ -341,6 +368,7 @@ pub fn gpu(
     };
     let lhm_outcome =
         lhm_parallel.or_else(|| (!nvidia.is_array()).then(|| hardware.lhm(LhmMode::Gpu, control)));
+    let mut lhm_failed = false;
     if let Some(outcome) = lhm_outcome {
         match outcome {
             Ok(v) => {
@@ -348,6 +376,7 @@ pub fn gpu(
                 value["lhmGpu"] = sanitize_lhm(&v, LhmMode::Gpu);
             }
             Err(e) => {
+                lhm_failed = true;
                 value["lhmGpu"] = json!({"hardware":[],"sensors":[],"error":e});
                 errors.push(error("LHM", &e));
             }
@@ -355,6 +384,9 @@ pub fn gpu(
     }
     value["nvidia"] = nvidia;
     errors.extend(counters.errors);
+    if !pdh_ok && adapters_failed && !nvidia_has_data && lhm_failed {
+        return Err("GPU 诊断所有采集源均失败。".into());
+    }
     add_errors(&mut value, errors);
     control.check()?;
     Ok(value)
@@ -470,6 +502,11 @@ pub fn sensor(
     };
     let admin = status(source.admin());
     let pawnio = status(hardware.pawnio());
+    let pdh_ok = !counters.samples.is_empty() || counters.errors.is_empty();
+    let lhm_ok = lhm.is_ok();
+    if !pdh_ok && !lhm_ok {
+        return Err("传感器与硬件监控采集全部失败。".into());
+    }
     let mut value = sensor_result(
         &counters,
         &lhm.as_ref()

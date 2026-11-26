@@ -81,69 +81,129 @@ pub fn run(
             )
         }
         DriverScope::Core => {
-            let net = collect(
-                source,
+            let mut succeeded = 0usize;
+            let net = match source.query(
                 CIMV2,
                 "SELECT Name,NetConnectionID,PhysicalAdapter,NetConnectionStatus FROM Win32_NetworkAdapter WHERE NetConnectionID IS NOT NULL",
                 control,
-                &mut errors,
-            );
-            let pnp = collect(
-                source,
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
+            let pnp = match source.query(
                 CIMV2,
                 "SELECT Name,PNPClass,Status,ConfigManagerErrorCode FROM Win32_PnPEntity WHERE PNPClass='Bluetooth' OR PNPClass='MEDIA'",
                 control,
-                &mut errors,
-            );
-            let display = collect(
-                source,
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
+            let display = match source.query(
                 CIMV2,
                 "SELECT Name,AdapterCompatibility,DriverVersion,Status,PNPDeviceID FROM Win32_VideoController",
                 control,
-                &mut errors,
-            );
+            ) {
+                Ok(rows) => {
+                    succeeded += 1;
+                    rows
+                }
+                Err(e) => {
+                    errors.push(e);
+                    Vec::new()
+                }
+            };
             let services = match source.native_services_by_name(&["bthserv", "Audiosrv"], control) {
-                Ok(Some(rows)) => rows,
-                Ok(None) => collect(
-                    source,
+                Ok(Some(rows)) => {
+                    succeeded += 1;
+                    rows
+                }
+                Ok(None) => match source.query(
                     CIMV2,
                     "SELECT Name,State FROM Win32_Service WHERE Name='bthserv' OR Name='Audiosrv'",
                     control,
-                    &mut errors,
-                ),
+                ) {
+                    Ok(rows) => {
+                        succeeded += 1;
+                        rows
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        Vec::new()
+                    }
+                },
                 Err(e) => {
                     errors.push(e);
-                    collect(
-                        source,
+                    match source.query(
                         CIMV2,
                         "SELECT Name,State FROM Win32_Service WHERE Name='bthserv' OR Name='Audiosrv'",
                         control,
-                        &mut errors,
-                    )
+                    ) {
+                        Ok(rows) => {
+                            succeeded += 1;
+                            rows
+                        }
+                        Err(e2) => {
+                            errors.push(e2);
+                            Vec::new()
+                        }
+                    }
                 }
             };
             let drivers = match source
                 .native_signed_drivers(&["NET", "BLUETOOTH", "MEDIA", "DISPLAY"], control)
             {
-                Ok(Some(rows)) => rows,
-                Ok(None) => collect(
-                    source,
+                Ok(Some(rows)) => {
+                    succeeded += 1;
+                    rows
+                }
+                Ok(None) => match source.query(
                     CIMV2,
                     "SELECT DeviceClass,DeviceName,DriverVersion,DriverDate,DriverProviderName FROM Win32_PnPSignedDriver WHERE DeviceClass='NET' OR DeviceClass='BLUETOOTH' OR DeviceClass='MEDIA' OR DeviceClass='DISPLAY'",
                     control,
-                    &mut errors,
-                ),
+                ) {
+                    Ok(rows) => {
+                        succeeded += 1;
+                        rows
+                    }
+                    Err(e) => {
+                        errors.push(e);
+                        Vec::new()
+                    }
+                },
                 Err(e) => {
                     errors.push(e);
-                    collect(
-                        source,
+                    match source.query(
                         CIMV2,
                         "SELECT DeviceClass,DeviceName,DriverVersion,DriverDate,DriverProviderName FROM Win32_PnPSignedDriver WHERE DeviceClass='NET' OR DeviceClass='BLUETOOTH' OR DeviceClass='MEDIA' OR DeviceClass='DISPLAY'",
                         control,
-                        &mut errors,
-                    )
+                    ) {
+                        Ok(rows) => {
+                            succeeded += 1;
+                            rows
+                        }
+                        Err(e2) => {
+                            errors.push(e2);
+                            Vec::new()
+                        }
+                    }
                 }
             };
+            control.check()?;
+            if succeeded == 0 && !errors.is_empty() {
+                return Err("设备与驱动信息采集全部失败，请检查 WMI 服务状态。".into());
+            }
             let group = |class: &str| {
                 pnp.iter()
                     .filter(|r| {
@@ -191,7 +251,7 @@ pub fn run(
     };
     control.check()?;
     let sources = match scope {
-        "core" => 5,
+        "core" => usize::MAX,
         "external" => 2,
         _ => 1,
     };

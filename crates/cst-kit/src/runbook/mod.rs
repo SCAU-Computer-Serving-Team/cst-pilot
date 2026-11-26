@@ -113,17 +113,19 @@ pub fn definitions(root: &Path) -> Result<Vec<ToolDefinition>, String> {
     let mut runbook = ToolDefinition::from_typed(
         "runbook",
         "Runbook",
-        "管理手动修复命令方案并按需导出 UTF-8 BOM + CRLF 纯文本清单。默认保存版本化方案（data/plans），传 exportTxt=true 或 action=\"export\" 导出至 artifacts/<日期>/runbook/<序号>-<风险档>-<标题>-v<版本>.txt。只写清单不执行命令。",
+        "唯一命令清单工具，管理手动修复命令方案并按需导出 UTF-8 BOM + CRLF 纯文本清单。action=\"plan\"（默认）保存版本化方案至 data/plans（修订传 runbookId+baseVersion，传 exportTxt=true 可同步导出）；action=\"export\" 按 runbookId 与 version 导出至 artifacts/<日期>/runbook/<序号>-<风险档>-<标题>-v<版本>.txt。只写清单不执行命令。",
         move |_, input: RunbookToolInput, cancel, _, _| {
             let store = store.clone();
             async move { diagnostic_result(store.execute(input, cancel.unwrap_or_default()).await?) }
         },
     );
-    runbook.prompt_snippet =
-        Some("创建、修订手动修复命令方案，并在需要时导出为可读纯文本清单。".into());
+    runbook.prompt_snippet = Some(
+        "管理手动修复命令方案并按需导出纯文本清单：action=\"plan\"（默认，传 exportTxt=true 可同步导出）与 action=\"export\"（传 runbookId+version）。只写清单不执行命令。"
+            .into(),
+    );
     runbook.prompt_guidelines = Some(vec![
         "生成或修订修复命令前先阅读 app/skills/runbook/SKILL.md；合并同风险档命令，不写入诊断采集或破坏系统的操作，工具绝不自动执行命令。".into(),
-        "新增或修订命令时调用 runbook（修订须传 runbookId、baseVersion 与完整 items）；默认 exportTxt=false 便于队员先核对并在卡片一键导出 TXT，若队员明确要求立即导出或处于无界面环境可传 exportTxt=true 或 action=\"export\"。".into(),
+        "统一通过唯一工具 runbook 管理方案：新增或修订用 action=\"plan\"（修订须传 runbookId、baseVersion 与完整 items，默认 exportTxt=false 便于队员先核对并在卡片一键导出 TXT）；需立即导出时传 exportTxt=true 或调用 action=\"export\"（传 runbookId 与 version）。".into(),
     ]);
     Ok(vec![runbook])
 }

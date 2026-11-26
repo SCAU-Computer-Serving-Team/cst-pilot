@@ -349,7 +349,17 @@ pub async fn handle_sessions_route(
                 "请求须指定命令方案记录",
             ));
         };
-        let open = obj.get("open").and_then(Value::as_bool).unwrap_or(true);
+        let open = match obj.get("open") {
+            None => true,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "open 参数必须为布尔值",
+                ));
+            }
+        };
         let id_owned = id.to_owned();
         let result = state
             .write_once_for_session(

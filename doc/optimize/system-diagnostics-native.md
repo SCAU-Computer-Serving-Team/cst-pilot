@@ -19,21 +19,21 @@
 
 1. **`sys(proc)` 与 `sys(io)` 共享 `NtQuerySystemInformation` 单次快照**：
    - 在 `crates/cst-kit/src/diagnostics/win_native/` 封装 `NtQuerySystemInformation(SystemProcessInformation = 5)`。单次系统调用获取全量进程的 `UniqueProcessId`、`ImageName`、`CreateTime`、`KernelTime`、`UserTime`、`WorkingSetSize`、`ReadTransferCount` 与 `WriteTransferCount`。
-   - 两次采样比对 `(pid, create_time)` 防止 PID 复用串值。仅对最终 Top-N 进程复用单一路径缓冲调用 `QueryFullProcessImageNameW`。接口报错时回退 WMI 并标记降级。
+   - 两次采样比对 `(pid, create_time)` 防止 PID 复用串值。仅对最终 Top-N 进程复用单一路径缓冲并复核创建时间后调用 `QueryFullProcessImageNameW`。接口不可用时 `sys(proc)` 回退 `Toolhelp32`，`sys(io)` 回退 WMI。
    - `sys(io)` 物理盘吞吐迁入 PDH `PhysicalDisk`，与进程双采样共用同一 `1.2 s` 窗口。
 2. **`sys(overview)` 原生 Win32 替代 WMI 性能计数器**：
    - 内存、内核池与开机时长改走 `GlobalMemoryStatusEx`、`GetPerformanceInfo`、`GetTickCount64` 与 `EnumPageFilesW`。
    - CPU 总占用改用 `GetSystemTimes` 约 `200 ms` 双采样，消除首次加载 WMI 性能计数器的长阻塞。机型与 BIOS 优先读注册表，失败回退 WMI。
 3. **`sys(gpu)` 与 `sys(sensor)` 并发优化与字段补齐**：
    - GPU 进程名映射改用 `CreateToolhelp32Snapshot`，替代 WMI `Win32_Process`。
-   - 先快速读取显示适配器列表。若存在非 NVIDIA 物理显示适配器，在 PDH `1.2 s` 窗口内并行启动 `lhm(Gpu)`，同时保留独显 `nvidia-smi` 与核显传感器。
+   - 先快速读取显示适配器列表。若存在非 NVIDIA 物理显示适配器（或适配器列表查询失败），在 PDH `1.2 s` 窗口内并行启动 `lhm(Gpu)`，同时保留独显 `nvidia-smi` 与核显传感器。
    - 进程内缓存 PDH 本地化计数器路径，供 `sys(gpu)` 与 `sys(sensor)` 共用。`byGpuPct[].engines[]` 过滤 `gpuPct == 0.0` 项，`lhmGpu.sensors[]` 补齐 `unit` 字段。`lhmGpu` 采集失败写入 `error` 字段，不复用 `notice`。
 4. **`startup` 与 `driver(core)` 改用 SCM 与 SetupAPI**：
    - `startup` 自启服务枚举改用 Win32 SCM（`EnumServicesStatusExW` 与 `QueryServiceConfigW`），普通权限零失败，摆脱 WMI 依赖。
-   - `driver(core)` 已签名驱动改用 SetupAPI（`SetupDiGetClassDevsW` 与设备属性查询），两项核心服务改用 SCM。`drivers[].date` 统一经 `parse_dmtf` 格式化为 `YYYY-MM-DD`。
+   - `driver(core)` 已签名驱动改用 SetupAPI（`SetupDiGetClassDevsW` 与设备属性查询），两项核心服务改用 SCM。`drivers[].date` 由 SetupAPI `DEVPKEY_Device_DriverDate`（`FILETIME`）与 WMI DMTF 统一格式化为 `YYYY-MM-DD`。
 5. **`eventlog` 值渲染、时区统一与失败态收口**：
    - 扫描批量改为 `EvtNext(64)`，元数据渲染改为 `EvtRender(EvtRenderEventValues)` 并复用渲染与消息缓冲，免去逐条 `16 KiB` 分配与 XML 解析。
-   - `query` 中字面量 `provider` 条件直接下推至 XPath。
+   - `query` 中 `provider` 统一在本地按忽略大小写正则匹配，事件排序与起止时间按原始 64 位 `FILETIME` 比较。
    - `events[].time` 统一改为本机带偏移 RFC3339（如 `2026-11-26T00:35:00+08:00`）。`detail` 超过 `20,000` 字符时补齐 `msgTruncated: true` 与 `originalChars`。请求通道全部失败时返回 `isError: true`。
 
 ### 2.2 明确放弃的方案

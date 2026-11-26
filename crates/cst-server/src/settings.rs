@@ -692,6 +692,13 @@ impl WebSearchSettingsStore {
         let mut cfg = self.read_config().await?;
         cfg.apply_patch(patch)
             .map_err(SettingsError::InvalidInput)?;
+        let encoded = serde_json::to_vec_pretty(&cfg)
+            .map_err(|_| SettingsError::InvalidInput("联网检索配置序列化失败。".to_owned()))?;
+        if encoded.len() > cst_kit::tools::web_access::MAX_CONFIG_BYTES {
+            return Err(SettingsError::InvalidInput(
+                "保存后的联网检索配置超过 64 KiB 上限。".to_owned(),
+            ));
+        }
         atomic_write_json(&self.file, &cfg, "保存联网检索配置")
             .await
             .map_err(SettingsError::Storage)?;

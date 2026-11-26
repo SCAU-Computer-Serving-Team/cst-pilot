@@ -158,6 +158,8 @@ pub struct EventQuery {
 pub struct EventRecord {
     pub log: String,
     pub time: String,
+    /// Raw Windows FILETIME (100ns ticks since 1601-01-01 UTC) for monotonic ordering across DST/offset changes.
+    pub time_raw: u64,
     pub record_id: u64,
     pub level: u8,
     pub provider: String,
@@ -184,8 +186,9 @@ pub trait DiagnosticSource: Send + Sync {
         control: &Control,
     ) -> Result<Vec<Value>, NativeError>;
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError>;
-    /// Populate executable image paths only for the final Top-N PIDs using a reused buffer.
-    fn fill_process_paths(&self, _pids: &mut [(u32, Option<String>)]) {}
+    /// Populate executable image paths only for the final Top-N `(pid, created_ticks)` pairs,
+    /// re-verifying process creation time on the same handle to prevent PID reuse mismatches.
+    fn fill_process_paths(&self, _pids: &mut [(u32, u64, Option<String>)]) {}
     /// Fast Win32 native overview snapshot (memory, kernel pool, uptime, CPU short dual-sample,
     /// pagefiles, registry machine/BIOS). Returning `Ok(None)` falls back to WMI.
     fn native_overview(&self, _control: &Control) -> Result<Option<NativeOverview>, NativeError> {
@@ -332,32 +335,42 @@ pub(crate) fn add_errors(value: &mut Value, errors: Vec<NativeError>) {
 }
 pub(crate) fn format_dmtf_date(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    if trimmed.len() == 10
-        && trimmed.as_bytes()[4] == b'-'
-        && trimmed.as_bytes()[7] == b'-'
-        && trimmed[..4].bytes().all(|b| b.is_ascii_digit())
+    let bytes = trimmed.as_bytes();
+    if bytes.len() == 10
+        && bytes.is_ascii()
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(u8::is_ascii_digit)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
     {
-        return Some(trimmed.to_owned());
+        let y: i32 = trimmed[0..4].parse().ok()?;
+        let m: u32 = trimmed[5..7].parse().ok()?;
+        let d: u32 = trimmed[8..10].parse().ok()?;
+        let date = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
+        return Some(date.format("%Y-%m-%d").to_string());
     }
-    if trimmed.len() >= 8 && trimmed[..8].bytes().all(|b| b.is_ascii_digit()) {
-        let y = &trimmed[0..4];
-        let m = &trimmed[4..6];
-        let d = &trimmed[6..8];
-        let (mi, di): (u32, u32) = (m.parse().ok()?, d.parse().ok()?);
-        if (1..=12).contains(&mi) && (1..=31).contains(&di) {
-            return Some(format!("{y}-{m}-{d}"));
-        }
+    if bytes.len() >= 8 && bytes[..8].iter().all(u8::is_ascii_digit) {
+        let y: i32 = trimmed[0..4].parse().ok()?;
+        let m: u32 = trimmed[4..6].parse().ok()?;
+        let d: u32 = trimmed[6..8].parse().ok()?;
+        let date = chrono::NaiveDate::from_ymd_opt(y, m, d)?;
+        return Some(date.format("%Y-%m-%d").to_string());
     }
     // Registry BIOSReleaseDate often uses `MM/DD/YYYY`.
-    let parts: Vec<&str> = trimmed.split('/').collect();
-    if parts.len() == 3 {
-        let (m, d, y): (u32, u32, u32) = (
-            parts[0].parse().ok()?,
-            parts[1].parse().ok()?,
-            parts[2].parse().ok()?,
-        );
-        if (1900..=2200).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d) {
-            return Some(format!("{y:04}-{m:02}-{d:02}"));
+    if bytes.is_ascii() {
+        let parts: Vec<&str> = trimmed.split('/').collect();
+        if parts.len() == 3 {
+            let (m, d, y): (u32, u32, i32) = (
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            );
+            if (1900..=2200).contains(&y)
+                && let Some(date) = chrono::NaiveDate::from_ymd_opt(y, m, d)
+            {
+                return Some(date.format("%Y-%m-%d").to_string());
+            }
         }
     }
     None

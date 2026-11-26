@@ -23,16 +23,16 @@
 通用行为约束：
 
 1. **只读边界与写入例外**：12 个查询与检索工具不修改系统配置、服务状态或机主文件，存储诊断零临时文件落盘。`runbook` 保存方案至 `data/plans/`，导出清单至 `artifacts/<日期>/runbook/`。`bitlocker` 仅 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
-2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。`ls` 与 `disk(usage)` 在明细、排行与拒绝列表中隐去敏感路径名，体积计入总容量。联网工具每次请求、重定向及云端抓取前先校验解析后的 IP，拒绝回环与私网地址，按配置放行 `198.18.0.0/15` TUN 网段。
-3. **统一耗时与裁剪保护**：`kit.rs` 外层为全部 14 个工具注入顶层整数毫秒 `elapsedMs`，覆盖正常、降级、结构化错误 JSON 与 `50 KiB` 裁剪输出。模型文本超过 `50 KiB` 时优先裁剪大数组与长正文，保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 等核心字段。
+2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。`ls` 与 `disk(usage)` 在明细、排行与拒绝列表中隐去敏感路径名，体积计入总容量。联网工具每次直连、重定向及云端抓取前均执行本地 URL 策略与 DNS 解析预检，拒绝回环、私网与混合解析结果，按配置放行 `198.18.0.0/15` TUN 网段。
+3. **统一耗时与裁剪保护**：`kit.rs` 外层为全部 14 个工具在执行阶段注入顶层整数毫秒 `elapsedMs`，覆盖正常、降级、执行期结构化错误 JSON 与 `50 KiB` 裁剪输出（前置 Schema 校验拦截发生在进入执行前）。模型文本超过 `50 KiB` 时基于完整 `details` 单次裁剪大数组与长正文，保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 等核心字段。
 4. **口径与错误诚实**：工具说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。请求数据源全部失败时返回结构化错误 JSON（`{"error", "elapsedMs"}`）并置 `isError: true`。部分数据源失败时保留成功数据，置 `isError: false` 与 `degraded: true`。正常调用不输出空错误容器（`collectionErrors`、`counterErrors`）或 `degraded: false`。
 
 ## 文件与存储工具
 
 ### read
 
-- **文本读取**：按偏移量与行数分页读取，单次上限 2000 行与 `50 KiB`（扫描阶段预留 JSON 转义余量），返回单块 JSON，含行号窗口、`truncated`、`truncatedBy`、`nextOffset` 与 `content`。不输出失效的外部命令提示。
-- **图片读取**：经 `PathGuard` 单句柄核验后执行 EXIF 修正与自适应缩放，返回 `[Text(meta_json), Image(base64)]` 双块。`details` 仅保存轻量元信息，不重复保存图片 base64。
+- **文本读取**：按偏移量与行数分页读取，单次上限 2000 行与 `50 KiB`（扫描阶段预留 JSON 转义余量），返回单块 JSON，含行号窗口、`truncated`、`truncatedBy`、`nextOffset` 与 `content`。0 字节文件返回 `totalLines: 0`，含空字节二进制或 UTF-16 文件报错拒绝，非 UTF-8 字节附 `encodingDegraded: true`。不输出失效的外部命令提示。
+- **图片读取**：经 `PathGuard` 单句柄核验后按 `20 MiB` 上限分块读取，执行 EXIF 修正与自适应缩放，返回 `[Text(meta_json), Image(base64)]` 双块；无法解码的损坏图片降级返回 `imageAttached: false, degraded: true`。`details` 仅保存轻量元信息，不重复保存图片 base64。
 
 ### ls 与 disk
 
@@ -51,27 +51,27 @@
 ### sys 与 startup
 
 - **sys overview**：优先通过 Win32 原生接口采集内存（`GlobalMemoryStatusEx`）、内核池（`GetPerformanceInfo`）、开机时长（`GetTickCount64`）、页面文件（`K32EnumPageFilesW`）、核心数（`GetLogicalProcessorInformationEx`）与注册表机型／BIOS，CPU 总占用采用 `GetSystemTimes` 200 ms 短窗双采样。原生接口缺失单项时回退 WMI。
-- **sys proc / io 双采样**：`proc` 与 `io` 共用 `NtQuerySystemInformation(SystemProcessInformation)` 单次全量进程快照，覆盖全部系统与受保护进程，按 `(pid, create_time)` 差分防 PID 复用，仅对 `proc` 最终 Top-N 进程复用单缓冲查询路径。`io` 物理盘指标走 PDH `PhysicalDisk`，与进程双采样共用约 `1.2 s` 窗口。原生接口报错时回退 WMI 并标记 `degraded: true`。
+- **sys proc / io 双采样**：`proc` 与 `io` 共用 `NtQuerySystemInformation(SystemProcessInformation)` 单次全量进程快照，覆盖全部系统与受保护进程，按 `(pid, create_time)` 差分防 PID 复用，仅对 `proc` 最终 Top-N 进程复用单缓冲复核创建时间后查询路径。`io` 物理盘指标走 PDH `PhysicalDisk`，与进程双采样共用约 `1.2 s` 窗口。`NtQuerySystemInformation` 不可用时 `proc` 回退 `Toolhelp32`，`io` 回退 WMI。
 - **sys gpu 聚合与双显卡核显补充**：每进程 `gpuPct` 取跨适配器最繁忙单一引擎利用率，`engines[]` 仅保留 `gpuPct > 0` 样本。专用显存仅统计大于 1 MiB 的实例。进程名映射使用 `CreateToolhelp32Snapshot`。检测到非 NVIDIA 物理显示适配器时，在 PDH `1.2 s` 窗口内并行执行 `lhm(Gpu)` 与 `nvidia-smi`，双显卡机型同时返回独显与核显数据。LHM 传感器统一附 `unit` 字段，采集失败写入 `lhmGpu.error`。PDH 本地化计数器路径在进程内缓存复用。
 - **sys sensor 能力边界**：零安装约束下不安装 WinRing0 或 PawnIO 内核驱动，并行读取随包 LHM 的温度、风扇、电压传感器（附 `unit`，上限 200 项）与 PDH ACPI 热区（−50～150°C）、逻辑核频率百分比（保留 >100% 睿频值）。
 - **startup 禁用三态与 SCM**：采集 HKLM/HKCU 的 `Run`、`RunOnce`、`Wow6432Node\Run`、启动文件夹与自动启动服务。自启服务优先经 Win32 SCM（`EnumServicesStatusExW` 与 `QueryServiceConfigW`）枚举，失败回退 WMI。关联 `StartupApproved` 首字节奇偶判读 `disabled`（`true` / `false` / `null`），不将 `Run` 的禁用记录套给同名 `RunOnce`。超 140 字符的 `path` 截断并附 `…`。
 
 ### eventlog 与 driver
 
-- **eventlog 场景、渲染与时区**：采用 `EvtNext(64)` 与 `EvtRender(EvtRenderEventValues)` 复用缓冲扫描，`query` 中的字面量 `provider` 条件直接下推 XPath。`events[].time` 输出本机带偏移 RFC3339（如 `2026-11-26T00:35:00+08:00`），与 `sys(overview).uptime.bootTime` 时区对齐。`detail` 正文超过 `20,000` 字符时附 `msgTruncated: true` 与 `originalChars`。`security` 执行前检查管理员令牌，非管理员返回 `admin: false, degraded: true`。请求通道全部失败返回 `isError: true`，部分通道失败保留已读通道并标 `degraded: true`。
+- **eventlog 场景、渲染与时区**：采用 `EvtNext(64)` 与 `EvtRender(EvtRenderEventValues)` 复用缓冲扫描，`provider` 按忽略大小写正则本地匹配。`events[].time` 输出本机带偏移 RFC3339（如 `2026-11-26T00:35:00+08:00`），时间排序与起止窗口按原始 64 位 `FILETIME` 比较，与 `sys(overview).uptime.bootTime` 时区对齐。`detail` 正文超过 `20,000` 字符时附 `msgTruncated: true` 与 `originalChars`。`security` 执行前检查管理员令牌，非管理员返回 `admin: false, degraded: true`。请求通道全部失败返回 `isError: true`，部分通道失败保留已读通道并标 `degraded: true`。
 - **driver 枚举与查找**：`problem` 筛选 `Status=Error/Unknown`。`core` 的关键服务（`bthserv`、`Audiosrv`）优先经 SCM 查询，四类签名驱动（`NET`、`BLUETOOTH`、`MEDIA`、`DISPLAY`）优先经 SetupAPI 查询，失败回退 WMI，`drivers[].date` 统一格式化为 `YYYY-MM-DD`。`external` 覆盖 `USB*`、`BTHENUM*`、`DISPLAY*` 与可移动磁盘。`find` 要求至少一个条件并按 AND 组合，`id` 同时匹配 `deviceId` 与 `hardwareIds`。
 
 ## 联网检索工具
 
 1. **三工具分工**：`web_search` 执行 1–3 个关键词并发检索；`web_fetch` 执行 1–5 个网页链接并发正文抓取；`get_search_content` 对两者的会话内存缓存（上限 32 条 / 8 MiB / 单条 2 MiB / TTL 30 分钟）执行分页或关键词定位续读。
-2. **双提供商与默认可用性**：配置文件 `data/config/web-search.json`（v2，兼容读取 v1）默认启用 `exa` 且开启托管免费 MCP 回退，保证便携 U 盘免配即用。配置 Exa 付费 Key 后使用官方 REST `/search`（支持 `fast` / `auto` / `deep` 模式，`lite` 自动剥离不支持参数）与 `/contents`。可选切换为 `deepseek` 独立 JSON REST 接口（`/v1/tools/search` 128 字符查询守卫与 `/v1/tools/fetch`），支持独立 Key 或 `reuseModelApiKey` 复用模型凭据。
-3. **并发、降级与编码安全**：多词与多链接受控并发执行并保持输入顺序，单条失败记入对应条目 `error` 与顶层 `collectionErrors` 并标 `degraded: true`，全部失败返回 `isError: true`。抓取策略支持 `auto` / `provider` / `direct`，所有 URL 发起前先经本地 SSRF 策略校验，直连抓取支持 UTF-8 与 GB18030 解码。
+2. **双提供商与凭据安全**：配置文件 `data/config/web-search.json`（v2，兼容读取 v1，上限 `64 KiB`）默认启用 `exa` 且开启托管免费 MCP 回退，保证便携 U 盘免配即用。配置 Exa 付费 Key 后使用官方 REST `/search`（支持 `fast` / `auto` / `deep` 模式，`lite` 自动剥离不支持参数）与 `/contents`。可选切换为 `deepseek` 独立 JSON REST 接口（`/v1/tools/search` 128 字符查询守卫、多域名 `(site:a OR site:b)` 组合算子与 `/v1/tools/fetch`），支持独立 Key 或官方 `https://api.deepseek.com` 下的 `reuseModelApiKey`。`baseUrl` 仅允许 HTTPS，变更来源禁止继承已保存密钥，清空密钥须显式传 `clearApiKey: true`。
+3. **并发、降级与编码安全**：多词与多链接受实例级并发信号量约束并保持输入顺序，支持等待阶段即时取消；单条失败记入对应条目 `error` 与顶层 `collectionErrors` 并标 `degraded: true`，全部失败返回 `isError: true`。抓取策略支持 `auto` / `provider` / `direct`，直连与云端抓取前均经本地 SSRF 策略与 DNS 解析预检，直连抓取拒绝二进制媒体类型并支持 UTF-8 与 GB18030 解码。
 
 ## 命令方案与交付
 
 1. **单工具统一流程**：`runbook` 通过 `action: "plan"`（默认）创建或修订命令方案，返回稳定 `runbookId`、当天序号 `sequence`（`01–999`）与递增 `version`。修订必须同时传入 `runbookId` 与当前最新 `baseVersion`，冲突时拒绝覆盖并保持原序号不变。
-2. **导出与双端一键直出**：传入 `exportTxt: true` 或调用 `action: "export"`（传 `runbookId` 与 `version`）时导出至 `artifacts/<YYYY-MM-DD>/runbook/<序号>-<风险档>-<标题>-v<版本>.txt`。桌面端与 Web 端方案卡片支持点击按钮直接调用服务端 `POST /api/sessions/:id/runbook/export` 导出 `.txt` 并用系统记事本打开，不触发额外模型推理。
-3. **格式统一与防篡改**：`commands[].shell` 统一输出小写 `"cmd" | "powershell"`。导出文件固定采用 UTF-8 BOM + CRLF 编码，每条命令四行正文加空行分隔，命令含换行或必填项为空时整次失败。同版本文件内容未变时幂等复用，已导出文件被现场修改或尝试导出过期版本时报错拒绝覆盖。各级目录拒绝符号链接与重解析点，目标文件拒绝硬链接，经同目录临时文件同步后原子替换。
+2. **导出与双端一键直出**：传入 `exportTxt: true` 或调用 `action: "export"`（仅传 `runbookId` 与最新版本 `version`）时导出至 `artifacts/<YYYY-MM-DD>/runbook/<序号>-<风险档>-<标题>-v<版本>.txt`。桌面端与 Web 端方案卡片支持点击按钮直接调用服务端 `POST /api/sessions/:id/runbook/export` 导出该卡片对应版本的 `.txt` 并用系统记事本打开（记事本启动失败仍保留已导出状态并返回 `launchError`），不触发额外模型推理。
+3. **格式统一与防篡改**：`commands[].shell` 统一输出小写 `"cmd" | "powershell"`。导出文件固定采用 UTF-8 BOM + CRLF 编码，每条命令四行正文加空行分隔，命令含换行或必填项为空时整次失败。同版本文件内容未变时幂等复用，已导出文件被现场修改或模型尝试导出过期版本时报错拒绝覆盖。写入与打开前均校验各级目录无符号链接与重解析点、目标文件无硬链接，写入经同目录临时文件同步后原子替换。
 
 ## bitlocker：状态、解锁与解密
 

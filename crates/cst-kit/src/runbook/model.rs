@@ -99,8 +99,8 @@ pub struct DeliverInput {
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub runbook_id: String,
-    #[serde(default = "default_sequence")]
-    pub sequence: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u16>,
     pub version: u64,
     pub day: String,
     pub created_at: String,
@@ -110,10 +110,6 @@ pub struct Plan {
     #[serde(default)]
     pub level_label: String,
     pub commands: Vec<RunbookItem>,
-}
-
-fn default_sequence() -> u16 {
-    1
 }
 
 pub fn artifact_date(value: Option<&str>) -> Result<String, String> {

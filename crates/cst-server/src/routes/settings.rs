@@ -122,7 +122,7 @@ pub async fn handle_settings_route(
             return Ok(Some(json_response(StatusCode::OK, &masked, method)));
         }
         if *method == Method::PATCH {
-            let body = read_json_body(raw_body, 128 * 1024)?;
+            let body = read_json_body(raw_body, cst_kit::tools::web_access::MAX_CONFIG_BYTES)?;
             let patch_body = body.clone();
             let result = state
                 .write_once(
@@ -153,7 +153,7 @@ pub async fn handle_settings_route(
     }
 
     if pathname == "/api/settings/web-search/test" && *method == Method::POST {
-        let body = read_json_body(raw_body, 64 * 1024)?;
+        let body = read_json_body(raw_body, cst_kit::tools::web_access::MAX_CONFIG_BYTES)?;
         let provider = match body.get("provider").and_then(Value::as_str) {
             Some("deepseek") => cst_kit::tools::web_access::WebSearchProvider::Deepseek,
             Some("exa") => cst_kit::tools::web_access::WebSearchProvider::Exa,
@@ -173,14 +173,28 @@ pub async fn handle_settings_route(
                 ));
             }
         };
-        let candidate_key = body
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        let candidate_base = body
-            .get("baseUrl")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let candidate_key = match body.get("apiKey") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "apiKey 必须为字符串",
+                ));
+            }
+        };
+        let candidate_base = match body.get("baseUrl") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "baseUrl 必须为字符串",
+                ));
+            }
+        };
         let probed = state
             .web_search_settings
             .probe(

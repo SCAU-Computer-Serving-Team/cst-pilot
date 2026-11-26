@@ -64,7 +64,7 @@
 | `T20` | `sys(gpu)` 双显卡并行核显与单位字段 | 兼容 / 语义 | 单独显、核显+独显双卡、纯核显、LHM 失败 | L1 / L2 / L3 | 检测到非 NVIDIA 物理显卡时并行采集 `lhmGpu` 且不丢失 `nvidia`；`sensors[]` 均含 `unit`；LHM 失败写入 `lhmGpu.error` |
 | `T21` | `sys(sensor)` LHM 隔离、单位与频率 | 兼容 / 语义 | 有/无 `cst-lhm-host.exe`、睿频 >100%、辅助进程超时 | L1 / L2 / L3 | `sensors[]` 附 `unit`（上限 200）；热区保留 `[-50, 150]`°C；频率保留 `>100%`；正常省略 `counterErrors`；子进程超时由 Job Object 销毁 |
 | `T22` | `startup` SCM 提速与禁用三态 | 性能 / 语义 | 含 `Run` 启用/禁用、同名 `RunOnce`、超 140 字服务路径 | L1 / L2 | SCM 枚举自启服务 < 150 ms（0 失败）；`RunOnce` 不继承 `Run` 禁用；超长 `path` 以 `…` 截断 |
-| `T23` | `eventlog` `EvtRenderEventValues` 与本机时区 | 性能 / 语义 | 真实 `System` + `Application` 通道查询 | L1 / L2 | `events[].time` 为本机带偏移 RFC3339（与 `bootTime` 对齐）；`EvtNext(64)` 延迟格式化；字面 `provider` 下推 XPath |
+| `T23` | `eventlog` `EvtRenderEventValues` 与本机时区 | 性能 / 语义 | 真实 `System` + `Application` 通道查询 | L1 / L2 | `events[].time` 为本机带偏移 RFC3339（与 `bootTime` 对齐）；`EvtNext(64)` 延迟格式化；`provider` 本地正则匹配与原始 `FILETIME` 排序 |
 | `T24` | `eventlog` 场景过滤、详文截断与全败错误 | 兼容 / 语义 | `boot`/`crash`/`service`/`disk`/`security`/`detail` 超 2 万字、全通道失败与单通道失败 | L1 / L2 | `detail` 超 20,000 字附 `msgTruncated: true` 与 `originalChars`；`security` 非管理员返 `degraded: true`；全部通道失败返 `isError: true`，部分失败返 `degraded: true` |
 | `T25` | `driver(core)` SetupAPI/SCM 与日期格式 | 性能 / 语义 | 真实 `driver(core)` 及 5 路全失败/单类失败 | L1 / L2 | `driver(core)` 耗时压至 1 秒内；`drivers[].date` 统一输出 `YYYY-MM-DD`；5 路全败返 `isError: true` |
 | `T26` | `driver(problem/external/find)` 条件组合 | 兼容 / 语义 | 空条件、`name + class + id` AND 组合、外接 USB 设备 | L1 / L2 / L3 | 空条件报错；`id` 同时匹配 `deviceId` 与 `hardwareIds` |
@@ -74,13 +74,13 @@
 
 | 编号 | 工具与场景 | 维度 | 前置与触发输入 | 层级 | 通过判据 |
 |---|---|---|---|---|---|
-| `T28` | `web-search.json` v1/v2 迁移与服务端脱敏 | 兼容 / 语义 | 旧 v1 配置加载；`GET/PATCH /api/settings/web-search` | L1 | 默认 `exa`（开启免费回退）；明文 Key 落盘但接口仅返 `hasApiKey` / `apiKeyTail`；修改热生效 |
+| `T28` | `web-search.json` v1/v2 迁移与凭据安全 | 兼容 / 语义 | 旧 v1 配置加载；`GET/PATCH /api/settings/web-search` 与 `test` 探测 | L1 | 默认 `exa`（开启免费回退）；接口仅返 `hasApiKey`/`apiKeyTail`；`baseUrl` 仅 HTTPS 且换域禁继承旧 Key；`clearApiKey: true` 清空密钥，总大小 `≤ 64 KiB` |
 | `T29` | Exa 免费回退与付费 REST 参数守卫 | 兼容 / 语义 | 无 Key 走 MCP；有 Key 走 `fast`(`lite`)/`auto`/`deep` | L1 | `lite` 模式自动剥离不支持参数不触发 `400`；常规与 `deep` 分别使用独立超时 |
-| `T30` | DeepSeek Search/Fetch 守卫与复用凭据 | 兼容 / 语义 | >128 字符查询 + 过滤算子；`reuseModelApiKey: true` | L1 | 128 字符守卫保留主查询词并截断超长算子；正确读取模型凭据或独立 Key |
+| `T30` | DeepSeek Search/Fetch 守卫与复用凭据 | 兼容 / 语义 | >128 字符查询 + 多域名/日期算子；`reuseModelApiKey: true` | L1 | 128 字符守卫保留主查询词、多域名组合为 `(site:a OR site:b)`；`reuseModelApiKey` 仅限官方 `https://api.deepseek.com` |
 | `T31` | 多词/多链并发与局部降级 | 性能 / 语义 | 3 个搜索词或 5 个 URL 中 1 条失败；全部失败 | L1 | 并发执行保持输入顺序；局部失败保留成功项并置 `degraded: true` + `collectionErrors`；全部失败返 `isError: true` |
-| `T32` | SSRF 阻断与重定向红线 | 兼容 / 语义 | 回环、私网、`169.254.169.254`、302 跳转内网、`198.18.x.x`、云端抓取前预检 | L1 | 除显式放行的 TUN 网段外全部拦截，私网 URL 不外发至 Exa/DeepSeek 云端接口 |
+| `T32` | SSRF 阻断、DNS 预检与重定向红线 | 兼容 / 语义 | 回环、私网、`169.254.169.254`、302 跳转内网、`198.18.x.x`、云端抓取前 DNS 预检 | L1 | 除显式放行的 TUN 网段外全部拦截，私网 IP 与内网域名均不外发至 Exa/DeepSeek 云端接口 |
 | `T33` | `web_fetch` GB18030 解码与脚本清理 | 兼容 / 语义 | UTF-8 与 GB18030 中文页、含 `<script>`/`<style>`、二进制响应 | L1 | GB18030 中文正确解码，二进制明确拒绝，脚本样式清理干净 |
-| `T34` | `get_search_content` 分页、定位与淘汰 | 性能 / 语义 | 超过 32 条或 8 MiB 触发淘汰；中文 `offset`/`limit` 与 `findText` | L1 | 淘汰旧条目返过期提示；中文分页无半字截断；零命中返 `matched: false` |
+| `T34` | `get_search_content` 分页、定位与淘汰 | 性能 / 语义 | 超过 32 条或 8 MiB 触发淘汰；中文 `offset`/`limit` 与 `findText` | L1 | 淘汰旧条目返过期提示；中文分页无半字截断；零命中返 `matchCount: 0` |
 
 ### 3.4 命令方案、BitLocker 与跨端契约（`runbook`、`bitlocker`、全量契约）
 

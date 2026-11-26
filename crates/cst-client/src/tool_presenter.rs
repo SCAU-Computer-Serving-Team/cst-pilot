@@ -1184,10 +1184,18 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
                 .and_then(|d| d.get("truncated"))
                 .is_some_and(is_js_truthy)
         {
-            let next_off = words(detail.and_then(|d| d.get("nextOffset")));
+            let text = match detail
+                .and_then(|d| d.get("nextOffset"))
+                .and_then(Value::as_u64)
+            {
+                Some(next_off) => {
+                    format!("JSON 字符片段，非完整结论 · 已截断，续读 offset={next_off}")
+                }
+                None => "JSON 字符片段，非完整结论 · 已截断，仅展示部分命中".to_owned(),
+            };
             blocks.push(ToolBlock::Notice {
                 id: "continue".into(),
-                text: format!("JSON 字符片段，非完整结论 · 已截断，续读 offset={next_off}"),
+                text,
                 status: NoticeStatus::Warning,
             });
         }

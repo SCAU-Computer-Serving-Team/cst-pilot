@@ -86,6 +86,19 @@ const _: () = {
     assert!(size_of::<SystemProcessInformation>() == 0x100);
 };
 
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(offset_of!(SystemProcessInformation, create_time) == 0x20);
+    assert!(offset_of!(SystemProcessInformation, user_time) == 0x28);
+    assert!(offset_of!(SystemProcessInformation, kernel_time) == 0x30);
+    assert!(offset_of!(SystemProcessInformation, image_name) == 0x38);
+    assert!(offset_of!(SystemProcessInformation, unique_process_id) == 0x44);
+    assert!(offset_of!(SystemProcessInformation, working_set_size) == 0x6C);
+    assert!(offset_of!(SystemProcessInformation, read_transfer_count) == 0xA0);
+    assert!(offset_of!(SystemProcessInformation, write_transfer_count) == 0xA8);
+    assert!(size_of::<SystemProcessInformation>() == 0xB8);
+};
+
 fn ticks(time: FILETIME) -> u64 {
     (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
 }
@@ -157,22 +170,34 @@ fn parse_nt_process_buffer(
     valid_bytes: usize,
     control: &Control,
 ) -> Result<Vec<ProcessSample>, NativeError> {
-    let base = buf.as_ptr().cast::<u8>() as usize;
-    let end = base + valid_bytes;
+    let buf_bytes = unsafe {
+        std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), std::mem::size_of_val(buf))
+    };
+    let base = buf_bytes.as_ptr() as usize;
+    let valid_bytes = valid_bytes.min(buf_bytes.len());
     let mut offset = 0usize;
     let mut rows = Vec::with_capacity(512);
+    let min_entry = size_of::<SystemProcessInformation>();
 
-    while offset + size_of::<SystemProcessInformation>() <= valid_bytes {
+    while offset + min_entry <= valid_bytes {
         stopped("Process", control)?;
         let entry = unsafe { &*((base + offset) as *const SystemProcessInformation) };
         let pid = entry.unique_process_id as u32;
         let raw_name = if !entry.image_name.buffer.is_null() && entry.image_name.length > 0 {
             let ptr = entry.image_name.buffer as usize;
             let bytes = entry.image_name.length as usize;
-            if ptr >= base && ptr.saturating_add(bytes) <= end && bytes.is_multiple_of(2) {
-                let units =
-                    unsafe { std::slice::from_raw_parts(entry.image_name.buffer, bytes / 2) };
-                String::from_utf16_lossy(units)
+            if let Some(rel) = ptr.checked_sub(base)
+                && let Some(end_rel) = rel.checked_add(bytes)
+                && end_rel <= valid_bytes
+                && bytes.is_multiple_of(2)
+            {
+                let units: Vec<u16> = buf_bytes[rel..end_rel]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| u16::from_le_bytes(*c))
+                    .collect();
+                String::from_utf16_lossy(&units)
             } else {
                 String::new()
             }
@@ -210,22 +235,45 @@ fn parse_nt_process_buffer(
         }
 
         if entry.next_entry_offset == 0 {
-            break;
+            return Ok(rows);
         }
-        let next = offset.saturating_add(entry.next_entry_offset as usize);
-        if next <= offset || !next.is_multiple_of(8) {
-            break;
+        let step = entry.next_entry_offset as usize;
+        if step < min_entry || !step.is_multiple_of(8) {
+            return Err(NativeError {
+                source: "NtQuerySystemInformation".into(),
+                code: None,
+                message: "系统进程链表步长异常。".into(),
+            });
+        }
+        let Some(next) = offset.checked_add(step) else {
+            return Err(NativeError {
+                source: "NtQuerySystemInformation".into(),
+                code: None,
+                message: "系统进程链表偏移溢出。".into(),
+            });
+        };
+        if next + min_entry > valid_bytes {
+            return Err(NativeError {
+                source: "NtQuerySystemInformation".into(),
+                code: None,
+                message: "系统进程链表偏移越界。".into(),
+            });
         }
         offset = next;
     }
 
-    Ok(rows)
+    Err(NativeError {
+        source: "NtQuerySystemInformation".into(),
+        code: None,
+        message: "系统进程快照缓冲区未正常终止。".into(),
+    })
 }
 
-/// Fill image paths ONLY for the final Top-N PIDs using a single reused path buffer.
-pub fn fill_paths(targets: &mut [(u32, Option<String>)]) {
+/// Fill image paths ONLY for the final Top-N `(pid, created_ticks)` pairs using a single reused
+/// path buffer, re-verifying process creation time on the same handle to prevent PID reuse.
+pub fn fill_paths(targets: &mut [(u32, u64, Option<String>)]) {
     let mut path_buffer = vec![0u16; 32768];
-    for (pid, slot) in targets.iter_mut() {
+    for (pid, expected_created, slot) in targets.iter_mut() {
         if slot.is_some() || *pid == 0 {
             continue;
         }
@@ -234,6 +282,18 @@ pub fn fill_paths(targets: &mut [(u32, Option<String>)]) {
             continue;
         };
         let handle = Handle(handle);
+        if *expected_created != 0 {
+            let mut created = FILETIME::default();
+            let mut exit = FILETIME::default();
+            let mut kernel = FILETIME::default();
+            let mut user = FILETIME::default();
+            if unsafe { GetProcessTimes(handle.0, &mut created, &mut exit, &mut kernel, &mut user) }
+                .is_err()
+                || ticks(created) != *expected_created
+            {
+                continue;
+            }
+        }
         let mut length = path_buffer.len() as u32;
         if unsafe {
             QueryFullProcessImageNameW(
@@ -245,7 +305,8 @@ pub fn fill_paths(targets: &mut [(u32, Option<String>)]) {
         }
         .is_ok()
         {
-            *slot = Some(String::from_utf16_lossy(&path_buffer[..length as usize]));
+            let used = (length as usize).min(path_buffer.len());
+            *slot = Some(String::from_utf16_lossy(&path_buffer[..used]));
         }
     }
 }
@@ -329,6 +390,7 @@ fn read_toolhelp(entry: &PROCESSENTRY32W, path_buffer: &mut [u16]) -> Option<Pro
     let mut kernel = FILETIME::default();
     let mut user = FILETIME::default();
     unsafe { GetProcessTimes(handle.0, &mut created, &mut exit, &mut kernel, &mut user) }.ok()?;
+    let created_ticks = ticks(created);
     let mut length = path_buffer.len() as u32;
     let path = unsafe {
         QueryFullProcessImageNameW(
@@ -339,7 +401,10 @@ fn read_toolhelp(entry: &PROCESSENTRY32W, path_buffer: &mut [u16]) -> Option<Pro
         )
     }
     .ok()
-    .map(|_| String::from_utf16_lossy(&path_buffer[..length as usize]));
+    .map(|_| {
+        let used = (length as usize).min(path_buffer.len());
+        String::from_utf16_lossy(&path_buffer[..used])
+    });
     let memory = unsafe {
         OpenProcess(
             PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
@@ -349,10 +414,19 @@ fn read_toolhelp(entry: &PROCESSENTRY32W, path_buffer: &mut [u16]) -> Option<Pro
     }
     .ok()
     .map(Handle)
-    .and_then(|handle| {
+    .and_then(|mem_handle| {
+        let mut c2 = FILETIME::default();
+        let mut e2 = FILETIME::default();
+        let mut k2 = FILETIME::default();
+        let mut u2 = FILETIME::default();
+        if unsafe { GetProcessTimes(mem_handle.0, &mut c2, &mut e2, &mut k2, &mut u2) }.is_err()
+            || ticks(c2) != created_ticks
+        {
+            return None;
+        }
         let mut counters = PROCESS_MEMORY_COUNTERS::default();
         let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        if unsafe { K32GetProcessMemoryInfo(handle.0, &mut counters, size) }.as_bool() {
+        if unsafe { K32GetProcessMemoryInfo(mem_handle.0, &mut counters, size) }.as_bool() {
             Some(counters.WorkingSetSize as u64)
         } else {
             None

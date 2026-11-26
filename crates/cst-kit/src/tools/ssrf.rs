@@ -170,6 +170,24 @@ impl SafeHttpClient {
         Ok((url, addresses))
     }
 
+    pub async fn preflight_url(
+        &self,
+        value: &str,
+        cancel: CancellationToken,
+        timeout_ms: u64,
+    ) -> Result<Url, String> {
+        let clamped = timeout_ms.clamp(1_000, 180_000);
+        let timeout = Duration::from_millis(clamped);
+        let (url, _) = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err("请求已取消。".into()),
+            res = tokio::time::timeout(timeout, self.resolve_target(value)) => {
+                res.map_err(|_| format!("域名解析超过 {} 秒。", clamped.div_ceil(1000)))??
+            }
+        };
+        Ok(url)
+    }
+
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, String> {
         let mut target = request.url.clone();
         for hop in 0..=MAX_REDIRECTS {
@@ -237,7 +255,43 @@ trait Connector: Send + Sync {
     ) -> BoxFuture<'_, Result<HttpHop, String>>;
 }
 
+fn is_binary_content_type(content_type: Option<&str>) -> bool {
+    let Some(raw) = content_type else {
+        return false;
+    };
+    let mime = raw
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if mime.is_empty() {
+        return false;
+    }
+    mime.starts_with("image/")
+        || mime.starts_with("audio/")
+        || mime.starts_with("video/")
+        || mime.starts_with("font/")
+        || matches!(
+            mime.as_str(),
+            "application/pdf"
+                | "application/octet-stream"
+                | "application/zip"
+                | "application/gzip"
+                | "application/x-gzip"
+                | "application/x-tar"
+                | "application/x-rar-compressed"
+                | "application/x-7z-compressed"
+                | "application/wasm"
+                | "application/msword"
+        )
+        || mime.starts_with("application/vnd.")
+}
+
 pub(crate) fn decode_http_body(bytes: &[u8], content_type: Option<&str>) -> Result<String, String> {
+    if is_binary_content_type(content_type) {
+        return Err("网络响应为不支持的二进制或媒体类型。".into());
+    }
     if memchr::memchr(0, bytes).is_some() {
         return Err("网络正文不是支持的文本编码。".into());
     }
@@ -316,6 +370,9 @@ impl Connector for ReqwestConnector {
                     location,
                     body: String::new(),
                 });
+            }
+            if (200..300).contains(&status) && is_binary_content_type(content_type.as_deref()) {
+                return Err("网络响应为不支持的二进制或媒体类型。".into());
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| "网络正文读取失败。")?

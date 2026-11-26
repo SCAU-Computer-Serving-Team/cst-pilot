@@ -15,8 +15,8 @@
 
 图片读取返回双块：`content` 为 `[Text(meta_json), Image(base64)]`，`details` 仅包含 `meta_json`（含 `elapsedMs`，不含图片 base64）。
 
-1. **统一耗时 `elapsedMs`**：全部工具（含正常、降级、错误与裁剪输出）顶层均包含整数毫秒 `elapsedMs`。Web 与桌面端卡片在重放历史会话时优先使用事件 `durationMs`，缺失时回退 `details.elapsedMs`。
-2. **模型文本 `50 KiB` 受保护键裁剪**：序列化 UTF-8 字节超过 `51,200` 字节时，`result.rs` 递减裁剪大数组与长字符串后输出合法 JSON，顶层附加 `outputTruncated: true`、`originalBytes` 与 `outputNotice`，并保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 字段。`details` 保留完整未裁剪对象。
+1. **统一耗时 `elapsedMs`**：全部 14 个工具在执行阶段（含正常、降级、执行期结构化错误与裁剪输出）顶层均包含整数毫秒 `elapsedMs`；运行时前置参数 Schema 校验错误在进入执行前拦截，不经计时包装。Web 与桌面端卡片在重放历史会话时优先使用事件 `durationMs`，缺失时回退 `details.elapsedMs`。
+2. **模型文本 `50 KiB` 受保护键裁剪**：序列化 UTF-8 字节超过 `51,200` 字节时，`result.rs` 基于完整 `details` 单次递减裁剪大数组与长字符串并输出合法 JSON，顶层附加 `outputTruncated: true`、`originalBytes` 与 `outputNotice`，保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 字段。`details` 保留完整未裁剪对象。
 3. **状态与错误字段**：
    - 整次调用失败：返回 `isError: true`，文本与 `details` 为结构化 JSON `{"error": "...", "elapsedMs": N}`。
    - 局部降级：返回 `isError: false`，顶层或子对象附 `degraded: true` 及非空错误明细（`collectionErrors`、`counterErrors`、`smartErrors`、`degradedFrom`）。
@@ -27,8 +27,8 @@
 
 - **参数**：`{ path: string, offset?: number, limit?: number }`（`offset` 1-based，默认 `1`；`limit` 默认 `2000`）。
 - **返回（顶层对象）**：
-  - 文本文件：`{ path, kind: "text", offset, limit, outputLines, totalLines, outputBytes, truncated, truncatedBy?: "lines" | "bytes", nextOffset?: number, content, notice?, elapsedMs }`。
-  - 图片文件：`content` 为 `[Text(meta_json), Image(data, mimeType)]`，其中 `meta_json` 与 `details` 为 `{ path, kind: "image", mimeType, bytes, width?, height?, originalWidth?, originalHeight?, resized, note?, elapsedMs }`。
+  - 文本文件：`{ path, kind: "text", offset, limit, outputLines, totalLines, outputBytes, truncated, truncatedBy?: "lines" | "bytes" | "limit", nextOffset?: number, firstLineExceedsLimit?: true, firstLineBytes?: number, encodingDegraded?: true, content, notice?, elapsedMs }`。0 字节空文件返回 `totalLines: 0`、`content: ""`；含空字节的二进制文件与 UTF-16 文件报错拒绝。
+  - 图片文件：`content` 为 `[Text(meta_json), Image(data, mimeType)]`，其中 `meta_json` 与 `details` 为 `{ path, kind: "image", mimeType, bytes, resized, hints: string[], imageAttached: boolean, degraded?, collectionErrors?, notice?, elapsedMs }`。单图上限 `20 MiB`，无法解码的损坏图片降级返回单块 JSON（`imageAttached: false`、`degraded: true`）。
 
 ## ls
 
@@ -100,7 +100,7 @@
 | `kind` | `boot` | `"all"`（默认）、`"unexpected"`、`"bluescreen"` |
 | `type` | `security` | `"all"`（默认）、`"logonFail"`、`"lockout"` |
 | `app` / `name` / `msg` | `crash` / `service` / `query` | 消息字面子串（1–200 字符，不区分大小写） |
-| `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名（`query` 默认 `"System"`，`detail` 必填）/ 最多 16 个 `0–65535` 整数 / 提供程序正则（1–128 字节，忽略大小写；纯字面量下推 XPath） |
+| `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名（`query` 默认 `"System"`，`detail` 必填）/ 最多 16 个 `0–65535` 整数 / 提供程序正则（1–128 字节，忽略大小写，按本地正则匹配） |
 | `recordId` / `id` | `detail` | 二选一必填。`recordId` 匹配精确记录号，`id` 取该事件 ID 最新一条，同时必须提供 `logName` |
 
 - **返回（顶层键为 `[scope]`，含 `elapsedMs`）**：
@@ -134,32 +134,32 @@
 
 | 工具 | 核心参数 | 返回契约（均含 `elapsedMs`） |
 |---|---|---|
-| `web_search` | `{ query?, queries?, numResults?, mode?: "fast"\|"auto"\|"deep", includeDomains?, excludeDomains?, afterDate?, beforeDate?, languages?, contentMode?: "highlights"\|"summary"\|"text", additionalQueries?, oriQuestion?, provider?: "exa"\|"deepseek" }`（1–3 词） | `{ responseId, provider, mode, queryCount, successfulQueries, totalResults, queries: { query, results: { title, url, publishedDate?, author?, snippet }[], preview, error? }[], degraded?, collectionErrors?, notice?, elapsedMs }`；并发执行，单条失败局部降级，全败返 `isError: true` |
-| `web_fetch` | `{ url?, urls?, mode?: "auto"\|"provider"\|"direct", maxCharacters?, provider?: "exa"\|"deepseek" }`（1–5 链接） | `{ responseId, provider, fetchMode, urlCount, successful, urls: { url, ok, title?, totalCharacters?, truncated?, content, error? }[], degraded?, collectionErrors?, elapsedMs }`；并发执行，发起前先过 SSRF 校验，直连支持 UTF-8 与 GB18030 |
-| `get_search_content` | `{ responseId, offset?, limit?, findText? }`（单次最多 6000 字符） | `{ responseId, content, totalCharacters, returnedCharacters, offset?, nextOffset?, truncated?, matchCount?, matched?, elapsedMs }` |
+| `web_search` | `{ query?, queries?, numResults?, mode?: "fast"\|"auto"\|"deep", includeDomains?, excludeDomains?, afterDate?, beforeDate?, languages?, contentMode?: "highlights"\|"summary"\|"text", additionalQueries?, oriQuestion?, provider?: "exa"\|"deepseek" }`（1–3 词） | `{ responseId, provider, mode, queryCount, successfulQueries, queries: { query, ok, resultCount, results: { title, url, snippet, excerpt, publishedAt?, score?, authority?, siteName? }[], preview?, synthesis?, grounding?, error? }[], degraded?, degradedFrom?, collectionErrors?, notice?, elapsedMs }`；并发执行，单条失败局部降级，全败返 `isError: true` |
+| `web_fetch` | `{ url?, urls?, mode?: "auto"\|"provider"\|"direct", maxCharacters?, provider?: "exa"\|"deepseek" }`（1–5 链接） | `{ responseId, provider, fetchMode, urlCount, successful, urls: { url, ok, title?, totalCharacters?, truncated?, content, error? }[], degraded?, collectionErrors?, elapsedMs }`；并发执行，直连与云端抓取前均经本地 SSRF 策略与 DNS 预检，直连支持 UTF-8 与 GB18030 |
+| `get_search_content` | `{ responseId, offset?, limit?, findText? }`（单次最多 6000 字符） | `{ responseId, mode: "range" \| "find", content, totalCharacters, returnedCharacters, offset, nextOffset?, truncated, matchCount?, elapsedMs }`（`find` 模式零命中返 `matchCount: 0`） |
 
 ### web-search 配置与服务端接口
 
-配置文件位于 `data/config/web-search.json`（v2，兼容读取 v1），默认启用 `exa`（含免费 MCP 回退），可选切换 `deepseek`（支持 `reuseModelApiKey`）。服务端路由位于 `cst-server`：
+配置文件位于 `data/config/web-search.json`（v2，兼容读取 v1，上限 `64 KiB`），默认启用 `exa`（含免费 MCP 回退），可选切换 `deepseek`（官方 `https://api.deepseek.com` 支持 `reuseModelApiKey`）。服务端路由位于 `cst-server`：
 
 | 方法与路径 | 用途与安全规则 |
 |---|---|
 | `GET /api/settings/web-search` | 读取当前联网检索配置脱敏视图（返回 `hasApiKey` 与 `apiKeyTail`，绝不返回明文密钥） |
-| `PATCH /api/settings/web-search` | 按字段合并更新配置并原子落盘（空字符串清除密钥，热生效，支持 `Idempotency-Key`） |
-| `POST /api/settings/web-search/test` | 使用当前或传入参数执行低开销探测，验证 `exa` 或 `deepseek` 连通性与凭据状态 |
+| `PATCH /api/settings/web-search` | 按字段合并更新配置并校验落盘 `≤ 64 KiB` 后原子写入。清空密钥须显式传 `clearApiKey: true`，拒绝空字符串或脱敏占位回写；`baseUrl` 仅允许 HTTPS，更改来源禁止继承旧 Key；热生效，支持 `Idempotency-Key` |
+| `POST /api/settings/web-search/test` | 使用当前或传入参数执行低开销探测，验证 `exa` 或 `deepseek` 连通性与凭据状态；变更 `baseUrl` 来源时不携带已保存密钥 |
 
 ## runbook
 
 - **参数**：
   - `action?: "plan" | "export"`（默认 `"plan"`）。
-  - `plan`：`title`（1–48 字）、`level: "safe" | "low" | "confirm"`、`items: { summary, command, shell: "cmd" | "powershell", admin?: boolean }[]`（1–20 条）、可选 `date`（`YYYY-MM-DD`）、可选 `runbookId` 与 `baseVersion`（修订已有方案时成对传入）、可选 `exportTxt: boolean`（默认 `false`）。
-  - `export`：`runbookId: string`、`version: number`。
+  - `plan`：`title`（1–48 字）、`level: "safe" | "low" | "confirm"`、`items: { summary, command, shell: "cmd" | "powershell", admin?: boolean }[]`（1–20 条）、可选 `date`（`YYYY-MM-DD`）、可选 `runbookId` 与 `baseVersion`（修订已有方案时成对传入）、可选 `exportTxt: boolean`（默认 `false`）；禁止传 `version`。
+  - `export`：仅接受 `runbookId: string` 与 `version: number`（须为最新版本），禁止同传方案编辑字段。
 - **返回（顶层键为 `runbook`，含 `elapsedMs`）**：
   - `{ runbookId, version, sequence, day, createdAt, timeText, title, level, levelLabel, items, commands[], action: "planned" | "exported", file?, dir?, name?, bytes?, encoding?, notice }`。
   - `commands[]` 统一为 `{ summary, command, shell: "cmd" | "powershell", admin: boolean }`。导出路径统一为 `artifacts/<YYYY-MM-DD>/runbook/<序号:02>-<风险档>-<标题>-v<版本>.txt`。
 - **服务端一键导出接口**：
-  - `POST /api/sessions/:id/runbook/export`：请求体 `{ entryId, toolCallId, open?: boolean }`（`open` 默认 `true`），解析该方案的 `runbookId` 与 `version`，落盘生成 `.txt` 并按 `open` 调用系统记事本打开，返回 `{ runbook, launched }`。
-  - `POST /api/sessions/:id/runbook/open`：打开已导出的 `.txt` 清单（兼容历史 `runbook_deliver` 记录）。
+  - `POST /api/sessions/:id/runbook/export`：请求体 `{ entryId, toolCallId, open?: boolean }`（`open` 须为布尔值，默认 `true`），按该卡片记录的 `runbookId` 与 `version` 导出 `.txt`（支持核对历史卡片版本），按 `open` 校验无重解析点与硬链接后调用记事本打开，返回 `{ runbook, launched, launchError? }`（记事本启动失败仍保留已导出的 `runbook` 与 `launched: false`）。
+  - `POST /api/sessions/:id/runbook/open`：校验无重解析点与硬链接后打开已导出的 `.txt` 清单（兼容历史 `runbook_deliver` 记录）。
 
 ## bitlocker
 

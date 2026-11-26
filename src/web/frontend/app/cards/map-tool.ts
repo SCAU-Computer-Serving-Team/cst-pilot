@@ -509,7 +509,13 @@ export function mapTool(call: Call, result: Message): CardView {
 		)
 			push({ kind: "text", id: "content", text: raw });
 		if (call.name === "get_search_content" && detail?.truncated)
-			notice("continue", `JSON 字符片段，非完整结论 · 已截断，续读 offset=${words(detail.nextOffset)}`, "warning");
+			notice(
+				"continue",
+				typeof detail.nextOffset === "number"
+					? `JSON 字符片段，非完整结论 · 已截断，续读 offset=${detail.nextOffset}`
+					: "JSON 字符片段，非完整结论 · 已截断，仅展示部分命中",
+				"warning",
+			);
 		pushNotices(detail);
 	} else if (diagnostics.has(call.name)) {
 		if (call.name === "startup" && record(detail?.startup)) {

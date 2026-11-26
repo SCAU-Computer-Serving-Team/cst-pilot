@@ -20,6 +20,7 @@ const CACHE_BYTES: usize = 8 * 1024 * 1024;
 const ENTRY_BYTES: usize = 2 * 1024 * 1024;
 const CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 const DEEPSEEK_MAX_QUERY_CHARS: usize = 128;
+pub const MAX_CONFIG_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -344,7 +345,7 @@ struct LegacySsrfConfig {
 impl WebSearchConfig {
     pub fn load_from_file(path: &Path) -> Result<Self, String> {
         let bytes = match std::fs::read(path) {
-            Ok(bytes) if bytes.len() <= 64 * 1024 => bytes,
+            Ok(bytes) if bytes.len() <= MAX_CONFIG_BYTES => bytes,
             Ok(_) => return Err("联网检索配置超过 64 KiB。".into()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(_) => return Err("联网检索配置无法读取，请检查 web-search.json。".into()),
@@ -445,28 +446,67 @@ impl WebSearchConfig {
         {
             return Err("DeepSeek minRerankScore 须在 0.0–3.0 之间。".into());
         }
+        if !self.providers.deepseek.localization.trim().is_empty()
+            && self
+                .providers
+                .deepseek
+                .localization
+                .trim()
+                .parse::<std::net::IpAddr>()
+                .is_err()
+        {
+            return Err("DeepSeek localization 必须是合法的 IP 地址。".into());
+        }
         let policy = NetworkPolicy {
             allow_tun: !self.ssrf.allow_ranges.is_empty(),
         };
-        policy
-            .validate_url(self.providers.exa.base_url.trim())
-            .map_err(|_| "Exa baseUrl 无效或不满足网络安全策略。")?;
-        policy
-            .validate_url(self.providers.deepseek.base_url.trim())
-            .map_err(|_| "DeepSeek baseUrl 无效或不满足网络安全策略。")?;
+        validate_https_base_url(&policy, &self.providers.exa.base_url, "Exa")?;
+        validate_https_base_url(&policy, &self.providers.deepseek.base_url, "DeepSeek")?;
         Ok(())
     }
 
-    pub fn apply_patch(&mut self, patch: Value) -> Result<(), String> {
-        let Some(obj) = patch.as_object() else {
+    pub fn apply_patch(&mut self, mut patch: Value) -> Result<(), String> {
+        let Some(obj) = patch.as_object_mut() else {
             return Err("联网检索配置补丁必须是 JSON 对象。".into());
         };
+        let old_exa_origin = base_url_origin(&self.providers.exa.base_url);
+        let old_ds_origin = base_url_origin(&self.providers.deepseek.base_url);
+        let old_exa_has_key = !self.providers.exa.api_key.trim().is_empty();
+        let old_ds_has_key = !self.providers.deepseek.api_key.trim().is_empty();
+        let old_exa_tail = mask_tail(self.providers.exa.api_key.trim());
+        let old_ds_tail = mask_tail(self.providers.deepseek.api_key.trim());
+
+        let mut exa_explicit_key = false;
+        let mut exa_clear_key = false;
+        let mut ds_explicit_key = false;
+        let mut ds_clear_key = false;
+        let mut ds_explicit_reuse_true = false;
+
+        if let Some(providers_obj) = obj.get_mut("providers").and_then(Value::as_object_mut) {
+            if let Some(exa_obj) = providers_obj.get_mut("exa").and_then(Value::as_object_mut) {
+                (exa_explicit_key, exa_clear_key) =
+                    sanitize_provider_key_patch(exa_obj, old_exa_tail.as_deref(), "Exa")?;
+            }
+            if let Some(ds_obj) = providers_obj
+                .get_mut("deepseek")
+                .and_then(Value::as_object_mut)
+            {
+                (ds_explicit_key, ds_clear_key) =
+                    sanitize_provider_key_patch(ds_obj, old_ds_tail.as_deref(), "DeepSeek")?;
+                ds_explicit_reuse_true = ds_obj.get("reuseModelApiKey") == Some(&Value::Bool(true));
+            }
+        }
+
         let mut current = serde_json::to_value(&*self).map_err(|_| "联网检索配置编码失败。")?;
         merge_json_patch(&mut current, obj);
         let mut next: Self =
             serde_json::from_value(current).map_err(|_| "联网检索配置字段类型或枚举值无效。")?;
         next.version = 2;
-        next.providers.exa.api_key = next.providers.exa.api_key.trim().to_owned();
+        if exa_clear_key {
+            next.providers.exa.api_key.clear();
+        } else {
+            next.providers.exa.api_key = next.providers.exa.api_key.trim().to_owned();
+        }
         next.providers.exa.base_url = next
             .providers
             .exa
@@ -474,7 +514,11 @@ impl WebSearchConfig {
             .trim()
             .trim_end_matches('/')
             .to_owned();
-        next.providers.deepseek.api_key = next.providers.deepseek.api_key.trim().to_owned();
+        if ds_clear_key {
+            next.providers.deepseek.api_key.clear();
+        } else {
+            next.providers.deepseek.api_key = next.providers.deepseek.api_key.trim().to_owned();
+        }
         next.providers.deepseek.base_url = next
             .providers
             .deepseek
@@ -482,7 +526,40 @@ impl WebSearchConfig {
             .trim()
             .trim_end_matches('/')
             .to_owned();
+
         next.validate()?;
+
+        if base_url_origin(&next.providers.exa.base_url) != old_exa_origin
+            && old_exa_has_key
+            && !exa_explicit_key
+            && !exa_clear_key
+        {
+            return Err(
+                "修改 Exa baseUrl 时不得复用旧 API Key，请提供新 apiKey 或设置 clearApiKey: true。"
+                    .into(),
+            );
+        }
+        if base_url_origin(&next.providers.deepseek.base_url) != old_ds_origin
+            && old_ds_has_key
+            && !ds_explicit_key
+            && !ds_clear_key
+        {
+            return Err(
+                "修改 DeepSeek baseUrl 时不得复用旧 API Key，请提供新 apiKey 或设置 clearApiKey: true。"
+                    .into(),
+            );
+        }
+        if !is_official_deepseek_base_url(&next.providers.deepseek.base_url) {
+            if ds_explicit_reuse_true {
+                return Err("仅官方 https://api.deepseek.com 地址支持复用模型 API Key。".into());
+            }
+            next.providers.deepseek.reuse_model_api_key = false;
+        }
+
+        let encoded = serde_json::to_vec_pretty(&next).map_err(|_| "联网检索配置编码失败。")?;
+        if encoded.len() > MAX_CONFIG_BYTES {
+            return Err("联网检索配置超过 64 KiB 上限。".into());
+        }
         *self = next;
         Ok(())
     }
@@ -503,7 +580,9 @@ impl WebSearchConfig {
             .and_then(Value::as_object_mut)
         {
             let key = self.providers.deepseek.api_key.trim();
-            let model_key_available = resolve_deepseek_model_api_key(config_dir).is_some();
+            let official_base = is_official_deepseek_base_url(&self.providers.deepseek.base_url);
+            let model_key_available =
+                official_base && resolve_deepseek_model_api_key(config_dir).is_some();
             ds.remove("apiKey");
             ds.insert("hasApiKey".into(), json!(!key.is_empty()));
             ds.insert("apiKeyTail".into(), json!(mask_tail(key)));
@@ -514,6 +593,84 @@ impl WebSearchConfig {
         }
         val
     }
+}
+
+fn validate_https_base_url(
+    policy: &NetworkPolicy,
+    raw: &str,
+    label: &str,
+) -> Result<url::Url, String> {
+    let url = policy
+        .validate_url(raw.trim())
+        .map_err(|_| format!("{label} baseUrl 无效或不满足网络安全策略。"))?;
+    if url.scheme() != "https" {
+        return Err(format!("{label} baseUrl 仅允许使用 HTTPS 协议。"));
+    }
+    Ok(url)
+}
+
+fn base_url_origin(raw: &str) -> Option<String> {
+    url::Url::parse(raw.trim())
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+}
+
+fn is_official_deepseek_base_url(raw: &str) -> bool {
+    let Ok(url) = url::Url::parse(raw.trim()) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .is_some_and(|h| h.eq_ignore_ascii_case("api.deepseek.com"))
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+fn looks_like_masked_key(candidate: &str, existing_tail: Option<&str>) -> bool {
+    if candidate.contains("****") || candidate.contains("•••") || candidate.contains("...") {
+        return true;
+    }
+    if let Some(tail) = existing_tail
+        && !tail.is_empty()
+        && candidate == tail
+    {
+        return true;
+    }
+    false
+}
+
+fn sanitize_provider_key_patch(
+    obj: &mut Map<String, Value>,
+    existing_tail: Option<&str>,
+    label: &str,
+) -> Result<(bool, bool), String> {
+    let clear = match obj.remove("clearApiKey") {
+        None => false,
+        Some(Value::Bool(b)) => b,
+        Some(_) => return Err(format!("{label} clearApiKey 必须是布尔值。")),
+    };
+    let explicit = match obj.get("apiKey") {
+        None => false,
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if clear {
+                return Err(format!("{label} 不能同时设置 clearApiKey 与 apiKey。"));
+            }
+            if trimmed.is_empty() {
+                return Err(format!(
+                    "{label} apiKey 不能为空；如需清除请传 clearApiKey: true。"
+                ));
+            }
+            if looks_like_masked_key(trimmed, existing_tail) {
+                return Err(format!("{label} apiKey 疑似脱敏占位值，已拒绝写入。"));
+            }
+            true
+        }
+        Some(_) => return Err(format!("{label} apiKey 必须是字符串。")),
+    };
+    Ok((explicit, clear))
 }
 
 fn mask_tail(key: &str) -> Option<String> {
@@ -574,17 +731,20 @@ pub struct WebAccess {
     static_config: WebSearchConfig,
     transport_override: Option<Arc<dyn HttpTransport>>,
     cache: Arc<Mutex<VecDeque<CachedContent>>>,
+    limiter: Arc<Mutex<(usize, Arc<Semaphore>)>>,
 }
 
 impl WebAccess {
     pub fn from_config(path: &Path) -> Result<Self, String> {
         let config = WebSearchConfig::load_from_file(path)?;
+        let cap = config.max_concurrent.clamp(1, 5);
         Ok(Self {
             config_path: Some(path.to_path_buf()),
             config_dir: path.parent().map(Path::to_path_buf),
             static_config: config,
             transport_override: None,
             cache: Arc::new(Mutex::new(VecDeque::new())),
+            limiter: Arc::new(Mutex::new((cap, Arc::new(Semaphore::new(cap))))),
         })
     }
 
@@ -597,13 +757,26 @@ impl WebAccess {
         transport: Arc<dyn HttpTransport>,
         config: WebSearchConfig,
     ) -> Self {
+        let cap = config.max_concurrent.clamp(1, 5);
         Self {
             config_path: None,
             config_dir: None,
             static_config: config,
             transport_override: Some(transport),
             cache: Arc::new(Mutex::new(VecDeque::new())),
+            limiter: Arc::new(Mutex::new((cap, Arc::new(Semaphore::new(cap))))),
         }
+    }
+
+    fn semaphore_for(&self, max_concurrent: usize) -> Arc<Semaphore> {
+        let cap = max_concurrent.clamp(1, 5);
+        if let Ok(mut guard) = self.limiter.lock() {
+            if guard.0 != cap {
+                *guard = (cap, Arc::new(Semaphore::new(cap)));
+            }
+            return guard.1.clone();
+        }
+        Arc::new(Semaphore::new(cap))
     }
 
     fn effective_config(&self) -> Result<WebSearchConfig, String> {
@@ -629,7 +802,9 @@ impl WebAccess {
         if !direct.is_empty() {
             return Some(direct.to_owned());
         }
-        if config.providers.deepseek.reuse_model_api_key {
+        if config.providers.deepseek.reuse_model_api_key
+            && is_official_deepseek_base_url(&config.providers.deepseek.base_url)
+        {
             return resolve_deepseek_model_api_key(self.config_dir.as_deref());
         }
         None
@@ -674,19 +849,60 @@ impl WebAccess {
         };
         match provider {
             WebSearchProvider::Exa => {
-                if let Some(k) = candidate_api_key {
-                    config.providers.exa.api_key = k.trim().to_owned();
-                }
+                let old_origin = base_url_origin(&config.providers.exa.base_url);
+                let old_tail = mask_tail(config.providers.exa.api_key.trim());
+                let explicit_key = match candidate_api_key {
+                    Some(k) => {
+                        let t = k.trim();
+                        if t.is_empty() || looks_like_masked_key(t, old_tail.as_deref()) {
+                            return json!({
+                                "ok": false,
+                                "provider": provider.as_str(),
+                                "latencyMs": started.elapsed().as_millis() as u64,
+                                "message": "测试用 Exa apiKey 无效或为脱敏占位值。",
+                            });
+                        }
+                        config.providers.exa.api_key = t.to_owned();
+                        true
+                    }
+                    None => false,
+                };
                 if let Some(u) = candidate_base_url {
-                    config.providers.exa.base_url = u.trim().trim_end_matches('/').to_owned();
+                    let trimmed = u.trim().trim_end_matches('/').to_owned();
+                    if base_url_origin(&trimmed) != old_origin && !explicit_key {
+                        config.providers.exa.api_key.clear();
+                    }
+                    config.providers.exa.base_url = trimmed;
                 }
             }
             WebSearchProvider::Deepseek => {
-                if let Some(k) = candidate_api_key {
-                    config.providers.deepseek.api_key = k.trim().to_owned();
-                }
+                let old_origin = base_url_origin(&config.providers.deepseek.base_url);
+                let old_tail = mask_tail(config.providers.deepseek.api_key.trim());
+                let explicit_key = match candidate_api_key {
+                    Some(k) => {
+                        let t = k.trim();
+                        if t.is_empty() || looks_like_masked_key(t, old_tail.as_deref()) {
+                            return json!({
+                                "ok": false,
+                                "provider": provider.as_str(),
+                                "latencyMs": started.elapsed().as_millis() as u64,
+                                "message": "测试用 DeepSeek apiKey 无效或为脱敏占位值。",
+                            });
+                        }
+                        config.providers.deepseek.api_key = t.to_owned();
+                        true
+                    }
+                    None => false,
+                };
                 if let Some(u) = candidate_base_url {
-                    config.providers.deepseek.base_url = u.trim().trim_end_matches('/').to_owned();
+                    let trimmed = u.trim().trim_end_matches('/').to_owned();
+                    if base_url_origin(&trimmed) != old_origin && !explicit_key {
+                        config.providers.deepseek.api_key.clear();
+                    }
+                    if !is_official_deepseek_base_url(&trimmed) {
+                        config.providers.deepseek.reuse_model_api_key = false;
+                    }
+                    config.providers.deepseek.base_url = trimmed;
                 }
             }
         }
@@ -796,6 +1012,9 @@ impl WebAccess {
                 )
                 .await;
             let any_ok = first.iter().any(Result::is_ok);
+            if cancel.is_cancelled() {
+                return Err("联网检索已取消。".into());
+            }
             if !any_ok
                 && input.provider.is_none()
                 && let Some(fallback) = config.fallback_provider
@@ -806,8 +1025,18 @@ impl WebAccess {
                     .find_map(|r| r.as_ref().err().cloned())
                     .unwrap_or_else(|| "主提供商检索失败".into());
                 let second = self
-                    .run_batch_search(fallback, &queries, &opts, &config, &transport, cancel)
+                    .run_batch_search(
+                        fallback,
+                        &queries,
+                        &opts,
+                        &config,
+                        &transport,
+                        cancel.clone(),
+                    )
                     .await;
+                if cancel.is_cancelled() {
+                    return Err("联网检索已取消。".into());
+                }
                 if second.iter().any(Result::is_ok) {
                     (
                         fallback,
@@ -821,6 +1050,9 @@ impl WebAccess {
                 (primary, None, first)
             }
         };
+        if cancel.is_cancelled() {
+            return Err("联网检索已取消。".into());
+        }
 
         let mut query_rows = Vec::with_capacity(queries.len());
         let mut collection_errors = Vec::new();
@@ -913,16 +1145,16 @@ impl WebAccess {
         transport: &Arc<dyn HttpTransport>,
         cancel: CancellationToken,
     ) -> Vec<Result<ParsedSearch, String>> {
-        let sem = Arc::new(Semaphore::new(config.max_concurrent.clamp(1, 5)));
+        let sem = self.semaphore_for(config.max_concurrent);
         let futs = queries.iter().map(|q| {
             let sem = sem.clone();
             let cancel = cancel.clone();
             let q = q.clone();
             async move {
-                let _permit = sem
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| "检索并发槽不可用。".to_owned())?;
+                let _permit = acquire_permit(sem, &cancel).await?;
+                if cancel.is_cancelled() {
+                    return Err("联网检索已取消。".into());
+                }
                 self.run_single_search(provider, &q, opts, config, transport, cancel)
                     .await
             }
@@ -1146,13 +1378,18 @@ impl WebAccess {
             FetchStrategy::Direct => false,
             FetchStrategy::Provider => true,
             FetchStrategy::Auto => match provider {
-                WebSearchProvider::Exa => !config.providers.exa.api_key.trim().is_empty(),
-                WebSearchProvider::Deepseek => self.resolve_deepseek_key(&config).is_some(),
+                WebSearchProvider::Exa => {
+                    config.providers.exa.enabled && !config.providers.exa.api_key.trim().is_empty()
+                }
+                WebSearchProvider::Deepseek => {
+                    config.providers.deepseek.enabled
+                        && self.resolve_deepseek_key(&config).is_some()
+                }
             },
         };
         let fetch_mode = if use_provider { "provider" } else { "direct" };
 
-        let sem = Arc::new(Semaphore::new(config.max_concurrent.clamp(1, 5)));
+        let sem = self.semaphore_for(config.max_concurrent);
         let futs = urls.iter().map(|raw_url| {
             let sem = sem.clone();
             let cancel = cancel.clone();
@@ -1161,12 +1398,18 @@ impl WebAccess {
             let config = config.clone();
             let transport = transport.clone();
             async move {
-                let _permit = sem
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| "抓取并发槽不可用。".to_owned())?;
-                // Local SSRF URL policy ALWAYS runs before direct OR cloud provider fetch.
-                let validated = policy.validate_url(&raw_url)?;
+                let _permit = acquire_permit(sem, &cancel).await?;
+                if cancel.is_cancelled() {
+                    return Err("网页抓取已取消。".into());
+                }
+                // Local SSRF URL policy + DNS preflight runs before cloud provider fetch.
+                let validated = if use_provider && self.transport_override.is_none() {
+                    SafeHttpClient::new(policy)
+                        .preflight_url(&raw_url, cancel.clone(), config.timeout_ms)
+                        .await?
+                } else {
+                    policy.validate_url(&raw_url)?
+                };
                 if use_provider {
                     self.fetch_via_provider(
                         provider,
@@ -1184,6 +1427,9 @@ impl WebAccess {
             }
         });
         let outcomes = join_all(futs).await;
+        if cancel.is_cancelled() {
+            return Err("网页抓取已取消。".into());
+        }
 
         let mut url_rows = Vec::with_capacity(urls.len());
         let mut collection_errors = Vec::new();
@@ -1198,7 +1444,7 @@ impl WebAccess {
                     let clipped_cache =
                         clip_bytes(&page.content, ENTRY_BYTES.saturating_sub(full.len()));
                     full.push_str(&format!("## {raw_url}\n{clipped_cache}\n\n"));
-                    let truncated = total_chars > max_chars;
+                    let truncated = page.provider_truncated || total_chars > max_chars;
                     let body = clip_chars(&page.content, max_chars).to_owned();
                     let mut row = json!({
                         "url": raw_url,
@@ -1264,6 +1510,9 @@ impl WebAccess {
     ) -> Result<FetchedPage, String> {
         match provider {
             WebSearchProvider::Exa => {
+                if !config.providers.exa.enabled {
+                    return Err("Exa 提供商已在配置中停用。".into());
+                }
                 let key = config.providers.exa.api_key.trim();
                 if key.is_empty() {
                     return Err("未配置 Exa API Key，无法使用 Exa 正文抓取。".into());
@@ -1305,9 +1554,17 @@ impl WebAccess {
                 if content.trim().is_empty() {
                     return Err("网页正文为空。".into());
                 }
-                Ok(FetchedPage { title, content })
+                let provider_truncated = content.chars().count() >= max_chars;
+                Ok(FetchedPage {
+                    title,
+                    content,
+                    provider_truncated,
+                })
             }
             WebSearchProvider::Deepseek => {
+                if !config.providers.deepseek.enabled {
+                    return Err("DeepSeek 提供商已在配置中停用。".into());
+                }
                 let key = self
                     .resolve_deepseek_key(config)
                     .ok_or("未配置 DeepSeek API Key，无法使用 DeepSeek 正文抓取。")?;
@@ -1340,7 +1597,11 @@ impl WebAccess {
                 if content.trim().is_empty() {
                     return Err("网页正文为空。".into());
                 }
-                Ok(FetchedPage { title, content })
+                Ok(FetchedPage {
+                    title,
+                    content,
+                    provider_truncated: false,
+                })
             }
         }
     }
@@ -1368,7 +1629,14 @@ impl WebAccess {
         }
         let title = extract_html_title(&resp.body);
         let content = readable_text(&resp.body);
-        Ok(FetchedPage { title, content })
+        if content.trim().is_empty() {
+            return Err("网页正文为空。".into());
+        }
+        Ok(FetchedPage {
+            title,
+            content,
+            provider_truncated: false,
+        })
     }
 
     pub fn get(&self, input: ContentInput) -> Result<Value, String> {
@@ -1496,9 +1764,21 @@ struct ParsedSearch {
     notices: Vec<String>,
 }
 
+async fn acquire_permit(
+    sem: Arc<Semaphore>,
+    cancel: &CancellationToken,
+) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err("请求已取消。".into()),
+        permit = sem.acquire_owned() => permit.map_err(|_| "并发槽不可用。".to_owned()),
+    }
+}
+
 struct FetchedPage {
     title: Option<String>,
     content: String,
+    provider_truncated: bool,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -1635,6 +1915,27 @@ fn build_exa_search_payload(
     Value::Object(payload)
 }
 
+fn is_valid_domain_token(d: &str) -> bool {
+    !d.is_empty()
+        && d.len() <= 253
+        && d.contains('.')
+        && !d.starts_with('.')
+        && !d.ends_with('.')
+        && !d.starts_with('-')
+        && !d.ends_with('-')
+        && !d.contains("..")
+        && d.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+}
+
+fn is_valid_iso_date(s: &str) -> bool {
+    s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+}
+
+fn is_valid_lang_token(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 16 && s.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-')
+}
+
 pub(crate) fn build_deepseek_query(
     raw_query: &str,
     include_domains: &[String],
@@ -1653,29 +1954,52 @@ pub(crate) fn build_deepseek_query(
         ));
     }
     let mut ops = Vec::new();
+    let mut includes = Vec::new();
     for d in include_domains {
         let d = d.trim();
         if !d.is_empty() {
-            ops.push(format!("site:{d}"));
+            if !is_valid_domain_token(d) {
+                return Err(format!("includeDomains 包含非法域名：{d}"));
+            }
+            includes.push(format!("site:{d}"));
         }
+    }
+    if includes.len() == 1 {
+        ops.push(includes.remove(0));
+    } else if includes.len() > 1 {
+        ops.push(format!("({})", includes.join(" OR ")));
     }
     for d in exclude_domains {
         let d = d.trim();
         if !d.is_empty() {
+            if !is_valid_domain_token(d) {
+                return Err(format!("excludeDomains 包含非法域名：{d}"));
+            }
             ops.push(format!("-site:{d}"));
         }
     }
     if let Some(after) = after_date.map(str::trim).filter(|s| !s.is_empty()) {
+        if !is_valid_iso_date(after) {
+            return Err(format!("afterDate 必须是合法的 YYYY-MM-DD 日期：{after}"));
+        }
         ops.push(format!("after:{after}"));
     }
     if let Some(before) = before_date.map(str::trim).filter(|s| !s.is_empty()) {
+        if !is_valid_iso_date(before) {
+            return Err(format!("beforeDate 必须是合法的 YYYY-MM-DD 日期：{before}"));
+        }
         ops.push(format!("before:{before}"));
     }
-    let langs: Vec<&str> = languages
-        .iter()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let mut langs = Vec::new();
+    for s in languages {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            if !is_valid_lang_token(trimmed) {
+                return Err(format!("languages 包含非法语言码：{trimmed}"));
+            }
+            langs.push(trimmed);
+        }
+    }
     if !langs.is_empty() {
         ops.push(format!("lang:{}", langs.join(",")));
     }
@@ -2187,5 +2511,102 @@ mod tests {
         assert_eq!(res["degraded"], true);
         assert!(res["degradedFrom"].as_str().unwrap().starts_with("exa:"));
         assert_eq!(res["queries"][0]["results"][0]["authority"], 4);
+    }
+
+    #[test]
+    fn patch_enforces_https_origin_isolation_clear_key_and_64kib_cap() {
+        let mut cfg = WebSearchConfig::default();
+        cfg.providers.exa.api_key = "exa-live-secret-9988".into();
+
+        // Plain HTTP baseUrl is rejected.
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": { "exa": { "baseUrl": "http://api.exa.ai" } }
+            }))
+            .is_err()
+        );
+        // Changing baseUrl origin without new key or clearApiKey is rejected (prevents key exfil).
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": { "exa": { "baseUrl": "https://other.example.com" } }
+            }))
+            .is_err()
+        );
+        // Empty string or masked placeholder apiKey is rejected.
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": { "exa": { "apiKey": "   " } }
+            }))
+            .is_err()
+        );
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": { "exa": { "apiKey": "****9988" } }
+            }))
+            .is_err()
+        );
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": { "exa": { "apiKey": "9988" } }
+            }))
+            .is_err()
+        );
+        // Changing DeepSeek baseUrl to non-official origin refuses reuseModelApiKey: true.
+        assert!(
+            cfg.apply_patch(json!({
+                "providers": {
+                    "deepseek": {
+                        "baseUrl": "https://proxy.example.com",
+                        "reuseModelApiKey": true
+                    }
+                }
+            }))
+            .is_err()
+        );
+        // Explicit clearApiKey clears key cleanly and allows changing origin.
+        cfg.apply_patch(json!({
+            "providers": {
+                "exa": {
+                    "baseUrl": "https://alt.example.com",
+                    "clearApiKey": true
+                }
+            }
+        }))
+        .unwrap();
+        assert!(cfg.providers.exa.api_key.is_empty());
+        assert_eq!(cfg.providers.exa.base_url, "https://alt.example.com");
+
+        // Oversized config (>64 KiB) is rejected before writing.
+        let huge_domains: Vec<String> = (0..2500)
+            .map(|i| format!("domain-{i}.example.com"))
+            .collect();
+        assert!(
+            cfg.apply_patch(json!({
+                "defaults": { "includeDomains": huge_domains }
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn deepseek_query_combines_multiple_include_domains_with_or_and_validates_syntax() {
+        let (q, omitted) = build_deepseek_query(
+            "BSOD",
+            &["learn.microsoft.com".into(), "support.microsoft.com".into()],
+            &["spam.example.com".into()],
+            Some("2026-01-15"),
+            None,
+            &["zh".into()],
+        )
+        .unwrap();
+        assert!(!omitted);
+        assert!(q.contains("(site:learn.microsoft.com OR site:support.microsoft.com)"));
+        assert!(q.contains("-site:spam.example.com"));
+        assert!(q.contains("after:2026-01-15"));
+        // Reject invalid domain / date syntax.
+        assert!(
+            build_deepseek_query("BSOD", &["bad domain.com".into()], &[], None, None, &[]).is_err()
+        );
+        assert!(build_deepseek_query("BSOD", &[], &[], Some("2026-02-30"), None, &[]).is_err());
     }
 }

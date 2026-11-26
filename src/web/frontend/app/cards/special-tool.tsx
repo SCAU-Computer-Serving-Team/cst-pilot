@@ -191,19 +191,25 @@ function Runbook({
 		key.current ??= crypto.randomUUID();
 		try {
 			if (wasUiExported) {
-				await apiJson(sessionPath(sessionId, "/runbook/export"), {
-					method: "POST",
-					body: { entryId, toolCallId: callId, open: true },
-					idempotencyKey: key.current,
-				});
+				const res = await apiJson<{ launched?: boolean; launchError?: string }>(
+					sessionPath(sessionId, "/runbook/export"),
+					{
+						method: "POST",
+						body: { entryId, toolCallId: callId, open: true },
+						idempotencyKey: key.current,
+					},
+				);
+				setFeedback(
+					res.launched === false ? (res.launchError ?? "无法启动记事本，请手动打开清单。") : "已发起打开",
+				);
 			} else {
 				await apiJson(sessionPath(sessionId, "/runbook/open"), {
 					method: "POST",
 					body: { entryId, toolCallId: callId },
 					idempotencyKey: key.current,
 				});
+				setFeedback("已发起打开");
 			}
-			setFeedback("已发起打开");
 			key.current = undefined;
 		} catch (cause) {
 			if (cause instanceof ApiFailure && cause.code?.startsWith("runbook_")) {
@@ -224,6 +230,8 @@ function Runbook({
 		key.current ??= crypto.randomUUID();
 		try {
 			const res = await apiJson<{
+				launched?: boolean;
+				launchError?: string;
 				runbook?: { file?: string; name?: string; levelLabel?: string; items?: number };
 			}>(sessionPath(sessionId, "/runbook/export"), {
 				method: "POST",
@@ -238,7 +246,11 @@ function Runbook({
 					count: typeof res.runbook.items === "number" ? res.runbook.items : view.count,
 				});
 			}
-			setFeedback("已导出并打开");
+			setFeedback(
+				res.launched === false
+					? (res.launchError ?? "已导出清单，但无法启动记事本，可点击上方文件名重试。")
+					: "已导出并打开",
+			);
 			key.current = undefined;
 		} catch (cause) {
 			if (cause instanceof ApiFailure && cause.code?.startsWith("runbook_")) {

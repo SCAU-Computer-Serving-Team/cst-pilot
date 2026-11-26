@@ -35,7 +35,45 @@ use windows::Win32::System::SystemInformation::{
     RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
 };
 use windows::Win32::System::Threading::GetSystemTimes;
-use windows::core::{BOOL, PCWSTR};
+use windows::core::{BOOL, PCWSTR, PWSTR};
+
+const DEVPROP_TYPE_FILETIME_VAL: u32 = 16;
+const DEVPROP_TYPE_STRING_VAL: u32 = 18;
+const ERROR_SERVICE_DOES_NOT_EXIST_CODE: u32 = 1060;
+
+fn as_bytes(words: &[u64]) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u8>(), std::mem::size_of_val(words)) }
+}
+
+fn as_bytes_mut(words: &mut [u64]) -> &mut [u8] {
+    unsafe {
+        std::slice::from_raw_parts_mut(
+            words.as_mut_ptr().cast::<u8>(),
+            std::mem::size_of_val(words),
+        )
+    }
+}
+
+/// Safely decode a NUL-terminated UTF-16 string pointer guaranteed to reside inside `buf`.
+fn bounded_wide_in_buf(ptr: PWSTR, buf: &[u8]) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    let base = buf.as_ptr() as usize;
+    let rel = (ptr.0 as usize).checked_sub(base)?;
+    if rel >= buf.len() || !rel.is_multiple_of(2) {
+        return None;
+    }
+    let mut units = Vec::new();
+    for pair in buf[rel..].as_chunks::<2>().0 {
+        let ch = u16::from_le_bytes(*pair);
+        if ch == 0 {
+            return Some(String::from_utf16_lossy(&units));
+        }
+        units.push(ch);
+    }
+    None
+}
 
 use super::{Control, NativeError, NativeOverview, native_error, stopped, wide};
 use crate::diagnostics::win_native::{format_dmtf_date, rounded};
@@ -82,14 +120,14 @@ fn sample_cpu_pct(control: &Control) -> Option<f64> {
     let mut user2 = FILETIME::default();
     unsafe { GetSystemTimes(Some(&mut idle2), Some(&mut kernel2), Some(&mut user2)) }.ok()?;
 
-    let idle_d = ft_to_u64(idle2).saturating_sub(ft_to_u64(idle1));
-    let kernel_d = ft_to_u64(kernel2).saturating_sub(ft_to_u64(kernel1));
-    let user_d = ft_to_u64(user2).saturating_sub(ft_to_u64(user1));
-    let total = kernel_d.saturating_add(user_d);
+    let idle_d = ft_to_u64(idle2).checked_sub(ft_to_u64(idle1))?;
+    let kernel_d = ft_to_u64(kernel2).checked_sub(ft_to_u64(kernel1))?;
+    let user_d = ft_to_u64(user2).checked_sub(ft_to_u64(user1))?;
+    let total = kernel_d.checked_add(user_d)?;
     if total == 0 {
         return None;
     }
-    let busy = total.saturating_sub(idle_d);
+    let busy = total.checked_sub(idle_d)?;
     Some(rounded(
         (busy as f64 / total as f64 * 100.0).clamp(0.0, 100.0),
         1,
@@ -150,32 +188,58 @@ fn read_reg_sz(subkey: &str, value_name: &str) -> Option<String> {
 fn physical_core_count() -> Option<u32> {
     let mut len = 0u32;
     let _ = unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, None, &mut len) };
-    if len == 0 || len > 4 * 1024 * 1024 {
+    if !(8..=4 * 1024 * 1024).contains(&len) {
         return None;
     }
-    let mut buf = vec![0u8; len as usize];
-    unsafe {
-        GetLogicalProcessorInformationEx(
-            RelationProcessorCore,
-            Some(
-                buf.as_mut_ptr()
-                    .cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(),
-            ),
-            &mut len,
-        )
+    let mut words: Vec<u64> = vec![0; (len as usize).div_ceil(8)];
+    let mut filled = false;
+    for _ in 0..4 {
+        let mut cap = (words.len() * 8) as u32;
+        match unsafe {
+            GetLogicalProcessorInformationEx(
+                RelationProcessorCore,
+                Some(
+                    words
+                        .as_mut_ptr()
+                        .cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(),
+                ),
+                &mut cap,
+            )
+        } {
+            Ok(()) => {
+                len = cap;
+                filled = true;
+                break;
+            }
+            Err(e)
+                if (e.code().0 as u32 & 0xffff) == ERROR_INSUFFICIENT_BUFFER.0
+                    && (8..=4 * 1024 * 1024).contains(&cap) =>
+            {
+                words.resize((cap as usize).div_ceil(8), 0);
+            }
+            Err(_) => return None,
+        }
     }
-    .ok()?;
+    if !filled {
+        return None;
+    }
+    let bytes = as_bytes(&words);
+    let used = (len as usize).min(bytes.len());
     let mut offset = 0usize;
     let mut cores = 0u32;
-    while offset + size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>() <= len as usize {
-        let info = unsafe {
-            &*(buf.as_ptr().add(offset) as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)
-        };
-        if info.Size == 0 {
+    // Header of SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX is fixed 8 bytes:
+    // Relationship: i32 (4 bytes) + Size: u32 (4 bytes). Variable-length records may be smaller
+    // than size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>() (which includes the largest union arm).
+    while offset + 8 <= used {
+        let relationship = i32::from_le_bytes(bytes[offset..offset + 4].try_into().ok()?);
+        let rec_size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
+        if rec_size < 8 || offset.checked_add(rec_size).is_none_or(|end| end > used) {
             break;
         }
-        cores += 1;
-        offset = offset.saturating_add(info.Size as usize);
+        if relationship == RelationProcessorCore.0 {
+            cores += 1;
+        }
+        offset += rec_size;
     }
     (cores > 0).then_some(cores)
 }
@@ -242,6 +306,12 @@ pub fn overview(control: &Control) -> Result<NativeOverview, NativeError> {
         out.free_mb = Some(rounded(free, 0));
         out.used_mb = Some(rounded(used, 0));
         out.used_pct = (total > 0.0).then(|| rounded(used / total * 100.0, 1));
+    } else {
+        out.errors.push(NativeError {
+            source: "GlobalMemoryStatusEx".into(),
+            code: None,
+            message: "原生内存信息读取失败。".into(),
+        });
     }
 
     // 4. Kernel pool & page size (`GetPerformanceInfo`) + Pagefiles (`EnumPageFilesW`)
@@ -261,6 +331,11 @@ pub fn overview(control: &Control) -> Result<NativeOverview, NativeError> {
         ));
         ps
     } else {
+        out.errors.push(NativeError {
+            source: "K32GetPerformanceInfo".into(),
+            code: None,
+            message: "原生内核池信息读取失败。".into(),
+        });
         4096
     };
 
@@ -270,6 +345,12 @@ pub fn overview(control: &Control) -> Result<NativeOverview, NativeError> {
     };
     if unsafe { K32EnumPageFilesW(Some(pagefile_cb), (&raw mut pf_ctx).cast()) }.as_bool() {
         out.pagefile = Some(pf_ctx.rows);
+    } else {
+        out.errors.push(NativeError {
+            source: "K32EnumPageFilesW".into(),
+            code: None,
+            message: "原生页面文件枚举失败。".into(),
+        });
     }
 
     // 5. Uptime (`GetTickCount64`)
@@ -332,136 +413,138 @@ pub fn auto_services(control: &Control) -> Result<Vec<Value>, NativeError> {
             .map_err(|e| native_error("OpenSCManagerW", e))?,
     );
 
-    let mut needed = 0u32;
-    let mut count = 0u32;
+    // Win32 caps EnumServicesStatusExW at 256 KiB per page; use an aligned 64 KiB page buffer
+    // and paginate properly via `resume` on ERROR_MORE_DATA.
+    let mut page_words: Vec<u64> = vec![0; (64 * 1024usize).div_ceil(8)];
+    let mut cfg_words: Vec<u64> = vec![0; (8 * 1024usize).div_ceil(8)];
+    let mut rows = Vec::new();
     let mut resume = 0u32;
-    let _ = unsafe {
-        EnumServicesStatusExW(
-            scm.0,
-            SC_ENUM_PROCESS_INFO,
-            SERVICE_WIN32,
-            SERVICE_STATE_ALL,
-            None,
-            &mut needed,
-            &mut count,
-            Some(&mut resume),
-            PCWSTR::null(),
-        )
-    };
-    if needed == 0 || needed > 16 * 1024 * 1024 {
-        return Ok(Vec::new());
-    }
-    let mut buf = vec![0u8; needed as usize + 4096];
-    resume = 0;
-    loop {
+
+    for _ in 0..64 {
         stopped("SCM", control)?;
+        let prev_resume = resume;
+        let mut needed = 0u32;
+        let mut count = 0u32;
         let res = unsafe {
             EnumServicesStatusExW(
                 scm.0,
                 SC_ENUM_PROCESS_INFO,
                 SERVICE_WIN32,
                 SERVICE_STATE_ALL,
-                Some(&mut buf),
+                Some(as_bytes_mut(&mut page_words)),
                 &mut needed,
                 &mut count,
                 Some(&mut resume),
                 PCWSTR::null(),
             )
         };
-        match res {
-            Ok(()) => break,
-            Err(e) if (e.code().0 as u32 & 0xffff) == ERROR_MORE_DATA.0 => {
-                let next = buf
-                    .len()
-                    .saturating_add(needed as usize)
-                    .saturating_add(4096);
-                if next > 16 * 1024 * 1024 {
-                    return Err(native_error("EnumServicesStatusExW", e));
-                }
-                buf.resize(next, 0);
-                resume = 0;
-            }
+        let has_more = match res {
+            Ok(()) => false,
+            Err(e) if (e.code().0 as u32 & 0xffff) == ERROR_MORE_DATA.0 => true,
             Err(e) => return Err(native_error("EnumServicesStatusExW", e)),
-        }
-    }
+        };
 
-    let entries = unsafe {
-        std::slice::from_raw_parts(
-            buf.as_ptr().cast::<ENUM_SERVICE_STATUS_PROCESSW>(),
-            count as usize,
-        )
-    };
-    let mut cfg_buf = vec![0u8; 8192];
-    let mut rows = Vec::new();
-    for entry in entries {
-        stopped("SCM", control)?;
-        let name = if entry.lpServiceName.is_null() {
-            continue;
-        } else {
-            unsafe { entry.lpServiceName.to_string() }.unwrap_or_default()
-        };
-        if name.is_empty() {
-            continue;
+        let page_bytes = as_bytes(&page_words);
+        let entry_size = size_of::<ENUM_SERVICE_STATUS_PROCESSW>();
+        let max_entries = page_bytes.len() / entry_size;
+        if (count as usize) > max_entries {
+            return Err(NativeError {
+                source: "EnumServicesStatusExW".into(),
+                code: None,
+                message: "SCM 返回的服务计数超出缓冲区长度。".into(),
+            });
         }
-        let Ok(svc_raw) =
-            (unsafe { OpenServiceW(scm.0, PCWSTR(entry.lpServiceName.0), SERVICE_QUERY_CONFIG) })
-        else {
-            continue;
-        };
-        let svc = ScHandle(svc_raw);
-        let mut cfg_needed = 0u32;
-        let ok = unsafe {
-            QueryServiceConfigW(
-                svc.0,
-                Some(cfg_buf.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
-                cfg_buf.len() as u32,
-                &mut cfg_needed,
+        let entries = unsafe {
+            std::slice::from_raw_parts(
+                page_words.as_ptr().cast::<ENUM_SERVICE_STATUS_PROCESSW>(),
+                count as usize,
             )
         };
-        let queried = match ok {
-            Ok(()) => true,
-            Err(e)
-                if (e.code().0 as u32 & 0xffff) == ERROR_INSUFFICIENT_BUFFER.0
-                    && cfg_needed <= 64 * 1024 =>
-            {
-                cfg_buf.resize(cfg_needed as usize, 0);
-                unsafe {
-                    QueryServiceConfigW(
-                        svc.0,
-                        Some(cfg_buf.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
-                        cfg_buf.len() as u32,
-                        &mut cfg_needed,
-                    )
-                }
-                .is_ok()
+        for entry in entries {
+            stopped("SCM", control)?;
+            let Some(name) = bounded_wide_in_buf(entry.lpServiceName, page_bytes) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
             }
-            Err(_) => false,
-        };
-        if !queried {
-            continue;
+            let name_w = wide(&name);
+            let Ok(svc_raw) =
+                (unsafe { OpenServiceW(scm.0, PCWSTR(name_w.as_ptr()), SERVICE_QUERY_CONFIG) })
+            else {
+                continue;
+            };
+            let svc = ScHandle(svc_raw);
+            let mut cfg_needed = 0u32;
+            let ok = unsafe {
+                QueryServiceConfigW(
+                    svc.0,
+                    Some(cfg_words.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
+                    (cfg_words.len() * 8) as u32,
+                    &mut cfg_needed,
+                )
+            };
+            let queried = match ok {
+                Ok(()) => true,
+                Err(e)
+                    if (e.code().0 as u32 & 0xffff) == ERROR_INSUFFICIENT_BUFFER.0
+                        && (cfg_needed as usize) >= size_of::<QUERY_SERVICE_CONFIGW>()
+                        && cfg_needed <= 64 * 1024 =>
+                {
+                    cfg_words.resize((cfg_needed as usize).div_ceil(8), 0);
+                    unsafe {
+                        QueryServiceConfigW(
+                            svc.0,
+                            Some(cfg_words.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
+                            (cfg_words.len() * 8) as u32,
+                            &mut cfg_needed,
+                        )
+                    }
+                    .is_ok()
+                }
+                Err(_) => false,
+            };
+            if !queried {
+                continue;
+            }
+            let cfg_bytes = as_bytes(&cfg_words);
+            if cfg_bytes.len() < size_of::<QUERY_SERVICE_CONFIGW>() {
+                continue;
+            }
+            let cfg = unsafe { &*(cfg_words.as_ptr().cast::<QUERY_SERVICE_CONFIGW>()) };
+            if cfg.dwStartType != SERVICE_AUTO_START {
+                continue;
+            }
+            let display = bounded_wide_in_buf(entry.lpDisplayName, page_bytes)
+                .unwrap_or_else(|| name.clone());
+            let path_name = match bounded_wide_in_buf(cfg.lpBinaryPathName, cfg_bytes) {
+                Some(p) => json!(p),
+                None => Value::Null,
+            };
+            rows.push(json!({
+                "Name": name,
+                "DisplayName": display,
+                "State": service_state_label(entry.ServiceStatusProcess.dwCurrentState.0),
+                "PathName": path_name,
+            }));
         }
-        let cfg = unsafe { &*(cfg_buf.as_ptr().cast::<QUERY_SERVICE_CONFIGW>()) };
-        if cfg.dwStartType != SERVICE_AUTO_START {
-            continue;
+
+        if !has_more {
+            return Ok(rows);
         }
-        let display = if entry.lpDisplayName.is_null() {
-            name.clone()
-        } else {
-            unsafe { entry.lpDisplayName.to_string() }.unwrap_or_else(|_| name.clone())
-        };
-        let path_name = if cfg.lpBinaryPathName.is_null() {
-            Value::Null
-        } else {
-            json!(unsafe { cfg.lpBinaryPathName.to_string() }.unwrap_or_default())
-        };
-        rows.push(json!({
-            "Name": name,
-            "DisplayName": display,
-            "State": service_state_label(entry.ServiceStatusProcess.dwCurrentState.0),
-            "PathName": path_name,
-        }));
+        if count == 0 && resume == prev_resume {
+            return Err(NativeError {
+                source: "EnumServicesStatusExW".into(),
+                code: Some(ERROR_MORE_DATA.0),
+                message: "SCM 服务分页无进展。".into(),
+            });
+        }
     }
-    Ok(rows)
+    Err(NativeError {
+        source: "EnumServicesStatusExW".into(),
+        code: Some(ERROR_MORE_DATA.0),
+        message: "SCM 服务分页次数超过上限。".into(),
+    })
 }
 
 pub fn services_by_name(names: &[&str], control: &Control) -> Result<Vec<Value>, NativeError> {
@@ -474,19 +557,22 @@ pub fn services_by_name(names: &[&str], control: &Control) -> Result<Vec<Value>,
     for &svc_name in names {
         stopped("SCM", control)?;
         let w = wide(svc_name);
-        let Ok(svc_raw) =
-            (unsafe { OpenServiceW(scm.0, PCWSTR(w.as_ptr()), SERVICE_QUERY_STATUS) })
-        else {
-            continue;
+        let svc_raw = match unsafe { OpenServiceW(scm.0, PCWSTR(w.as_ptr()), SERVICE_QUERY_STATUS) }
+        {
+            Ok(h) => h,
+            Err(e) if (e.code().0 as u32 & 0xffff) == ERROR_SERVICE_DOES_NOT_EXIST_CODE => {
+                continue;
+            }
+            Err(e) => return Err(native_error("OpenServiceW", e)),
         };
         let svc = ScHandle(svc_raw);
         let mut status = SERVICE_STATUS::default();
-        if unsafe { QueryServiceStatus(svc.0, &mut status) }.is_ok() {
-            rows.push(json!({
-                "Name": svc_name,
-                "State": service_state_label(status.dwCurrentState.0),
-            }));
-        }
+        unsafe { QueryServiceStatus(svc.0, &mut status) }
+            .map_err(|e| native_error("QueryServiceStatus", e))?;
+        rows.push(json!({
+            "Name": svc_name,
+            "State": service_state_label(status.dwCurrentState.0),
+        }));
     }
     Ok(rows)
 }
@@ -529,8 +615,11 @@ fn devprop_string(
             return None;
         }
     }
+    if prop_type.0 != DEVPROP_TYPE_STRING_VAL {
+        return None;
+    }
     let bytes = (req as usize).min(buf.len());
-    if bytes < 2 {
+    if bytes < 2 || !bytes.is_multiple_of(2) {
         return None;
     }
     let units: Vec<u16> = buf[..bytes]
@@ -564,13 +653,14 @@ fn devprop_filetime_date(
         )
     }
     .ok()?;
-    if req < 8 {
+    if prop_type.0 != DEVPROP_TYPE_FILETIME_VAL || req != 8 {
         return None;
     }
     let ticks = u64::from_le_bytes(raw);
-    const EPOCH_DIFF_100NS: u64 = 116_444_736_000_000_000;
-    let unix_secs = ticks.checked_sub(EPOCH_DIFF_100NS)? / 10_000_000;
-    let dt = chrono::Utc.timestamp_opt(unix_secs as i64, 0).single()?;
+    const EPOCH_DIFF_100NS: i128 = 116_444_736_000_000_000;
+    let unix_secs = (i128::from(ticks) - EPOCH_DIFF_100NS).div_euclid(10_000_000);
+    let secs = i64::try_from(unix_secs).ok()?;
+    let dt = chrono::Utc.timestamp_opt(secs, 0).single()?;
     Some(dt.format("%Y-%m-%d").to_string())
 }
 

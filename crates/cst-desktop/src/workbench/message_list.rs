@@ -1961,10 +1961,23 @@ impl MessageListView {
                         } else {
                             c.open_session_runbook(s_id, e_id, c_id).await
                         };
-                        if let Err(err) = res {
-                            let _ = weak.update(cx, |_, cx| {
-                                cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                            });
+                        match res {
+                            Ok(val) => {
+                                if val.get("launched") == Some(&Value::Bool(false))
+                                    && let Some(msg) =
+                                        val.get("launchError").and_then(Value::as_str)
+                                {
+                                    let msg = msg.to_owned();
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(MessageListEvent::ErrorMessage(msg));
+                                    });
+                                }
+                            }
+                            Err(err) => {
+                                let _ = weak.update(cx, |_, cx| {
+                                    cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                                });
+                            }
                         }
                     })
                     .detach();
@@ -1998,6 +2011,15 @@ impl MessageListView {
                                     let _ = weak.update(cx, |this, cx| {
                                         this.exported_runbooks.insert(call_key, deliv);
                                         cx.notify();
+                                    });
+                                }
+                                if val.get("launched") == Some(&Value::Bool(false))
+                                    && let Some(msg) =
+                                        val.get("launchError").and_then(Value::as_str)
+                                {
+                                    let msg = msg.to_owned();
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(MessageListEvent::ErrorMessage(msg));
                                     });
                                 }
                             }
@@ -3666,6 +3688,7 @@ fn render_process_part_inert(
                     .and_then(|v| {
                         v.get("durationMs")
                             .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+                            .or_else(|| v.get("details").and_then(|d| d.get("elapsedMs")))
                     })
                     .and_then(Value::as_u64);
                 let is_err = tool_result_val

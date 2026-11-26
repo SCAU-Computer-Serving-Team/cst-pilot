@@ -65,22 +65,28 @@ pub fn run_with(
                 std::thread::available_parallelism().map_or(1, usize::from),
                 top,
             );
-            populate_top_paths(source, &mut proc_val);
+            populate_top_paths(source, &second, &mut proc_val);
             Ok(json!({"proc": proc_val}))
         }
     }
 }
 
-fn populate_top_paths(source: &dyn DiagnosticSource, proc_val: &mut Value) {
-    let mut missing: Vec<u32> = Vec::new();
+fn populate_top_paths(
+    source: &dyn DiagnosticSource,
+    samples: &[ProcessSample],
+    proc_val: &mut Value,
+) {
+    let created_by_pid: HashMap<u32, u64> = samples.iter().map(|p| (p.pid, p.created)).collect();
+    let mut missing: Vec<(u32, u64)> = Vec::new();
     for key in ["byCpu", "byMem"] {
         if let Some(arr) = proc_val[key].as_array() {
             for row in arr {
                 if row["path"].is_null()
                     && let Some(pid) = row["pid"].as_u64().and_then(|v| u32::try_from(v).ok())
-                    && !missing.contains(&pid)
+                    && !missing.iter().any(|(p, _)| *p == pid)
                 {
-                    missing.push(pid);
+                    let created = created_by_pid.get(&pid).copied().unwrap_or(0);
+                    missing.push((pid, created));
                 }
             }
         }
@@ -88,12 +94,14 @@ fn populate_top_paths(source: &dyn DiagnosticSource, proc_val: &mut Value) {
     if missing.is_empty() {
         return;
     }
-    let mut slots: Vec<(u32, Option<String>)> =
-        missing.into_iter().map(|pid| (pid, None)).collect();
+    let mut slots: Vec<(u32, u64, Option<String>)> = missing
+        .into_iter()
+        .map(|(pid, created)| (pid, created, None))
+        .collect();
     source.fill_process_paths(&mut slots);
     let resolved: HashMap<u32, String> = slots
         .into_iter()
-        .filter_map(|(pid, path)| path.map(|p| (pid, p)))
+        .filter_map(|(pid, _, path)| path.map(|p| (pid, p)))
         .collect();
     if resolved.is_empty() {
         return;
@@ -147,8 +155,59 @@ pub fn process_result(
 fn overview(source: &dyn DiagnosticSource, control: &Control) -> Result<Value, String> {
     let mut errors = Vec::new();
     match source.native_overview(control) {
-        Ok(Some(native)) => {
-            errors.extend(native.errors);
+        Ok(Some(mut native)) => {
+            errors.extend(std::mem::take(&mut native.errors));
+            if native.cpu_total_pct.is_none() {
+                let cpu = collect(
+                    source,
+                    CIMV2,
+                    "SELECT Name,PercentProcessorTime FROM Win32_PerfFormattedData_PerfOS_Processor",
+                    control,
+                    &mut errors,
+                );
+                native.cpu_total_pct = cpu
+                    .iter()
+                    .find(|r| r["Name"] == "_Total")
+                    .and_then(|r| number(r, "PercentProcessorTime"));
+            }
+            if native.total_mb.is_none() {
+                let os = collect(
+                    source,
+                    CIMV2,
+                    "SELECT TotalVisibleMemorySize,FreePhysicalMemory FROM Win32_OperatingSystem",
+                    control,
+                    &mut errors,
+                )
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+                let total = number(&os, "TotalVisibleMemorySize").map(|v| v / 1024.0);
+                let free = number(&os, "FreePhysicalMemory").map(|v| v / 1024.0);
+                let used = total.zip(free).map(|(t, f)| (t - f).max(0.0));
+                native.total_mb = total.map(|v| rounded(v, 0));
+                native.free_mb = free.map(|v| rounded(v, 0));
+                native.used_mb = used.map(|v| rounded(v, 0));
+                native.used_pct = used
+                    .zip(total)
+                    .filter(|(_, t)| *t > 0.0)
+                    .map(|(u, t)| rounded(u / t * 100.0, 1));
+            }
+            if native.nonpaged_mb.is_none() {
+                let pool = collect(
+                    source,
+                    CIMV2,
+                    "SELECT PoolNonpagedBytes,PoolPagedBytes FROM Win32_PerfFormattedData_PerfOS_Memory",
+                    control,
+                    &mut errors,
+                )
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+                native.nonpaged_mb =
+                    number(&pool, "PoolNonpagedBytes").map(|v| rounded(v / 1048576.0, 0));
+                native.paged_mb =
+                    number(&pool, "PoolPagedBytes").map(|v| rounded(v / 1048576.0, 0));
+            }
             let pagefile = match native.pagefile {
                 Some(rows) => rows,
                 None => collect(
@@ -173,6 +232,15 @@ fn overview(source: &dyn DiagnosticSource, control: &Control) -> Result<Value, S
                 .collect(),
             };
             control.check()?;
+            let has_any = native.cpu_total_pct.is_some()
+                || native.total_mb.is_some()
+                || native.nonpaged_mb.is_some()
+                || !pagefile.is_empty()
+                || native.uptime.is_some()
+                || native.cpu.is_some();
+            if !has_any && !errors.is_empty() {
+                return Err("整机信息采集全部失败。".into());
+            }
             let mut result = json!({
                 "cpuTotalPct": native.cpu_total_pct,
                 "logicalCores": native.logical_cores,

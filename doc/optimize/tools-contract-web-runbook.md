@@ -41,10 +41,10 @@
    - **DeepSeek Search API（可选提供商）**：对接官方独立 JSON REST 端点 `https://api.deepseek.com/v1/tools/search`（查询长度 `1–128` 字符守卫，支持 `site:`/`after:`/`before:`/`lang:` 算子、`count` `1–50`、`ori_question`、`need_content`）与 `POST /v1/tools/fetch`。支持独立 API Key 或开启 `reuseModelApiKey` 复用模型凭据。
 3. **并发、容错与抓取策略**：
    - 多词（`1–3`）与多链接（`1–5`）改受控并发并保持输入顺序，单条失败记入该项 `error` 与 `collectionErrors` 并标 `degraded: true`，仅全败返 `isError: true`。
-   - 解耦常规超时（默认 `15 s`）与深度搜索超时（默认 `45 s`）。所有 URL 发起前先经本地 SSRF 策略校验，不将私网地址发往外部接口。直连抓取支持 UTF-8 与 GB18030 解码。
+   - 解耦常规超时（默认 `15 s`）与深度搜索超时（默认 `45 s`）。所有 URL 发起前先经本地 SSRF 策略与 DNS 解析预检，拒绝内网域名及私网地址外发至外部接口。直连抓取拒绝二进制媒体类型并支持 UTF-8 与 GB18030 解码。
 4. **配置与服务端接口**：
-   - 升级 `data/config/web-search.json` 为 v2 结构并兼容读取 v1，保留在 `PathGuard` 敏感保护清单内。
-   - 服务端新增 `GET/PATCH /api/settings/web-search`（密钥脱敏，保存后热生效）与 `POST /api/settings/web-search/test`。双端图形设置页等待设置页重设计 PR 合并后接入。
+   - 升级 `data/config/web-search.json` 为 v2 结构并兼容读取 v1，单文件上限 `64 KiB`，保留在 `PathGuard` 敏感保护清单内。`baseUrl` 仅允许 HTTPS，换域禁止继承旧 Key，`reuseModelApiKey` 仅限官方 `https://api.deepseek.com`。
+   - 服务端新增 `GET/PATCH /api/settings/web-search`（密钥脱敏，显式 `clearApiKey: true` 清空，保存后热生效）与 `POST /api/settings/web-search/test`。双端图形设置页等待设置页重设计 PR 合并后接入。
 
 ### 2.3 单工具 `runbook` 与双端一键导出
 

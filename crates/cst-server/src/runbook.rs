@@ -175,19 +175,50 @@ pub async fn export_and_maybe_open_runbook(
             ServiceError::new(ServiceErrorKind::InvalidInput, "runbook_export_failed", msg)
         })?;
     let mut launched = false;
+    let mut launch_error: Option<String> = None;
     if open
         && let Some(file) = exported
             .pointer("/runbook/file")
             .and_then(Value::as_str)
             .map(str::to_owned)
     {
-        validate_and_open_runbook(&file, kit_root, artifacts_root, opener).await?;
-        launched = true;
+        match validate_and_open_runbook(&file, kit_root, artifacts_root, opener).await {
+            Ok(_) => launched = true,
+            Err(err) => launch_error = Some(err.message),
+        }
     }
     if let Some(obj) = exported.as_object_mut() {
         obj.insert("launched".into(), json!(launched));
+        if let Some(msg) = launch_error {
+            obj.insert("launchError".into(), json!(msg));
+        }
     }
     Ok(exported)
+}
+
+fn strip_trusted_base(target: &Path, base: &Path) -> Option<PathBuf> {
+    if let Ok(rel) = target.strip_prefix(base) {
+        return Some(rel.to_path_buf());
+    }
+    #[cfg(windows)]
+    {
+        let target_norm = strip_windows_verbatim_prefix(target);
+        let base_norm = strip_windows_verbatim_prefix(base);
+        let t_str = target_norm.to_string_lossy();
+        let b_str = base_norm.to_string_lossy();
+        let b_trimmed = b_str.trim_end_matches(['\\', '/']);
+        if t_str.len() > b_trimmed.len()
+            && t_str
+                .get(..b_trimmed.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b_trimmed))
+        {
+            let rest = &t_str[b_trimmed.len()..];
+            if let Some(rel) = rest.strip_prefix('\\').or_else(|| rest.strip_prefix('/')) {
+                return Some(PathBuf::from(rel));
+            }
+        }
+    }
+    None
 }
 
 pub async fn validate_and_open_runbook(
@@ -196,9 +227,85 @@ pub async fn validate_and_open_runbook(
     artifacts_root: &Path,
     opener: &RunbookOpenerFn,
 ) -> Result<Value, ServiceError> {
-    let file_path = PathBuf::from(file);
-    let canonical_target = match fs::canonicalize(&file_path) {
-        Ok(p) => strip_windows_verbatim_prefix(&p),
+    let raw_target = strip_windows_verbatim_prefix(Path::new(file));
+    if !raw_target.is_absolute() {
+        return Err(ServiceError::new(
+            ServiceErrorKind::InvalidInput,
+            "runbook_invalid_file",
+            "文件不属于已交付的文本清单",
+        ));
+    }
+
+    let mut matched_storage: Option<(cst_os::fs_safe::Storage, PathBuf)> = None;
+    for candidate_base in [artifacts_root.to_path_buf(), kit_root.join("outbox")] {
+        let Ok(storage) = cst_os::fs_safe::Storage::new(&candidate_base) else {
+            continue;
+        };
+        let clean_base = strip_windows_verbatim_prefix(&storage.root);
+        if let Some(rel) = strip_trusted_base(&raw_target, &clean_base) {
+            matched_storage = Some((storage, rel));
+            break;
+        }
+    }
+
+    let Some((storage, rel)) = matched_storage else {
+        return Err(ServiceError::new(
+            ServiceErrorKind::InvalidInput,
+            "runbook_invalid_file",
+            "文件不属于已交付的文本清单",
+        ));
+    };
+
+    if rel.as_os_str().is_empty()
+        || !rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+        || !rel
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("txt"))
+    {
+        return Err(ServiceError::new(
+            ServiceErrorKind::InvalidInput,
+            "runbook_invalid_file",
+            "文件不属于已交付的文本清单",
+        ));
+    }
+
+    let rel_parent = rel.parent().unwrap_or_else(|| Path::new(""));
+    let _dir_lease = storage.pin_directory(rel_parent, false).map_err(|msg| {
+        if msg.contains("系统错误 2") || msg.contains("系统错误 3") {
+            ServiceError::new(
+                ServiceErrorKind::NotFound,
+                "runbook_missing",
+                "清单文件已不存在，请使用卡片中的命令或重新生成清单。",
+            )
+        } else if msg.contains("系统错误 5") {
+            ServiceError::new(
+                ServiceErrorKind::AccessDenied,
+                "runbook_access_denied",
+                "没有权限访问清单，请检查文件权限。",
+            )
+        } else {
+            ServiceError::new(
+                ServiceErrorKind::InvalidInput,
+                "runbook_invalid_file",
+                "文件不属于已交付的文本清单",
+            )
+        }
+    })?;
+
+    let verified_path = storage.root.join(&rel);
+    match fs::symlink_metadata(&verified_path) {
+        Ok(meta) => {
+            if cst_os::fs_safe::is_reparse_or_symlink(&meta) || !meta.is_file() {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::InvalidInput,
+                    "runbook_invalid_file",
+                    "交付路径包含链接、重解析点或未指向文本文件",
+                ));
+            }
+        }
         Err(err) => {
             return Err(match err.kind() {
                 io::ErrorKind::NotFound => ServiceError::new(
@@ -218,50 +325,41 @@ pub async fn validate_and_open_runbook(
                 ),
             });
         }
-    };
-
-    let mut allowed_bases = Vec::new();
-    if let Ok(canon_art) = fs::canonicalize(artifacts_root) {
-        allowed_bases.push(strip_windows_verbatim_prefix(&canon_art));
-    }
-    if let Ok(canon_outbox) = fs::canonicalize(kit_root.join("outbox")) {
-        allowed_bases.push(strip_windows_verbatim_prefix(&canon_outbox));
     }
 
-    let is_contained = allowed_bases
-        .iter()
-        .any(|base| canonical_target.starts_with(base));
-    let is_txt = canonical_target
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("txt"));
-    if !is_contained || !is_txt {
-        return Err(ServiceError::new(
-            ServiceErrorKind::InvalidInput,
-            "runbook_invalid_file",
-            "文件不属于已交付的文本清单",
-        ));
-    }
-
-    match fs::metadata(&canonical_target) {
-        Ok(meta) if meta.is_file() => {}
-        Ok(_) => {
-            return Err(ServiceError::new(
+    let opened = storage.open_read(&verified_path).map_err(|msg| {
+        if msg.contains("系统错误 5") {
+            ServiceError::new(
+                ServiceErrorKind::AccessDenied,
+                "runbook_access_denied",
+                "没有权限访问清单，请检查文件权限。",
+            )
+        } else if msg.contains("硬链接") || msg.contains("链接") || msg.contains("重解析点")
+        {
+            ServiceError::new(
                 ServiceErrorKind::InvalidInput,
                 "runbook_invalid_file",
-                "交付路径未指向文本文件",
-            ));
+                "文件不属于已交付的文本清单",
+            )
+        } else {
+            ServiceError::new(
+                ServiceErrorKind::Internal,
+                "runbook_unavailable",
+                "无法读取清单，请检查所在介质。",
+            )
         }
-        Err(_) => {
-            return Err(ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "runbook_missing",
-                "清单文件已不存在，请使用卡片中的命令或重新生成清单。",
-            ));
-        }
-    }
+    })?;
+    let Some(opened_file) = opened else {
+        return Err(ServiceError::new(
+            ServiceErrorKind::NotFound,
+            "runbook_missing",
+            "清单文件已不存在，请使用卡片中的命令或重新生成清单。",
+        ));
+    };
+    drop(opened_file);
 
-    opener(canonical_target).await.map_err(|_| {
+    let launch_path = strip_windows_verbatim_prefix(&verified_path);
+    opener(launch_path).await.map_err(|_| {
         ServiceError::new(
             ServiceErrorKind::Unavailable,
             "runbook_launch_failed",

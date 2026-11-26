@@ -46,7 +46,7 @@ pub(crate) fn filetime_to_local_rfc3339(ticks: u64) -> String {
     }
 }
 
-fn variant_string(v: &EVT_VARIANT) -> Option<String> {
+fn variant_string(v: &EVT_VARIANT, buf: &[u8]) -> Option<String> {
     if v.Type == EvtVarTypeNull.0 as u32 {
         return None;
     }
@@ -55,7 +55,19 @@ fn variant_string(v: &EVT_VARIANT) -> Option<String> {
         if ptr.is_null() {
             return None;
         }
-        return unsafe { ptr.to_string() }.ok();
+        let base = buf.as_ptr() as usize;
+        let rel = (ptr.0 as usize).checked_sub(base)?;
+        if rel >= buf.len() || !rel.is_multiple_of(2) {
+            return None;
+        }
+        let mut units = Vec::new();
+        for pair in buf[rel..].as_chunks::<2>().0 {
+            let ch = u16::from_le_bytes(*pair);
+            if ch == 0 {
+                return Some(String::from_utf16_lossy(&units));
+            }
+            units.push(ch);
+        }
     }
     None
 }
@@ -85,16 +97,16 @@ fn variant_u64(v: &EVT_VARIANT) -> Option<u64> {
 fn render_system_values(
     ctx: EVT_HANDLE,
     handle: EVT_HANDLE,
-    buffer: &mut Vec<u8>,
+    buffer: &mut Vec<u64>,
 ) -> Result<EventRecord, NativeError> {
     let mut used = 0u32;
     let mut prop_count = 0u32;
-    let render = |buf: &mut Vec<u8>, used: &mut u32, count: &mut u32| unsafe {
+    let render = |buf: &mut Vec<u64>, used: &mut u32, count: &mut u32| unsafe {
         EvtRender(
             Some(ctx),
             handle,
             EvtRenderEventValues.0,
-            buf.len() as u32,
+            (buf.len() * 8) as u32,
             Some(buf.as_mut_ptr().cast()),
             used,
             count,
@@ -104,12 +116,21 @@ fn render_system_values(
         if !is_code(&e, ERROR_INSUFFICIENT_BUFFER.0) || used > 2 * 1024 * 1024 {
             return Err(error("EvtRender", e));
         }
-        buffer.resize(used as usize + 256, 0);
+        buffer.resize((used as usize + 256).div_ceil(8), 0);
         render(buffer, &mut used, &mut prop_count).map_err(|e| error("EvtRender", e))?;
     }
+    let buf_bytes = unsafe {
+        std::slice::from_raw_parts(
+            buffer.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(buffer.as_slice()),
+        )
+    };
+    let used_bytes = used as usize;
     let count = prop_count as usize;
-    if count < EvtSystemPropertyIdEND.0 as usize
-        || count * std::mem::size_of::<EVT_VARIANT>() > buffer.len()
+    let variants_bytes = count.checked_mul(std::mem::size_of::<EVT_VARIANT>());
+    if used_bytes > buf_bytes.len()
+        || count < EvtSystemPropertyIdEND.0 as usize
+        || variants_bytes.is_none_or(|vb| vb > used_bytes)
     {
         return Err(NativeError {
             source: "EvtRender".into(),
@@ -117,18 +138,21 @@ fn render_system_values(
             message: "事件系统属性数量异常。".into(),
         });
     }
+    let valid_buf = &buf_bytes[..used_bytes];
     let vals = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<EVT_VARIANT>(), count) };
-    let provider = variant_string(&vals[EvtSystemProviderName.0 as usize]).unwrap_or_default();
+    let provider =
+        variant_string(&vals[EvtSystemProviderName.0 as usize], valid_buf).unwrap_or_default();
     let id = variant_u64(&vals[EvtSystemEventID.0 as usize]).unwrap_or(0) as u16;
     let level = variant_u64(&vals[EvtSystemLevel.0 as usize]).unwrap_or(0) as u8;
     let time_ticks = variant_u64(&vals[EvtSystemTimeCreated.0 as usize]).unwrap_or(0);
     let record_id = variant_u64(&vals[EvtSystemEventRecordId.0 as usize]).unwrap_or(0);
-    let channel = variant_string(&vals[EvtSystemChannel.0 as usize]).unwrap_or_default();
-    let computer = variant_string(&vals[EvtSystemComputer.0 as usize]);
+    let channel = variant_string(&vals[EvtSystemChannel.0 as usize], valid_buf).unwrap_or_default();
+    let computer = variant_string(&vals[EvtSystemComputer.0 as usize], valid_buf);
 
     Ok(EventRecord {
         log: channel,
         time: filetime_to_local_rfc3339(time_ticks),
+        time_raw: time_ticks,
         record_id,
         level,
         provider,
@@ -230,7 +254,7 @@ pub fn query(
     );
     let publishers = Publishers::default();
     let msg_buf: MsgBuffer = Rc::new(RefCell::new(vec![0u16; 4096]));
-    let mut render_buf = vec![0u8; 4096];
+    let mut render_buf: Vec<u64> = vec![0; 4096 / 8];
     let mut read = EventRead::default();
     let mut scanned = 0;
 
@@ -239,16 +263,20 @@ pub fn query(
         let mut raw = [0isize; 64];
         let mut returned = 0;
         let capacity = (query.max_events - scanned).min(raw.len());
-        match unsafe { EvtNext(result.0, &mut raw[..capacity], 1000, 0, &mut returned) } {
+        let next_res = unsafe { EvtNext(result.0, &mut raw[..capacity], 1000, 0, &mut returned) };
+        // Immediately take ownership of all valid returned handles before checking status.
+        let valid_count = (returned as usize).min(capacity);
+        let handles: Vec<_> = raw[..valid_count]
+            .iter()
+            .filter(|h| **h != 0)
+            .map(|h| EventHandle(EVT_HANDLE(*h)))
+            .collect();
+        match next_res {
             Ok(()) => {}
             Err(e) if is_code(&e, ERROR_NO_MORE_ITEMS.0) => break,
             Err(e) if is_code(&e, windows::Win32::Foundation::ERROR_TIMEOUT.0) => continue,
             Err(e) => return Err(error(&query.log, e)),
         }
-        let handles: Vec<_> = raw[..returned as usize]
-            .iter()
-            .map(|h| EventHandle(EVT_HANDLE(*h)))
-            .collect();
         for event in handles {
             stopped("EventLog", control)?;
             scanned += 1;
@@ -274,7 +302,19 @@ pub fn query(
             })?;
         }
         if scanned >= query.max_events {
-            read.truncated = query.max_events > 1;
+            if query.max_events > 1 {
+                // Probe 1 extra event to distinguish exact-cap completion from real truncation.
+                let mut probe = [0isize; 1];
+                let mut probe_ret = 0u32;
+                let probe_res =
+                    unsafe { EvtNext(result.0, &mut probe[..1], 100, 0, &mut probe_ret) };
+                let _probe_guard: Vec<_> = probe[..(probe_ret as usize).min(1)]
+                    .iter()
+                    .filter(|h| **h != 0)
+                    .map(|h| EventHandle(EVT_HANDLE(*h)))
+                    .collect();
+                read.truncated = probe_res.is_ok() && probe_ret > 0;
+            }
             break;
         }
     }

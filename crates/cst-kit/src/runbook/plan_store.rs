@@ -44,6 +44,18 @@ impl RunbookStore {
                 .await
             }
             RunbookAction::Export => {
+                if input.title.is_some()
+                    || input.level.is_some()
+                    || input.items.is_some()
+                    || input.date.is_some()
+                    || input.base_version.is_some()
+                    || input.export_txt
+                {
+                    return Err(
+                        "action=export 仅接受 runbookId 与 version，不能同时传方案编辑字段。"
+                            .into(),
+                    );
+                }
                 let runbook_id = input
                     .runbook_id
                     .ok_or("action=export 必须提供 runbookId。")?;
@@ -102,7 +114,7 @@ impl RunbookStore {
                 return Err("已有方案的归档日期不能修改。".into());
             }
             let sequence = match &previous {
-                Some(prev) if prev.sequence >= 1 => prev.sequence,
+                Some(prev) if prev.sequence.is_some_and(|s| s >= 1) => prev.sequence.unwrap(),
                 _ => next_sequence_for_day(plan_storage, plans_rel, root_storage, &day, cancel)?,
             };
             let now = Local::now();
@@ -111,7 +123,7 @@ impl RunbookStore {
                     .as_ref()
                     .map(|p| p.runbook_id.clone())
                     .unwrap_or_else(|| Uuid::new_v4().to_string()),
-                sequence,
+                sequence: Some(sequence),
                 version: previous.as_ref().map_or(1, |p| p.version + 1),
                 day,
                 created_at: now
@@ -134,7 +146,12 @@ impl RunbookStore {
                 cancel,
             )?;
             if export_txt {
-                return write_exported_txt(&plan, root_storage, cancel);
+                return write_exported_txt(&plan, root_storage, cancel).map_err(|err| {
+                    format!(
+                        "命令方案已保存（runbookId={}, version={}），但 TXT 导出失败：{err}",
+                        plan.runbook_id, plan.version
+                    )
+                });
             }
             let mut value = plan_value(&plan)?;
             value["action"] = json!("planned");
@@ -178,7 +195,7 @@ impl RunbookStore {
         self.locked_plans(
             cancel,
             move |plan_storage, plans_rel, root_storage, cancel| {
-                let plan = if require_latest {
+                let mut plan = if require_latest {
                     let latest_plan = latest(plan_storage, plans_rel, &runbook_id, cancel)?;
                     if latest_plan.version != version {
                         return Err(format!(
@@ -190,6 +207,28 @@ impl RunbookStore {
                 } else {
                     load_version(plan_storage, plans_rel, &runbook_id, version)?
                 };
+                if plan.sequence.is_none() {
+                    let body = build_body(&plan.title, plan.level, &plan.commands, &plan.time_text);
+                    let existing_seq = find_existing_exported_sequence(
+                        root_storage,
+                        &plan.day,
+                        &plan.level_label,
+                        &plan.title,
+                        plan.version,
+                        &body,
+                        cancel,
+                    )?;
+                    plan.sequence = Some(match existing_seq {
+                        Some(seq) => seq,
+                        None => next_sequence_for_day(
+                            plan_storage,
+                            plans_rel,
+                            root_storage,
+                            &plan.day,
+                            cancel,
+                        )?,
+                    });
+                }
                 write_exported_txt(&plan, root_storage, cancel)
             },
         )
@@ -205,7 +244,7 @@ fn write_exported_txt(
     let relative = PathBuf::from("artifacts").join(&plan.day).join("runbook");
     let _lease = root_storage.pin_directory(&relative, true)?;
     let dir = root_storage.directory(&relative, false)?;
-    let seq = plan.sequence.max(1);
+    let seq = plan.sequence.unwrap_or(1).max(1);
     let name = format!(
         "{seq:02}-{}-{}-v{}.txt",
         plan.level_label, plan.title, plan.version
@@ -262,7 +301,7 @@ fn next_sequence_for_day(
             if let Ok(plan) = latest(plan_storage, plans_rel, &id, cancel)
                 && plan.day == day
             {
-                max_seq = max_seq.max(plan.sequence);
+                max_seq = max_seq.max(plan.sequence.unwrap_or(0));
             }
         }
     }
@@ -287,6 +326,42 @@ fn next_sequence_for_day(
         return Err("当天清单序号已达到 999 上限，请在次日生成新清单。".into());
     }
     Ok(next)
+}
+
+fn find_existing_exported_sequence(
+    root_storage: &Storage,
+    day: &str,
+    level_label: &str,
+    title: &str,
+    version: u64,
+    expected_body: &[u8],
+    cancel: &CancellationToken,
+) -> Result<Option<u16>, String> {
+    let art_rel = PathBuf::from("artifacts").join(day).join("runbook");
+    let Ok(_lease) = root_storage.pin_directory(&art_rel, false) else {
+        return Ok(None);
+    };
+    let Ok(art_dir) = root_storage.directory(&art_rel, false) else {
+        return Ok(None);
+    };
+    let suffix = format!("-{level_label}-{title}-v{version}.txt");
+    if let Ok(entries) = fs::read_dir(&art_dir) {
+        for entry in entries.flatten() {
+            cancelled(cancel)?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(num) = name.strip_suffix(&suffix)
+                && (2..=3).contains(&num.len())
+                && num.bytes().all(|b| b.is_ascii_digit())
+                && let Ok(seq) = num.parse::<u16>()
+                && seq >= 1
+                && let Ok(Some(bytes)) = root_storage.read(&art_dir.join(&name))
+                && bytes == expected_body
+            {
+                return Ok(Some(seq));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn parse_filename_sequence(name: &str) -> Option<u16> {
@@ -389,8 +464,8 @@ fn parse_and_validate_plan(raw: &[u8], id: &str, version: u64) -> Result<Plan, S
     plan.title = title;
     plan.commands = commands;
     plan.level_label = plan.level.label().into();
-    if plan.sequence == 0 {
-        plan.sequence = 1;
+    if plan.sequence == Some(0) {
+        plan.sequence = None;
     }
     Ok(plan)
 }

@@ -195,7 +195,7 @@ impl DiagnosticSource for WindowsSource {
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError> {
         process::snapshot(control)
     }
-    fn fill_process_paths(&self, pids: &mut [(u32, Option<String>)]) {
+    fn fill_process_paths(&self, pids: &mut [(u32, u64, Option<String>)]) {
         process::fill_paths(pids);
     }
     fn native_overview(&self, control: &Control) -> Result<Option<NativeOverview>, NativeError> {

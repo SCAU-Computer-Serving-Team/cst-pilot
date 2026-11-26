@@ -12,7 +12,7 @@
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
 | Rust 核心与全局回归 | `cargo test --workspace --locked` | 模型协议（`pi-ai`）、Agent 循环（`pi-agent`）、会话存储与扩展（`pi-session`）、运行时 SDK（`pi-runtime`）、业务包与后台服务全量隔离测试 |
 | Rust 存储故障注入 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 开启故障注入特性，验证部分写入、同步失败与尾部恢复保护 |
-| Rust 业务与安全专项 | `cargo test -p cst-kit --locked` | 17 工具白名单、凭据与硬链接拦截、SSRF 与 Exa 检索、原生诊断字段与 50 KiB 裁剪、方案版本与 BOM+CRLF 清单、卷身份缓存、GPU/I/O/传感器采集、CSTOA 双路由登录与额度缓存 |
+| Rust 业务与安全专项 | `cargo test -p cst-kit --locked` | 14 工具白名单、凭据与硬链接拦截、SSRF 与 Exa/DeepSeek 检索、原生诊断字段与 50 KiB 受保护键裁剪、单工具 `runbook` 版本与 BOM+CRLF 清单、卷身份缓存、GPU/I/O/传感器采集、CSTOA 双路由登录与额度缓存 |
 | Rust 遥测专项 | `cargo test -p cst-kit --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默开关、Ed25519 签名、请求扣点有界查询、双命名管道存活证明、目录锁、草稿封存恢复、双端独立队列与共享 5 秒关闭预算 |
 | Rust BitLocker 专项 | `cargo test -p cst-kit --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 恢复密码三条隐私边界、BSTR 清零、本地隐藏输入与确认、同卷命名管道互斥、超时与崩溃后实时状态复查 |
 | Rust 软件内升级专项 | `cargo test -p cst-updater --locked`、`cargo test -p cst-kit --test update_package --test update_health_check --test update_service --locked` | 双重签名与 ZIP 边界校验、配置合并、逐文件中断恢复、真实 Windows Job Object 15 秒健康检查、独立更新器进程恢复、失败回滚与升级门禁协调 |
@@ -93,7 +93,7 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 
 1. **B17–B22** `driver`：`problem` 区分正常空数组与采集失败。`core` 核对网卡、蓝牙、音频与显示设备及驱动版本。`external` 对照 USB、蓝牙、显示器与可移动盘。`find` 验证 `class`、`id`（含 `HardwareID` 子串与特殊字符）、`name + class` 交集及空条件报错。
 2. **B23–B31** `eventlog`：`recent` 时间倒序且未截断时 `sum(counts.n) = total`。`boot`（含 `bluescreen` 去重）、`crash`（含 Information 级 WER 1001 与 `app` 全组过滤）、`service`（排除 7045）以及 `disk`、`query`、`detail`（按 `recordId` 精确读取与轮转未找到）语义准确。`security` 在非管理员下返回 `admin: false, degraded: true`。
-3. **B32–B35** `runbook`：在 `artifacts/<当天>/runbook/` 生成 UTF-8 BOM + CRLF 格式 `.txt`。同日序号递增，指定 `sequence` 原地替换并清理旧标题文件，跨天从 `01` 重置。命令含换行或必填项为空时整次报错且不留残余文件，只读介质明确报错。
+3. **B32–B35** `runbook`：`action="plan"` 保存版本化方案至 `data/plans/`，修订须成对传 `runbookId` 与最新 `baseVersion` 且继承当天序号；`exportTxt=true`、`action="export"` 或双端卡片一键导出均在 `artifacts/<当天>/runbook/` 生成 UTF-8 BOM + CRLF 格式 `<序号:02>-<风险档>-<标题>-v<版本>.txt` 并跨天从 `01` 重置。已导出文件被篡改、命令含换行或只读介质时明确报错且不留残余文件。
 
 ### BitLocker 实机核查
 
