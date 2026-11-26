@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
@@ -281,6 +280,36 @@ fn v1_validation_rejects_invalid_combinations_and_boundaries() {
             &guard,
             &ws.root,
             fffind_in(json!({"path": &root, "kind": "dir", "sortBy": "size"})),
+            &cancel
+        )
+        .is_err()
+    );
+
+    // `kind="dir"` + empty `ext: []` must still be rejected (P1-10).
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "kind": "dir", "ext": []})),
+            &cancel
+        )
+        .is_err()
+    );
+    // `2^64 / 1048576 = 17592186044416` must be rejected cleanly instead of saturating to u64::MAX (P1-10).
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "minSizeMiB": 17_592_186_044_416.0})),
+            &cancel
+        )
+        .is_err()
+    );
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "maxSizeMiB": 17_592_186_044_416.0})),
             &cancel
         )
         .is_err()
@@ -1314,21 +1343,103 @@ fn v6_usn_events_sequence_reuse_hardlink_delete_dir_move_into_git_and_half_renam
 }
 
 #[test]
-fn v7_search_index_manager_lru_eviction_and_idle_ttl_reaper() {
+fn v7_search_index_manager_lru_eviction_arc_reader_ledger_and_idle_ttl() {
     let mgr = SearchIndexManager::new(Duration::from_millis(40), 100 * 1024 * 1024);
     let now = Instant::now();
-    let c_idx = Arc::new(make_test_volume_index("C:", Some(60 * 1024 * 1024)));
-    let d_idx = Arc::new(make_test_volume_index("D:", Some(60 * 1024 * 1024)));
+    let c_idx = make_test_volume_index("C:", Some(60 * 1024 * 1024));
+    let d_idx = make_test_volume_index("D:", Some(60 * 1024 * 1024));
 
-    mgr.insert_for_test(c_idx, now - Duration::from_secs(5));
+    let c_reader = mgr
+        .insert_for_test(c_idx, now - Duration::from_secs(5))
+        .expect("C: fits in 100 MiB");
+    assert_eq!(mgr.cached_bytes(), 60 * 1024 * 1024);
+    assert_eq!(mgr.reserved_bytes(), 60 * 1024 * 1024);
+
+    // While an in-flight reader STILL holds `c_reader`, inserting D: (60 MiB) evicts C: from the
+    // cache map, YET `c_reader`'s 60 MiB remains charged against the ledger -> D: is rejected!
+    assert!(mgr.insert_for_test(d_idx, now).is_none());
+    assert_eq!(mgr.cached_bytes(), 0);
+    assert_eq!(mgr.reserved_bytes(), 60 * 1024 * 1024);
+
+    // Once the in-flight reader drops `c_reader`, its reservation releases immediately and D: succeeds!
+    drop(c_reader);
+    assert_eq!(mgr.reserved_bytes(), 0);
+    let d_idx2 = make_test_volume_index("D:", Some(60 * 1024 * 1024));
+    let _d_arc = mgr
+        .insert_for_test(d_idx2, now)
+        .expect("D: fits after drop");
+    drop(_d_arc);
     assert_eq!(mgr.cached_bytes(), 60 * 1024 * 1024);
 
-    // Inserting D: (60 MiB) exceeds 100 MiB cap -> evicts older C: via LRU.
-    mgr.insert_for_test(d_idx, now);
-    assert_eq!(mgr.cached_bytes(), 60 * 1024 * 1024);
-
-    // After idle TTL elapses, purge_idle releases cached memory to 0.
+    // After idle TTL elapses, purge_idle releases cached memory & ledger reservation to 0.
     std::thread::sleep(Duration::from_millis(60));
     mgr.purge_idle();
     assert_eq!(mgr.cached_bytes(), 0);
+    assert_eq!(mgr.reserved_bytes(), 0);
+}
+
+#[test]
+fn v1_and_v4_sol_review_regressions_cr_preservation_50kib_match_priority_and_usn_tail() {
+    // 1. P2-1: CR preservation (double CR before LF strips only 1 CR; bare CR at EOF preserved).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let cancel = CancellationToken::new();
+    let src = b"a\r\r\nb\r";
+    let m = ContentMatcher::build("a\r", true, true).unwrap();
+    let budget = AtomicUsize::new(1024);
+    let out = scan_reader_streaming(
+        Cursor::new(src.as_slice()),
+        "C:/test/cr.txt",
+        src.len() as u64,
+        &budget,
+        &m,
+        1,
+        10,
+        deadline,
+        &cancel,
+        1,
+    )
+    .unwrap();
+    let (rows, _) = merge_and_limit_grep_rows(out.rows, 10);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].text, "a\r");
+    assert!(rows[0].matched);
+    assert_eq!(rows[1].text, "b\r");
+
+    // 2. P1-9: 50 KiB atomic bound drops context rows before matched rows & rejects oversized root.
+    let mut map = serde_json::Map::new();
+    map.insert("root".into(), json!("C:/logs"));
+    map.insert("truncated".into(), json!(false));
+    map.insert("skipped".into(), json!(0));
+    let big_ctx = "c".repeat(30_000);
+    let hit_line = "MATCH_IMPORTANT".to_owned();
+    map.insert(
+        "matches".into(),
+        json!([
+            {"path": "C:/logs/a.log", "line": 1, "text": &big_ctx, "matched": false},
+            {"path": "C:/logs/a.log", "line": 2, "text": &big_ctx, "matched": false},
+            {"path": "C:/logs/a.log", "line": 3, "text": &hit_line, "matched": true},
+        ]),
+    );
+    let bounded = crate::diagnostics::result::enforce_atomic_matches_bound(&mut map).unwrap();
+    assert!(bounded.len() <= MAX_BYTES);
+    assert!(
+        map["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["matched"] == true),
+        "matched row must survive context trimming under 50 KiB bound"
+    );
+
+    let mut huge_root = serde_json::Map::new();
+    huge_root.insert("root".into(), json!("x".repeat(60_000)));
+    huge_root.insert("matches".into(), json!([]));
+    assert!(crate::diagnostics::result::enforce_atomic_matches_bound(&mut huge_root).is_err());
+
+    // 3. P1-5: Truncated trailing USN bytes must fail with IoFailed (never silently break).
+    let truncated_usn = vec![0u8; 20]; // 8-byte next_usn + 12 truncated tail bytes (< 60)
+    assert!(matches!(
+        parse_usn_read_buffer(&truncated_usn),
+        Err(UsnReadError::IoFailed)
+    ));
 }

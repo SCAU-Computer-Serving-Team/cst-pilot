@@ -6,7 +6,7 @@ mod win_volumes;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, TimeZone};
@@ -70,30 +70,38 @@ pub enum TruncatedReason {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FffindInput {
     /// 必填。扫描范围：传 "*" 扫描本机全部可见固定盘与可移动盘（跳过光驱与网络盘）；传裸盘符或盘根（如 "C:"、"C:\\"）扫描整盘；传目录或单个文件路径扫描指定范围。拒绝 UNC 与网络映射盘。
+    #[schemars(length(min = 1))]
     pub path: String,
     /// 可选。名称或路径匹配表达式，支持完整精确名、通配符（*、?、[]、{}）与空格多词模糊匹配；省略或传 "*"/"**" 表示不按名称过滤；不可传空串或纯空白，非法通配符直接报错（UTF-8 上限 4096 字节）。
     #[serde(default)]
+    #[schemars(length(min = 1, max = 4096))]
     pub pattern: Option<String>,
     /// 可选。条目类型过滤："file" 仅文件（默认），"dir" 仅目录（如查找 WeChat Files、Minidump），"any" 同时返回文件与目录。
     #[serde(default)]
     pub kind: Option<FffindKind>,
     /// 可选。最后一段扩展名白名单，不区分大小写，单个前导点号可选（如 ["dmp", "log", "mp4"]），不支持复合后缀与通配符。不可与 kind="dir" 同传。
     #[serde(default)]
+    #[schemars(length(max = 64))]
     pub ext: Option<Vec<String>>,
     /// 可选。排除通配符列表（如 ["*.tmp", "node_modules/"]）。无分隔符匹配任意层级名称，尾 "/" 剪枝匹配目录。
     #[serde(default)]
+    #[schemars(length(max = 64))]
     pub exclude: Option<Vec<String>>,
     /// 可选。最大遍历深度，根目录深度为 0，1 仅扫描直接子项。path="*" 时按各卷根计深度，单文件根不可传此字段。
     #[serde(default)]
+    #[schemars(range(min = 1, max = 1024))]
     pub max_depth: Option<usize>,
     /// 可选。仅保留最近 N 小时内修改的条目，按调用时刻 UTC 闭区间 [now-N, now] 过滤，未来与未知时间不命中。
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 87600.0))]
     pub modified_within_hours: Option<f64>,
     /// 可选。最小文件逻辑体积，单位二进制 MiB（1 MiB = 1048576 字节），含端点向上取整字节。不可与 kind="dir" 同传。
     #[serde(default, rename = "minSizeMiB")]
+    #[schemars(range(min = 0.0))]
     pub min_size_mib: Option<f64>,
     /// 可选。最大文件逻辑体积，单位二进制 MiB，含端点向下取整字节，须大于等于 minSizeMiB；0 仅匹配空文件。不可与 kind="dir" 同传。
     #[serde(default, rename = "maxSizeMiB")]
+    #[schemars(range(min = 0.0))]
     pub max_size_mib: Option<f64>,
     /// 可选。排序方式："relevance" 相关性降序，"modified" 修改时间降序，"size" 文件字节数降序。省略时按名称、时间、大小条件自动选择。"size" 不可与 kind="dir" 同传。
     #[serde(default)]
@@ -103,6 +111,7 @@ pub struct FffindInput {
     pub case_sensitive: Option<bool>,
     /// 可选。最多返回的命中条目数，范围 1 至 1000，默认 30。
     #[serde(default)]
+    #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
 }
 
@@ -110,17 +119,22 @@ pub struct FffindInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FfgrepInput {
     /// 必填。单行正则表达式或字面检索文本，不可为空，UTF-8 上限 4096 字节（空白字符作为正文保留）。
+    #[schemars(length(min = 1, max = 4096))]
     pub pattern: String,
     /// 必填。目标目录路径或单个文件路径（如 "C:\\Windows\\Logs\\CBS" 或 "C:\\Windows\\Logs\\CBS\\CBS.log"）。拒绝 UNC、网络映射盘与内嵌通配符。
+    #[schemars(length(min = 1))]
     pub path: String,
     /// 可选。文件包含通配符列表（如 ["*.log", "*.ini", "*.xml"]），无分隔符匹配任意层级文件名。仅目录模式允许传入，单文件根传入报错。
     #[serde(default)]
+    #[schemars(length(max = 64))]
     pub include: Option<Vec<String>>,
     /// 可选。排除通配符列表（如 ["*.bak", "archive/"]），尾 "/" 剪枝目录且优先于 include。仅目录模式允许传入，单文件根传入报错。
     #[serde(default)]
+    #[schemars(length(max = 64))]
     pub exclude: Option<Vec<String>>,
     /// 可选。仅检索最近 N 小时内修改的文件，按调用时刻 UTC 闭区间 [now-N, now] 过滤并在打开句柄上复核。
     #[serde(default)]
+    #[schemars(range(min = 0.0, max = 87600.0))]
     pub modified_within_hours: Option<f64>,
     /// 可选。置 true 时按字面子串匹配，不解析正则元字符；默认 false。
     #[serde(default)]
@@ -130,9 +144,11 @@ pub struct FfgrepInput {
     pub case_sensitive: Option<bool>,
     /// 可选。每条命中行前后各附带的上下文行数，范围 0 至 20，默认 0。触及 limit 时优先保留命中行。
     #[serde(default)]
+    #[schemars(range(min = 0, max = 20))]
     pub context: Option<usize>,
     /// 可选。返回总行数上限（含上下文行），范围 1 至 1000，默认 30。
     #[serde(default)]
+    #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
 }
 
@@ -301,7 +317,7 @@ fn find_paths_with_details(
     let exts = validate_exts(input.ext.as_deref())?;
     let size_bounds = validate_size_bounds(input.min_size_mib, input.max_size_mib)?;
     if matches!(kind, FffindKind::Dir) {
-        if !exts.is_empty() {
+        if input.ext.is_some() {
             return Err("kind=\"dir\" 不可与 ext 同时使用。".into());
         }
         if size_bounds.is_some() {
@@ -347,10 +363,15 @@ fn find_paths_with_details(
         }
     });
 
-    let path_trimmed = input.path.trim();
-    if path_trimmed.is_empty() {
+    if input.path.trim().is_empty() {
         return Err("path 不可为空。".into());
     }
+    // Preserve verbatim `\\?\` paths without trimming trailing spaces/dots; trim ordinary inputs.
+    let path_arg = if input.path.starts_with(r"\\?\") {
+        input.path.as_str()
+    } else {
+        input.path.trim()
+    };
 
     let session = guard.session();
     let spec = walk_engine::WalkQuerySpec {
@@ -365,11 +386,11 @@ fn find_paths_with_details(
         limit,
     };
 
-    if path_trimmed == "*" {
+    if path_arg == "*" {
         return run_whole_pc_find(&session, spec, deadline, cancel);
     }
 
-    let resolved_path = resolve_explicit_search_path(cwd, path_trimmed)?;
+    let resolved_path = resolve_explicit_search_path(cwd, path_arg)?;
     let verified_root = session.verify_search_root(&resolved_path)?;
     let root_display = normalize_path(&verified_root.canonical_path);
 
@@ -400,7 +421,7 @@ fn find_paths_with_details(
     {
         let mgr = mft_index::SearchIndexManager::global();
         if let Some((idx, status)) = mgr.get_or_build_windows(&drive, false, deadline, cancel)? {
-            let (mft_cands, mft_limit, mft_skipped) = idx.query(
+            let (mft_cands, mft_limit, mft_skipped, mft_timed_out) = idx.query(
                 &session,
                 &verified_root,
                 subtree_rel.as_deref(),
@@ -411,7 +432,7 @@ fn find_paths_with_details(
             candidates = mft_cands;
             truncated_by_limit = mft_limit;
             skipped = mft_skipped;
-            timed_out = Instant::now() >= deadline;
+            timed_out = mft_timed_out;
             method = "mft-index";
             let mut st_map = Map::new();
             st_map.insert(
@@ -529,6 +550,7 @@ fn run_whole_pc_find(
     let mut skipped_roots = enumeration.skipped;
     let mut had_non_policy_failure = enumeration.had_non_policy_failure;
     let mut mft_roots = Vec::new();
+    let mut mft_partial_roots = Vec::new();
     let mut walk_targets = Vec::new();
     let mut vol_index_status = Map::new();
     let mut all_candidates = Vec::new();
@@ -537,6 +559,7 @@ fn run_whole_pc_find(
     let mut skipped_count = 0usize;
 
     let mgr = mft_index::SearchIndexManager::global();
+    let mut mft_candidates_vols = Vec::new();
 
     for vol in enumeration.ready {
         if cancel.is_cancelled() {
@@ -544,7 +567,11 @@ fn run_whole_pc_find(
         }
         let verified_root = match session.verify_search_root(&vol.native_root) {
             Ok(v) => v,
-            Err(_) => {
+            Err(err) => {
+                if err.contains("权限拒绝") {
+                    // Policy-denied root never increments degraded failure or leaks existence.
+                    continue;
+                }
                 had_non_policy_failure = true;
                 skipped_roots.push(SkippedRoot {
                     root: vol.display_root,
@@ -556,25 +583,10 @@ fn run_whole_pc_find(
 
         if !vol.is_subst
             && vol.filesystem.eq_ignore_ascii_case("NTFS")
-            && let Some((idx, status)) =
-                mgr.get_or_build_windows(&vol.drive, vol.is_subst, deadline, cancel)?
+            && crate::diagnostics::mft::mft_enabled()
+            && cst_os::is_elevated().unwrap_or(false)
         {
-            let (cands, lim, sk) =
-                idx.query(session, &verified_root, None, &spec, deadline, cancel)?;
-            all_candidates.extend(cands);
-            truncated_by_limit |= lim;
-            skipped_count += sk;
-            if Instant::now() >= deadline {
-                timed_out = true;
-            }
-            vol_index_status.insert(
-                vol.display_root.clone(),
-                json!(match status {
-                    mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
-                    mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
-                }),
-            );
-            mft_roots.push(vol.display_root);
+            mft_candidates_vols.push((vol, verified_root));
         } else {
             walk_targets.push(walk_engine::WalkRootTarget {
                 display_root: vol.display_root,
@@ -584,11 +596,97 @@ fn run_whole_pc_find(
         }
     }
 
-    if mft_roots.is_empty() && walk_targets.is_empty() {
+    // Dispatch NTFS MFT volumes concurrently so a slow cold build on one volume never starves others.
+    type MftVolHit = (
+        Vec<FindCandidate>,
+        bool,
+        usize,
+        bool,
+        mft_index::IndexBuildStatus,
+    );
+    type MftVolOutcome = Result<(String, Option<MftVolHit>, walk_engine::WalkRootTarget), String>;
+    let mft_outcomes: Mutex<Vec<MftVolOutcome>> = Mutex::new(Vec::new());
+    if !mft_candidates_vols.is_empty() {
+        std::thread::scope(|scope| {
+            for (vol, verified_root) in mft_candidates_vols {
+                let mgr_ref = &mgr;
+                let spec_ref = &spec;
+                let outcomes_ref = &mft_outcomes;
+                scope.spawn(move || {
+                    let res = match mgr_ref.get_or_build_windows(
+                        &vol.drive,
+                        vol.is_subst,
+                        deadline,
+                        cancel,
+                    ) {
+                        Ok(Some((idx, status))) => {
+                            match idx.query(
+                                session,
+                                &verified_root,
+                                None,
+                                spec_ref,
+                                deadline,
+                                cancel,
+                            ) {
+                                Ok((cands, lim, sk, to)) => Ok((
+                                    vol.display_root.clone(),
+                                    Some((cands, lim, sk, to, status)),
+                                    walk_engine::WalkRootTarget {
+                                        display_root: vol.display_root,
+                                        verified_root,
+                                        is_volume_root: !vol.is_subst,
+                                    },
+                                )),
+                                Err(e) => Err(e),
+                            }
+                        }
+                        Ok(None) => Ok((
+                            vol.display_root.clone(),
+                            None,
+                            walk_engine::WalkRootTarget {
+                                display_root: vol.display_root,
+                                verified_root,
+                                is_volume_root: !vol.is_subst,
+                            },
+                        )),
+                        Err(e) => Err(e),
+                    };
+                    if let Ok(mut guard) = outcomes_ref.lock() {
+                        guard.push(res);
+                    }
+                });
+            }
+        });
+    }
+    for item in mft_outcomes.into_inner().unwrap_or_default() {
+        let (display_root, mft_res, fallback_target) = item?;
+        if let Some((cands, lim, sk, to, status)) = mft_res {
+            all_candidates.extend(cands);
+            truncated_by_limit |= lim;
+            skipped_count += sk;
+            timed_out |= to;
+            vol_index_status.insert(
+                display_root.clone(),
+                json!(match status {
+                    mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
+                    mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
+                }),
+            );
+            if to {
+                mft_partial_roots.push(display_root);
+            } else {
+                mft_roots.push(display_root);
+            }
+        } else {
+            walk_targets.push(fallback_target);
+        }
+    }
+
+    if mft_roots.is_empty() && mft_partial_roots.is_empty() && walk_targets.is_empty() {
         return Err("所有本机磁盘均无访问权限，无法执行全电脑检索。".into());
     }
 
-    let mut partial_roots = Vec::new();
+    let mut partial_roots = mft_partial_roots;
     let mut completed_walk_roots = Vec::new();
     let mut queue_overflowed = false;
 
@@ -663,9 +761,10 @@ fn finalize_fffind_response(
     method: &str,
     vol_index_status: Option<Map<String, Value>>,
 ) -> Result<(Value, Value), String> {
+    // Deduplicate identical canonical paths BEFORE checking `limit`, keeping the best-ranked copy.
     candidates.sort_by(|a, b| cmp_find_candidate(a, b, spec.sort_by));
-    // Deduplicate identical canonical paths across threads/volumes.
-    candidates.dedup_by(|a, b| a.path == b.path);
+    let mut seen_paths: HashSet<String> = HashSet::with_capacity(candidates.len());
+    candidates.retain(|c| seen_paths.insert(c.path.clone()));
     if candidates.len() > spec.limit {
         candidates.truncate(spec.limit);
         truncated_by_limit = true;
@@ -686,8 +785,10 @@ fn finalize_fffind_response(
         })
         .collect();
 
-    let reason = if timed_out || queue_overflowed {
+    let reason = if timed_out {
         Some(TruncatedReason::Timeout)
+    } else if queue_overflowed {
+        Some(TruncatedReason::VisitedLimit)
     } else if truncated_by_limit {
         Some(TruncatedReason::Limit)
     } else {
@@ -772,16 +873,20 @@ fn grep_files_with_details(
     if input.pattern.contains(['\r', '\n']) {
         return Err("ffgrep 仅支持单行检索，pattern 不得包含换行符。".into());
     }
-    let path_trimmed = input.path.trim();
-    if path_trimmed.is_empty() || path_trimmed == "*" {
+    if input.path.trim().is_empty() || input.path.trim() == "*" {
         return Err("ffgrep 的 path 必须指定具体目录或单个文件路径，不支持 \"*\"。".into());
     }
+    let path_arg = if input.path.starts_with(r"\\?\") {
+        input.path.as_str()
+    } else {
+        input.path.trim()
+    };
 
     let limit = validate_limit(input.limit)?;
     let context = validate_context(input.context)?;
     let modified_window = validate_modified_window(input.modified_within_hours)?;
 
-    let resolved_path = resolve_explicit_search_path(cwd, path_trimmed)?;
+    let resolved_path = resolve_explicit_search_path(cwd, path_arg)?;
     let session = guard.session();
     let verified_root = session.verify_search_root(&resolved_path)?;
     let root_display = normalize_path(&verified_root.canonical_path);
@@ -901,6 +1006,8 @@ fn validate_size_bounds(
     min_mib: Option<f64>,
     max_mib: Option<f64>,
 ) -> Result<Option<(u64, u64)>, String> {
+    // `2.0_f64.powi(64)` is exact in IEEE-754; `u64::MAX as f64` rounds up to `2^64`.
+    const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
     let min_bytes = match min_mib {
         None => None,
         Some(v) if !v.is_finite() || v < 0.0 => {
@@ -908,7 +1015,7 @@ fn validate_size_bounds(
         }
         Some(v) => {
             let scaled = (v * MIB_BYTES).ceil();
-            if scaled > u64::MAX as f64 {
+            if !scaled.is_finite() || scaled >= TWO_POW_64 {
                 return Err("minSizeMiB 超出支持范围。".into());
             }
             Some(scaled as u64)
@@ -921,7 +1028,7 @@ fn validate_size_bounds(
         }
         Some(v) => {
             let scaled = (v * MIB_BYTES).floor();
-            if scaled > u64::MAX as f64 {
+            if !scaled.is_finite() || scaled >= TWO_POW_64 {
                 return Err("maxSizeMiB 超出支持范围。".into());
             }
             Some(scaled as u64)
@@ -995,7 +1102,11 @@ pub(crate) fn resolve_explicit_search_path(cwd: &Path, raw: &str) -> Result<Path
     #[cfg(windows)]
     let raw = if let Some(rest) = raw.strip_prefix(r"\\?\") {
         let b = rest.as_bytes();
-        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/') {
+        if b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && (b[2] == b'\\' || b[2] == b'/')
+        {
             rest
         } else {
             raw

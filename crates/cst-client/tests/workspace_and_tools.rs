@@ -503,12 +503,13 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
         &make_result(
             Some(json!({
                 "root": "*",
-                "scannedRoots": ["C:\\", "D:\\"],
-                "partialRoots": ["E:\\"],
-                "skippedRoots": [{ "root": "Z:\\", "reason": "网络映射盘已跳过" }],
+                "scannedRoots": ["C:/", "D:/"],
+                "partialRoots": ["E:/"],
+                "skippedRoots": [{ "root": "Z:/", "reason": "network_drive_skipped" }],
                 "truncated": true,
                 "truncatedReason": "timeout",
                 "skipped": 0,
+                "method": "mft-index",
                 "matches": []
             })),
             "",
@@ -520,6 +521,9 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
         "匹配结果：本次没有结果",
         "扫描卷",
         "部分完成卷",
+        "跳过卷 · Z:/",
+        "网络映射盘已跳过",
+        "MFT 内存索引",
         "截断原因",
         "超时",
         "原因",
@@ -531,4 +535,5 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     }
     assert!(!empty_json.contains("scannedRoots"));
     assert!(!empty_json.contains("truncatedReason"));
+    assert!(!empty_json.contains("network_drive_skipped"));
 }

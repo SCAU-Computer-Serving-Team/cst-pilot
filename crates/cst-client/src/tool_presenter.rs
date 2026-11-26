@@ -748,6 +748,47 @@ fn measure(key: &str, val: Option<&Value>) -> String {
         }
         .to_owned();
     }
+    if let Some(Value::String(s)) = val {
+        match key {
+            "kind" => {
+                return match s.as_str() {
+                    "file" => "文件",
+                    "dir" => "目录",
+                    other => other,
+                }
+                .to_owned();
+            }
+            "reason" => {
+                return match s.as_str() {
+                    "network_drive_skipped" => "网络映射盘已跳过",
+                    "cdrom_skipped" => "光驱已跳过",
+                    "not_ready" => "卷未就绪",
+                    "locked" => "卷已锁定",
+                    "access_denied" => "无权限访问",
+                    "duplicate_volume_alias" => "重复卷别名已跳过",
+                    "unsupported_drive_type" => "不支持的驱动器类型",
+                    "timeout" => "探活超时",
+                    "unavailable" => "卷不可用",
+                    other => other,
+                }
+                .to_owned();
+            }
+            "method" => {
+                return match s.as_str() {
+                    "mft-index" => "MFT 内存索引",
+                    "native-walk" => "原生并行遍历",
+                    "mixed" => "混合引擎",
+                    other => other,
+                }
+                .to_owned();
+            }
+            _ => match s.as_str() {
+                "cold-built" => return "冷建完成".to_owned(),
+                "usn-synced" => return "USN 增量同步".to_owned(),
+                _ => {}
+            },
+        }
+    }
     match val {
         None | Some(Value::Null) => "未知".into(),
         Some(Value::Bool(b)) => if *b { "是" } else { "否" }.into(),
@@ -950,6 +991,7 @@ fn group_heading(key: &str, entry: &Map<String, Value>, index: usize) -> Option<
         ),
         "thermalZones" => format!("热区 · {}", first_non_empty(&[entry.get("zone")], &idx1)),
         "drivers" => format!("驱动 · {}", first_non_empty(&[entry.get("device")], &idx1)),
+        "skippedRoots" => format!("跳过卷 · {}", first_non_empty(&[entry.get("root")], &idx1)),
         _ => return None,
     })
 }

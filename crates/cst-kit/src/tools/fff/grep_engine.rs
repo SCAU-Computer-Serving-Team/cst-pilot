@@ -21,6 +21,8 @@ use super::{
 pub(crate) const STREAM_CHUNK_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_DIR_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub(crate) const MAX_GREP_VISITED: usize = 500_000;
+const MAX_STAGED_COLLECTOR_BYTES: usize = 256 * 1024;
+const MAX_GLOBAL_STAGED_BYTES: usize = 512 * 1024;
 
 pub(crate) enum ContentMatcher {
     LiteralSensitive(Box<Finder<'static>>),
@@ -63,7 +65,7 @@ impl ContentMatcher {
 
 #[derive(Clone, Debug)]
 pub(crate) struct StagedRow {
-    pub path: String,
+    pub path: Arc<str>,
     pub line: usize,
     pub text: String,
     pub matched: bool,
@@ -72,6 +74,7 @@ pub(crate) struct StagedRow {
 #[derive(Default)]
 struct LineStreamCollector {
     rows: Vec<StagedRow>,
+    staged_bytes: usize,
     matched_count: usize,
     more_matches_omitted: bool,
     before: VecDeque<(usize, String)>,
@@ -93,10 +96,34 @@ impl LineStreamCollector {
         }
     }
 
+    fn push_row(&mut self, row: StagedRow) -> bool {
+        let row_bytes = row.text.len().saturating_add(32);
+        if self.staged_bytes.saturating_add(row_bytes) > MAX_STAGED_COLLECTOR_BYTES {
+            // Try evicting non-matched context rows to make room for a matched row.
+            if row.matched {
+                while self.staged_bytes.saturating_add(row_bytes) > MAX_STAGED_COLLECTOR_BYTES {
+                    let Some(idx) = self.rows.iter().rposition(|r| !r.matched) else {
+                        break;
+                    };
+                    let removed = self.rows.remove(idx);
+                    self.staged_bytes = self
+                        .staged_bytes
+                        .saturating_sub(removed.text.len().saturating_add(32));
+                }
+            }
+            if self.staged_bytes.saturating_add(row_bytes) > MAX_STAGED_COLLECTOR_BYTES {
+                return false;
+            }
+        }
+        self.staged_bytes = self.staged_bytes.saturating_add(row_bytes);
+        self.rows.push(row);
+        true
+    }
+
     fn feed_utf8(
         &mut self,
         chunk: &[u8],
-        path: &str,
+        path: &Arc<str>,
         matcher: &ContentMatcher,
         context: usize,
         limit: usize,
@@ -107,6 +134,7 @@ impl LineStreamCollector {
         if memchr::memchr(0, chunk).is_some() {
             self.saw_nul = true;
             self.rows.clear();
+            self.staged_bytes = 0;
             self.before.clear();
             return;
         }
@@ -116,7 +144,7 @@ impl LineStreamCollector {
                 let seg = &chunk[pos..pos + nl_rel];
                 pos += nl_rel + 1;
                 self.push_line_bytes(seg);
-                self.finish_line(path, matcher, context, limit);
+                self.finish_line(path, matcher, context, limit, true);
             } else {
                 let seg = &chunk[pos..];
                 pos = chunk.len();
@@ -129,10 +157,9 @@ impl LineStreamCollector {
         if self.dropping_oversized {
             return;
         }
-        // Account for up to 1 trailing '\r' that may be trimmed at line end.
+        // Account for up to 1 trailing '\r' that may be stripped on CRLF.
         if self.line_buf.len().saturating_add(seg.len()) > MAX_LINE_BYTES + 1 {
             let trimmed_new_len = self.line_buf.len() + seg.len();
-            // Even if the very last byte is '\r', still > MAX_LINE_BYTES.
             if trimmed_new_len > MAX_LINE_BYTES + 1
                 || (trimmed_new_len == MAX_LINE_BYTES + 1 && seg.last() != Some(&b'\r'))
             {
@@ -147,7 +174,14 @@ impl LineStreamCollector {
         self.line_buf.extend_from_slice(seg);
     }
 
-    fn finish_line(&mut self, path: &str, matcher: &ContentMatcher, context: usize, limit: usize) {
+    fn finish_line(
+        &mut self,
+        path: &Arc<str>,
+        matcher: &ContentMatcher,
+        context: usize,
+        limit: usize,
+        saw_lf: bool,
+    ) {
         let cur_line = self.line_no;
         self.line_no += 1;
 
@@ -156,7 +190,8 @@ impl LineStreamCollector {
             self.line_buf.clear();
             return;
         }
-        while self.line_buf.last() == Some(&b'\r') {
+        // Only strip a SINGLE trailing CR immediately preceding LF (preserve literal CR in content).
+        if saw_lf && self.line_buf.last() == Some(&b'\r') {
             self.line_buf.pop();
         }
         if self.line_buf.len() > MAX_LINE_BYTES {
@@ -177,39 +212,48 @@ impl LineStreamCollector {
                 return;
             }
             while let Some((prev_no, prev_text)) = self.before.pop_front() {
-                if prev_no > self.last_emitted_line {
-                    self.rows.push(StagedRow {
-                        path: path.to_owned(),
+                if prev_no > self.last_emitted_line
+                    && self.push_row(StagedRow {
+                        path: Arc::clone(path),
                         line: prev_no,
                         text: prev_text,
                         matched: false,
-                    });
+                    })
+                {
                     self.last_emitted_line = prev_no;
                 }
             }
             let text = String::from_utf8_lossy(&self.line_buf).into_owned();
-            self.rows.push(StagedRow {
-                path: path.to_owned(),
+            if self.push_row(StagedRow {
+                path: Arc::clone(path),
                 line: cur_line,
                 text,
                 matched: true,
-            });
-            self.matched_count += 1;
-            self.last_emitted_line = cur_line;
-            self.after_remaining = context;
+            }) {
+                self.matched_count += 1;
+                self.last_emitted_line = cur_line;
+                self.after_remaining = context;
+            } else {
+                self.more_matches_omitted = true;
+                self.after_remaining = 0;
+            }
         } else if self.after_remaining > 0 {
             let text = String::from_utf8_lossy(&self.line_buf).into_owned();
-            if cur_line > self.last_emitted_line {
-                self.rows.push(StagedRow {
-                    path: path.to_owned(),
+            if cur_line > self.last_emitted_line
+                && self.push_row(StagedRow {
+                    path: Arc::clone(path),
                     line: cur_line,
                     text,
                     matched: false,
-                });
+                })
+            {
                 self.last_emitted_line = cur_line;
             }
             self.after_remaining -= 1;
-        } else if context > 0 && self.matched_count < limit {
+        } else if context > 0
+            && self.matched_count < limit
+            && self.staged_bytes < MAX_STAGED_COLLECTOR_BYTES
+        {
             if self.before.len() == context {
                 self.before.pop_front();
             }
@@ -219,7 +263,13 @@ impl LineStreamCollector {
         self.line_buf.clear();
     }
 
-    fn finish_eof(&mut self, path: &str, matcher: &ContentMatcher, context: usize, limit: usize) {
+    fn finish_eof(
+        &mut self,
+        path: &Arc<str>,
+        matcher: &ContentMatcher,
+        context: usize,
+        limit: usize,
+    ) {
         if self.saw_nul {
             return;
         }
@@ -229,7 +279,7 @@ impl LineStreamCollector {
             return;
         }
         if !self.line_buf.is_empty() {
-            self.finish_line(path, matcher, context, limit);
+            self.finish_line(path, matcher, context, limit, false);
         }
     }
 }
@@ -376,6 +426,7 @@ pub(crate) fn scan_reader_streaming(
     cancel: &CancellationToken,
     chunk_size: usize,
 ) -> io::Result<StreamScanOutcome> {
+    let path_arc: Arc<str> = Arc::from(path_display);
     let chunk_size = chunk_size.max(1);
     let mut mode = DetectedStreamMode::ProbingBom(Vec::with_capacity(4));
     let mut read_buf = vec![0u8; chunk_size.min(STREAM_CHUNK_BYTES)];
@@ -395,7 +446,15 @@ pub(crate) fn scan_reader_streaming(
             break;
         }
         if bytes_read_total >= max_file_bytes {
-            reached_eof = true;
+            // Confirm true EOF vs a file that grew after open (1-byte probe without consuming
+            // additional lines): if more bytes exist, keep `reached_eof = false` so incomplete
+            // trailing lines/characters are not mis-evaluated as EOF.
+            let mut probe = [0u8; 1];
+            match reader.read(&mut probe) {
+                Ok(0) => reached_eof = true,
+                Ok(_) => reached_eof = false,
+                Err(_) => reached_eof = false,
+            }
             break;
         }
 
@@ -409,12 +468,12 @@ pub(crate) fn scan_reader_streaming(
         let n = match reader.read(&mut read_buf[..reserved]) {
             Ok(n) => {
                 if n < reserved {
-                    remaining_budget.fetch_add(reserved - n, AtomicOrdering::Relaxed);
+                    remaining_budget.fetch_add(reserved - n, AtomicOrdering::AcqRel);
                 }
                 n
             }
             Err(err) => {
-                remaining_budget.fetch_add(reserved, AtomicOrdering::Relaxed);
+                remaining_budget.fetch_add(reserved, AtomicOrdering::AcqRel);
                 return Err(err);
             }
         };
@@ -425,14 +484,13 @@ pub(crate) fn scan_reader_streaming(
         bytes_read_total += n as u64;
         let chunk = &read_buf[..n];
 
-        // Transition from BOM probing once we have >= 3 bytes (or enough to decide UTF-16 BOM).
         if let DetectedStreamMode::ProbingBom(ref mut probe) = mode {
             probe.extend_from_slice(chunk);
             if probe.len() < 3 {
                 continue;
             }
             let data = std::mem::take(probe);
-            mode = init_mode_from_probe(&data, path_display, matcher, context, limit);
+            mode = init_mode_from_probe(&data, &path_arc, matcher, context, limit);
             if stream_is_binary(&mode) {
                 return Ok(StreamScanOutcome {
                     rows: Vec::new(),
@@ -448,7 +506,7 @@ pub(crate) fn scan_reader_streaming(
             continue;
         }
 
-        feed_stream_mode(&mut mode, chunk, path_display, matcher, context, limit);
+        feed_stream_mode(&mut mode, chunk, &path_arc, matcher, context, limit);
         if stream_is_binary(&mode) {
             return Ok(StreamScanOutcome {
                 rows: Vec::new(),
@@ -476,17 +534,16 @@ pub(crate) fn scan_reader_streaming(
         });
     }
 
-    // If file ended while still in BOM probe (< 3 bytes), initialize now.
     if let DetectedStreamMode::ProbingBom(ref mut probe) = mode {
         let data = std::mem::take(probe);
-        mode = init_mode_from_probe(&data, path_display, matcher, context, limit);
+        mode = init_mode_from_probe(&data, &path_arc, matcher, context, limit);
     }
 
     let true_eof = reached_eof && !budget_truncated && !timed_out;
     finalize_stream_mode(
         mode,
         true_eof,
-        path_display,
+        &path_arc,
         matcher,
         context,
         limit,
@@ -498,7 +555,7 @@ pub(crate) fn scan_reader_streaming(
 
 fn init_mode_from_probe(
     probe: &[u8],
-    path_display: &str,
+    path_display: &Arc<str>,
     matcher: &ContentMatcher,
     context: usize,
     limit: usize,
@@ -553,7 +610,7 @@ fn init_mode_from_probe(
 fn feed_stream_mode(
     mode: &mut DetectedStreamMode,
     chunk: &[u8],
-    path_display: &str,
+    path_display: &Arc<str>,
     matcher: &ContentMatcher,
     context: usize,
     limit: usize,
@@ -577,12 +634,13 @@ fn feed_stream_mode(
             gb_collector,
             gb_decode_buf,
         } => {
-            // Raw NUL in no-BOM file is immediately binary for both UTF-8 and GB18030.
             if memchr::memchr(0, chunk).is_some() {
                 utf8_collector.saw_nul = true;
                 utf8_collector.rows.clear();
+                utf8_collector.staged_bytes = 0;
                 gb_collector.saw_nul = true;
                 gb_collector.rows.clear();
+                gb_collector.staged_bytes = 0;
                 return;
             }
             if *utf8_valid {
@@ -592,6 +650,7 @@ fn feed_stream_mode(
                 if !ok {
                     *utf8_valid = false;
                     utf8_collector.rows.clear();
+                    utf8_collector.staged_bytes = 0;
                     utf8_collector.before.clear();
                 }
             }
@@ -619,7 +678,7 @@ fn stream_is_binary(mode: &DetectedStreamMode) -> bool {
 fn finalize_stream_mode(
     mode: DetectedStreamMode,
     true_eof: bool,
-    path_display: &str,
+    path_display: &Arc<str>,
     matcher: &ContentMatcher,
     context: usize,
     limit: usize,
@@ -755,7 +814,7 @@ pub(crate) fn merge_and_limit_grep_rows(
     limit: usize,
 ) -> (Vec<FfgrepMatch>, bool) {
     // Deduplicate by (path, line), upgrading `matched` to true if either occurrence matched.
-    let mut dedup: BTreeMap<(String, usize), (String, bool)> = BTreeMap::new();
+    let mut dedup: BTreeMap<(Arc<str>, usize), (String, bool)> = BTreeMap::new();
     for row in rows.drain(..) {
         dedup
             .entry((row.path, row.line))
@@ -771,7 +830,7 @@ pub(crate) fn merge_and_limit_grep_rows(
         let out = dedup
             .into_iter()
             .map(|((path, line), (text, matched))| FfgrepMatch {
-                path,
+                path: path.to_string(),
                 line,
                 text,
                 matched,
@@ -781,8 +840,9 @@ pub(crate) fn merge_and_limit_grep_rows(
     }
 
     // Prioritize matched rows first, then fill remaining slots with context rows in order.
-    let mut kept_matched: Vec<((String, usize), (String, bool))> = Vec::with_capacity(limit);
-    let mut ctx_candidates: Vec<((String, usize), (String, bool))> = Vec::new();
+    type DedupEntry = ((Arc<str>, usize), (String, bool));
+    let mut kept_matched: Vec<DedupEntry> = Vec::with_capacity(limit);
+    let mut ctx_candidates: Vec<DedupEntry> = Vec::new();
     for entry in dedup {
         if entry.1.1 {
             if kept_matched.len() < limit {
@@ -800,7 +860,7 @@ pub(crate) fn merge_and_limit_grep_rows(
     let out = combined
         .into_iter()
         .map(|((path, line), (text, matched))| FfgrepMatch {
-            path,
+            path: path.to_string(),
             line,
             text,
             matched,
@@ -1154,13 +1214,6 @@ fn visit_grep_entry(
         shared.mark_timed_out();
         return WalkState::Quit;
     }
-    if shared.visited.fetch_add(1, AtomicOrdering::Relaxed) >= MAX_GREP_VISITED {
-        shared
-            .visited_limit_hit
-            .store(true, AtomicOrdering::Relaxed);
-        shared.stop.store(true, AtomicOrdering::Relaxed);
-        return WalkState::Quit;
-    }
 
     let entry = match entry {
         Ok(e) => e,
@@ -1197,7 +1250,7 @@ fn visit_grep_entry(
     let (file, verified) = match shared.session.open_grep_file(path, &shared.verified_root) {
         Ok(pair) => pair,
         Err(SearchGuardError::PolicyDenied) => {
-            // Protected secrets / `.state/` / reparse links are never counted in `skipped`.
+            // Protected secrets / `.state/` / reparse links are never counted in `skipped` or `visited`.
             return WalkState::Continue;
         }
         Err(SearchGuardError::IoOrAccess) => {
@@ -1205,6 +1258,15 @@ fn visit_grep_entry(
             return WalkState::Continue;
         }
     };
+
+    // Charge `visited` strictly AFTER policy authorization so sensitive files never shift `visited_limit`.
+    if shared.visited.fetch_add(1, AtomicOrdering::Relaxed) >= MAX_GREP_VISITED {
+        shared
+            .visited_limit_hit
+            .store(true, AtomicOrdering::Relaxed);
+        shared.stop.store(true, AtomicOrdering::Relaxed);
+        return WalkState::Quit;
+    }
 
     // Re-verify modified time on the opened handle.
     if !path_within_modified_window(verified.modified_secs, shared.modified_window) {
@@ -1268,7 +1330,29 @@ fn visit_grep_entry(
     if !outcome.is_binary && !outcome.rows.is_empty() {
         let added_matches = outcome.rows.iter().filter(|r| r.matched).count();
         let mut guard = shared.collected.lock().unwrap_or_else(|e| e.into_inner());
-        guard.extend(outcome.rows);
+        let mut cur_bytes: usize = guard.iter().map(|r| r.text.len().saturating_add(32)).sum();
+        for row in outcome.rows {
+            let sz = row.text.len().saturating_add(32);
+            if cur_bytes.saturating_add(sz) > MAX_GLOBAL_STAGED_BYTES {
+                if row.matched {
+                    while cur_bytes.saturating_add(sz) > MAX_GLOBAL_STAGED_BYTES {
+                        let Some(idx) = guard.iter().rposition(|r| !r.matched) else {
+                            break;
+                        };
+                        let removed = guard.remove(idx);
+                        cur_bytes = cur_bytes.saturating_sub(removed.text.len().saturating_add(32));
+                    }
+                }
+                if cur_bytes.saturating_add(sz) > MAX_GLOBAL_STAGED_BYTES {
+                    shared
+                        .more_matches_omitted
+                        .store(true, AtomicOrdering::Relaxed);
+                    continue;
+                }
+            }
+            cur_bytes = cur_bytes.saturating_add(sz);
+            guard.push(row);
+        }
         let total_matched = shared
             .matched_collected
             .fetch_add(added_matches, AtomicOrdering::Relaxed)

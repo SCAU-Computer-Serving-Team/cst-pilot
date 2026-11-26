@@ -162,12 +162,13 @@ test("ffgrep maps skippedLargeFiles, skipped, match rows, and empty matches to C
 		result(
 			{
 				root: "*",
-				scannedRoots: ["C:\\", "D:\\"],
-				partialRoots: ["E:\\"],
-				skippedRoots: [{ root: "Z:\\", reason: "网络映射盘已跳过" }],
+				scannedRoots: ["C:/", "D:/"],
+				partialRoots: ["E:/"],
+				skippedRoots: [{ root: "Z:/", reason: "network_drive_skipped" }],
 				truncated: true,
 				truncatedReason: "timeout",
 				skipped: 0,
+				method: "mft-index",
 				matches: [],
 			},
 			"",
@@ -177,8 +178,12 @@ test("ffgrep maps skippedLargeFiles, skipped, match rows, and empty matches to C
 	assert.match(emptySerialized, /匹配结果：本次没有结果/);
 	assert.match(emptySerialized, /扫描卷/);
 	assert.match(emptySerialized, /部分完成卷/);
+	assert.match(emptySerialized, /跳过卷 · Z:\//);
+	assert.match(emptySerialized, /网络映射盘已跳过/);
+	assert.match(emptySerialized, /MFT 内存索引/);
 	assert.match(emptySerialized, /截断原因/);
 	assert.match(emptySerialized, /超时/);
 	assert.doesNotMatch(emptySerialized, /scannedRoots/);
 	assert.doesNotMatch(emptySerialized, /truncatedReason/);
+	assert.doesNotMatch(emptySerialized, /network_drive_skipped/);
 });

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
@@ -38,15 +38,55 @@ pub(crate) fn enumerate_whole_pc_volumes(
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<VolumeEnumeration, String> {
+    if cancel.is_cancelled() {
+        return Err("文件检索已取消。".into());
+    }
+    let cancel_bg = cancel.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("cst-fff-enum-vols".into())
+        .spawn(move || {
+            let res = enumerate_whole_pc_volumes_blocking(deadline, &cancel_bg);
+            let _ = tx.send(res);
+        })
+        .map_err(|_| "枚举本机逻辑驱动器线程启动失败。".to_owned())?;
+
+    loop {
+        if cancel.is_cancelled() {
+            return Err("文件检索已取消。".into());
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err("枚举本机逻辑驱动器超时。".into());
+        }
+        let wait = (deadline - now).min(Duration::from_millis(50));
+        match rx.recv_timeout(wait) {
+            Ok(res) => return res,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("枚举本机逻辑驱动器异常中止。".into());
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn enumerate_whole_pc_volumes_blocking(
+    deadline: Instant,
+    cancel: &CancellationToken,
+) -> Result<VolumeEnumeration, String> {
     use std::collections::HashSet;
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
     use windows::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_NOT_READY, ERROR_UNRECOGNIZED_MEDIA,
+        ERROR_ACCESS_DENIED, ERROR_NOT_READY, ERROR_UNRECOGNIZED_MEDIA, HANDLE,
     };
     use windows::Win32::Storage::FileSystem::{
-        GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
-        QueryDosDeviceW,
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, GetDriveTypeW, GetFileInformationByHandle, GetLogicalDrives,
+        GetVolumeInformationW, GetVolumeNameForVolumeMountPointW, QueryDosDeviceW,
     };
     use windows::Win32::System::Diagnostics::Debug::{
         SEM_FAILCRITICALERRORS, SetThreadErrorMode, THREAD_ERROR_MODE,
@@ -81,14 +121,11 @@ pub(crate) fn enumerate_whole_pc_volumes(
     let mut ready = Vec::new();
     let mut skipped = Vec::new();
     let mut had_non_policy_failure = false;
-    let mut seen_volume_keys: HashSet<String> = HashSet::new();
+    let mut seen_root_keys: HashSet<String> = HashSet::new();
 
     for bit in 0..26u32 {
         if cancel.is_cancelled() {
             return Err("文件检索已取消。".into());
-        }
-        if Instant::now() >= deadline {
-            break;
         }
         if (mask & (1u32 << bit)) == 0 {
             continue;
@@ -97,6 +134,14 @@ pub(crate) fn enumerate_whole_pc_volumes(
         let drive = format!("{letter}:");
         let native_str = format!("{letter}:\\");
         let display_root = format!("{letter}:/");
+        if Instant::now() >= deadline {
+            had_non_policy_failure = true;
+            skipped.push(SkippedRoot {
+                root: display_root,
+                reason: "timeout".into(),
+            });
+            continue;
+        }
         let wide_root: Vec<u16> = OsStr::new(&native_str)
             .encode_wide()
             .chain(Some(0))
@@ -129,6 +174,7 @@ pub(crate) fn enumerate_whole_pc_volumes(
         }
 
         // Detect SUBST virtual drive letters via QueryDosDeviceW (`\??\...`).
+        // Fail-safe: if QueryDosDeviceW fails, treat as `is_subst = true` so raw $MFT is disabled.
         let wide_dev: Vec<u16> = OsStr::new(&drive).encode_wide().chain(Some(0)).collect();
         let mut dev_buf = [0u16; 512];
         let dev_len = unsafe { QueryDosDeviceW(PCWSTR(wide_dev.as_ptr()), Some(&mut dev_buf)) };
@@ -140,7 +186,7 @@ pub(crate) fn enumerate_whole_pc_volumes(
             let target = String::from_utf16_lossy(&dev_buf[..end]);
             target.starts_with(r"\??\")
         } else {
-            false
+            true
         };
 
         let mut serial = 0u32;
@@ -167,8 +213,6 @@ pub(crate) fn enumerate_whole_pc_volumes(
             } else {
                 "unavailable"
             };
-            // Empty removable card readers reporting not_ready are expected hardware state,
-            // while fixed-drive failures or access_denied/locked mark degraded coverage.
             if drive_type == DRIVE_FIXED || reason != "not_ready" {
                 had_non_policy_failure = true;
             }
@@ -196,18 +240,42 @@ pub(crate) fn enumerate_whole_pc_volumes(
             .filter(|g| !g.is_empty())
         };
 
-        // Deduplicate multiple drive letters mapped to the exact same physical volume
-        // (keeping SUBST mappings distinct if pointing to a subdirectory, or skipping
-        // whole-volume alias duplicates).
-        if let Some(ref guid) = volume_guid {
-            let key = guid.to_ascii_lowercase();
-            if !seen_volume_keys.insert(key) {
-                skipped.push(SkippedRoot {
-                    root: display_root,
-                    reason: "duplicate_volume_alias".into(),
-                });
-                continue;
+        // Deduplicate whole-volume aliases (including SUBST to a volume root) by (volume, root_id)
+        // while keeping SUBST mappings to distinct subdirectories separate.
+        let root_obj_id = std::fs::OpenOptions::new()
+            .read(false)
+            .access_mode(FILE_READ_ATTRIBUTES.0)
+            .share_mode(7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(&native_str)
+            .ok()
+            .and_then(|f| {
+                let mut info = BY_HANDLE_FILE_INFORMATION::default();
+                unsafe { GetFileInformationByHandle(HANDLE(f.as_raw_handle()), &mut info) }
+                    .ok()
+                    .map(|()| {
+                        let idx =
+                            ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+                        (info.dwVolumeSerialNumber, idx)
+                    })
+            });
+
+        let dedup_key = match (&volume_guid, root_obj_id) {
+            (Some(guid), Some((_, idx))) if idx != 0 => {
+                Some(format!("guid:{}:{idx}", guid.to_ascii_lowercase()))
             }
+            (Some(guid), _) => Some(format!("guid:{}", guid.to_ascii_lowercase())),
+            (None, Some((vser, idx))) if vser != 0 && idx != 0 => Some(format!("ser:{vser}:{idx}")),
+            _ => None,
+        };
+        if let Some(key) = dedup_key
+            && !seen_root_keys.insert(key)
+        {
+            skipped.push(SkippedRoot {
+                root: display_root,
+                reason: "duplicate_volume_alias".into(),
+            });
+            continue;
         }
 
         let fs_len = fs_buf.iter().position(|&c| c == 0).unwrap_or(fs_buf.len());

@@ -14,7 +14,7 @@ use ntfs_ng::{
 use tokio_util::sync::CancellationToken;
 
 use crate::diagnostics::mft::mft_enabled;
-use crate::diagnostics::volume_index::{VolumeIdentity, storage_cache_bytes};
+use crate::diagnostics::volume_index::{MemoryReservation, ProcessMemoryLedger, VolumeIdentity};
 use crate::diagnostics::walk::is_cloud_reparse_tag;
 
 use super::super::path_guard::{PathGuardSession, SearchGuardError, VerifiedSearchEntry, path_key};
@@ -26,7 +26,6 @@ use super::{
 
 pub(crate) const MAX_MFT_SEARCH_RECORDS: u64 = 4_000_000;
 pub(crate) const MAX_VOLUME_INDEX_BYTES: usize = 256 * 1024 * 1024;
-pub(crate) const MAX_PROCESS_CACHE_BYTES: usize = 384 * 1024 * 1024;
 pub(crate) const IDLE_TTL: Duration = Duration::from_secs(180);
 const MAX_CONCURRENT_MFT_BUILDS: usize = 2;
 const MAX_TOMBSTONE_NUM: usize = 1;
@@ -39,6 +38,7 @@ const FLAG_META_STALE: u16 = 1 << 3;
 const FLAG_TOMBSTONE: u16 = 1 << 4;
 
 const EDGE_FLAG_TOMBSTONE: u8 = 1 << 0;
+const EDGE_FLAG_LOSSY_NAME: u8 = 1 << 1;
 
 pub(crate) const USN_REASON_DATA_OVERWRITE: u32 = 0x0000_0001;
 pub(crate) const USN_REASON_DATA_EXTEND: u32 = 0x0000_0002;
@@ -97,7 +97,7 @@ struct ReachabilityState {
     dir_parent_edge: Vec<Option<u32>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct VolumeFileIndex {
     pub drive_upper: String,
     pub identity: VolumeIdentity,
@@ -112,20 +112,56 @@ pub(crate) struct VolumeFileIndex {
     pub tombstones: usize,
     reachability: ReachabilityState,
     pub estimated_bytes: usize,
+    /// RAII reservation in the unified 384 MiB process memory ledger.
+    /// Lives as long as this `Arc<VolumeFileIndex>` generation is held by cache or in-flight readers.
+    #[allow(dead_code)]
+    mem_guard: Option<MemoryReservation>,
 }
 
 impl VolumeFileIndex {
     pub(crate) fn compute_estimated_bytes(
-        objects: &[ObjectNode],
-        edges: &[NameEdge],
-        name_arena: &[u8],
+        objects: &Vec<ObjectNode>,
+        edges: &Vec<NameEdge>,
+        name_arena: &Vec<u8>,
         ref_to_obj: &HashMap<u64, u32>,
     ) -> usize {
-        std::mem::size_of_val(objects)
-            + std::mem::size_of_val(edges)
-            + name_arena.len()
-            + ref_to_obj.capacity() * 24
-            + objects.len() * 8
+        objects
+            .capacity()
+            .saturating_mul(std::mem::size_of::<ObjectNode>())
+            .saturating_add(
+                edges
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<NameEdge>()),
+            )
+            .saturating_add(name_arena.capacity())
+            .saturating_add(ref_to_obj.capacity().saturating_mul(24))
+            .saturating_add(objects.capacity().saturating_mul(8))
+    }
+
+    pub(crate) fn clone_with_reservation(&self, ledger: &Arc<ProcessMemoryLedger>) -> Option<Self> {
+        let need = Self::compute_estimated_bytes(
+            &self.objects,
+            &self.edges,
+            &self.name_arena,
+            &self.ref_to_obj,
+        );
+        let guard = ledger.try_reserve(need)?;
+        Some(Self {
+            drive_upper: self.drive_upper.clone(),
+            identity: self.identity.clone(),
+            journal_id: self.journal_id,
+            applied_cursor: self.applied_cursor,
+            root_ref: self.root_ref,
+            objects: self.objects.clone(),
+            edges: self.edges.clone(),
+            name_arena: self.name_arena.clone(),
+            ref_to_obj: self.ref_to_obj.clone(),
+            live_objects: self.live_objects,
+            tombstones: self.tombstones,
+            reachability: self.reachability.clone(),
+            estimated_bytes: need,
+            mem_guard: Some(guard),
+        })
     }
 
     pub(crate) fn edge_name(&self, edge: &NameEdge) -> &str {
@@ -421,12 +457,22 @@ impl VolumeFileIndex {
                 continue;
             }
 
-            if (ev.reason
-                & (USN_REASON_FILE_CREATE
-                    | USN_REASON_RENAME_NEW_NAME
-                    | USN_REASON_HARD_LINK_CHANGE))
-                != 0
-            {
+            // Hard link changes can remove or add links without naming the removed edge;
+            // trigger a clean rebuild rather than risking ghost edges.
+            if (ev.reason & USN_REASON_HARD_LINK_CHANGE) != 0 {
+                return Err(());
+            }
+
+            if (ev.reason & (USN_REASON_FILE_CREATE | USN_REASON_RENAME_NEW_NAME)) != 0 {
+                let existed_before = self.ref_to_obj.contains_key(&ev.file_ref);
+                // Unpaired RENAME_NEW_NAME on an existing object without RENAME_OLD_NAME in batch
+                // would leave a stale old edge behind -> trigger clean rebuild.
+                if (ev.reason & USN_REASON_RENAME_NEW_NAME) != 0
+                    && existed_before
+                    && !rename_old_seen.contains(&ev.file_ref)
+                {
+                    return Err(());
+                }
                 let obj_idx = if let Some(&existing) = self.ref_to_obj.get(&ev.file_ref) {
                     existing
                 } else {
@@ -586,7 +632,7 @@ impl VolumeFileIndex {
         spec: &WalkQuerySpec,
         deadline: Instant,
         cancel: &CancellationToken,
-    ) -> Result<(Vec<FindCandidate>, bool, usize), String> {
+    ) -> Result<(Vec<FindCandidate>, bool, usize, bool), String> {
         let mut local: Vec<FindCandidate> =
             Vec::with_capacity(spec.limit.saturating_add(2).min(256));
         let mut truncated_by_limit = false;
@@ -601,6 +647,9 @@ impl VolumeFileIndex {
             .map(|s| s.split('/').count() as u16)
             .unwrap_or(0);
 
+        let mut dir_list_cache: HashMap<u32, bool> = HashMap::new();
+        let mut timed_out = false;
+
         let cap = spec.limit.saturating_add(1);
         let sort_by = spec.sort_by;
 
@@ -610,10 +659,15 @@ impl VolumeFileIndex {
                     return Err("文件检索已取消。".into());
                 }
                 if Instant::now() >= deadline {
+                    timed_out = true;
                     break;
                 }
             }
             if (edge.flags & EDGE_FLAG_TOMBSTONE) != 0 {
+                continue;
+            }
+            if (edge.flags & EDGE_FLAG_LOSSY_NAME) != 0 {
+                skipped += 1;
                 continue;
             }
             let obj_idx = edge.obj_idx as usize;
@@ -716,7 +770,9 @@ impl VolumeFileIndex {
             };
 
             if !spec.excludes.is_empty()
-                && (spec.excludes.is_match(rel_for_root) || spec.excludes.is_match(name))
+                && (spec.excludes.is_match(rel_for_root)
+                    || spec.excludes.is_match(name)
+                    || ancestor_dir_excluded(rel_for_root, &spec.excludes))
             {
                 continue;
             }
@@ -742,6 +798,22 @@ impl VolumeFileIndex {
             {
                 continue;
             }
+
+            // P0-3: Verify caller holds FILE_LIST_DIRECTORY permission on EVERY ancestor directory
+            // between `verified_root` and this candidate's parent so raw $MFT never leaks entries
+            // hidden by subdirectory ACLs.
+            #[cfg(windows)]
+            if !self.verify_ancestor_list_permissions(
+                session,
+                verified_root,
+                parent_dir_idx,
+                subtree_depth_base,
+                &mut dir_list_cache,
+            ) {
+                continue;
+            }
+            #[cfg(not(windows))]
+            let _ = &mut dir_list_cache;
 
             let native_path = PathBuf::from(format!(
                 "{}\\{}",
@@ -799,8 +871,89 @@ impl VolumeFileIndex {
             }
         }
 
-        Ok((local, truncated_by_limit, skipped))
+        Ok((local, truncated_by_limit, skipped, timed_out))
     }
+
+    #[cfg(windows)]
+    fn verify_ancestor_list_permissions(
+        &self,
+        session: &PathGuardSession,
+        verified_root: &VerifiedSearchEntry,
+        parent_dir_idx: usize,
+        subtree_depth_base: u16,
+        cache: &mut HashMap<u32, bool>,
+    ) -> bool {
+        let mut chain: Vec<usize> = Vec::new();
+        let mut cur = parent_dir_idx;
+        while let Some(depth) = self.reachability.dir_depth.get(cur).copied().flatten() {
+            if depth <= subtree_depth_base {
+                break;
+            }
+            if let Some(&ok) = cache.get(&(cur as u32)) {
+                if !ok {
+                    for &d in &chain {
+                        cache.insert(d as u32, false);
+                    }
+                    return false;
+                }
+                break;
+            }
+            chain.push(cur);
+            let Some(edge_idx) = self
+                .reachability
+                .dir_parent_edge
+                .get(cur)
+                .copied()
+                .flatten()
+            else {
+                return false;
+            };
+            let parent_ref = self.edges[edge_idx as usize].parent_ref;
+            if parent_ref == self.root_ref {
+                break;
+            }
+            let Some(&next_idx) = self.ref_to_obj.get(&parent_ref) else {
+                return false;
+            };
+            cur = next_idx as usize;
+        }
+        // Verify top-down so denied outer directory immediately prunes inner ancestors.
+        for &dir_idx in chain.iter().rev() {
+            let Some(rel) = self.dir_rel_path(dir_idx) else {
+                cache.insert(dir_idx as u32, false);
+                return false;
+            };
+            let native = PathBuf::from(format!("{}\\{}", self.drive_upper, rel.replace('/', "\\")));
+            let expected_ref = self.objects[dir_idx].file_ref;
+            let ok = session
+                .verify_dir_list_identity(&native, verified_root, expected_ref)
+                .is_ok();
+            cache.insert(dir_idx as u32, ok);
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn ancestor_dir_excluded(rel_path: &str, excludes: &globset::GlobSet) -> bool {
+    let mut pos = 0usize;
+    while let Some(slash) = rel_path[pos..].find('/') {
+        let end = pos + slash;
+        let prefix = &rel_path[..end];
+        let name = &rel_path[pos..end];
+        let with_slash = format!("{prefix}/");
+        if excludes.is_match(prefix)
+            || excludes.is_match(&with_slash)
+            || excludes.is_match(name)
+            || excludes.is_match(format!("{name}/"))
+        {
+            return true;
+        }
+        pos = end + 1;
+    }
+    false
 }
 
 // ============================================================================
@@ -1026,6 +1179,7 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
     journal_id: u64,
     u0_cursor: i64,
     mft: &ntfs_ng::mft::Mft<S>,
+    ledger: &Arc<ProcessMemoryLedger>,
     cancel: &CancellationToken,
 ) -> Result<VolumeFileIndex, String> {
     let total_records = mft.records();
@@ -1115,13 +1269,21 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
                     return Err("名称池超限，回退目录遍历。".into());
                 };
                 name_arena.extend_from_slice(name_slice);
+                let flags = if name_slice.contains(&0xEF)
+                    && std::str::from_utf8(name_slice)
+                        .is_ok_and(|s| s.contains(char::REPLACEMENT_CHARACTER))
+                {
+                    EDGE_FLAG_LOSSY_NAME
+                } else {
+                    0
+                };
                 edges.push(NameEdge {
                     parent_ref,
                     obj_idx,
                     name_offset: off,
                     name_len: len,
                     namespace: ns,
-                    flags: 0,
+                    flags,
                 });
                 count = count.saturating_add(1);
             }
@@ -1164,13 +1326,21 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
                 };
                 name_arena.extend_from_slice(name_slice);
                 let edge_idx = edges.len() as u32;
+                let flags = if name_slice.contains(&0xEF)
+                    && std::str::from_utf8(name_slice)
+                        .is_ok_and(|s| s.contains(char::REPLACEMENT_CHARACTER))
+                {
+                    EDGE_FLAG_LOSSY_NAME
+                } else {
+                    0
+                };
                 edges.push(NameEdge {
                     parent_ref,
                     obj_idx,
                     name_offset: off,
                     name_len: len,
                     namespace: ns,
-                    flags: 0,
+                    flags,
                 });
                 if objects[oi].first_edge == u32::MAX {
                     objects[oi].first_edge = edge_idx;
@@ -1185,6 +1355,9 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
     if estimated_bytes > MAX_VOLUME_INDEX_BYTES {
         return Err("卷搜索索引超过单卷内存上限，回退目录遍历。".into());
     }
+    let Some(mem_guard) = ledger.try_reserve(estimated_bytes) else {
+        return Err("进程级缓存预算不足，回退目录遍历。".into());
+    };
 
     let live_objects = objects.len();
     let mut index = VolumeFileIndex {
@@ -1205,6 +1378,7 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
             dir_parent_edge: Vec::new(),
         },
         estimated_bytes,
+        mem_guard: Some(mem_guard),
     };
     index.recompute_reachability();
     Ok(index)
@@ -1226,11 +1400,14 @@ pub(crate) enum UsnReadError {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct UsnJournalCursor {
     pub journal_id: u64,
+    pub first_usn: i64,
     pub next_usn: i64,
+    pub lowest_valid_usn: i64,
 }
 
 /// Safe zero-UB parser for a `FSCTL_READ_USN_JOURNAL` response buffer.
-/// First 8 bytes are the continuation `next_usn`; subsequent records must be V2.
+/// First 8 bytes are the continuation `next_usn`; subsequent records must be V2
+/// and fill the returned buffer completely without trailing truncated fragments.
 pub(crate) fn parse_usn_read_buffer(buf: &[u8]) -> Result<(i64, Vec<UsnEventV2>), UsnReadError> {
     if buf.len() < 8 {
         return Err(UsnReadError::IoFailed);
@@ -1240,7 +1417,8 @@ pub(crate) fn parse_usn_read_buffer(buf: &[u8]) -> Result<(i64, Vec<UsnEventV2>)
     let mut off = 8usize;
     while off < buf.len() {
         if off + 60 > buf.len() {
-            break;
+            // Never silently accept truncated trailing bytes.
+            return Err(UsnReadError::IoFailed);
         }
         let rec_len = u32::from_le_bytes(buf[off..off + 4].try_into().unwrap()) as usize;
         if rec_len < 60 || off + rec_len > buf.len() {
@@ -1403,22 +1581,31 @@ mod win_usn {
             )
         }
         .map_err(|e| map_win32_usn_err(&e))?;
+        if (ret as usize) < std::mem::size_of::<UsnJournalDataV0>() {
+            return Err(UsnReadError::IoFailed);
+        }
         Ok(UsnJournalCursor {
             journal_id: data.usn_journal_id,
+            first_usn: data.first_usn,
             next_usn: data.next_usn,
+            lowest_valid_usn: data.lowest_valid_usn,
         })
     }
 
     /// Reads all USN V2 events from `start_usn` up to `high_water_usn` (capped by `max_events`
     /// so runaway journal backlogs cleanly fall back to rebuild).
+    /// Fails with `Wrapped` if the journal cursor stalls or regresses before `high_water_usn`.
     pub(super) fn read_usn_range(
         handle: &VolumeUsnHandle,
-        journal_id: u64,
+        journal_info: UsnJournalCursor,
         start_usn: i64,
         high_water_usn: i64,
         max_events: usize,
         cancel: &CancellationToken,
     ) -> Result<(i64, Vec<UsnEventV2>), UsnReadError> {
+        if start_usn < journal_info.first_usn || start_usn < journal_info.lowest_valid_usn {
+            return Err(UsnReadError::Wrapped);
+        }
         let mut cursor = start_usn;
         let mut out = Vec::new();
         let mut buf = vec![0u8; 64 * 1024];
@@ -1433,7 +1620,7 @@ mod win_usn {
                 return_only_on_close: 0,
                 timeout: 0,
                 bytes_to_wait_for: 0,
-                usn_journal_id: journal_id,
+                usn_journal_id: journal_info.journal_id,
             };
             let mut ret = 0u32;
             unsafe {
@@ -1451,13 +1638,18 @@ mod win_usn {
             .map_err(|e| map_win32_usn_err(&e))?;
 
             let (next_cursor, batch) = parse_usn_read_buffer(&buf[..ret as usize])?;
-            if batch.is_empty() || next_cursor <= cursor {
-                cursor = next_cursor.max(cursor);
-                break;
+            if next_cursor < cursor {
+                return Err(UsnReadError::Wrapped);
+            }
+            if batch.is_empty() {
+                if next_cursor >= high_water_usn {
+                    cursor = next_cursor;
+                    break;
+                }
+                return Err(UsnReadError::Wrapped);
             }
             for ev in batch {
                 if ev.usn >= high_water_usn {
-                    // Never advance continuation cursor past unapplied records.
                     return Ok((ev.usn, out));
                 }
                 out.push(ev);
@@ -1465,7 +1657,13 @@ mod win_usn {
                     return Err(UsnReadError::Wrapped);
                 }
             }
+            if next_cursor <= cursor {
+                return Err(UsnReadError::Wrapped);
+            }
             cursor = next_cursor;
+        }
+        if cursor < high_water_usn {
+            return Err(UsnReadError::Wrapped);
         }
         Ok((cursor, out))
     }
@@ -1473,6 +1671,7 @@ mod win_usn {
     pub(super) fn cold_build_windows_volume(
         drive_upper: &str,
         identity: &VolumeIdentity,
+        ledger: &Arc<ProcessMemoryLedger>,
         cancel: &CancellationToken,
     ) -> Result<VolumeFileIndex, String> {
         let raw_path = identity
@@ -1512,6 +1711,7 @@ mod win_usn {
             u0.journal_id,
             u0.next_usn,
             &mft,
+            ledger,
             cancel,
         )?;
 
@@ -1522,15 +1722,12 @@ mod win_usn {
             return Err("冷建期间 USN 日志代际变化，放弃本次索引。".into());
         }
         if u1.next_usn > u0.next_usn {
-            let (applied, events) = read_usn_range(
-                &usn_handle,
-                u0.journal_id,
-                u0.next_usn,
-                u1.next_usn,
-                200_000,
-                cancel,
-            )
-            .map_err(|e| format!("冷建窗口 USN 重放失败：{e:?}"))?;
+            let (applied, events) =
+                read_usn_range(&usn_handle, u1, u0.next_usn, u1.next_usn, 200_000, cancel)
+                    .map_err(|e| format!("冷建窗口 USN 重放失败：{e:?}"))?;
+            if applied < u1.next_usn {
+                return Err("冷建窗口 USN 未覆盖完整高水位，放弃本次索引。".into());
+            }
             index
                 .apply_usn_events(&events, applied)
                 .map_err(|()| "冷建窗口 USN 应用超限，放弃本次索引。".to_owned())?;
@@ -1546,6 +1743,7 @@ mod win_usn {
 
     pub(super) fn sync_windows_volume(
         current: &VolumeFileIndex,
+        ledger: &Arc<ProcessMemoryLedger>,
         cancel: &CancellationToken,
     ) -> Result<Option<VolumeFileIndex>, UsnReadError> {
         let raw_path = current
@@ -1561,11 +1759,11 @@ mod win_usn {
             return Err(UsnReadError::Wrapped);
         }
         if cur.next_usn <= current.applied_cursor {
-            return Ok(None); // Already up to date!
+            return Ok(None);
         }
         let (applied, events) = read_usn_range(
             &usn_handle,
-            current.journal_id,
+            cur,
             current.applied_cursor,
             cur.next_usn,
             100_000,
@@ -1574,7 +1772,9 @@ mod win_usn {
         if events.is_empty() && applied == current.applied_cursor {
             return Ok(None);
         }
-        let mut next = current.clone();
+        let mut next = current
+            .clone_with_reservation(ledger)
+            .ok_or(UsnReadError::Wrapped)?;
         next.apply_usn_events(&events, applied)
             .map_err(|()| UsnReadError::Wrapped)?;
         Ok(Some(next))
@@ -1689,24 +1889,33 @@ pub(crate) struct SearchIndexManager {
     state: Mutex<ManagerState>,
     active_builds: AtomicUsize,
     idle_ttl: Duration,
-    max_process_bytes: usize,
+    ledger: Arc<ProcessMemoryLedger>,
     reaper_started: AtomicBool,
 }
 
 impl SearchIndexManager {
+    #[cfg(test)]
     pub(crate) fn new(idle_ttl: Duration, max_process_bytes: usize) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(ManagerState::default()),
             active_builds: AtomicUsize::new(0),
             idle_ttl,
-            max_process_bytes,
+            ledger: ProcessMemoryLedger::new_isolated(max_process_bytes, max_process_bytes),
             reaper_started: AtomicBool::new(false),
         })
     }
 
     pub(crate) fn global() -> Arc<Self> {
         static GLOBAL: OnceLock<Arc<SearchIndexManager>> = OnceLock::new();
-        let mgr = Arc::clone(GLOBAL.get_or_init(|| Self::new(IDLE_TTL, MAX_PROCESS_CACHE_BYTES)));
+        let mgr = Arc::clone(GLOBAL.get_or_init(|| {
+            Arc::new(Self {
+                state: Mutex::new(ManagerState::default()),
+                active_builds: AtomicUsize::new(0),
+                idle_ttl: IDLE_TTL,
+                ledger: ProcessMemoryLedger::global(),
+                reaper_started: AtomicBool::new(false),
+            })
+        }));
         mgr.ensure_reaper_started();
         mgr
     }
@@ -1714,7 +1923,7 @@ impl SearchIndexManager {
     fn ensure_reaper_started(self: &Arc<Self>) {
         if !self.reaper_started.swap(true, Ordering::AcqRel) {
             let weak = Arc::downgrade(self);
-            let _ = std::thread::Builder::new()
+            let res = std::thread::Builder::new()
                 .name("cst-fff-index-reaper".into())
                 .spawn(move || {
                     while let Some(mgr) = weak.upgrade() {
@@ -1722,6 +1931,10 @@ impl SearchIndexManager {
                         mgr.purge_idle();
                     }
                 });
+            if res.is_err() {
+                // Retry on next request if thread creation failed transiently.
+                self.reaper_started.store(false, Ordering::Release);
+            }
         }
     }
 
@@ -1746,33 +1959,53 @@ impl SearchIndexManager {
     }
 
     #[cfg(test)]
-    pub(crate) fn insert_for_test(&self, index: Arc<VolumeFileIndex>, accessed_at: Instant) {
-        if let Ok(mut state) = self.state.lock() {
-            let drive = index.drive_upper.clone();
-            state.volumes.insert(
-                drive,
-                CachedVolumeEntry {
-                    index,
-                    last_accessed: accessed_at,
-                },
-            );
-            self.evict_lru_locked(&mut state);
-        }
+    pub(crate) fn reserved_bytes(&self) -> usize {
+        self.ledger.reserved_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_for_test(
+        &self,
+        mut index: VolumeFileIndex,
+        accessed_at: Instant,
+    ) -> Option<Arc<VolumeFileIndex>> {
+        let mut state = self.state.lock().ok()?;
+        let need = index.estimated_bytes;
+        // Evict oldest cached entries until ledger reservation succeeds (evicted entries still
+        // held by live Arc readers keep their bytes charged until Drop).
+        let guard = loop {
+            if let Some(g) = self.ledger.try_reserve(need) {
+                break g;
+            }
+            let oldest = state
+                .volumes
+                .iter()
+                .min_by_key(|(_, e)| e.last_accessed)
+                .map(|(k, _)| k.clone())?;
+            state.volumes.remove(&oldest);
+        };
+        index.mem_guard = Some(guard);
+        let arc = Arc::new(index);
+        state.volumes.insert(
+            arc.drive_upper.clone(),
+            CachedVolumeEntry {
+                index: Arc::clone(&arc),
+                last_accessed: accessed_at,
+            },
+        );
+        self.evict_lru_locked(&mut state);
+        Some(arc)
     }
 
     fn evict_lru_locked(&self, state: &mut ManagerState) {
-        let storage_bytes = storage_cache_bytes();
-        let search_cap = self
-            .max_process_bytes
-            .saturating_sub(storage_bytes)
-            .min(MAX_VOLUME_INDEX_BYTES);
+        let search_cap = self.ledger.search_cap();
         loop {
             let total_search: usize = state
                 .volumes
                 .values()
                 .map(|v| v.index.estimated_bytes)
                 .sum();
-            if total_search <= search_cap {
+            if total_search <= search_cap && self.ledger.reserved_bytes() <= search_cap {
                 break;
             }
             let Some(oldest) = state
@@ -1788,7 +2021,8 @@ impl SearchIndexManager {
     }
 
     /// Attempts to obtain an up-to-date `VolumeFileIndex` for an elevated local NTFS volume.
-    /// Returns `Ok(None)` cleanly whenever fallback to Win32 traversal should be used.
+    /// Both cold builds and USN hot refreshes share the same `(drive, VolumeIdentity)` singleflight
+    /// so concurrent callers never race or overwrite newer generations.
     #[cfg(windows)]
     pub(crate) fn get_or_build_windows(
         self: &Arc<Self>,
@@ -1808,8 +2042,10 @@ impl SearchIndexManager {
             return Ok(None);
         }
 
-        // Fast path: check cached volume + USN incremental sync outside lock.
-        let cached_opt = {
+        // Singleflight registration INSIDE lock (covers BOTH hot USN sync and cold build),
+        // thread spawn OUTSIDE lock.
+        let key = (drive_upper.clone(), identity.clone());
+        let (flight, sub, should_spawn, base_cached) = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let ttl = self.idle_ttl;
             state.volumes.retain(|_, e| e.last_accessed.elapsed() < ttl);
@@ -1820,7 +2056,7 @@ impl SearchIndexManager {
             {
                 return Ok(None);
             }
-            if let Some(entry) = state.volumes.get_mut(&drive_upper) {
+            let existing_cached = if let Some(entry) = state.volumes.get_mut(&drive_upper) {
                 if entry.index.identity == identity {
                     entry.last_accessed = Instant::now();
                     Some(Arc::clone(&entry.index))
@@ -1830,47 +2066,8 @@ impl SearchIndexManager {
                 }
             } else {
                 None
-            }
-        };
+            };
 
-        if let Some(existing) = cached_opt {
-            match win_usn::sync_windows_volume(&existing, cancel) {
-                Ok(None) => return Ok(Some((existing, IndexBuildStatus::UsnSynced))),
-                Ok(Some(updated)) => {
-                    let arc = Arc::new(updated);
-                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    state.volumes.insert(
-                        drive_upper.clone(),
-                        CachedVolumeEntry {
-                            index: Arc::clone(&arc),
-                            last_accessed: Instant::now(),
-                        },
-                    );
-                    self.evict_lru_locked(&mut state);
-                    return Ok(Some((arc, IndexBuildStatus::UsnSynced)));
-                }
-                Err(
-                    UsnReadError::NotActive
-                    | UsnReadError::AccessDenied
-                    | UsnReadError::UnsupportedVersion,
-                ) => {
-                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    state.volumes.remove(&drive_upper);
-                    state.usn_unavailable.insert(drive_upper, Instant::now());
-                    return Ok(None);
-                }
-                Err(UsnReadError::Wrapped | UsnReadError::IoFailed) => {
-                    let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                    state.volumes.remove(&drive_upper);
-                    // Fall through to cold rebuild below.
-                }
-            }
-        }
-
-        // Singleflight registration INSIDE lock, thread spawn OUTSIDE lock (fixes P0-5!).
-        let key = (drive_upper.clone(), identity.clone());
-        let (flight, sub, should_spawn) = {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(existing) = state
                 .pending
                 .get(&key)
@@ -1883,9 +2080,8 @@ impl SearchIndexManager {
                     key: key.clone(),
                     flight: Arc::clone(&f),
                 };
-                (f, sub, false)
+                (f, sub, false, None)
             } else {
-                // Respect concurrency cap.
                 let mut cur = self.active_builds.load(Ordering::Relaxed);
                 let acquired = loop {
                     if cur >= MAX_CONCURRENT_MFT_BUILDS {
@@ -1912,7 +2108,7 @@ impl SearchIndexManager {
                     key: key.clone(),
                     flight: Arc::clone(&f),
                 };
-                (f, sub, true)
+                (f, sub, true, existing_cached)
             }
         };
 
@@ -1923,7 +2119,7 @@ impl SearchIndexManager {
             let d = drive_upper.clone();
             let id = identity.clone();
             let spawn_res = std::thread::Builder::new()
-                .name(format!("cst-mft-build-{d}"))
+                .name(format!("cst-mft-sync-{d}"))
                 .spawn(move || {
                     struct BuildSlotGuard(Arc<SearchIndexManager>);
                     impl Drop for BuildSlotGuard {
@@ -1932,23 +2128,72 @@ impl SearchIndexManager {
                         }
                     }
                     let _slot = BuildSlotGuard(Arc::clone(&mgr));
+                    let mut mark_usn_unavailable = false;
                     let outcome =
                         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            win_usn::cold_build_windows_volume(&d, &id, &f.build_cancel)
-                        })) {
-                            Ok(Ok(idx)) => {
-                                BuildOutcome::Ready(Arc::new(idx), IndexBuildStatus::ColdBuilt)
+                            if let Some(ref existing) = base_cached {
+                                match win_usn::sync_windows_volume(
+                                    existing,
+                                    &mgr.ledger,
+                                    &f.build_cancel,
+                                ) {
+                                    Ok(None) => {
+                                        return Ok((
+                                            Arc::clone(existing),
+                                            IndexBuildStatus::UsnSynced,
+                                            false,
+                                        ));
+                                    }
+                                    Ok(Some(updated)) => {
+                                        return Ok((
+                                            Arc::new(updated),
+                                            IndexBuildStatus::UsnSynced,
+                                            false,
+                                        ));
+                                    }
+                                    Err(
+                                        UsnReadError::NotActive
+                                        | UsnReadError::AccessDenied
+                                        | UsnReadError::UnsupportedVersion,
+                                    ) => {
+                                        return Err(true);
+                                    }
+                                    Err(UsnReadError::Wrapped | UsnReadError::IoFailed) => {
+                                        if f.build_cancel.is_cancelled() {
+                                            return Err(false);
+                                        }
+                                        // Fall through to cold rebuild within the SAME singleflight.
+                                    }
+                                }
                             }
-                            Ok(Err(_)) => {
+                            // Evict LRU before cold build if ledger is near capacity.
+                            if let Ok(mut st) = mgr.state.lock() {
+                                mgr.evict_lru_locked(&mut st);
+                            }
+                            match win_usn::cold_build_windows_volume(
+                                &d,
+                                &id,
+                                &mgr.ledger,
+                                &f.build_cancel,
+                            ) {
+                                Ok(idx) => Ok((Arc::new(idx), IndexBuildStatus::ColdBuilt, false)),
+                                Err(_) => Err(!f.build_cancel.is_cancelled()),
+                            }
+                        })) {
+                            Ok(Ok((arc, status, _))) => BuildOutcome::Ready(arc, status),
+                            Ok(Err(unavail)) => {
                                 if f.build_cancel.is_cancelled() {
                                     BuildOutcome::Cancelled
                                 } else {
+                                    mark_usn_unavailable = unavail;
                                     BuildOutcome::Fallback
                                 }
                             }
                             Err(_) => BuildOutcome::Fallback,
                         };
 
+                    // Monotonic publication: verify flight ownership, latest volume identity,
+                    // and cursor monotonicity before updating cache; cancellation never deletes cache.
                     if let Ok(mut state) = mgr.state.lock() {
                         let still_active = state
                             .pending
@@ -1959,18 +2204,30 @@ impl SearchIndexManager {
                             state.gen_seq = state.gen_seq.wrapping_add(1);
                             match &outcome {
                                 BuildOutcome::Ready(arc, _) => {
-                                    state.volumes.insert(
-                                        d.clone(),
-                                        CachedVolumeEntry {
-                                            index: Arc::clone(arc),
-                                            last_accessed: Instant::now(),
-                                        },
-                                    );
-                                    state.usn_unavailable.remove(&d);
-                                    mgr.evict_lru_locked(&mut state);
+                                    let latest_ok = crate::diagnostics::volume::volume_identity(&d)
+                                        .is_ok_and(|cur| cur == id);
+                                    let monotonic = state.volumes.get(&d).is_none_or(|cur| {
+                                        cur.index.identity != id
+                                            || cur.index.journal_id != arc.journal_id
+                                            || arc.applied_cursor >= cur.index.applied_cursor
+                                    });
+                                    if latest_ok && monotonic {
+                                        state.volumes.insert(
+                                            d.clone(),
+                                            CachedVolumeEntry {
+                                                index: Arc::clone(arc),
+                                                last_accessed: Instant::now(),
+                                            },
+                                        );
+                                        state.usn_unavailable.remove(&d);
+                                        mgr.evict_lru_locked(&mut state);
+                                    }
                                 }
                                 BuildOutcome::Fallback => {
-                                    state.usn_unavailable.insert(d.clone(), Instant::now());
+                                    if mark_usn_unavailable {
+                                        state.volumes.remove(&d);
+                                        state.usn_unavailable.insert(d.clone(), Instant::now());
+                                    }
                                 }
                                 BuildOutcome::Cancelled => {}
                             }
@@ -2065,6 +2322,7 @@ impl VolumeFileIndex {
                 dir_parent_edge: Vec::new(),
             },
             estimated_bytes: 0,
+            mem_guard: None,
         };
         idx.recompute_reachability();
         idx.estimated_bytes = est_bytes_override.unwrap_or_else(|| {

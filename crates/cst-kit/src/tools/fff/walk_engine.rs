@@ -41,6 +41,23 @@ impl GlobalWorkerPermit {
             }
         }
     }
+
+    fn acquire_bounded(
+        max_global: usize,
+        deadline: Instant,
+        cancel: &CancellationToken,
+    ) -> Option<Self> {
+        let wait_until = deadline.min(Instant::now() + Duration::from_millis(250));
+        loop {
+            if let Some(p) = Self::try_acquire(max_global) {
+                return Some(p);
+            }
+            if cancel.is_cancelled() || Instant::now() >= wait_until {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 }
 impl Drop for GlobalWorkerPermit {
     fn drop(&mut self) {
@@ -233,12 +250,22 @@ impl FindWorker {
     fn insert_approved(&mut self, candidate: FindCandidate) {
         let cap = self.shared.spec.limit.saturating_add(1);
         let sort_by = self.shared.spec.sort_by;
+        // Deduplicate by verified canonical path inside local Top-K before checking limit.
+        if let Some(existing_pos) = self.local.iter().position(|c| c.path == candidate.path) {
+            if cmp_find_candidate(&candidate, &self.local[existing_pos], sort_by).is_lt() {
+                self.local.remove(existing_pos);
+            } else {
+                return;
+            }
+        }
+        let mut inserted = false;
         if self.local.len() < cap {
             let pos = self
                 .local
                 .binary_search_by(|existing| cmp_find_candidate(existing, &candidate, sort_by))
                 .unwrap_or_else(|i| i);
-            self.local.insert(pos, candidate);
+            self.local.insert(pos, candidate.clone());
+            inserted = true;
             if self.local.len() == cap {
                 self.shared
                     .truncated_by_limit
@@ -252,7 +279,12 @@ impl FindWorker {
                 .local
                 .binary_search_by(|existing| cmp_find_candidate(existing, &candidate, sort_by))
                 .unwrap_or_else(|i| i);
-            self.local.insert(pos, candidate);
+            self.local.insert(pos, candidate.clone());
+            inserted = true;
+        }
+        // Incrementally publish verified top candidates so stuck I/O at deadline never loses hits.
+        if inserted && let Ok(mut guard) = self.shared.collected.try_lock() {
+            guard.push(candidate);
         }
     }
 }
@@ -269,17 +301,15 @@ mod win_walk_find {
     use crate::diagnostics::walk::{is_cloud_reparse_tag, parse_file_id_both_dir_buffer};
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::Foundation::{
-        CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_FILE_NOT_FOUND,
-        ERROR_HANDLE_EOF, ERROR_INVALID_FUNCTION, ERROR_INVALID_LEVEL, ERROR_INVALID_PARAMETER,
-        ERROR_NO_MORE_FILES, ERROR_NOT_SUPPORTED, HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_HANDLE_EOF, ERROR_NO_MORE_FILES,
+        HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
         FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH, FileIdBothDirectoryInfo,
-        FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-        GetFileInformationByHandle, GetFileInformationByHandleEx, OPEN_EXISTING, WIN32_FIND_DATAW,
+        FILE_SHARE_WRITE, FileIdBothDirectoryInfo, GetFileInformationByHandle,
+        GetFileInformationByHandleEx, OPEN_EXISTING,
     };
     use windows::Win32::System::IO::CancelSynchronousIo;
     use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread};
@@ -288,6 +318,8 @@ mod win_walk_find {
     const FILE_ATTRIBUTE_CLOUD_RECALL_DIR: u32 = 0x0004_0000 | 0x0040_0000;
 
     struct OwnedHandle(HANDLE);
+    unsafe impl Send for OwnedHandle {}
+    unsafe impl Sync for OwnedHandle {}
     impl Drop for OwnedHandle {
         fn drop(&mut self) {
             if self.0 != INVALID_HANDLE_VALUE && !self.0.is_invalid() {
@@ -299,7 +331,7 @@ mod win_walk_find {
     }
 
     struct CancelRegistry {
-        threads: Mutex<Vec<usize>>,
+        threads: Mutex<Vec<Arc<OwnedHandle>>>,
     }
     impl CancelRegistry {
         fn new() -> Self {
@@ -310,33 +342,36 @@ mod win_walk_find {
 
         fn register_current_thread(self: &Arc<Self>) -> ThreadCancelGuard {
             let mut dup = HANDLE::default();
-            let raw = unsafe {
+            let handle = unsafe {
                 let proc = GetCurrentProcess();
                 let cur = GetCurrentThread();
                 if DuplicateHandle(proc, cur, proc, &mut dup, 0, false, DUPLICATE_SAME_ACCESS)
                     .is_ok()
                 {
-                    dup.0 as usize
+                    Some(Arc::new(OwnedHandle(dup)))
                 } else {
-                    0
+                    None
                 }
             };
-            if raw != 0
+            if let Some(ref h) = handle
                 && let Ok(mut list) = self.threads.lock()
             {
-                list.push(raw);
+                list.push(Arc::clone(h));
             }
             ThreadCancelGuard {
                 registry: Arc::clone(self),
-                raw,
+                handle,
             }
         }
 
         fn cancel_all(&self) {
-            let handles: Vec<usize> = self.threads.lock().map(|g| g.clone()).unwrap_or_default();
-            for raw in handles {
+            // Clone `Arc<OwnedHandle>` under lock so handles stay alive during CancelSynchronousIo
+            // even if the worker thread concurrently exits (prevents handle-reuse races).
+            let handles: Vec<Arc<OwnedHandle>> =
+                self.threads.lock().map(|g| g.clone()).unwrap_or_default();
+            for h in handles {
                 unsafe {
-                    let _ = CancelSynchronousIo(HANDLE(raw as *mut _));
+                    let _ = CancelSynchronousIo(h.0);
                 }
             }
         }
@@ -344,17 +379,14 @@ mod win_walk_find {
 
     struct ThreadCancelGuard {
         registry: Arc<CancelRegistry>,
-        raw: usize,
+        handle: Option<Arc<OwnedHandle>>,
     }
     impl Drop for ThreadCancelGuard {
         fn drop(&mut self) {
-            if self.raw != 0 {
-                if let Ok(mut list) = self.registry.threads.lock() {
-                    list.retain(|&h| h != self.raw);
-                }
-                unsafe {
-                    let _ = CloseHandle(HANDLE(self.raw as *mut _));
-                }
+            if let Some(ref h) = self.handle
+                && let Ok(mut list) = self.registry.threads.lock()
+            {
+                list.retain(|entry| !Arc::ptr_eq(entry, h));
             }
         }
     }
@@ -398,6 +430,7 @@ mod win_walk_find {
         high: VecDeque<FindDirTask>,
         low: Vec<FindDirTask>,
         active: usize,
+        active_by_root: Vec<usize>,
         queued_bytes: usize,
         stop: bool,
         workers_alive: usize,
@@ -409,7 +442,7 @@ mod win_walk_find {
     }
 
     impl FindDirQueue {
-        fn new(initial: Vec<FindDirTask>, workers_alive: usize) -> Self {
+        fn new(initial: Vec<FindDirTask>, root_count: usize, workers_alive: usize) -> Self {
             let mut high = VecDeque::with_capacity(initial.len().max(16));
             let mut queued_bytes = 0usize;
             for task in initial {
@@ -421,6 +454,7 @@ mod win_walk_find {
                     high,
                     low: Vec::new(),
                     active: 0,
+                    active_by_root: vec![0; root_count],
                     queued_bytes,
                     stop: false,
                     workers_alive,
@@ -438,6 +472,9 @@ mod win_walk_find {
                 if let Some(task) = guard.high.pop_front().or_else(|| guard.low.pop()) {
                     guard.queued_bytes = guard.queued_bytes.saturating_sub(task.est_bytes);
                     guard.active += 1;
+                    if let Some(slot) = guard.active_by_root.get_mut(task.root_idx) {
+                        *slot += 1;
+                    }
                     return Some(task);
                 }
                 if guard.active == 0 {
@@ -453,6 +490,7 @@ mod win_walk_find {
         fn finish_and_push(
             &self,
             shared: &WalkShared,
+            root_idx: usize,
             high_batch: Vec<FindDirTask>,
             low_batch: Vec<FindDirTask>,
         ) {
@@ -478,29 +516,44 @@ mod win_walk_find {
                     }
                 }
                 guard.active = guard.active.saturating_sub(1);
+                if let Some(slot) = guard.active_by_root.get_mut(root_idx) {
+                    *slot = slot.saturating_sub(1);
+                }
                 if guard.active == 0 || !guard.high.is_empty() || !guard.low.is_empty() {
                     self.cv.notify_all();
                 }
             }
         }
 
-        fn abort_active_task(&self) {
+        fn abort_active_task(&self, root_idx: usize) {
             if let Ok(mut guard) = self.state.lock() {
                 guard.active = guard.active.saturating_sub(1);
+                if let Some(slot) = guard.active_by_root.get_mut(root_idx) {
+                    *slot = slot.saturating_sub(1);
+                }
                 self.cv.notify_all();
             }
+        }
+
+        fn mark_inflight_and_queued_partial(guard: &mut FindQueueState, shared: &WalkShared) {
+            for (idx, &cnt) in guard.active_by_root.iter().enumerate() {
+                if cnt > 0 {
+                    shared.mark_root_partial(idx);
+                }
+            }
+            for t in guard.high.drain(..) {
+                shared.mark_root_partial(t.root_idx);
+            }
+            for t in guard.low.drain(..) {
+                shared.mark_root_partial(t.root_idx);
+            }
+            guard.queued_bytes = 0;
         }
 
         fn stop_all_and_mark_partials(&self, shared: &WalkShared) {
             if let Ok(mut guard) = self.state.lock() {
                 guard.stop = true;
-                for t in guard.high.drain(..) {
-                    shared.mark_root_partial(t.root_idx);
-                }
-                for t in guard.low.drain(..) {
-                    shared.mark_root_partial(t.root_idx);
-                }
-                guard.queued_bytes = 0;
+                Self::mark_inflight_and_queued_partial(&mut guard, shared);
                 self.cv.notify_all();
             }
         }
@@ -518,6 +571,7 @@ mod win_walk_find {
             &self,
             shared: &WalkShared,
             cancel_reg: &CancelRegistry,
+            stop_deadline: Instant,
             return_deadline: Instant,
         ) {
             let mut guard = match self.state.lock() {
@@ -531,25 +585,18 @@ mod win_walk_find {
                     if shared.cancel.is_cancelled() {
                         shared.mark_cancelled();
                         guard.stop = true;
-                        for t in guard.high.drain(..) {
-                            shared.mark_root_partial(t.root_idx);
-                        }
-                        for t in guard.low.drain(..) {
-                            shared.mark_root_partial(t.root_idx);
-                        }
-                        guard.queued_bytes = 0;
+                        Self::mark_inflight_and_queued_partial(&mut guard, shared);
                         self.cv.notify_all();
                         cancelling = true;
-                    } else if now >= shared.deadline {
+                    } else if now >= stop_deadline {
                         shared.mark_timed_out();
                         guard.stop = true;
-                        for t in guard.high.drain(..) {
-                            shared.mark_root_partial(t.root_idx);
-                        }
-                        for t in guard.low.drain(..) {
-                            shared.mark_root_partial(t.root_idx);
-                        }
-                        guard.queued_bytes = 0;
+                        Self::mark_inflight_and_queued_partial(&mut guard, shared);
+                        self.cv.notify_all();
+                        cancelling = true;
+                    } else if guard.stop || shared.stop.load(AtomicOrdering::Relaxed) {
+                        guard.stop = true;
+                        Self::mark_inflight_and_queued_partial(&mut guard, shared);
                         self.cv.notify_all();
                         cancelling = true;
                     }
@@ -558,8 +605,8 @@ mod win_walk_find {
                     drop(guard);
                     cancel_reg.cancel_all();
                     if Instant::now() >= return_deadline {
-                        // Return deadline reached: stuck driver I/O threads keep holding their
-                        // global worker permits until they exit naturally.
+                        // Return AT OR BEFORE total request deadline; stuck I/O threads retain
+                        // their global permits until they unwind naturally.
                         return;
                     }
                     guard = match self.state.lock() {
@@ -584,12 +631,14 @@ mod win_walk_find {
         queue: &'a FindDirQueue,
         shared: &'a WalkShared,
         cancel_reg: &'a CancelRegistry,
+        root_idx: usize,
         completed: bool,
     }
     impl Drop for PanicTaskGuard<'_> {
         fn drop(&mut self) {
             if !self.completed {
-                self.queue.abort_active_task();
+                self.shared.mark_root_partial(self.root_idx);
+                self.queue.abort_active_task(self.root_idx);
                 if std::thread::panicking() {
                     self.shared.stop.store(true, AtomicOrdering::Relaxed);
                     self.queue.stop_all_and_mark_partials(self.shared);
@@ -637,18 +686,6 @@ mod win_walk_find {
         path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
 
-    fn to_wide_pattern(dir: &Path) -> Vec<u16> {
-        const BACKSLASH: u16 = b'\\' as u16;
-        const COLON: u16 = b':' as u16;
-        let mut w: Vec<u16> = dir.as_os_str().encode_wide().collect();
-        if !matches!(w.last().copied(), Some(BACKSLASH | COLON)) {
-            w.push(BACKSLASH);
-        }
-        w.push(b'*' as u16);
-        w.push(0);
-        w
-    }
-
     fn is_dot_or_dotdot(name: &[u16]) -> bool {
         (name.len() == 1 && name[0] == b'.' as u16)
             || (name.len() == 2 && name[0] == b'.' as u16 && name[1] == b'.' as u16)
@@ -669,29 +706,9 @@ mod win_walk_find {
         lossless
     }
 
-    fn is_info_class_unsupported(err: &windows::core::Error) -> bool {
-        let code = err.code().0 as u32 & 0xFFFF;
-        code == ERROR_INVALID_FUNCTION.0
-            || code == ERROR_NOT_SUPPORTED.0
-            || code == ERROR_INVALID_PARAMETER.0
-            || code == ERROR_INVALID_LEVEL.0
-    }
-
     fn is_enum_eof(err: &windows::core::Error) -> bool {
         let code = err.code().0 as u32 & 0xFFFF;
         code == ERROR_NO_MORE_FILES.0 || code == ERROR_HANDLE_EOF.0
-    }
-
-    fn is_findfirst_empty(err: &windows::core::Error) -> bool {
-        let code = err.code().0 as u32 & 0xFFFF;
-        code == ERROR_FILE_NOT_FOUND.0 || code == ERROR_NO_MORE_FILES.0
-    }
-
-    fn is_findfirst_flag_unsupported(err: &windows::core::Error) -> bool {
-        let code = err.code().0 as u32 & 0xFFFF;
-        code == ERROR_INVALID_PARAMETER.0
-            || code == ERROR_NOT_SUPPORTED.0
-            || code == ERROR_INVALID_FUNCTION.0
     }
 
     fn is_low_priority_dir(
@@ -767,19 +784,16 @@ mod win_walk_find {
         {
             return Err(());
         }
-        if task.depth > 0 {
-            if let Some(ev) = task.expected_vol
-                && ev != 0
-                && info.dwVolumeSerialNumber != 0
-                && info.dwVolumeSerialNumber != ev
-            {
+        if let Some(ev) = task.expected_vol
+            && ev != 0
+            && (info.dwVolumeSerialNumber == 0 || info.dwVolumeSerialNumber != ev)
+        {
+            return Err(());
+        }
+        if let Some(eid) = task.expected_file_id.filter(|&id| id != 0) {
+            let opened_id = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+            if opened_id == 0 || opened_id != eid {
                 return Err(());
-            }
-            if let Some(eid) = task.expected_file_id.filter(|&id| id != 0) {
-                let opened_id = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
-                if opened_id != eid {
-                    return Err(());
-                }
             }
         }
         Ok((handle, info.dwVolumeSerialNumber))
@@ -818,7 +832,8 @@ mod win_walk_find {
         }
         let lossless = decode_utf16_into(name_u16, &mut scratch.name_buf);
         if !lossless {
-            // Skip names with unpaired surrogates that cannot round-trip cleanly as UTF-8.
+            // Surface unpaired UTF-16 surrogates via `skipped` rather than silent drop or mangling.
+            worker.local_skipped += 1;
             return true;
         }
         let name = scratch.name_buf.as_str();
@@ -981,122 +996,6 @@ mod win_walk_find {
         true
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn scan_dir_findfirst_fallback(
-        worker: &mut FindWorker,
-        shared: &WalkShared,
-        task: &FindDirTask,
-        dir_vol: u32,
-        parent_name_lower: &str,
-        root_is_vol_root: bool,
-        display_prefix: &str,
-        rel_prefix: &str,
-        high_batch: &mut Vec<FindDirTask>,
-        low_batch: &mut Vec<FindDirTask>,
-        scratch: &mut WorkerScratch,
-    ) {
-        let pattern = to_wide_pattern(&task.path);
-        let mut data = WIN32_FIND_DATAW::default();
-        let mut handle = unsafe {
-            FindFirstFileExW(
-                PCWSTR(pattern.as_ptr()),
-                FindExInfoBasic,
-                (&raw mut data).cast(),
-                FindExSearchNameMatch,
-                None,
-                FIND_FIRST_EX_LARGE_FETCH,
-            )
-        };
-        if let Err(ref err) = handle
-            && is_findfirst_flag_unsupported(err)
-        {
-            handle = unsafe {
-                FindFirstFileExW(
-                    PCWSTR(pattern.as_ptr()),
-                    FindExInfoBasic,
-                    (&raw mut data).cast(),
-                    FindExSearchNameMatch,
-                    None,
-                    FIND_FIRST_EX_FLAGS(0),
-                )
-            };
-        }
-        let handle = match handle {
-            Ok(h) if h != INVALID_HANDLE_VALUE => h,
-            Ok(_) => return,
-            Err(err) if is_findfirst_empty(&err) => return,
-            Err(_) => {
-                worker.local_skipped += 1;
-                return;
-            }
-        };
-        struct FindHandle(HANDLE);
-        impl Drop for FindHandle {
-            fn drop(&mut self) {
-                unsafe {
-                    let _ = FindClose(self.0);
-                }
-            }
-        }
-        let _guard = FindHandle(handle);
-
-        loop {
-            if shared.stop.load(AtomicOrdering::Relaxed) {
-                break;
-            }
-            if shared.cancel.is_cancelled() {
-                shared.mark_cancelled();
-                break;
-            }
-            if Instant::now() >= shared.deadline {
-                shared.mark_timed_out();
-                break;
-            }
-            let len = data
-                .cFileName
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(data.cFileName.len());
-            let name_u16 = &data.cFileName[..len];
-            if !is_dot_or_dotdot(name_u16) {
-                let eof = ((data.nFileSizeHigh as u64) << 32) | (data.nFileSizeLow as u64);
-                let ft = ((data.ftLastWriteTime.dwHighDateTime as u64) << 32)
-                    | (data.ftLastWriteTime.dwLowDateTime as u64);
-                let mtime = crate::tools::path_guard::filetime_to_unix_secs(ft);
-                let keep = process_entry(
-                    worker,
-                    shared,
-                    task,
-                    dir_vol,
-                    parent_name_lower,
-                    root_is_vol_root,
-                    display_prefix,
-                    rel_prefix,
-                    name_u16,
-                    data.dwFileAttributes,
-                    data.dwReserved0,
-                    eof,
-                    mtime,
-                    None,
-                    high_batch,
-                    low_batch,
-                    scratch,
-                );
-                if !keep {
-                    break;
-                }
-            }
-            match unsafe { FindNextFileW(handle, &mut data) } {
-                Ok(()) => {}
-                Err(err) if is_enum_eof(&err) => break,
-                Err(_) => {
-                    worker.local_skipped += 1;
-                    break;
-                }
-            }
-        }
-    }
-
     fn scan_dir(
         worker: &mut FindWorker,
         shared: &WalkShared,
@@ -1107,6 +1006,9 @@ mod win_walk_find {
     ) {
         let Ok((handle, dir_vol)) = open_dir_checked(task) else {
             worker.local_skipped += 1;
+            if task.depth == 0 {
+                shared.mark_root_partial(task.root_idx);
+            }
             return;
         };
         let target = &shared.targets[task.root_idx];
@@ -1123,7 +1025,6 @@ mod win_walk_find {
             .and_then(|s| s.to_str())
             .map(|s| s.to_ascii_lowercase())
             .unwrap_or_default();
-        let mut first_batch = true;
 
         loop {
             if shared.stop.load(AtomicOrdering::Relaxed) {
@@ -1148,7 +1049,6 @@ mod win_walk_find {
             };
             match res {
                 Ok(()) => {
-                    first_batch = false;
                     let raw = unsafe {
                         std::slice::from_raw_parts(scratch.io_buf.as_ptr().cast::<u8>(), buf_bytes)
                     };
@@ -1189,25 +1089,11 @@ mod win_walk_find {
                     }
                 }
                 Err(err) if is_enum_eof(&err) => break,
-                Err(err) if first_batch && is_info_class_unsupported(&err) => {
-                    drop(handle);
-                    scan_dir_findfirst_fallback(
-                        worker,
-                        shared,
-                        task,
-                        dir_vol,
-                        &parent_name_lower,
-                        target.is_volume_root,
-                        &display_prefix,
-                        &rel_prefix,
-                        high_batch,
-                        low_batch,
-                        scratch,
-                    );
-                    break;
-                }
                 Err(_) => {
                     worker.local_skipped += 1;
+                    if task.depth == 0 {
+                        shared.mark_root_partial(task.root_idx);
+                    }
                     break;
                 }
             }
@@ -1215,68 +1101,53 @@ mod win_walk_find {
     }
 
     pub(super) fn run_parallel_walk_win(shared: Arc<WalkShared>) {
-        let mut initial = Vec::with_capacity(shared.targets.len());
+        let root_count = shared.targets.len();
+        let mut initial = Vec::with_capacity(root_count);
         for (idx, target) in shared.targets.iter().enumerate() {
             let may_prot = shared
                 .session
                 .dir_may_contain_protected_key(&target.verified_root.canonical_path);
+            // Pin root volume & object identity even at depth 0 to prevent root rebind races.
             initial.push(FindDirTask::new(
                 idx,
                 target.verified_root.canonical_path.clone(),
                 0,
                 false,
                 may_prot,
-                None,
-                None,
+                (target.verified_root.vol_serial != 0).then_some(target.verified_root.vol_serial),
+                (target.verified_root.index64 != 0).then_some(target.verified_root.index64),
             ));
         }
 
         let max_global = worker_threads();
         let mut permits = Vec::with_capacity(max_global);
-        for _ in 0..max_global {
-            if let Some(p) = GlobalWorkerPermit::try_acquire(max_global) {
-                permits.push(p);
-            } else {
-                break;
+        if let Some(first) =
+            GlobalWorkerPermit::acquire_bounded(max_global, shared.deadline, &shared.cancel)
+        {
+            permits.push(first);
+            for _ in 1..max_global {
+                if let Some(p) = GlobalWorkerPermit::try_acquire(max_global) {
+                    permits.push(p);
+                } else {
+                    break;
+                }
             }
         }
-        // Guarantee at least 1 worker runs synchronously if all global slots are busy.
-        let use_inline = permits.is_empty();
-        let cancel_reg = Arc::new(CancelRegistry::new());
-
-        if use_inline {
-            let queue = Arc::new(FindDirQueue::new(initial, 1));
-            let mut worker = FindWorker::new(Arc::clone(&shared));
-            let mut scratch = WorkerScratch::new();
-            while let Some(task) = queue.pop() {
-                if shared.stop.load(AtomicOrdering::Relaxed) {
-                    queue.abort_active_task();
-                    queue.stop_all_and_mark_partials(&shared);
-                    break;
-                }
-                let mut high_batch = Vec::new();
-                let mut low_batch = Vec::new();
-                scan_dir(
-                    &mut worker,
-                    &shared,
-                    &task,
-                    &mut high_batch,
-                    &mut low_batch,
-                    &mut scratch,
-                );
-                if shared.stop.load(AtomicOrdering::Relaxed) {
-                    shared.mark_root_partial(task.root_idx);
-                    queue.abort_active_task();
-                    queue.stop_all_and_mark_partials(&shared);
-                    break;
-                }
-                queue.finish_and_push(&shared, high_batch, low_batch);
+        if permits.is_empty() {
+            // Never bypass the global worker permit pool with unbounded inline blocking I/O.
+            for idx in 0..root_count {
+                shared.mark_root_partial(idx);
             }
-            worker.flush();
+            if shared.cancel.is_cancelled() {
+                shared.mark_cancelled();
+            } else {
+                shared.mark_timed_out();
+            }
             return;
         }
 
-        let queue = Arc::new(FindDirQueue::new(initial, permits.len()));
+        let cancel_reg = Arc::new(CancelRegistry::new());
+        let queue = Arc::new(FindDirQueue::new(initial, root_count, permits.len()));
         let mut spawned = 0usize;
         for permit in permits {
             let w_shared = Arc::clone(&shared);
@@ -1299,11 +1170,12 @@ mod win_walk_find {
                             queue: &w_queue,
                             shared: &w_shared,
                             cancel_reg: &w_cancel,
+                            root_idx: task.root_idx,
                             completed: false,
                         };
                         if w_shared.stop.load(AtomicOrdering::Relaxed) {
                             w_shared.mark_root_partial(task.root_idx);
-                            w_queue.abort_active_task();
+                            w_queue.abort_active_task(task.root_idx);
                             panic_guard.completed = true;
                             break;
                         }
@@ -1319,12 +1191,12 @@ mod win_walk_find {
                         );
                         if w_shared.stop.load(AtomicOrdering::Relaxed) {
                             w_shared.mark_root_partial(task.root_idx);
-                            w_queue.abort_active_task();
+                            w_queue.abort_active_task(task.root_idx);
                             w_queue.stop_all_and_mark_partials(&w_shared);
                             panic_guard.completed = true;
                             break;
                         }
-                        w_queue.finish_and_push(&w_shared, high_batch, low_batch);
+                        w_queue.finish_and_push(&w_shared, task.root_idx, high_batch, low_batch);
                         panic_guard.completed = true;
                     }
                     worker.flush();
@@ -1336,11 +1208,17 @@ mod win_walk_find {
             }
         }
         if spawned == 0 {
+            for idx in 0..root_count {
+                shared.mark_root_partial(idx);
+            }
             shared.mark_timed_out();
             return;
         }
-        let return_deadline = shared.deadline + RETURN_DEADLINE_MARGIN;
-        queue.wait_until_done_or_deadline(&shared, &cancel_reg, return_deadline);
+        let stop_deadline = shared
+            .deadline
+            .checked_sub(RETURN_DEADLINE_MARGIN)
+            .unwrap_or(shared.deadline);
+        queue.wait_until_done_or_deadline(&shared, &cancel_reg, stop_deadline, shared.deadline);
     }
 }
 
