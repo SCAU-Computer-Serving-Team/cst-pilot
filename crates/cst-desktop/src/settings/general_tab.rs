@@ -148,6 +148,7 @@ pub fn render_general_tab(
     };
 
     let tr_update_btn = kbd.tracker.clone();
+    let kbd_active_for_update = kbd.kbd_active;
     let right_update_controls = if in_flight {
         let mut group = div().flex().items_center().gap(space::LG).flex_shrink_0();
         if let Some(ratio) = progress_ratio {
@@ -183,7 +184,13 @@ pub fn render_general_tab(
                         .text_color(palette.text_secondary)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                        .hover(move |s| {
+                            if kbd_active_for_update {
+                                s
+                            } else {
+                                s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                            }
+                        })
                         .active(|s| s.bg(palette.bg_active_press))
                         .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
                         .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
@@ -233,7 +240,13 @@ pub fn render_general_tab(
             .text_color(palette.text_primary)
             .flex()
             .items_center()
-            .hover(|s| s.bg(palette.bg_item_hover))
+            .hover(move |s| {
+                if kbd_active_for_update {
+                    s
+                } else {
+                    s.bg(palette.bg_item_hover)
+                }
+            })
             .active(|s| s.bg(palette.bg_active_press))
             .on_click(move |_, w, cx| (on_check_or_open_update)(w, cx))
             .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))

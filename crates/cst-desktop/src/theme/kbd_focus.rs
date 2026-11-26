@@ -451,10 +451,20 @@ impl<const N: usize> KbdBoundsTracker<N> {
     }
 }
 
+/// Pending scroll-into-view request resolved on the exact prepaint/paint frame where the
+/// target key's layout bounds become available.
+struct PendingScrollRequest {
+    key: SharedString,
+    scroll: ScrollHandle,
+    margin_px: f32,
+    frames_left: u8,
+}
+
 /// Keyed bounds tracker for dynamic-length menus, lists, toolbars, and settings views.
 #[derive(Clone, Default)]
 pub struct KbdDynamicBoundsTracker {
     slots: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
+    pending_scroll: Rc<RefCell<Option<PendingScrollRequest>>>,
 }
 
 impl KbdDynamicBoundsTracker {
@@ -473,6 +483,142 @@ impl KbdDynamicBoundsTracker {
     pub fn get(&self, key: &str) -> Option<Bounds<Pixels>> {
         self.slots.borrow().get(key).copied()
     }
+
+    /// Arms a pending scroll request consumed once `key` has freshly laid-out bounds.
+    /// Replaces any prior unconsumed request so newer input always wins.
+    pub fn request_scroll(
+        &self,
+        scroll: &ScrollHandle,
+        key: impl Into<SharedString>,
+        margin_px: f32,
+    ) {
+        *self.pending_scroll.borrow_mut() = Some(PendingScrollRequest {
+            key: key.into(),
+            scroll: scroll.clone(),
+            margin_px,
+            frames_left: 4,
+        });
+    }
+
+    /// Cancels any unconsumed scroll request (called on tab leave or pointer override).
+    pub fn cancel_pending_scroll(&self) {
+        *self.pending_scroll.borrow_mut() = None;
+    }
+
+    /// Consumes a pending scroll request once `key` is present in the current frame's layout
+    /// bounds, applying minimal scroll adjustment using same-frame viewport & target geometry.
+    pub fn flush_pending_scroll(&self, window: &mut Window) {
+        let mut pending = self.pending_scroll.borrow_mut();
+        let Some(req) = pending.as_mut() else {
+            return;
+        };
+        if let Some(bounds) = self.slots.borrow().get(req.key.as_ref()).copied() {
+            let scroll = req.scroll.clone();
+            let margin = req.margin_px;
+            *pending = None;
+            drop(pending);
+            if scroll_target_into_view(&scroll, bounds, margin) {
+                window.refresh();
+            }
+            return;
+        }
+        if req.frames_left <= 1 {
+            *pending = None;
+        } else {
+            req.frames_left -= 1;
+        }
+    }
+}
+
+/// Computes the minimal vertical `ScrollHandle` offset adjustment needed to bring a target
+/// rectangle inside a scroll viewport with `margin_px` breathing room on top and bottom.
+///
+/// `current_offset_y` is non-positive (`0.0` at top, `-max_offset_y` at bottom).
+pub fn compute_scroll_into_view_offset_y(
+    viewport_top: f32,
+    viewport_height: f32,
+    target_top: f32,
+    target_height: f32,
+    current_offset_y: f32,
+    max_offset_y: f32,
+    margin_px: f32,
+) -> Option<f32> {
+    if viewport_height <= 1.0 || target_height <= 0.0 {
+        return None;
+    }
+    let margin = margin_px.max(0.0).min(viewport_height * 0.45);
+    let safe_top = viewport_top + margin;
+    let safe_bottom = viewport_top + viewport_height - margin;
+    let target_bottom = target_top + target_height;
+
+    let delta = if target_top < safe_top {
+        safe_top - target_top
+    } else if target_bottom > safe_bottom {
+        safe_bottom - target_bottom
+    } else {
+        return None;
+    };
+
+    let min_offset = -max_offset_y.max(0.0);
+    let next_y = (current_offset_y + delta).clamp(min_offset, 0.0);
+    ((next_y - current_offset_y).abs() >= 0.5).then_some(next_y)
+}
+
+/// Minimally scrolls `scroll` so `target` (in window coordinates) sits within the viewport
+/// with `margin_px` top/bottom padding so `3px` corner brackets are never clipped.
+pub fn scroll_target_into_view(
+    scroll: &ScrollHandle,
+    target: Bounds<Pixels>,
+    margin_px: f32,
+) -> bool {
+    let vp = scroll.bounds();
+    let cur = scroll.offset();
+    let max_off = scroll.max_offset();
+    let Some(next_y) = compute_scroll_into_view_offset_y(
+        f32::from(vp.origin.y),
+        f32::from(vp.size.height),
+        f32::from(target.origin.y),
+        f32::from(target.size.height),
+        f32::from(cur.y),
+        f32::from(max_off.y),
+        margin_px,
+    ) else {
+        return false;
+    };
+    scroll.set_offset(point(cur.x, px(next_y)));
+    true
+}
+
+/// Scrolls a tracked dynamic control into view immediately when its bounds exist, or arms a
+/// prepaint-synced pending request consumed on the exact frame the newly mounted row lays out.
+pub fn scroll_dynamic_target_into_view(
+    scroll: &ScrollHandle,
+    tracker: &KbdDynamicBoundsTracker,
+    key: impl Into<SharedString>,
+    margin_px: f32,
+    _window: &mut Window,
+) {
+    let key = key.into();
+    if let Some(bounds) = tracker.get(key.as_ref()) {
+        tracker.cancel_pending_scroll();
+        let _ = scroll_target_into_view(scroll, bounds, margin_px);
+        return;
+    }
+    tracker.request_scroll(scroll, key, margin_px);
+}
+
+/// Steps a vertical `ScrollHandle` by `delta_y` (`> 0.0` scrolls up toward top, `< 0.0` scrolls down).
+/// Returns `true` when the scroll offset actually changed.
+pub fn scroll_step_y(scroll: &ScrollHandle, delta_y: f32) -> bool {
+    let cur = scroll.offset();
+    let cur_y = f32::from(cur.y);
+    let min_y = -f32::from(scroll.max_offset().y).max(0.0);
+    let next_y = (cur_y + delta_y).clamp(min_y, 0.0);
+    if (next_y - cur_y).abs() < 0.5 {
+        return false;
+    }
+    scroll.set_offset(point(cur.x, px(next_y)));
+    true
 }
 
 /// Target descriptor for a dynamic control inside a `KbdDynamicBoundsTracker` container.
@@ -492,6 +638,18 @@ impl KbdDynamicSpec {
             corner_radius: 6.0,
             tone: KbdTone::Neutral,
             rail: KbdRailPlacement::LeftInside,
+            bracket_pad: 2.0,
+        }
+    }
+
+    /// Frameless `0px`-padding hairline list row: places the vertical rail in the left outer
+    /// gutter (`LeftOutside`, `-7px`) so it never overlaps the leading glyph or checkbox.
+    pub fn hairline_row(key: impl Into<SharedString>) -> Self {
+        Self {
+            key: key.into(),
+            corner_radius: 4.0,
+            tone: KbdTone::Neutral,
+            rail: KbdRailPlacement::LeftOutside,
             bracket_pad: 2.0,
         }
     }
@@ -886,6 +1044,7 @@ pub fn render_gliding_dynamic_indicator(
     canvas(
         |_, _, _| (),
         move |container_bounds, _, window, cx| {
+            tracker.flush_pending_scroll(window);
             let now = Instant::now();
             let resolved = target.as_ref().and_then(|spec| {
                 let ctrl = tracker.get(spec.key.as_ref())?;
@@ -1468,5 +1627,34 @@ mod tests {
         assert_eq!(tracker.get("row-0"), Some(rect));
         tracker.clear();
         assert_eq!(tracker.get("row-0"), None);
+    }
+
+    #[test]
+    fn scroll_into_view_computes_minimal_clamped_delta() {
+        // Already inside safe zone [116, 584] -> no scroll needed.
+        assert_eq!(
+            compute_scroll_into_view_offset_y(100.0, 500.0, 200.0, 48.0, 0.0, 400.0, 16.0),
+            None
+        );
+        // Below viewport bottom: bottom=648 vs safe_bottom=584 -> scroll down by -64.
+        assert_eq!(
+            compute_scroll_into_view_offset_y(100.0, 500.0, 600.0, 48.0, 0.0, 400.0, 16.0),
+            Some(-64.0)
+        );
+        // Above viewport top: top=80 vs safe_top=116 -> scroll up by +36.
+        assert_eq!(
+            compute_scroll_into_view_offset_y(100.0, 500.0, 80.0, 48.0, -100.0, 400.0, 16.0),
+            Some(-64.0)
+        );
+        // Clamped at -max_offset_y when near end of document.
+        assert_eq!(
+            compute_scroll_into_view_offset_y(100.0, 500.0, 700.0, 48.0, -350.0, 400.0, 16.0),
+            Some(-400.0)
+        );
+        // Clamped at 0.0 when already at top.
+        assert_eq!(
+            compute_scroll_into_view_offset_y(100.0, 500.0, 80.0, 48.0, 0.0, 400.0, 16.0),
+            None
+        );
     }
 }

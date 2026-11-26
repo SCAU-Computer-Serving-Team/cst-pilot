@@ -803,6 +803,9 @@ impl AppShell {
         if dest_route == ShellRoute::AllSessions {
             self.all_sessions_view
                 .update(cx, |v, cx| v.focus(window, cx));
+        } else if dest_route == ShellRoute::Settings {
+            self.settings_view
+                .update(cx, |sv, cx| sv.focus_on_return(true, window, cx));
         } else {
             self.root_focus.focus(window, cx);
         }
@@ -2038,8 +2041,7 @@ impl AppShell {
                 self.toggle_sidebar(window, cx);
             }
             PaletteCommandTarget::OpenSettings => {
-                self.set_route(ShellRoute::Settings, cx);
-                cx.notify();
+                self.open_settings_route(None, true, window, cx);
             }
             PaletteCommandTarget::OpenWeb => {
                 self.trigger_open_web(false, window, cx);
@@ -2475,7 +2477,28 @@ impl AppShell {
             cx.notify();
             return true;
         }
+        if self.route == ShellRoute::Settings {
+            self.navigate_back(window, cx);
+            return true;
+        }
         false
+    }
+
+    pub(super) fn open_settings_route(
+        &mut self,
+        category: Option<SettingsCategory>,
+        from_keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_route(ShellRoute::Settings, cx);
+        self.settings_view.update(cx, |sv, cx| {
+            if let Some(cat) = category {
+                sv.set_category(cat, cx);
+            }
+            sv.focus_on_enter(from_keyboard, window, cx);
+        });
+        cx.notify();
     }
 
     fn trigger_update_prepare(&mut self, cx: &mut Context<Self>) {
@@ -3042,6 +3065,13 @@ impl AppShell {
                 cx.notify();
             }
             LoginViewEvent::NavigateToCustomGatewaySettings => {
+                let prev = (ShellRoute::Login, SessionSubView::Chat, None);
+                if self.route_history.last() != Some(&prev) {
+                    self.route_history.push(prev);
+                    if self.route_history.len() > 24 {
+                        self.route_history.remove(0);
+                    }
+                }
                 self.set_route(ShellRoute::Settings, cx);
                 self.settings_view
                     .update(cx, |sv, cx| sv.open_custom_gateway_creator(window, cx));
@@ -4073,12 +4103,11 @@ impl Render for AppShell {
                     .detach();
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
+            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 if this.blocks_workspace_shortcuts(cx) {
                     return;
                 }
-                this.set_route(ShellRoute::Settings, cx);
-                cx.notify();
+                this.open_settings_route(None, true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_command_palette(window, cx);
@@ -4699,12 +4728,7 @@ impl Render for AppShell {
                             return;
                         };
                         this.pending_return_session_id = Some(taken.return_session_id);
-                        this.root_focus.focus(w, cx);
-                        this.set_route(ShellRoute::Settings, cx);
-                        this.settings_view.update(cx, |sv, cx| {
-                            sv.set_category(SettingsCategory::Providers, cx);
-                        });
-                        cx.notify();
+                        this.open_settings_route(Some(SettingsCategory::Providers), true, w, cx);
                     });
                 },
                 window,
