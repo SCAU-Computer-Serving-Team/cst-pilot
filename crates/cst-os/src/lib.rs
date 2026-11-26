@@ -19,7 +19,8 @@ pub use fs_safe::{
 };
 pub use json::{parse_local_json, parse_strict_json, strip_json_comments};
 pub use layout::{
-    KitLayout, normalize_canonical_path_for_hash, resolve_kit_root, strip_windows_verbatim_prefix,
+    KitLayout, REQUIRED_SKILL_NAMES, normalize_canonical_path_for_hash, resolve_kit_root,
+    strip_windows_verbatim_prefix,
 };
 pub use locks::{RunbookDirectoryLock, ServerInstanceLock, SessionOwnerLock, UpdateLock};
 pub use process::{

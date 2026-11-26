@@ -22,10 +22,10 @@
 
 通用行为约束：
 
-1. **只读边界与写入例外**：12 个查询与检索工具不修改系统配置、服务状态或机主文件，存储诊断零临时文件落盘。`runbook` 保存方案至 `data/plans/`，导出清单至 `artifacts/<日期>/runbook/`。`bitlocker` 仅 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
-2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。`ls` 与 `disk(usage)` 在明细、排行与拒绝列表中隐去敏感路径名，体积计入总容量。联网工具每次直连、重定向及云端抓取前均执行本地 URL 策略与 DNS 解析预检，拒绝回环、私网与混合解析结果，按配置放行 `198.18.0.0/15` TUN 网段。
-3. **统一耗时与裁剪保护**：`kit.rs` 外层为全部 14 个工具在执行阶段注入顶层整数毫秒 `elapsedMs`，覆盖正常、降级、执行期结构化错误 JSON 与 `50 KiB` 裁剪输出（前置 Schema 校验拦截发生在进入执行前）。模型文本超过 `50 KiB` 时基于完整 `details` 单次裁剪大数组与长正文，保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 等核心字段。
-4. **口径与错误诚实**：工具说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。请求数据源全部失败时返回结构化错误 JSON（`{"error", "elapsedMs"}`）并置 `isError: true`。部分数据源失败时保留成功数据，置 `isError: false` 与 `degraded: true`。正常调用不输出空错误容器（`collectionErrors`、`counterErrors`）或 `degraded: false`。
+1. **只读边界与写入例外**：12 个查询与检索工具不修改系统配置、服务状态或机主文件，存储诊断零临时文件落盘。`runbook` 默认保存方案至 `data/plans/`（受实际数据目录设置控制），导出清单至 `artifacts/<日期>/runbook/`。`bitlocker` 仅 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
+2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断受保护凭据文件（默认 `data/config/{auth,models,mcp-auth,web-search}.json` 与 `data/telemetry/identity.json`）、`.state/` 目录及其硬链接／符号链接别名，同时拦截无法核验的链接、未驻留云文件、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。`ls` 与 `disk(usage)` 在明细、排行与拒绝列表中隐去敏感路径名，体积计入总容量。联网工具每次直连、重定向及云端抓取前均执行本地 URL 策略与 DNS 解析预检，拒绝回环、私网与混合解析结果，按配置放行 `198.18.0.0/15` TUN 网段。
+3. **统一耗时与裁剪保护**：`kit.rs` 外层为全部 14 个工具在执行阶段注入顶层整数毫秒 `elapsedMs`，覆盖正常、降级、执行期结构化错误 JSON 与 `50 KiB` 裁剪输出（前置 Schema 校验拦截发生在进入执行前）。模型文本超过 `50 KiB` 时基于完整 `details` 单次裁剪大数组与长正文，优先保留 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 等核心字段（极端退路仅保留最小对象）。
+4. **口径与错误诚实**：工具说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。执行期返回 `Err` 时包装为结构化错误 JSON（`{"error", "elapsedMs"}`）并置 `isError: true`。部分数据源失败、采集降级或受控操作被拒／取消时返回 `isError: false` 并按工具语义附 `degraded: true` 或对应状态字段。正常调用不输出空错误容器（`collectionErrors`、`counterErrors`）或 `degraded: false`。
 
 ## 文件与存储工具
 
@@ -37,13 +37,13 @@
 ### ls 与 disk
 
 - **ls 大小来源与预算**：实时枚举目标目录直接子项，不设条目数上限，统一受外层 215 秒超时与取消信号控制。管理员权限下查询本地 NTFS 盘根且无缓存时建立 120 秒 `$MFT` 卷缓存，同卷子目录查询优先复用快照。全部直接子目录通过 `FileReference` 与 `PathPolicy::LIVE` 路径核验时返回 `method: "native-index"`，任一项未命中则整次走并行 Win32 目录遍历（`method: "walk"`）。`$MFT` 扫描失败回退遍历时附加 `degradedFrom` 与 `degraded: true`。目录不可打开输出 `bytes: null`，任一子项不完整时全部 `pct` 置 `null` 并置 `degraded: true`。
-- **disk space / info / health**：容量按二进制 GiB（`字节 ÷ 2³⁰`）换算，`freeGB: 0` 表示剩余空间为零。`space` 与 `volumes` 走 Win32 原生接口并带线程防弹窗与远程卷短超时隔离。盘符映射优先 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（全 extent 核验，失败回退 WMI）。`health` 优先 Win32 原生 NVMe/ATA 存储 IOCTL（核验序列号并固定输出 6 项字段），不支持或身份不明时回退单次批量 WMI。指定 `drive` 且关联失败时，`info` 返回全量 `physicalDisks` 并附 `infoNotice`，`health` 拒绝查询 SMART 并说明原因。
+- **disk space / info / health**：容量按二进制 GiB（`字节 ÷ 2³⁰`）换算并四舍五入至 1 位小数，`freeGB: 0` 无法区分精确零与舍入零。`space` 与 `volumes` 走 Win32 原生接口并带线程防弹窗与远程卷短超时隔离。盘符映射优先 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（全 extent 核验，失败回退 WMI）。`health` 优先 Win32 原生 NVMe/ATA 存储 IOCTL（核验序列号并固定输出 6 项字段），不支持或身份不明时回退单次批量 WMI。指定 `drive` 且关联失败时，`info` 返回全量 `physicalDisks` 并附 `infoNotice`，`health` 拒绝查询 SMART 并说明原因。
 - **disk usage 扫描与降级**：管理员本地 NTFS 盘根默认使用纯 Rust `ntfs-ng` 直读 `$MFT`（`method: "native-mft"`，设 `CST_DISABLE_MFT=1` 关闭），完整快照写入 120 秒卷缓存供 `ls` 复用，并补齐 `stats.filesScanned`。记录损坏、超内存上限或卷身份变化时拒绝发布缓存，回退 `native-walk` 并附 `degradedFrom` 与 `degraded: true`。子目录、普通权限、非 NTFS 卷与 UNC 路径走无条目上限并行 Win32 `FileIdBothDirectoryInfo` 遍历。两套后端均执行确定性硬链接去重与云占位保护。
 
 ### fffind 与 ffgrep
 
 - **单次基线与并发边界**：每次检索建立瞬态 `PathGuardSession`，不跨调用缓存。遍历禁用符号链接与目录联接跟随（`follow_links(false)`），工作线程上限 8 线程（预留 2 个逻辑核余量），打开文件后在同一句柄上复核规范路径、硬链接数与文件标识。
-- **路径排序与跨盘过滤**：`fffind` 按相关性排序（精确文件名与前缀高于分散子序列），支持空格多词交集，全为弱匹配时附 `notice`。`include` 与 `exclude` 统一按正斜杠路径匹配，跨盘符绝对路径与相对路径行为一致。
+- **路径排序与跨盘过滤**：`fffind` 按相关性排序（精确文件名与前缀高于分散子序列），支持空格多词交集，全为弱匹配时附 `notice`。`path` 通配过滤与 `exclude` 统一按正斜杠路径匹配（不接受 `include` 字段），跨盘符绝对路径与相对路径行为一致。
 - **多编码解码与资源护栏**：`ffgrep` 依次处理 UTF-16 LE/BE BOM、UTF-8 BOM、无 BOM 含 `0x00` 二进制跳过、UTF-8 零拷贝与 GB18030 回退解码。单文件上限 `10 MiB`（超限跳过并记入 `skippedLargeFiles` 与 `notice`），单行上限 `8 KiB`，单次总读取上限 `256 MiB`（达到上限保留已有命中并置 `truncated: true` 与 `degraded: true`），最多遍历 50 万项，超时 30 秒，输出超 `50 KiB` 前受控截断并置 `truncated: true`。
 
 ## 系统诊断工具
@@ -52,7 +52,7 @@
 
 - **sys overview**：优先通过 Win32 原生接口采集内存（`GlobalMemoryStatusEx`）、内核池（`GetPerformanceInfo`）、开机时长（`GetTickCount64`）、页面文件（`K32EnumPageFilesW`）、核心数（`GetLogicalProcessorInformationEx`）与注册表机型／BIOS，CPU 总占用采用 `GetSystemTimes` 200 ms 短窗双采样。原生接口缺失单项时回退 WMI。
 - **sys proc / io 双采样**：`proc` 与 `io` 共用 `NtQuerySystemInformation(SystemProcessInformation)` 单次全量进程快照，覆盖全部系统与受保护进程，按 `(pid, create_time)` 差分防 PID 复用，仅对 `proc` 最终 Top-N 进程复用单缓冲复核创建时间后查询路径。`io` 物理盘指标走 PDH `PhysicalDisk`，与进程双采样共用约 `1.2 s` 窗口。`NtQuerySystemInformation` 不可用时 `proc` 回退 `Toolhelp32`，`io` 回退 WMI。
-- **sys gpu 聚合与双显卡核显补充**：每进程 `gpuPct` 取跨适配器最繁忙单一引擎利用率，`engines[]` 仅保留 `gpuPct > 0` 样本。专用显存仅统计大于 1 MiB 的实例。进程名映射使用 `CreateToolhelp32Snapshot`。检测到非 NVIDIA 物理显示适配器时，在 PDH `1.2 s` 窗口内并行执行 `lhm(Gpu)` 与 `nvidia-smi`，双显卡机型同时返回独显与核显数据。LHM 传感器统一附 `unit` 字段，采集失败写入 `lhmGpu.error`。PDH 本地化计数器路径在进程内缓存复用。
+- **sys gpu 聚合与双显卡核显补充**：每进程 `gpuPct` 取跨适配器最繁忙单一引擎利用率，`engines[]` 仅保留 `gpuPct > 0` 样本。专用显存仅统计大于 1 MiB 的实例。进程名映射使用 `CreateToolhelp32Snapshot`。适配器查询失败或检测到非 NVIDIA 物理显示适配器时，在 PDH `1.2 s` 窗口内并行执行 `lhm(Gpu)` 与 `nvidia-smi`；其余情况在 `nvidia` 非数组时补查 `lhm(Gpu)`（传感器可读性取决于硬件与权限，不保证双卡均有读数）。LHM 传感器统一附 `unit` 字段，采集失败写入 `lhmGpu.error`。PDH 本地化计数器路径在进程内缓存复用。
 - **sys sensor 能力边界**：零安装约束下不安装 WinRing0 或 PawnIO 内核驱动，并行读取随包 LHM 的温度、风扇、电压传感器（附 `unit`，上限 200 项）与 PDH ACPI 热区（−50～150°C）、逻辑核频率百分比（保留 >100% 睿频值）。
 - **startup 禁用三态与 SCM**：采集 HKLM/HKCU 的 `Run`、`RunOnce`、`Wow6432Node\Run`、启动文件夹与自动启动服务。自启服务优先经 Win32 SCM（`EnumServicesStatusExW` 与 `QueryServiceConfigW`）枚举，失败回退 WMI。关联 `StartupApproved` 首字节奇偶判读 `disabled`（`true` / `false` / `null`），不将 `Run` 的禁用记录套给同名 `RunOnce`。超 140 字符的 `path` 截断并附 `…`。
 

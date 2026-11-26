@@ -1,34 +1,32 @@
 ---
 name: startup
-description: startup 开机自启盘点参考。核查注册表自启项、启动文件夹、自动启动服务及 disabled 三态边界时查阅。
+description: startup 开机自启盘点：注册表自启项、启动文件夹与自动启动服务。
 ---
 
 # startup
 
-只读开机自启盘点工具，无输入参数，一次采集三类自启配置。
+只读开机自启盘点工具，不接受输入参数（传 `{}`）。返回结构为 `{ "startup": { ... }, "elapsedMs": N }`。
 
-## 排查路径
+## 场景选择
 
-1. 排查开机慢、后台自启弹窗或残留软件时调用 `startup({})`。
-2. 发现可疑条目后，结合 `sys(proc)` 的 `path` 核实是否正在运行。
-3. 需要关闭自启项或停用第三方服务时，将操作写入 `runbook` 交队员手动执行。
-4. 核对三类清单、`disabled` 三态、`degraded`、`collectionErrors` 与顶层 `elapsedMs`，同时向队员交代未覆盖范围后结束排查。
+| 目标 | 调用与联查 | 结束条件 |
+|---|---|---|
+| 盘点开机自启项与自动服务 | `startup({})` | 列出可疑或目标条目，标注 `disabled` 状态与未覆盖机制 |
+| 核实可疑条目是否正在运行 | 联查 `sys({ scope: "proc" })` | 匹配到进程 `path` 可作为正在运行的正面旁证；未入榜或 `path: null` 须标“未核实”，不可断定未运行 |
+| 关闭自启项或停用第三方服务 | 转 `runbook` 编写修复命令 | 服务 `path` 被截断或为 `null` 时，不可直接复制拼命令 |
 
-## 参数与返回字段
+## 返回字段与口径
 
-参数：`{}`（不接受任何字段）。返回结构为 `{ "startup": { ... }, "elapsedMs": N }`。
-
-| 字段 | 内容与口径 |
+| 字段 | 内容与边界 |
 |---|---|
-| `regItems[]` | 注册表 `Run`、`RunOnce`（HKLM 与 HKCU）及 HKLM `Wow6432Node\Run`：`source`、`name`、`command`、`disabled` |
-| `startupFolders[]` | 当前用户（`scope: "user"`）与所有用户（`scope: "allUsers"`）启动文件夹：`scope`、`path`、`items[]: { name, disabled }` |
-| `services[]` | 自动启动服务（含延迟自启）：`name`、`display`、`state`（`Running` 排前）、`path`（超 140 字符截断附 `…`） |
+| `regItems[]` | HKLM 与 HKCU 的 `Run`、`RunOnce` 及 HKLM `Wow6432Node\Run`：`source`、`name`、`command`、`disabled` |
+| `startupFolders[]` | 当前用户（`scope: "user"`）与所有用户（`scope: "allUsers"`）启动文件夹：`scope`、`path`、`items[]: { name, disabled }`。仅列直接文件名，不展开快捷方式目标；目录不存在时可省略对应对象 |
+| `services[]` | 自动启动服务（含延迟自启）：`name`、`display`、`state`（`Running` 排前）、`path`（超 140 字符截断附 `…`）。同时保留系统与第三方服务，`System32` 路径不能单独证明归属 |
 | `notice` | 采集口径与未覆盖范围说明 |
-| `degraded` / `collectionErrors` | 部分来源失败时出现 |
+| `degraded?` / `collectionErrors?` | 原生采集失败或回退时出现；原生服务接口失败但回退成功后，仍可同时包含 `services` 与 `collectionErrors`，按错误 `source` 判断受影响部分 |
 
-## disabled 三态与能力边界
+## 状态边界与超时规则
 
-1. **`disabled` 三态**：`true` 表示任务管理器启动开关已禁用；`false` 表示已启用；`null` 表示无匹配的禁用状态记录。`RunOnce` 不套用同名 `Run` 的禁用记录。条目存在或状态为 `false` 均不保证实际启动成功。
-2. **未覆盖机制**：不包含计划任务与 WMI 事件订阅等持久化入口，排查顽固自启时须向队员说明该边界。
-3. **服务清单口径**：同时保留系统与第三方自动启动服务，不按厂商过滤；`System32` 路径不能单独证明归属或可信度。
-4. **耗时与错误**：超时上限 30 秒；`elapsedMs` 明显偏高提示服务管理器或系统查询响应慢。整次失败返回 `isError: true`；`degraded: true` 时空数组不能解释为没有自启项。
+1. **`disabled` 三态**：`true` 为已禁用，`false` 为已启用，`null` 为未取得可用状态或该项不判定（`RunOnce` 固定为 `null`，状态记录缺少首字节时也为 `null`）。条目存在或为 `false` 均不保证实际启动成功。
+2. **未覆盖入口**：不包含计划任务与 WMI 事件订阅，排查持久化问题须向队员说明该边界。
+3. **错误与超时**：超时上限 30 秒，超时或快照主入口失败返回 `isError: true`（`{"error", "elapsedMs"}`）。子来源失败可保留在 `degraded: true` 与 `collectionErrors` 中，此时空数组不可解释为无自启项。

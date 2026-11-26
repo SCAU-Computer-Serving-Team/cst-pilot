@@ -16,10 +16,10 @@
 图片读取返回双块：`content` 为 `[Text(meta_json), Image(base64)]`，`details` 仅包含 `meta_json`（含 `elapsedMs`，不含图片 base64）。
 
 1. **统一耗时 `elapsedMs`**：全部 14 个工具在执行阶段（含正常、降级、执行期结构化错误与裁剪输出）顶层均包含整数毫秒 `elapsedMs`；运行时前置参数 Schema 校验错误在进入执行前拦截，不经计时包装。Web 与桌面端卡片在重放历史会话时优先使用事件 `durationMs`，缺失时回退 `details.elapsedMs`。
-2. **模型文本 `50 KiB` 受保护键裁剪**：序列化 UTF-8 字节超过 `51,200` 字节时，`result.rs` 基于完整 `details` 单次递减裁剪大数组与长字符串并输出合法 JSON，顶层附加 `outputTruncated: true`、`originalBytes` 与 `outputNotice`，保护 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 字段。`details` 保留完整未裁剪对象。
+2. **模型文本 `50 KiB` 受保护键裁剪**：序列化 UTF-8 字节超过 `51,200` 字节时，`result.rs` 基于完整 `details` 单次递减裁剪大数组与长字符串并输出合法 JSON，顶层附加 `outputTruncated: true`、`originalBytes` 与 `outputNotice`，优先保留 `elapsedMs`、`degraded`、`degradedFrom`、`error`、`notice`、`file`、`dir`、`name`、`runbookId`、`version`、`sequence`、`action`、`level`、`levelLabel`、`items` 等核心键（极端退路仅保留最小对象，第二轮允许缩减长 `error` / `notice`）。`details` 保留工具执行后的完整未裁剪对象。
 3. **状态与错误字段**：
-   - 整次调用失败：返回 `isError: true`，文本与 `details` 为结构化 JSON `{"error": "...", "elapsedMs": N}`。
-   - 局部降级：返回 `isError: false`，顶层或子对象附 `degraded: true` 及非空错误明细（`collectionErrors`、`counterErrors`、`smartErrors`、`degradedFrom`）。
+   - 执行期返回 `Err`（整次失败）：包装为 `isError: true`，文本与 `details` 为结构化 JSON `{"error": "...", "elapsedMs": N}`；前置参数 Schema 校验错误在进入执行前拦截，不附 `elapsedMs`。
+   - 局部降级与不完整：返回 `isError: false`，按具体工具输出 `degraded: true` 及对应的错误明细（如 `collectionErrors`、`counterErrors`、`smartErrors`、`degradedFrom`）；部分场景（如 `eventlog(security)` 非管理员或 `disk(health)` 无可用 SMART、`bitlocker` 业务拒绝／取消）可在无错误数组或全部目标被拒时返回 `isError: false`，`isError: false` 不等价于测量完整或操作成功。
    - 正常调用：省略 `degraded` 与空错误容器，不输出 `degraded: false`、`counterErrors: {}` 或 `collectionErrors: []`。
    - `notice` / `*Notice`：仅描述数据来源、单位、采样窗口与采集限制。
 
@@ -56,15 +56,15 @@
 | `space` | `space[]: { drive, totalGB, freeGB, usedPct }[]`、可选 `degraded`、`collectionErrors` |
 | `info` | `physicalDisks[]: { FriendlyName, SerialNumber, MediaType, BusType, HealthStatus, OperationalStatus, DeviceId, sizeGB }[]`、`volumes[]: { drive, label, fs, driveType, totalGB, freeGB }[]`、可选 `infoNotice`、`degraded`、`collectionErrors` |
 | `health` | `smart: { DeviceId, Wear, Temperature, PowerOnHours, ReadErrorsTotal, WriteErrorsTotal }[] \| null`、可选 `smartErrors[]: { deviceId, error, code? }[]`、`smartNotice`、`degraded` |
-| `usage` | `usage: { root, totalGB, method: "native-mft"\|"native-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]: { path, sizeGB, modified }[]?, extAgg[]: { ext, files, sizeGB }[]?（最多 40 项）, staleFiles[]: { path, sizeGB, modified }[]?, stats: { filesScanned, budget? }, truncated?, denied[]?, degraded?, degradedFrom?, notice }` |
+| `usage` | `usage: { root, totalGB, method: "native-mft"\|"native-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]: { path, sizeGB, modified }[], extAgg[]: { ext, files, sizeGB }[]（最多 40 项）, staleFiles[]: { path, sizeGB, modified }[], stats: { filesScanned, budget? }, truncated?, denied[]?, degraded?, degradedFrom?, notice }` |
 | `all` | 同层合并 `space`、`info`、`health` 的全部字段 |
 
 ## fffind 与 ffgrep
 
 | 工具 | 核心参数 | 返回契约（均含 `elapsedMs`） |
 |---|---|---|
-| `fffind` | `{ pattern, path?, exclude?, limit? }`（`limit` 默认 30、最大 1000） | `{ matches: { path }[], truncated: boolean, skipped: number, notice?: string, elapsedMs }`；按相关性排序，全弱匹配附 `notice` |
-| `ffgrep` | `{ pattern, path?, include?, exclude?, limit?, context?, caseSensitive?, literal? }` | `{ matches: { path, line, text, matched }[], truncated: boolean, skipped: number, skippedLargeFiles?: number, degraded?: boolean, notice?: string, elapsedMs }`；支持 UTF-16 LE/BE BOM 与 GB18030，单文件限 `10 MiB`，总读取达 `256 MiB` 时保留命中并置 `truncated: true`、`degraded: true` |
+| `fffind` | `{ pattern, path?, exclude?, limit?, caseSensitive? }`（`path` 支持目录、文件或通配过滤；`limit` 默认 30、范围 1–1000；不接受 `include`） | `{ matches: { path }[], truncated: boolean, skipped: number, notice?: string, elapsedMs }`；按相关性排序，全弱匹配附 `notice` |
+| `ffgrep` | `{ pattern, path?, exclude?, limit?, context?, caseSensitive?, literal? }`（`path` 支持目录、文件或通配过滤；`limit` 默认 30、范围 1–1000；`context` 0–20 且计入返回条数；不接受 `include`） | `{ matches: { path, line, text, matched }[], truncated: boolean, skipped: number, skippedLargeFiles?: number, degraded?: boolean, notice?: string, elapsedMs }`；支持 UTF-16 LE/BE BOM 与 GB18030，单文件限 `10 MiB`，总读取达 `256 MiB` 时保留命中并置 `truncated: true`、`degraded: true` |
 
 ## sys
 
@@ -100,12 +100,12 @@
 | `kind` | `boot` | `"all"`（默认）、`"unexpected"`、`"bluescreen"` |
 | `type` | `security` | `"all"`（默认）、`"logonFail"`、`"lockout"` |
 | `app` / `name` / `msg` | `crash` / `service` / `query` | 消息字面子串（1–200 字符，不区分大小写） |
-| `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名（`query` 默认 `"System"`，`detail` 必填）/ 最多 16 个 `0–65535` 整数 / 提供程序正则（1–128 字节，忽略大小写，按本地正则匹配） |
-| `recordId` / `id` | `detail` | 二选一必填。`recordId` 匹配精确记录号，`id` 取该事件 ID 最新一条，同时必须提供 `logName` |
+| `logName` / `ids` / `provider` | `logName` 用于 `query`（默认 `"System"`）与 `detail`（必填）；`ids` 仅 `query`；`provider` 作用于全部列表类 `scope` | 通道名（1–100 字节 ASCII 字母数字开头，其余仅字母数字、空格及 `./_-`）/ 最多 16 个 `0–65535` 整数 / 提供程序正则（1–128 字节，忽略大小写，按本地正则匹配） |
+| `recordId` / `id` | `detail` | 二选一必填。`recordId`（非负整数）匹配精确记录号，`id` 取该事件 ID 最新一条，同时必须提供 `logName` |
 
 - **返回（顶层键为 `[scope]`，含 `elapsedMs`）**：
-  - 列表类 `scope`：`logs`、`hours`、`top`、`total`、`truncated`、`events[]: { logName, time, recordId, level, levelName, provider, id, msg }[]`（`time` 为本机带偏移 RFC3339，`msg` 最多 200 字符）、`counts[]: { key, provider, id, n, last }[]`（最多 100 组）、`countsTruncated`、可选 `scanTruncated`、`unreadable`、`firstTime`、`lastTime`、`admin`、`notice`、可选 `noMatch` / `degraded` / `collectionErrors`。所有请求通道全部失败返回 `isError: true`。
-  - `detail`：`{ found: boolean, logName, recordId?, id?, time?, level?, levelName?, provider?, machine?, msg?, msgTruncated?, originalChars?, notice, unreadable?, degraded? }`（`msg` 保留换行，最多 20,000 字符，超限置 `msgTruncated: true` 与 `originalChars`）。
+  - 列表类 `scope`：`logs`、`hours`、`top`、`total`、`truncated`、`events[]: { logName, time, recordId, level, levelName, provider, id, msg }[]`（`time` 为本机带偏移 RFC3339，`msg` 最多 200 字符，未读到时为 `null`）、`counts[]: { key, provider, id, n, last }[]`（先收录扫描遇到的至多 100 组再按 `n` 降序）、`countsTruncated`、可选 `scanTruncated`、`unreadable`、`firstTime`、`lastTime`、`admin: boolean | null`、`notice`、可选 `noMatch` / `degraded` / `collectionErrors`。所有请求通道全部失败返回 `isError: true`。
+  - `detail`：`{ found: boolean, logName, recordId?, id?, time?, level?, levelName?, provider?, machine?, msg?, msgTruncated?, originalChars?, notice, unreadable?, degraded? }`（`msg` 保留换行，最多 20,000 字符，超限置 `msgTruncated: true` 与 `originalChars`，未读到消息时为 `null` 且置 `degraded: true`）。
 
 ### eventlog 内置事件范围
 
@@ -163,9 +163,9 @@
 
 ## bitlocker
 
-- **参数**：`{ scope?: "status" | "unlock" | "decrypt", drive?: string, recoveryPassword?: string }`（默认 `status`；`unlock` 必填 `drive`，可选 48 位 `recoveryPassword`；其他 `scope` 禁止传 `recoveryPassword`）。
+- **参数**：`{ scope?: "status" | "unlock" | "decrypt", drive?: string, recoveryPassword?: string }`（默认 `status`；`unlock` 必填 `drive`，可选 8 组 6 位 ASCII 数字以 `-` 分隔的 `recoveryPassword`；其他 `scope` 禁止传 `recoveryPassword`）。
 - **返回（顶层键为 `bitlocker`，含 `elapsedMs`）**：
   - 查询级：`{ scope, collectedAt, admin, source: "Win32_EncryptableVolume", volumes[], notice, degraded?, collectionErrors?, operation? }`（无错误时不输出 `collectionErrors` 与 `degraded`）。
   - `volumes[]`：`{ volumeId, drive, volumeType, conversionStatus, encryptionPercentage, encryptionMethod, protectionStatus, lockStatus, autoUnlockEnabled, autoUnlockKeysStored, keyProtectors: { id, type }[], collectionErrors? }`。
-  - `unlock` / `decrypt` 在每卷附加 `operation`：`{ status: "accepted" | "rejected" | "skipped" | "cancelled" | "unknown", reason, returnCode: number | null, error?: { source, code, message }, credentialSource?: "localInput" | "toolParameter" | null }`。
+  - `unlock` / `decrypt` 在每卷附加 `operation`：`{ status: "accepted" | "rejected" | "skipped" | "cancelled" | "unknown", reason, returnCode: number | null, error: { source, code, message } | null, credentialSource?: "localInput" | "toolParameter" }`。
   - 进程崩溃重启后的自动复查在顶层附加 `operation: { status: "unknown", reason }` 并持久化 `cst.bitlocker-state-verification` 自定义条目。
