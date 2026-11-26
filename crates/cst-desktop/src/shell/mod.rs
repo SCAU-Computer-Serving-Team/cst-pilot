@@ -190,7 +190,6 @@ pub struct AppShell {
     pending_return_session_id: Option<Option<String>>,
     startup_missing_key_checked: bool,
     update_dialog: UpdateDialogState,
-    last_prompted_update_version: Option<String>,
     branch_summarizing_sessions: BTreeSet<String>,
     session_subview_prior_focus: Option<FocusHandle>,
     sidebar_collapsed: bool,
@@ -433,7 +432,6 @@ impl AppShell {
             pending_return_session_id: None,
             startup_missing_key_checked: false,
             update_dialog: UpdateDialogState::default(),
-            last_prompted_update_version: None,
             branch_summarizing_sessions: BTreeSet::new(),
             session_subview_prior_focus: None,
             sidebar_collapsed,
@@ -845,11 +843,12 @@ impl AppShell {
         self.update_dialog.handoff_locked
             || self.update_dialog.launch_pending
             || (self.update_dialog.open
-                && self
-                    .snapshot
-                    .update_state
-                    .as_ref()
-                    .is_some_and(|update| update.status.phase == UpdatePhaseDto::Launching))
+                && self.snapshot.update_state.as_ref().is_some_and(|update| {
+                    matches!(
+                        update.status.phase,
+                        UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired
+                    )
+                }))
     }
 
     fn close_recent_drawer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1525,22 +1524,12 @@ impl AppShell {
             }
         }
 
-        // 2. Auto-surface UpdateDialog when a new `Available` version arrives, or auto-launch when `Ready`
-        if let Some(ref us) = self.snapshot.update_state {
-            match us.status.phase {
-                UpdatePhaseDto::Available => {
-                    let ver = us.status.version.clone().unwrap_or_default();
-                    if !ver.is_empty() && self.last_prompted_update_version.as_deref() != Some(&ver)
-                    {
-                        self.last_prompted_update_version = Some(ver);
-                        self.open_update_dialog(window, cx);
-                    }
-                }
-                UpdatePhaseDto::Ready if self.update_dialog.auto_launch_when_ready => {
-                    self.trigger_update_launch_handoff(window, cx);
-                }
-                _ => {}
-            }
+        // 2. Keep startup check silent on `Available`; auto-launch only after explicit user confirmation (`auto_launch_when_ready`).
+        if let Some(ref us) = self.snapshot.update_state
+            && us.status.phase == UpdatePhaseDto::Ready
+            && self.update_dialog.auto_launch_when_ready
+        {
+            self.trigger_update_launch_handoff(window, cx);
         }
     }
 

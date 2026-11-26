@@ -46,7 +46,9 @@ pub fn compute_update_progress_ratio(update_state: Option<&UpdateStateDto>) -> O
                 Some(0.55)
             }
         }
-        UpdatePhaseDto::Ready | UpdatePhaseDto::Launching => Some(1.0),
+        UpdatePhaseDto::Ready | UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired => {
+            Some(1.0)
+        }
         _ => None,
     }
 }
@@ -88,7 +90,13 @@ pub fn render_update_dialog(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("包含稳定性改进与诊断能力更新。");
 
-    if dialog.handoff_locked || dialog.launch_pending || phase == UpdatePhaseDto::Launching {
+    if dialog.handoff_locked
+        || dialog.launch_pending
+        || matches!(
+            phase,
+            UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired
+        )
+    {
         return render_frosted_surface(
             "update-handoff-lock-scrim",
             FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
@@ -242,7 +250,7 @@ pub fn render_update_dialog(
                     format_megabytes(tot)
                 )
             }
-            (None, Some(tot)) => format!("正在下载签名离线包（共 {}）…", format_megabytes(tot)),
+            (None, Some(tot)) => format!("正在下载签名在线包（共 {}）…", format_megabytes(tot)),
             _ => "正在下载并校验签名清单…".to_owned(),
         };
 
