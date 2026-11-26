@@ -926,6 +926,24 @@ fn independent_updater_help_and_missing_compiled_key_do_not_touch_a_kit() {
     let f = Fixture::new();
     let old = f.old_program();
     let exe = env!("CARGO_BIN_EXE_cst-updater");
+    #[cfg(windows)]
+    {
+        let pe = fs::read(exe).expect("read cst-updater.exe PE header");
+        assert_eq!(&pe[0..2], b"MZ");
+        let pe_offset = u32::from_le_bytes(pe[0x3c..0x40].try_into().unwrap()) as usize;
+        assert_eq!(&pe[pe_offset..pe_offset + 4], b"PE\0\0");
+        let subsystem_offset = pe_offset + 4 + 20 + 68;
+        let subsystem = u16::from_le_bytes(
+            pe[subsystem_offset..subsystem_offset + 2]
+                .try_into()
+                .unwrap(),
+        );
+        // IMAGE_SUBSYSTEM_WINDOWS_GUI (2) prevents console flash when spawned during upgrade/recovery.
+        assert_eq!(
+            subsystem, 2,
+            "cst-updater.exe must use the Windows GUI subsystem"
+        );
+    }
     assert!(
         std::process::Command::new(exe)
             .arg("--help")

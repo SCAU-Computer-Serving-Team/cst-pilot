@@ -484,6 +484,25 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
     let _held_lock = ServerInstanceLock::acquire(&dir).expect("hold instance lock");
 
     let exe = env!("CARGO_BIN_EXE_cst-server");
+    #[cfg(windows)]
+    {
+        let pe = fs::read(exe).expect("read cst-server.exe PE header");
+        assert_eq!(&pe[0..2], b"MZ");
+        let pe_offset = u32::from_le_bytes(pe[0x3c..0x40].try_into().unwrap()) as usize;
+        assert_eq!(&pe[pe_offset..pe_offset + 4], b"PE\0\0");
+        let subsystem_offset = pe_offset + 4 + 20 + 68;
+        let subsystem = u16::from_le_bytes(
+            pe[subsystem_offset..subsystem_offset + 2]
+                .try_into()
+                .unwrap(),
+        );
+        // IMAGE_SUBSYSTEM_WINDOWS_GUI (2) ensures silent background/UAC launches never open a console window.
+        assert_eq!(
+            subsystem, 2,
+            "cst-server.exe must use the Windows GUI subsystem"
+        );
+    }
+
     let ok_out = Command::new(exe)
         .arg("--health-check")
         .env("CST_PILOT_ROOT", &dir)

@@ -136,11 +136,16 @@ fn main() -> ExitCode {
     let cli = match parse_cli_args(std::env::args().skip(1)) {
         Ok(c) => c,
         Err(msg) => {
+            cst_os::attach_parent_console_if_stdio_missing();
             let _ = writeln!(std::io::stderr(), "{msg}");
             let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
     };
+
+    if cli.health_check {
+        cst_os::attach_parent_console_if_stdio_missing();
+    }
 
     let has_explicit_kit_root = cli.kit_root.is_some();
     let kit_root = match cli
