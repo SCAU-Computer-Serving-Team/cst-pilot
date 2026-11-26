@@ -329,13 +329,36 @@ impl VolumeFileIndex {
         Some(parts.join("/"))
     }
 
-    /// Apply a batch of USN V2 events onto a cloned mutable generation.
-    /// Returns `Ok(())` or `Err(())` if index must be rebuilt.
+    /// Apply a batch of USN V2 events onto a cloned mutable generation without external ledger growth.
+    #[cfg(test)]
     pub(crate) fn apply_usn_events(
         &mut self,
         events: &[UsnEventV2],
         new_cursor: i64,
     ) -> Result<(), ()> {
+        self.apply_usn_events_with_reserve(events, new_cursor, |_| None)
+    }
+
+    /// Apply a batch of USN V2 events onto a cloned mutable generation and synchronize
+    /// `self.mem_guard` with any capacity growth or shrinkage in `ProcessMemoryLedger`.
+    /// Returns `Ok(())` or `Err(())` if the index must be rebuilt or exceeds memory budget.
+    pub(crate) fn apply_usn_events_with_reserve(
+        &mut self,
+        events: &[UsnEventV2],
+        new_cursor: i64,
+        reserve_mem: impl Fn(usize) -> Option<MemoryReservation>,
+    ) -> Result<(), ()> {
+        // Reserve temporary edge-lookup map overhead if batch replay uses it.
+        let _temp_guard = if events.len() > 8 && self.mem_guard.is_some() {
+            let temp_need = self.edges.len().saturating_mul(12);
+            if temp_need > 0 {
+                Some(reserve_mem(temp_need).ok_or(())?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let mut tree_dirty = false;
         let mut rename_old_seen: HashSet<u64> = HashSet::new();
 
@@ -605,15 +628,26 @@ impl VolumeFileIndex {
             self.recompute_reachability();
         }
         self.applied_cursor = new_cursor;
-        self.estimated_bytes = Self::compute_estimated_bytes(
+        let new_bytes = Self::compute_estimated_bytes(
             &self.objects,
             &self.edges,
             &self.name_arena,
             &self.ref_to_obj,
         );
-        if self.estimated_bytes > MAX_VOLUME_INDEX_BYTES || self.tombstone_ratio_exceeded() {
+        if new_bytes > MAX_VOLUME_INDEX_BYTES || self.tombstone_ratio_exceeded() {
             return Err(());
         }
+        if let Some(ref mut guard) = self.mem_guard {
+            let cur_reserved = guard.bytes();
+            if new_bytes > cur_reserved {
+                let extra = reserve_mem(new_bytes - cur_reserved).ok_or(())?;
+                guard.merge(extra);
+            } else if new_bytes < cur_reserved {
+                guard.shrink_to(new_bytes);
+            }
+            debug_assert_eq!(guard.bytes(), new_bytes);
+        }
+        self.estimated_bytes = new_bytes;
         Ok(())
     }
 
@@ -832,12 +866,35 @@ impl VolumeFileIndex {
                 is_dir,
             ) {
                 Ok(v) => v,
-                Err(SearchGuardError::PolicyDenied) => continue,
+                Err(SearchGuardError::PolicyDenied) => {
+                    if cancel.is_cancelled() {
+                        return Err("文件检索已取消。".into());
+                    }
+                    if Instant::now() >= deadline {
+                        timed_out = true;
+                        break;
+                    }
+                    continue;
+                }
                 Err(SearchGuardError::IoOrAccess) => {
                     skipped += 1;
+                    if cancel.is_cancelled() {
+                        return Err("文件检索已取消。".into());
+                    }
+                    if Instant::now() >= deadline {
+                        timed_out = true;
+                        break;
+                    }
                     continue;
                 }
             };
+            if cancel.is_cancelled() {
+                return Err("文件检索已取消。".into());
+            }
+            if Instant::now() >= deadline {
+                timed_out = true;
+                break;
+            }
             if verified.is_dir != is_dir {
                 continue;
             }
@@ -1196,6 +1253,7 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
     let mem_exceeded = AtomicBool::new(false);
     let mut chunks: Vec<SearchChunkOut> = Vec::new();
     let mut mem_bytes = 0usize;
+    let mut chunk_guard: Option<MemoryReservation> = None;
 
     let threads = super::worker_threads();
     let summary = Scan::new(mft)
@@ -1208,11 +1266,28 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
                 cancel_flag.store(true, Ordering::Release);
                 return std::ops::ControlFlow::Break(());
             }
-            mem_bytes = mem_bytes.saturating_add(out.est_bytes());
+            let chunk_bytes = out.est_bytes();
+            mem_bytes = mem_bytes.saturating_add(chunk_bytes);
             if mem_bytes > MAX_VOLUME_INDEX_BYTES {
                 mem_exceeded.store(true, Ordering::Release);
                 cancel_flag.store(true, Ordering::Release);
                 return std::ops::ControlFlow::Break(());
+            }
+            if chunk_bytes > 0 {
+                match reserve_mem(chunk_bytes) {
+                    Some(extra) => {
+                        if let Some(ref mut g) = chunk_guard {
+                            g.merge(extra);
+                        } else {
+                            chunk_guard = Some(extra);
+                        }
+                    }
+                    None => {
+                        mem_exceeded.store(true, Ordering::Release);
+                        cancel_flag.store(true, Ordering::Release);
+                        return std::ops::ControlFlow::Break(());
+                    }
+                }
             }
             if !out.objects.is_empty() || !out.extensions.is_empty() || out.attr_errors > 0 {
                 chunks.push(out);
@@ -1225,7 +1300,7 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
         return Err("文件检索已取消。".into());
     }
     if mem_exceeded.load(Ordering::Acquire) {
-        return Err("卷搜索索引超过单卷内存上限，回退目录遍历。".into());
+        return Err("卷搜索索引超过单卷或进程内存上限，回退目录遍历。".into());
     }
     if summary.unreadable > 0
         || summary.unmapped > 0
@@ -1237,9 +1312,28 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
     }
 
     let obj_total: usize = chunks.iter().map(|c| c.objects.len()).sum();
+    let edge_total: usize = chunks
+        .iter()
+        .map(|c| {
+            c.objects.iter().map(|o| o.names.len()).sum::<usize>()
+                + c.extensions.iter().map(|e| e.names.len()).sum::<usize>()
+        })
+        .sum();
+    let name_bytes_total: usize = chunks.iter().map(|c| c.names.len()).sum();
+    let pre_assembly_est = obj_total
+        .saturating_mul(std::mem::size_of::<ObjectNode>() + 32)
+        .saturating_add(edge_total.saturating_mul(std::mem::size_of::<NameEdge>()))
+        .saturating_add(name_bytes_total);
+    if pre_assembly_est > MAX_VOLUME_INDEX_BYTES {
+        return Err("卷搜索索引超过单卷内存上限，回退目录遍历。".into());
+    }
+    let Some(mut mem_guard) = reserve_mem(pre_assembly_est) else {
+        return Err("进程级缓存预算不足，回退目录遍历。".into());
+    };
+
     let mut objects = Vec::with_capacity(obj_total);
-    let mut edges = Vec::with_capacity(obj_total);
-    let mut name_arena = Vec::with_capacity(obj_total.saturating_mul(16));
+    let mut edges = Vec::with_capacity(edge_total);
+    let mut name_arena = Vec::with_capacity(name_bytes_total);
     let mut ref_to_obj: HashMap<u64, u32> = HashMap::with_capacity(obj_total);
     let mut root_ref = FileReference::new(records::ROOT, 5).to_u64();
 
@@ -1355,14 +1449,24 @@ pub(crate) fn build_index_from_mft_source<S: ReadAt + Sync>(
         }
     }
 
+    // Release temporary projection chunks and their ledger reservation before final reconciliation.
+    drop(chunks);
+    drop(chunk_guard);
+
     let estimated_bytes =
         VolumeFileIndex::compute_estimated_bytes(&objects, &edges, &name_arena, &ref_to_obj);
     if estimated_bytes > MAX_VOLUME_INDEX_BYTES {
         return Err("卷搜索索引超过单卷内存上限，回退目录遍历。".into());
     }
-    let Some(mem_guard) = reserve_mem(estimated_bytes) else {
-        return Err("进程级缓存预算不足，回退目录遍历。".into());
-    };
+    if estimated_bytes > mem_guard.bytes() {
+        let Some(extra) = reserve_mem(estimated_bytes - mem_guard.bytes()) else {
+            return Err("进程级缓存预算不足，回退目录遍历。".into());
+        };
+        mem_guard.merge(extra);
+    } else if estimated_bytes < mem_guard.bytes() {
+        mem_guard.shrink_to(estimated_bytes);
+    }
+    debug_assert_eq!(mem_guard.bytes(), estimated_bytes);
 
     let live_objects = objects.len();
     let mut index = VolumeFileIndex {
@@ -1400,6 +1504,8 @@ pub(crate) enum UsnReadError {
     UnsupportedVersion,
     AccessDenied,
     IoFailed,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    BudgetExhausted,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1737,7 +1843,7 @@ mod win_usn {
             u0.journal_id,
             u0.next_usn,
             &mft,
-            reserve_mem,
+            &reserve_mem,
             cancel,
         )
         .map_err(|_| ColdBuildError::Fallback)?;
@@ -1767,7 +1873,7 @@ mod win_usn {
                 return Err(ColdBuildError::Fallback);
             }
             index
-                .apply_usn_events(&events, applied)
+                .apply_usn_events_with_reserve(&events, applied, &reserve_mem)
                 .map_err(|()| ColdBuildError::Fallback)?;
         }
 
@@ -1812,10 +1918,17 @@ mod win_usn {
             return Ok(None);
         }
         let mut next = current
-            .clone_with_reservation_fn(reserve_mem)
-            .ok_or(UsnReadError::Wrapped)?;
-        next.apply_usn_events(&events, applied)
-            .map_err(|()| UsnReadError::Wrapped)?;
+            .clone_with_reservation_fn(&reserve_mem)
+            .ok_or(UsnReadError::BudgetExhausted)?;
+        next.apply_usn_events_with_reserve(&events, applied, &reserve_mem)
+            .map_err(|()| {
+                if next.tombstone_ratio_exceeded() || next.estimated_bytes > MAX_VOLUME_INDEX_BYTES
+                {
+                    UsnReadError::Wrapped
+                } else {
+                    UsnReadError::BudgetExhausted
+                }
+            })?;
         Ok(Some(next))
     }
 }
@@ -1836,7 +1949,9 @@ pub(crate) enum MftVolumeResult {
         status: IndexBuildStatus,
         deadline: Instant,
     },
-    Fallback,
+    Fallback {
+        remaining_budget: Duration,
+    },
     TimedOut,
 }
 
@@ -1859,6 +1974,12 @@ impl Drop for BuildSlotPermit {
     }
 }
 
+pub(crate) enum SlotAcquire {
+    Acquired(BuildSlotPermit),
+    TimedOut,
+    Cancelled,
+}
+
 impl BuildSlotPool {
     pub(crate) fn new(max: usize) -> Arc<Self> {
         Arc::new(Self {
@@ -1868,23 +1989,34 @@ impl BuildSlotPool {
         })
     }
 
-    /// Blocks until a cold-build slot becomes available or `cancel` fires.
-    /// Waiting in this queue never consumes the volume's own scan timeout budget.
-    pub(crate) fn acquire(self: &Arc<Self>, cancel: &CancellationToken) -> Option<BuildSlotPermit> {
+    /// Blocks until a cold-build slot becomes available, `max_wait` expires, or `cancel` fires.
+    /// Waiting in this queue never consumes the volume's own scan timeout budget, while the
+    /// bounded `max_wait` prevents wedged synchronous volume I/O from hanging queued volumes forever.
+    pub(crate) fn acquire_bounded(
+        self: &Arc<Self>,
+        max_wait: Duration,
+        cancel: &CancellationToken,
+    ) -> SlotAcquire {
+        let queue_deadline = Instant::now() + max_wait;
         let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if cancel.is_cancelled() {
-                return None;
+                return SlotAcquire::Cancelled;
             }
             if *active < self.max {
                 *active += 1;
-                return Some(BuildSlotPermit {
+                return SlotAcquire::Acquired(BuildSlotPermit {
                     pool: Arc::clone(self),
                 });
             }
+            let now = Instant::now();
+            if now >= queue_deadline {
+                return SlotAcquire::TimedOut;
+            }
+            let wait = (queue_deadline - now).min(Duration::from_millis(20));
             let (next, _) = self
                 .cv
-                .wait_timeout(active, Duration::from_millis(20))
+                .wait_timeout(active, wait)
                 .unwrap_or_else(|e| e.into_inner());
             active = next;
         }
@@ -1906,8 +2038,29 @@ pub(crate) enum BuildOutcome {
 
 #[derive(Default)]
 struct FlightState {
-    work_started: Option<Instant>,
+    /// Cumulative active work duration performed before any pause/completion.
+    active_work_elapsed: Duration,
+    /// Present while this flight is actively performing USN sync or `$MFT` cold build;
+    /// `None` while waiting in the `BuildSlotPool` queue or after completion.
+    active_work_since: Option<Instant>,
     result: Option<BuildOutcome>,
+}
+
+impl FlightState {
+    fn total_work_elapsed(&self, now: Instant) -> Duration {
+        self.active_work_elapsed.saturating_add(
+            self.active_work_since
+                .map_or(Duration::ZERO, |since| now.saturating_duration_since(since)),
+        )
+    }
+
+    fn pause_at(&mut self, at: Instant) {
+        if let Some(since) = self.active_work_since.take() {
+            self.active_work_elapsed = self
+                .active_work_elapsed
+                .saturating_add(at.saturating_duration_since(since));
+        }
+    }
 }
 
 pub(crate) struct BuildFlight {
@@ -1928,46 +2081,83 @@ impl BuildFlight {
     }
 
     pub(crate) fn mark_work_started(&self, at: Instant) {
-        if let Ok(mut guard) = self.state.lock() {
-            guard.work_started = Some(at);
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.result.is_none() && guard.active_work_since.is_none() {
+            guard.active_work_since = Some(at);
         }
         self.ready.notify_all();
     }
 
-    fn reset_work_started(&self) {
-        if let Ok(mut guard) = self.state.lock() {
-            guard.work_started = None;
-        }
+    pub(crate) fn pause_work_for_queue(&self, at: Instant) {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        guard.pause_at(at);
+        self.ready.notify_all();
     }
 
     pub(crate) fn finish(&self, outcome: BuildOutcome) {
-        if let Ok(mut guard) = self.state.lock() {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        guard.pause_at(Instant::now());
+        if guard.result.is_none() {
             guard.result = Some(outcome);
         }
         self.ready.notify_all();
     }
 
-    /// Waits for this flight while charging `vol_budget` ONLY after `work_started` is set
-    /// (i.e., after acquiring a build slot). Queue wait time only observes `cancel`.
+    /// Waits for this flight while charging `vol_budget` ONLY for active work performed after this
+    /// subscriber joined (USN sync + cold build accumulate without reset; slot queue waiting is
+    /// excluded from `vol_budget` but independently bounded by `queue_budget`).
+    /// Returns `(outcome, remaining_vol_budget)` so fallback paths receive only the unused budget.
     pub(crate) fn wait_with_budget(
         &self,
         vol_budget: Duration,
+        queue_budget: Duration,
         cancel: &CancellationToken,
-    ) -> (BuildOutcome, Option<Instant>) {
+    ) -> (BuildOutcome, Duration) {
         let joined_at = Instant::now();
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let sub_work_base = guard.total_work_elapsed(joined_at);
         loop {
-            if let Some(outcome) = guard.result.as_ref() {
-                let started = guard.work_started.unwrap_or(joined_at).max(joined_at);
-                return (outcome.clone(), Some(started + vol_budget));
-            }
             if cancel.is_cancelled() {
-                return (BuildOutcome::Cancelled, None);
+                return (BuildOutcome::Cancelled, Duration::ZERO);
             }
-            if let Some(started) = guard.work_started {
-                let vol_deadline = started.max(joined_at) + vol_budget;
-                if Instant::now() >= vol_deadline {
-                    return (BuildOutcome::TimedOut, Some(vol_deadline));
+            let now = Instant::now();
+            let sub_work_elapsed = guard.total_work_elapsed(now).saturating_sub(sub_work_base);
+            if let Some(outcome) = guard.result.as_ref() {
+                let remaining = vol_budget.saturating_sub(sub_work_elapsed);
+                return match outcome {
+                    BuildOutcome::Ready(..) => {
+                        if sub_work_elapsed > vol_budget {
+                            (BuildOutcome::TimedOut, Duration::ZERO)
+                        } else {
+                            (outcome.clone(), remaining)
+                        }
+                    }
+                    BuildOutcome::Fallback => {
+                        if sub_work_elapsed >= vol_budget {
+                            (BuildOutcome::TimedOut, Duration::ZERO)
+                        } else {
+                            (BuildOutcome::Fallback, remaining)
+                        }
+                    }
+                    BuildOutcome::TimedOut => (BuildOutcome::TimedOut, Duration::ZERO),
+                    BuildOutcome::Cancelled => (BuildOutcome::Cancelled, Duration::ZERO),
+                };
+            }
+            if guard.active_work_since.is_some() {
+                if sub_work_elapsed >= vol_budget {
+                    return (BuildOutcome::TimedOut, Duration::ZERO);
+                }
+            } else {
+                let sub_queue_elapsed = now
+                    .saturating_duration_since(joined_at)
+                    .saturating_sub(sub_work_elapsed);
+                if sub_queue_elapsed >= queue_budget {
+                    let remaining = vol_budget.saturating_sub(sub_work_elapsed);
+                    return if remaining.is_zero() {
+                        (BuildOutcome::TimedOut, Duration::ZERO)
+                    } else {
+                        (BuildOutcome::Fallback, remaining)
+                    };
                 }
             }
             let (next, _) = self
@@ -1975,6 +2165,29 @@ impl BuildFlight {
                 .wait_timeout(guard, Duration::from_millis(20))
                 .unwrap_or_else(|e| e.into_inner());
             guard = next;
+        }
+    }
+}
+
+struct FlightFinishGuard {
+    manager: Arc<SearchIndexManager>,
+    key: (String, VolumeIdentity),
+    flight: Arc<BuildFlight>,
+    disarmed: bool,
+}
+
+impl Drop for FlightFinishGuard {
+    fn drop(&mut self) {
+        if !self.disarmed {
+            if let Ok(mut state) = self.manager.state.lock()
+                && state
+                    .pending
+                    .get(&self.key)
+                    .is_some_and(|active| Arc::ptr_eq(active, &self.flight))
+            {
+                state.pending.remove(&self.key);
+            }
+            self.flight.finish(BuildOutcome::Fallback);
         }
     }
 }
@@ -2209,10 +2422,31 @@ impl SearchIndexManager {
         }
     }
 
+    /// Evicts a specific stale cached generation for `drive_upper` if it still matches
+    /// `(identity, journal_id, applied_cursor)`. Active external `Arc` readers continue
+    /// holding their memory reservation until dropped.
+    pub(crate) fn evict_stale_volume_generation(
+        &self,
+        drive_upper: &str,
+        identity: &VolumeIdentity,
+        journal_id: u64,
+        applied_cursor: i64,
+    ) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let matches_stale = state.volumes.get(drive_upper).is_some_and(|entry| {
+            entry.index.identity == *identity
+                && entry.index.journal_id == journal_id
+                && entry.index.applied_cursor == applied_cursor
+        });
+        if matches_stale {
+            state.volumes.remove(drive_upper);
+        }
+    }
+
     /// Attempts to obtain an up-to-date `VolumeFileIndex` for an elevated local NTFS volume.
     /// Both cold builds and USN hot refreshes share the same `(drive, VolumeIdentity)` singleflight.
-    /// Cold builds queue on `BuildSlotPool` rather than falling back to directory walks, and the
-    /// volume's `vol_budget` starts only once this volume actually begins building/syncing.
+    /// Cold builds queue on `BuildSlotPool` (bounded so wedged I/O cannot hang queued volumes),
+    /// and active USN + cold-build work accumulates against `vol_budget` without double-dipping.
     #[cfg(windows)]
     pub(crate) fn get_or_build_windows(
         self: &Arc<Self>,
@@ -2222,20 +2456,31 @@ impl SearchIndexManager {
         cancel: &CancellationToken,
     ) -> Result<MftVolumeResult, String> {
         if !mft_enabled() || is_subst || !cst_os::is_elevated().unwrap_or(false) {
-            return Ok(MftVolumeResult::Fallback);
+            return Ok(MftVolumeResult::Fallback {
+                remaining_budget: vol_budget,
+            });
         }
         let drive_upper = drive.to_ascii_uppercase();
         let Ok(identity) = crate::diagnostics::volume::volume_identity(&drive_upper) else {
-            return Ok(MftVolumeResult::Fallback);
+            return Ok(MftVolumeResult::Fallback {
+                remaining_budget: vol_budget,
+            });
         };
         if !identity.filesystem.eq_ignore_ascii_case("NTFS") {
-            return Ok(MftVolumeResult::Fallback);
+            return Ok(MftVolumeResult::Fallback {
+                remaining_budget: vol_budget,
+            });
         }
+
+        // Bounded queue wait for cold-build slots (2x single-volume budget, capped at MAX_TIMEOUT_SECS).
+        let queue_budget = vol_budget
+            .saturating_mul(2)
+            .min(Duration::from_secs(super::MAX_TIMEOUT_SECS));
 
         // Singleflight registration INSIDE lock (covers BOTH hot USN sync and cold build),
         // thread spawn OUTSIDE lock.
         let key = (drive_upper.clone(), identity.clone());
-        let (flight, sub, should_spawn, base_cached) = {
+        let (flight, sub, should_spawn, mut base_cached) = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let ttl = self.idle_ttl;
             state.volumes.retain(|_, e| e.last_accessed.elapsed() < ttl);
@@ -2244,7 +2489,9 @@ impl SearchIndexManager {
                 .get(&drive_upper)
                 .is_some_and(|at| at.elapsed() < Duration::from_secs(60))
             {
-                return Ok(MftVolumeResult::Fallback);
+                return Ok(MftVolumeResult::Fallback {
+                    remaining_budget: vol_budget,
+                });
             }
             let existing_cached = if let Some(entry) = state.volumes.get_mut(&drive_upper) {
                 if entry.index.identity == identity {
@@ -2290,26 +2537,34 @@ impl SearchIndexManager {
             let k = key.clone();
             let d = drive_upper.clone();
             let id = identity.clone();
+            let build_queue_budget = queue_budget.max(Duration::from_secs(2));
             let spawn_res = std::thread::Builder::new()
                 .name(format!("cst-mft-sync-{d}"))
                 .spawn(move || {
+                    let mut finish_guard = FlightFinishGuard {
+                        manager: Arc::clone(&mgr),
+                        key: k.clone(),
+                        flight: Arc::clone(&f),
+                        disarmed: false,
+                    };
                     let mut mark_usn_unavailable = false;
                     let outcome =
                         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            if let Some(ref existing) = base_cached {
+                            if let Some(existing) = base_cached.take() {
                                 f.mark_work_started(Instant::now());
-                                match win_usn::sync_windows_volume(
-                                    existing,
+                                let old_journal = existing.journal_id;
+                                let old_cursor = existing.applied_cursor;
+                                let sync_res = win_usn::sync_windows_volume(
+                                    &existing,
                                     |need| mgr.reserve_with_eviction(need, &f.build_cancel),
                                     &f.build_cancel,
-                                ) {
+                                );
+                                match sync_res {
                                     Ok(None) => {
-                                        return Ok((
-                                            Arc::clone(existing),
-                                            IndexBuildStatus::UsnSynced,
-                                        ));
+                                        return Ok((existing, IndexBuildStatus::UsnSynced));
                                     }
                                     Ok(Some(updated)) => {
+                                        drop(existing);
                                         return Ok((
                                             Arc::new(updated),
                                             IndexBuildStatus::UsnSynced,
@@ -2320,20 +2575,43 @@ impl SearchIndexManager {
                                         | UsnReadError::AccessDenied
                                         | UsnReadError::UnsupportedVersion,
                                     ) => {
+                                        drop(existing);
                                         return Err(true);
                                     }
-                                    Err(UsnReadError::Wrapped | UsnReadError::IoFailed) => {
+                                    Err(
+                                        err @ (UsnReadError::Wrapped
+                                        | UsnReadError::IoFailed
+                                        | UsnReadError::BudgetExhausted),
+                                    ) => {
+                                        // Release the build thread's Arc BEFORE cold rebuild so an
+                                        // unpinned old generation can be evicted cleanly from cache.
+                                        drop(existing);
                                         if f.build_cancel.is_cancelled() {
                                             return Err(false);
                                         }
-                                        // Fall through to cold rebuild within the SAME singleflight.
-                                        f.reset_work_started();
+                                        if matches!(err, UsnReadError::Wrapped) {
+                                            mgr.evict_stale_volume_generation(
+                                                &d,
+                                                &id,
+                                                old_journal,
+                                                old_cursor,
+                                            );
+                                        }
+                                        // Preserve elapsed USN sync work while pausing timer for slot queue.
+                                        f.pause_work_for_queue(Instant::now());
                                     }
                                 }
                             }
-                            // Queue for an MFT cold-build slot (never falls back just because slots are busy).
-                            let Some(_slot) = mgr.build_slots.acquire(&f.build_cancel) else {
-                                return Err(false);
+                            // Queue for an MFT cold-build slot with bounded wait so wedged volume I/O
+                            // cannot hang queued drives indefinitely.
+                            let _slot = match mgr
+                                .build_slots
+                                .acquire_bounded(build_queue_budget, &f.build_cancel)
+                            {
+                                SlotAcquire::Acquired(p) => p,
+                                SlotAcquire::TimedOut | SlotAcquire::Cancelled => {
+                                    return Err(false);
+                                }
                             };
                             f.mark_work_started(Instant::now());
                             match win_usn::cold_build_windows_volume(
@@ -2361,8 +2639,17 @@ impl SearchIndexManager {
                             Err(_) => BuildOutcome::Fallback,
                         };
 
-                    // Monotonic publication: verify flight ownership, latest volume identity,
-                    // and cursor monotonicity before updating cache; cancellation never deletes cache.
+                    // Verify latest volume identity OUTSIDE `mgr.state` lock so a slow/unplugged
+                    // drive syscall can never block other volumes or subscriber cancellation cleanup.
+                    let latest_identity_ok = match &outcome {
+                        BuildOutcome::Ready(_, _) => {
+                            crate::diagnostics::volume::volume_identity(&d)
+                                .is_ok_and(|cur| cur == id)
+                        }
+                        _ => false,
+                    };
+
+                    // Monotonic publication inside lock (pure in-memory checks only).
                     if let Ok(mut state) = mgr.state.lock() {
                         let still_active = state
                             .pending
@@ -2373,14 +2660,12 @@ impl SearchIndexManager {
                             state.gen_seq = state.gen_seq.wrapping_add(1);
                             match &outcome {
                                 BuildOutcome::Ready(arc, _) => {
-                                    let latest_ok = crate::diagnostics::volume::volume_identity(&d)
-                                        .is_ok_and(|cur| cur == id);
                                     let monotonic = state.volumes.get(&d).is_none_or(|cur| {
                                         cur.index.identity != id
                                             || cur.index.journal_id != arc.journal_id
                                             || arc.applied_cursor >= cur.index.applied_cursor
                                     });
-                                    if latest_ok && monotonic {
+                                    if latest_identity_ok && monotonic {
                                         state.volumes.insert(
                                             d.clone(),
                                             CachedVolumeEntry {
@@ -2403,6 +2688,7 @@ impl SearchIndexManager {
                         }
                     }
                     f.finish(outcome);
+                    finish_guard.disarmed = true;
                 });
 
             if spawn_res.is_err() {
@@ -2413,17 +2699,23 @@ impl SearchIndexManager {
             }
         }
 
-        let (outcome, vol_deadline) = {
+        let (outcome, remaining_budget) = {
             let _keep_sub = sub;
-            flight.wait_with_budget(vol_budget, cancel)
+            flight.wait_with_budget(vol_budget, queue_budget, cancel)
         };
         match outcome {
             BuildOutcome::Ready(arc, status) => Ok(MftVolumeResult::Ready {
                 index: arc,
                 status,
-                deadline: vol_deadline.unwrap_or_else(|| Instant::now() + vol_budget),
+                deadline: Instant::now() + remaining_budget,
             }),
-            BuildOutcome::Fallback => Ok(MftVolumeResult::Fallback),
+            BuildOutcome::Fallback => {
+                if remaining_budget.is_zero() {
+                    Ok(MftVolumeResult::TimedOut)
+                } else {
+                    Ok(MftVolumeResult::Fallback { remaining_budget })
+                }
+            }
             BuildOutcome::TimedOut => Ok(MftVolumeResult::TimedOut),
             BuildOutcome::Cancelled => Err("文件检索已取消。".into()),
         }
@@ -2434,10 +2726,12 @@ impl SearchIndexManager {
         self: &Arc<Self>,
         _drive: &str,
         _is_subst: bool,
-        _vol_budget: Duration,
+        vol_budget: Duration,
         _cancel: &CancellationToken,
     ) -> Result<MftVolumeResult, String> {
-        Ok(MftVolumeResult::Fallback)
+        Ok(MftVolumeResult::Fallback {
+            remaining_budget: vol_budget,
+        })
     }
 }
 

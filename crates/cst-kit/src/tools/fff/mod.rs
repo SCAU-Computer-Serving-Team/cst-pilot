@@ -117,9 +117,12 @@ pub struct FffindInput {
     #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
     /// 可选。单卷或目标目录检索的超时预算，单位秒，范围 1 至 180，默认 30。全电脑 path="*" 模式下各卷在开始扫描时独立起算该预算。
-    #[serde(default)]
+    #[serde(
+        default = "default_timeout_sec",
+        deserialize_with = "deserialize_timeout_sec"
+    )]
     #[schemars(range(min = 1, max = 180))]
-    pub timeout_sec: Option<u64>,
+    pub timeout_sec: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -158,9 +161,12 @@ pub struct FfgrepInput {
     #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
     /// 可选。内容检索的超时预算，单位秒，范围 1 至 180，默认 30。
-    #[serde(default)]
+    #[serde(
+        default = "default_timeout_sec",
+        deserialize_with = "deserialize_timeout_sec"
+    )]
     #[schemars(range(min = 1, max = 180))]
-    pub timeout_sec: Option<u64>,
+    pub timeout_sec: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -422,7 +428,10 @@ fn find_paths_with_details(
     let mut truncated_by_limit = false;
     let mut timed_out = false;
     let mut queue_overflowed = false;
+    let mut had_non_policy_failure = false;
+    let mut extra_notices: Vec<String> = Vec::new();
     let mut skipped = 0usize;
+    let mut walk_budget = per_vol_budget;
 
     #[cfg(windows)]
     let mut handled_by_mft = false;
@@ -430,9 +439,19 @@ fn find_paths_with_details(
     let handled_by_mft = false;
 
     #[cfg(windows)]
+    let mut single_root_mft_eligible = false;
+    #[cfg(not(windows))]
+    let single_root_mft_eligible = false;
+
+    #[cfg(windows)]
     if let Some((drive, subtree_rel)) =
         mft_index::split_windows_drive_and_subtree(&verified_root.canonical_path)
     {
+        if crate::diagnostics::volume::volume_identity(&drive)
+            .is_ok_and(|id| id.filesystem.eq_ignore_ascii_case("NTFS"))
+        {
+            single_root_mft_eligible = true;
+        }
         let mgr = mft_index::SearchIndexManager::global();
         match mgr.get_or_build_windows(&drive, false, per_vol_budget, cancel)? {
             mft_index::MftVolumeResult::Ready {
@@ -469,7 +488,9 @@ fn find_paths_with_details(
                 method = "mft-index";
                 handled_by_mft = true;
             }
-            mft_index::MftVolumeResult::Fallback => {}
+            mft_index::MftVolumeResult::Fallback { remaining_budget } => {
+                walk_budget = remaining_budget;
+            }
         }
     }
 
@@ -481,17 +502,28 @@ fn find_paths_with_details(
                 display_root: root_display.clone(),
                 verified_root,
                 is_volume_root: is_vol_root,
+                budget: walk_budget,
             }],
             spec.clone(),
-            per_vol_budget,
             cancel,
         )?;
         candidates = outcome.candidates;
         truncated_by_limit = outcome.truncated_by_limit;
         timed_out = outcome.timed_out;
         queue_overflowed = outcome.queue_overflowed;
+        had_non_policy_failure |= outcome.had_non_policy_failure;
         skipped = outcome.skipped;
+        if let Some(sk) = outcome.skipped_roots.first() {
+            let msg = match sk.reason.as_str() {
+                "worker_pool_busy" => "工作线程池繁忙，未启动目录扫描，请稍后重试。",
+                "worker_spawn_failed" => "目录扫描线程启动失败，请稍后重试。",
+                _ => "目录扫描异常中止，结果不完整，请重试。",
+            };
+            extra_notices.push(msg.to_owned());
+        }
     }
+
+    let suggest_admin_retry = should_suggest_admin_retry(single_root_mft_eligible);
 
     finalize_fffind_response(
         root_display,
@@ -503,11 +535,13 @@ fn find_paths_with_details(
         truncated_by_limit,
         timed_out,
         queue_overflowed,
-        false,
+        had_non_policy_failure,
         skipped,
         method,
         vol_index_status,
         timeout_sec,
+        suggest_admin_retry,
+        extra_notices,
     )
 }
 
@@ -562,6 +596,8 @@ fn run_single_file_find(
         if cfg!(windows) { "native-walk" } else { "walk" },
         None,
         timeout_sec,
+        false,
+        Vec::new(),
     )
 }
 
@@ -584,6 +620,7 @@ fn run_whole_pc_find(
     let mut mft_roots = Vec::new();
     let mut mft_partial_roots = Vec::new();
     let mut walk_targets = Vec::new();
+    let mut mft_eligible_roots: HashSet<String> = HashSet::new();
     let mut vol_index_status = Map::new();
     let mut all_candidates = Vec::new();
     let mut truncated_by_limit = false;
@@ -613,8 +650,11 @@ fn run_whole_pc_find(
             }
         };
 
-        if !vol.is_subst
-            && vol.filesystem.eq_ignore_ascii_case("NTFS")
+        let is_ntfs_local = !vol.is_subst && vol.filesystem.eq_ignore_ascii_case("NTFS");
+        if is_ntfs_local {
+            mft_eligible_roots.insert(vol.display_root.clone());
+        }
+        if is_ntfs_local
             && crate::diagnostics::mft::mft_enabled()
             && cst_os::is_elevated().unwrap_or(false)
         {
@@ -624,12 +664,13 @@ fn run_whole_pc_find(
                 display_root: vol.display_root,
                 verified_root,
                 is_volume_root: !vol.is_subst,
+                budget: per_vol_budget,
             });
         }
     }
 
-    // Dispatch NTFS MFT volumes concurrently; cold builds queue on `BuildSlotPool` and each
-    // volume starts its own independent `per_vol_budget` once it begins building/syncing.
+    // Dispatch NTFS MFT volumes concurrently; cold builds queue on `BuildSlotPool` (bounded) and
+    // each volume accumulates active USN + cold-build work against `per_vol_budget`.
     enum MftVolDispatch {
         Queried {
             display_root: String,
@@ -683,11 +724,12 @@ fn run_whole_pc_find(
                         Ok(mft_index::MftVolumeResult::TimedOut) => Ok(MftVolDispatch::TimedOut {
                             display_root: vol.display_root,
                         }),
-                        Ok(mft_index::MftVolumeResult::Fallback) => {
+                        Ok(mft_index::MftVolumeResult::Fallback { remaining_budget }) => {
                             Ok(MftVolDispatch::Fallback(walk_engine::WalkRootTarget {
                                 display_root: vol.display_root,
                                 verified_root,
                                 is_volume_root: !vol.is_subst,
+                                budget: remaining_budget,
                             }))
                         }
                         Err(e) => Err(e),
@@ -699,6 +741,7 @@ fn run_whole_pc_find(
             }
         });
     }
+    let mut used_mft = false;
     for item in mft_outcomes.into_inner().unwrap_or_default() {
         match item? {
             MftVolDispatch::Queried {
@@ -709,6 +752,7 @@ fn run_whole_pc_find(
                 timed_out: to,
                 status,
             } => {
+                used_mft = true;
                 all_candidates.extend(cands);
                 truncated_by_limit |= lim;
                 skipped_count += sk;
@@ -727,6 +771,7 @@ fn run_whole_pc_find(
                 }
             }
             MftVolDispatch::TimedOut { display_root } => {
+                used_mft = true;
                 timed_out = true;
                 mft_partial_roots.push(display_root);
             }
@@ -743,49 +788,37 @@ fn run_whole_pc_find(
     let mut partial_roots = mft_partial_roots;
     let mut completed_walk_roots = Vec::new();
     let mut queue_overflowed = false;
+    let mut used_walk = false;
 
     if !walk_targets.is_empty() {
-        let all_walk_names: Vec<String> = walk_targets
-            .iter()
-            .map(|t| t.display_root.clone())
-            .collect();
-        let outcome = walk_engine::run_walk_find(
-            session,
-            walk_targets,
-            spec.clone(),
-            per_vol_budget,
-            cancel,
-        )?;
+        used_walk = true;
+        let outcome = walk_engine::run_walk_find(session, walk_targets, spec.clone(), cancel)?;
         all_candidates.extend(outcome.candidates);
         truncated_by_limit |= outcome.truncated_by_limit;
         timed_out |= outcome.timed_out;
         queue_overflowed |= outcome.queue_overflowed;
+        had_non_policy_failure |= outcome.had_non_policy_failure;
         skipped_count += outcome.skipped;
-        let partial_set: HashSet<&str> = outcome.partial_roots.iter().map(String::as_str).collect();
-        for r in all_walk_names {
-            if partial_set.contains(r.as_str()) {
-                partial_roots.push(r);
-            } else {
-                completed_walk_roots.push(r);
-            }
-        }
+        completed_walk_roots.extend(outcome.completed_roots);
+        partial_roots.extend(outcome.partial_roots);
+        skipped_roots.extend(outcome.skipped_roots);
     }
 
-    let mut scanned_roots = mft_roots.clone();
-    scanned_roots.extend(completed_walk_roots.iter().cloned());
+    let mut scanned_roots = mft_roots;
+    scanned_roots.extend(completed_walk_roots);
     scanned_roots.sort();
     partial_roots.sort();
     skipped_roots.sort_by(|a, b| a.root.cmp(&b.root));
 
-    let method = match (
-        !mft_roots.is_empty(),
-        !completed_walk_roots.is_empty() || !partial_roots.is_empty(),
-    ) {
+    let method = match (used_mft, used_walk) {
         (true, false) => "mft-index",
         (false, true) => "native-walk",
         (true, true) => "mixed",
         (false, false) => "native-walk",
     };
+
+    let any_partial_mft_eligible = partial_roots.iter().any(|r| mft_eligible_roots.contains(r));
+    let suggest_admin_retry = should_suggest_admin_retry(any_partial_mft_eligible);
 
     finalize_fffind_response(
         "*".to_owned(),
@@ -802,7 +835,23 @@ fn run_whole_pc_find(
         method,
         (!vol_index_status.is_empty()).then_some(vol_index_status),
         timeout_sec,
+        suggest_admin_retry,
+        Vec::new(),
     )
+}
+
+fn should_suggest_admin_retry(has_mft_eligible_target: bool) -> bool {
+    #[cfg(windows)]
+    {
+        has_mft_eligible_target
+            && crate::diagnostics::mft::mft_enabled()
+            && matches!(cst_os::is_elevated(), Ok(false))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = has_mft_eligible_target;
+        false
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -821,6 +870,8 @@ fn finalize_fffind_response(
     method: &str,
     vol_index_status: Option<Map<String, Value>>,
     timeout_sec: u64,
+    suggest_admin_retry: bool,
+    extra_notices: Vec<String>,
 ) -> Result<(Value, Value), String> {
     // Deduplicate identical canonical paths BEFORE checking `limit`, keeping the best-ranked copy.
     candidates.sort_by(|a, b| cmp_find_candidate(a, b, spec.sort_by));
@@ -856,24 +907,33 @@ fn finalize_fffind_response(
         None
     };
     let degraded = timed_out || queue_overflowed || had_non_policy_failure;
-    let mut notices = Vec::new();
+    let mut notices = extra_notices;
     if timed_out {
-        let is_elevated = cst_os::is_elevated().unwrap_or(false);
         if let Some(ref partials) = partial_roots {
-            if is_elevated {
-                notices.push(format!(
-                    "全电脑检索中部分卷达到单卷 {timeout_sec} 秒预算，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path 或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）重试。",
-                    partials.join("、")
-                ));
-            } else {
+            if suggest_admin_retry {
                 notices.push(format!(
                     "全电脑检索中部分卷达到单卷 {timeout_sec} 秒预算，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试。",
                     partials.join("、")
                 ));
+            } else {
+                notices.push(format!(
+                    "全电脑检索中部分卷达到单卷 {timeout_sec} 秒预算，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path 或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）重试。",
+                    partials.join("、")
+                ));
             }
         } else if matches.is_empty() {
+            if suggest_admin_retry {
+                notices.push(format!(
+                    "文件检索达到 {timeout_sec} 秒预算且未找到匹配项；可缩小 path 范围、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试。"
+                ));
+            } else {
+                notices.push(format!(
+                    "文件检索达到 {timeout_sec} 秒预算且未找到匹配项；可缩小 path 范围或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）后重试。"
+                ));
+            }
+        } else if suggest_admin_retry {
             notices.push(format!(
-                "文件检索达到 {timeout_sec} 秒预算且未找到匹配项；可缩小 path 范围或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）后重试。"
+                "文件检索达到 {timeout_sec} 秒预算，已保留已扫范围内的高分命中；可缩小 path 范围、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试获取完整结果。"
             ));
         } else {
             notices.push(format!(
@@ -1027,13 +1087,24 @@ fn grep_files_with_details(
 // Validation, Path Normalization, Glob & QueryPlan Helpers
 // ============================================================================
 
-fn validate_timeout_sec(timeout_sec: Option<u64>) -> Result<u64, String> {
-    match timeout_sec {
-        None => Ok(DEFAULT_TIMEOUT_SECS),
-        Some(v) if (1..=MAX_TIMEOUT_SECS).contains(&v) => Ok(v),
-        Some(_) => Err(format!(
+fn default_timeout_sec() -> u64 {
+    DEFAULT_TIMEOUT_SECS
+}
+
+fn deserialize_timeout_sec<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(DEFAULT_TIMEOUT_SECS))
+}
+
+fn validate_timeout_sec(timeout_sec: u64) -> Result<u64, String> {
+    if (1..=MAX_TIMEOUT_SECS).contains(&timeout_sec) {
+        Ok(timeout_sec)
+    } else {
+        Err(format!(
             "timeoutSec 必须在 1 至 {MAX_TIMEOUT_SECS} 秒之间。"
-        )),
+        ))
     }
 }
 
