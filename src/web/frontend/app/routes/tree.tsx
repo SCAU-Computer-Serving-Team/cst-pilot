@@ -27,6 +27,7 @@ import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shel
 import { isNavigationKeyEvent, scrollRowIntoView } from "../shell/keyboard-navigation";
 import { Notification } from "../shell/notification";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { usePresenceExit } from "../shell/use-presence-exit";
 import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
 import { branchSummaryHref } from "../tree/branch-summary";
 import {
@@ -98,6 +99,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const filterTriggerRef = useRef<HTMLButtonElement>(null);
 	usePanelDismiss(filterOpen, () => setFilterOpen(false), undefined, filterTriggerRef);
 	const [choice, setChoice] = useState("");
+	const choicePresence = usePresenceExit(choice || null);
 	// 键盘光标在三个选项间的位置；对话框打开时重置。
 	const [choiceIndex, setChoiceIndex] = useState(0);
 	const choiceDialogRef = useRef<HTMLDivElement>(null);
@@ -182,13 +184,11 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	choiceIndexRef.current = choiceIndex;
 	const chooseRef = useRef(choose);
 	chooseRef.current = choose;
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!choice) return;
 		const previous = document.activeElement;
 		const list = listRef.current;
-		const frame = requestAnimationFrame(() => {
-			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
-		});
+		choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
 		const onKey = (event: KeyboardEvent) => {
 			const dialog = choiceDialogRef.current;
 			if (
@@ -243,9 +243,8 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 		};
 		window.addEventListener("keydown", onKey, true);
 		return () => {
-			cancelAnimationFrame(frame);
 			window.removeEventListener("keydown", onKey, true);
-			if (document.querySelector(".standby-scrim")) return;
+			if (document.querySelector("dialog[open], .standby-scrim, .palette-scrim")) return;
 			if (
 				previous instanceof HTMLElement &&
 				previous !== document.body &&
@@ -642,11 +641,27 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 					insetY={1}
 				/>
 			</ul>
-			{!!choice && (
-				<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
+			{choicePresence.mounted && (
+				<div
+					ref={choicePresence.surfaceRef}
+					className="summary-layer"
+					data-state={choicePresence.state}
+					data-exiting={choicePresence.exiting ? "true" : undefined}
+					inert={choicePresence.exiting || undefined}
+					aria-hidden={choicePresence.exiting || undefined}
+				>
+					<div
+						className={
+							choicePresence.exiting
+								? "summary-backdrop tier-3-scrim"
+								: "summary-scrim summary-backdrop tier-3-scrim"
+						}
+						role="none"
+						onMouseDown={choicePresence.exiting ? undefined : () => setChoice("")}
+					/>
 					<div
 						ref={choiceDialogRef}
-						tabIndex={-1}
+						tabIndex={choicePresence.exiting ? undefined : -1}
 						className="summary-dialog tier-3-dialog"
 						role="dialog"
 						aria-modal="true"
@@ -655,7 +670,14 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 					>
 						<div className="summary-dialog-head">
 							<h2>选择</h2>
-							<button type="button" className="btn-icon sm-28" aria-label="关闭" onClick={() => setChoice("")}>
+							<button
+								type="button"
+								className="btn-icon sm-28"
+								aria-label="关闭"
+								onClick={() => {
+									if (!choicePresence.exiting) setChoice("");
+								}}
+							>
 								<X size={16} aria-hidden="true" />
 							</button>
 						</div>
@@ -669,9 +691,15 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 									type="button"
 									key={option.mode}
 									className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
-									onFocus={() => setChoiceIndex(index)}
-									onMouseEnter={() => setChoiceIndex(index)}
-									onClick={() => void choose(option.mode)}
+									onFocus={() => {
+										if (!choicePresence.exiting) setChoiceIndex(index);
+									}}
+									onMouseEnter={() => {
+										if (!choicePresence.exiting) setChoiceIndex(index);
+									}}
+									onClick={() => {
+										if (!choicePresence.exiting) void choose(option.mode);
+									}}
 								>
 									<option.icon size={16} aria-hidden="true" />
 									<span>{option.label}</span>

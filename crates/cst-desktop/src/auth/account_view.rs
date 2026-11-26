@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::login_view::LoginMethodTab;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{KbdTone, use_dialog_action_nav};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius,
@@ -368,199 +368,302 @@ impl Render for AccountView {
             window,
             cx,
         );
-        let confirm_modal_opt = self.logout_confirm_open.then(|| {
-            let kbd_style = snap.desktop_settings.keyboard_focus_style;
-            let scale_factor = window.scale_factor();
-            let entity = cx.entity();
-            let ent_cancel = entity.clone();
-            let ent_confirm = entity.clone();
-            let on_cancel: crate::theme::kbd_focus::DialogActionCallback = Rc::new(move |w, cx| {
-                ent_cancel.update(cx, |this, cx| {
-                    this.dismiss_logout_confirm(w, cx);
-                });
-            });
-            let on_confirm: crate::theme::kbd_focus::DialogActionCallback =
-                Rc::new(move |w, cx| {
-                    ent_confirm.update(cx, |this, cx| {
-                        this.logout_cstoa_only(w, cx);
+        let confirm_modal_opt = self
+            .logout_confirm_open
+            .then(|| {
+                let kbd_style = snap.desktop_settings.keyboard_focus_style;
+                let scale_factor = window.scale_factor();
+                let entity = cx.entity();
+                let ent_cancel = entity.clone();
+                let ent_confirm = entity.clone();
+                let on_cancel: crate::theme::kbd_focus::DialogActionCallback =
+                    Rc::new(move |w, cx| {
+                        ent_cancel.update(cx, |this, cx| {
+                            this.dismiss_logout_confirm(w, cx);
+                        });
                     });
-                });
-            let focuses = [
-                self.logout_cancel_focus.clone(),
-                self.logout_confirm_focus.clone(),
-            ];
-            logout_nav.clear_tracker(cx);
-            let kbd_active = logout_nav.is_keyboard_active(cx);
-            let tracker_cancel = logout_nav.tracker(cx);
-            let tracker_confirm = logout_nav.tracker(cx);
-            let kbd_overlay = logout_nav.render_overlay(
-                kbd_style,
-                &focuses,
-                [KbdTone::Neutral, KbdTone::Danger],
-                false,
-                &palette,
-                window,
-                cx,
-            );
-            let nav_move = logout_nav.clone();
-            let nav_key = logout_nav.clone();
-            let nav_click_cancel = logout_nav.clone();
-            let nav_click_confirm = logout_nav.clone();
-            let click_cancel = Rc::clone(&on_cancel);
-            let click_confirm = Rc::clone(&on_confirm);
+                let on_confirm: crate::theme::kbd_focus::DialogActionCallback =
+                    Rc::new(move |w, cx| {
+                        ent_confirm.update(cx, |this, cx| {
+                            this.logout_cstoa_only(w, cx);
+                        });
+                    });
+                let focuses = [
+                    self.logout_cancel_focus.clone(),
+                    self.logout_confirm_focus.clone(),
+                ];
+                logout_nav.clear_tracker(cx);
+                let kbd_active = logout_nav.is_keyboard_active(cx);
+                let tracker_cancel = logout_nav.tracker(cx);
+                let tracker_confirm = logout_nav.tracker(cx);
+                let kbd_overlay = logout_nav.render_overlay(
+                    kbd_style,
+                    &focuses,
+                    [KbdTone::Neutral, KbdTone::Danger],
+                    false,
+                    &palette,
+                    window,
+                    cx,
+                );
+                let nav_move = logout_nav.clone();
+                let nav_key = logout_nav.clone();
+                let nav_click_cancel = logout_nav.clone();
+                let nav_click_confirm = logout_nav.clone();
+                let click_cancel = Rc::clone(&on_cancel);
+                let click_confirm = Rc::clone(&on_confirm);
 
-            let card = render_frosted_surface(
-                "account-logout-confirm-dialog",
-                FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
-                    .with_opacity(logout_scrim_p),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_dialog("account-logout-confirm-dialog", "退出 CSTOA 登录")
-            .w(layout::MODAL_STANDARD_WIDTH)
-            .p(px(20.0))
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .shadow(palette.craft_stack_shadows())
-            .flex()
-            .flex_col()
-            .gap(space::MD)
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        Icon::new(IconName::CircleAlert)
-                            .size(px(16.0))
-                            .text_color(palette.status_danger),
-                    )
-                    .child(
-                        apply_scale(div(), scale::BODY_SEMIBOLD)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("确认退出 CSTOA？")),
-                    ),
-            )
-            .child(
-                apply_scale(div(), scale::UI)
-                    .text_color(palette.text_secondary)
-                    .child("退出后将清除本机 CSTOA 登录凭据，可随时重新扫码或通过密钥登录。"),
-            )
-            .child(
-                div()
-                    .relative()
-                    .w_full()
-                    .pt(space::XS)
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("account-logout-cancel-btn")
-                            .test_support()
-                            .a11y_button("account-logout-cancel-btn", "取消")
-                            .track_focus(&self.logout_cancel_focus)
-                            .tab_index(0)
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_surface)))
-                            .on_click(move |_, window, cx| {
-                                nav_click_cancel.clear_keyboard(window, cx);
-                                click_cancel(window, cx);
-                            })
-                            .child(cjk_inline_label("取消"))
-                            .on_prepaint(move |bounds, _, _| tracker_cancel.set(0, bounds)),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("account-logout-confirm-btn")
-                            .test_support()
-                            .a11y_button("account-logout-confirm-btn", "退出 CSTOA")
-                            .track_focus(&self.logout_confirm_focus)
-                            .tab_index(0)
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .bg(palette.status_danger)
-                            .text_color(palette.text_on_accent)
-                            .flex()
-                            .items_center()
-                            .when(!kbd_active, |el| {
-                                el.hover(|s| s.bg(palette.status_danger_hover))
-                            })
-                            .on_click(move |_, window, cx| {
-                                nav_click_confirm.clear_keyboard(window, cx);
-                                click_confirm(window, cx);
-                            })
-                            .child(cjk_inline_label("退出 CSTOA"))
-                            .on_prepaint(move |bounds, _, _| tracker_confirm.set(1, bounds)),
-                    )
-                    .child(kbd_overlay),
-            );
+                let card = render_frosted_surface(
+                    "account-logout-confirm-dialog",
+                    FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
+                        .with_opacity(logout_scrim_p),
+                    palette.bg_elevated,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .test_support()
+                .a11y_dialog("account-logout-confirm-dialog", "退出 CSTOA 登录")
+                .w(layout::MODAL_STANDARD_WIDTH)
+                .p(px(20.0))
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette.border_subtle)
+                .shadow(palette.craft_stack_shadows())
+                .flex()
+                .flex_col()
+                .gap(space::MD)
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .child(
+                            Icon::new(IconName::CircleAlert)
+                                .size(px(16.0))
+                                .text_color(palette.status_danger),
+                        )
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("确认退出 CSTOA？")),
+                        ),
+                )
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .text_color(palette.text_secondary)
+                        .child("退出后将清除本机 CSTOA 登录凭据，可随时重新扫码或通过密钥登录。"),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .pt(space::XS)
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap(space::SM)
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("account-logout-cancel-btn")
+                                .test_support()
+                                .a11y_button("account-logout-cancel-btn", "取消")
+                                .track_focus(&self.logout_cancel_focus)
+                                .tab_index(0)
+                                .h(height::CONTROL)
+                                .px(space::MD)
+                                .rounded(radius::CONTROL)
+                                .border_1()
+                                .border_color(palette.border_strong)
+                                .bg(palette.bg_workspace)
+                                .text_color(palette.text_primary)
+                                .flex()
+                                .items_center()
+                                .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_surface)))
+                                .on_click(move |_, window, cx| {
+                                    nav_click_cancel.clear_keyboard(window, cx);
+                                    click_cancel(window, cx);
+                                })
+                                .child(cjk_inline_label("取消"))
+                                .on_prepaint(move |bounds, _, _| tracker_cancel.set(0, bounds)),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("account-logout-confirm-btn")
+                                .test_support()
+                                .a11y_button("account-logout-confirm-btn", "退出 CSTOA")
+                                .track_focus(&self.logout_confirm_focus)
+                                .tab_index(0)
+                                .h(height::CONTROL)
+                                .px(space::MD)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.status_danger)
+                                .text_color(palette.text_on_accent)
+                                .flex()
+                                .items_center()
+                                .when(!kbd_active, |el| {
+                                    el.hover(|s| s.bg(palette.status_danger_hover))
+                                })
+                                .on_click(move |_, window, cx| {
+                                    nav_click_confirm.clear_keyboard(window, cx);
+                                    click_confirm(window, cx);
+                                })
+                                .child(cjk_inline_label("退出 CSTOA"))
+                                .on_prepaint(move |bounds, _, _| tracker_confirm.set(1, bounds)),
+                        )
+                        .child(kbd_overlay),
+                );
 
-            render_frosted_surface(
-                "account-logout-confirm-scrim",
-                FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
-                palette.bg_scrim,
-                transparency_enabled,
-                scale_factor,
-            )
-            .rounded(radius::ROW)
-            .opacity(0.01 + 0.99 * logout_scrim_p)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_move(move |ev: &MouseMoveEvent, w, cx| {
-                nav_move.handle_mouse_move(ev, w, cx);
+                render_frosted_scrim(
+                    "account-logout-confirm-scrim",
+                    FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
+                    palette.bg_scrim,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .rounded(radius::ROW)
+                .occlude()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_mouse_move(move |ev: &MouseMoveEvent, w, cx| {
+                    nav_move.handle_mouse_move(ev, w, cx);
+                })
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.dismiss_logout_confirm(window, cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .tab_stop(false)
+                        .on_key_down(move |ev: &KeyDownEvent, w, cx| {
+                            if nav_key.handle_key_down(
+                                ev,
+                                &focuses,
+                                false,
+                                on_cancel.as_ref(),
+                                on_confirm.as_ref(),
+                                w,
+                                cx,
+                            ) {
+                                cx.stop_propagation();
+                            }
+                        })
+                        .focus_trap("account-logout-confirm-trap", &self.logout_trap_focus)
+                        .child(motion::apply_modal_motion(
+                            card,
+                            logout_scrim_p,
+                            scale_factor,
+                            palette.craft_stack_shadows(),
+                        )),
+                )
             })
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.dismiss_logout_confirm(window, cx);
-                }),
-            )
-            .child(
-                div()
-                    .tab_stop(false)
-                    .on_key_down(move |ev: &KeyDownEvent, w, cx| {
-                        if nav_key.handle_key_down(
-                            ev,
-                            &focuses,
-                            false,
-                            on_cancel.as_ref(),
-                            on_confirm.as_ref(),
-                            w,
-                            cx,
-                        ) {
-                            cx.stop_propagation();
-                        }
-                    })
-                    .focus_trap("account-logout-confirm-trap", &self.logout_trap_focus)
-                    .child(motion::animate_modal_enter(
-                        "account-logout-confirm-anim",
+            .or_else(|| {
+                (logout_scrim_p > 0.001).then(|| {
+                    let scale_factor = window.scale_factor();
+                    let card = render_frosted_surface(
+                        "account-logout-confirm-dialog-exit",
+                        FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
+                            .with_opacity(logout_scrim_p),
+                        palette.bg_elevated,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .w(layout::MODAL_STANDARD_WIDTH)
+                    .p(px(20.0))
+                    .rounded(radius::ROW)
+                    .border_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .flex_col()
+                    .gap(space::MD)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .child(
+                                Icon::new(IconName::CircleAlert)
+                                    .size(px(16.0))
+                                    .text_color(palette.status_danger),
+                            )
+                            .child(
+                                apply_scale(div(), scale::BODY_SEMIBOLD)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("确认退出 CSTOA？")),
+                            ),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_secondary)
+                            .child(
+                                "退出后将清除本机 CSTOA 登录凭据，可随时重新扫码或通过密钥登录。",
+                            ),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .pt(space::XS)
+                            .flex()
+                            .items_center()
+                            .justify_end()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .h(height::CONTROL)
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_workspace)
+                                    .text_color(palette.text_primary)
+                                    .flex()
+                                    .items_center()
+                                    .child(cjk_inline_label("取消")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .h(height::CONTROL)
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .bg(palette.status_danger)
+                                    .text_color(palette.text_on_accent)
+                                    .flex()
+                                    .items_center()
+                                    .child(cjk_inline_label("退出 CSTOA")),
+                            ),
+                    );
+                    render_frosted_scrim(
+                        "account-logout-confirm-scrim-exit",
+                        FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
+                        palette.bg_scrim,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .rounded(radius::ROW)
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(motion::apply_modal_motion(
                         card,
+                        logout_scrim_p,
+                        scale_factor,
                         palette.craft_stack_shadows(),
-                    )),
-            )
-        });
+                    ))
+                })
+            });
 
         div()
             .id("account-view")

@@ -55,6 +55,7 @@ pub struct LoginView {
     generation: u64,
     qr_generation: u64,
     qr_running: bool,
+    qr_poll_task: Option<gpui::Task<()>>,
     active_qr_flow_id: Option<String>,
     oauth_pending: bool,
     window: gpui::AnyWindowHandle,
@@ -116,6 +117,7 @@ impl LoginView {
             generation: 0,
             qr_generation: 0,
             qr_running: false,
+            qr_poll_task: None,
             active_qr_flow_id: None,
             oauth_pending: false,
             window: window.window_handle(),
@@ -246,6 +248,10 @@ impl LoginView {
 
     fn reset_qr(&mut self, cx: &mut Context<Self>) {
         self.qr_generation += 1;
+        // Dropping the poll task immediately cancels any sleeping 1500ms background wait
+        // so refreshes and tab switches never stall behind an old generation.
+        self.qr_poll_task = None;
+        self.qr_running = false;
         // Cancel any active server-side QR flow immediately when leaving or switching tabs
         // so existing CSTOA credentials remain untouched and provider locks release at once.
         if let Some(flow_id) = self.active_qr_flow_id.take() {
@@ -286,7 +292,7 @@ impl LoginView {
 
         let client = self.client.clone();
         let generation = self.qr_generation;
-        cx.spawn(async move |weak, cx| {
+        self.qr_poll_task = Some(cx.spawn(async move |weak, cx| {
             let started = client
                 .start_auth_flow("cstoa".into(), "oauth".into(), None)
                 .await;
@@ -342,6 +348,7 @@ impl LoginView {
                 .unwrap_or(false);
 
             let mut already_terminal = started_terminal;
+            let mut last_remaining_sec: Option<u64> = None;
             if live && let Some(id) = flow_id.as_deref() {
                 loop {
                     let current = weak
@@ -391,13 +398,38 @@ impl LoginView {
                             break;
                         }
                     }
-                    let _ = weak.update(cx, |this, cx| {
-                        if generation == this.qr_generation {
-                            cx.notify();
-                        }
-                    });
+                    let (window_active, rem_ms) = weak
+                        .update(cx, |this, cx| {
+                            if generation != this.qr_generation {
+                                return (false, 0u64);
+                            }
+                            let active = this
+                                .window
+                                .update(cx, |_, window, _| {
+                                    let vp = window.viewport_size();
+                                    window.is_window_active()
+                                        && window.is_visible()
+                                        && f32::from(vp.width) > 1.0
+                                        && f32::from(vp.height) > 1.0
+                                })
+                                .unwrap_or(false);
+                            let remaining_ms = this.qr_expires_at_ms.saturating_sub(now_epoch_ms());
+                            let rem_sec = remaining_ms.div_ceil(1000);
+                            if active && last_remaining_sec != Some(rem_sec) {
+                                last_remaining_sec = Some(rem_sec);
+                                cx.notify();
+                            }
+                            (active, remaining_ms)
+                        })
+                        .unwrap_or((false, 0));
+                    let base_ms = if window_active { 250 } else { 1500 };
+                    let poll_interval_ms = if rem_ms > 0 {
+                        base_ms.min(rem_ms.max(50))
+                    } else {
+                        base_ms
+                    };
                     cx.background_executor()
-                        .timer(Duration::from_millis(250))
+                        .timer(Duration::from_millis(poll_interval_ms))
                         .await;
                 }
             }
@@ -420,17 +452,18 @@ impl LoginView {
                     .await;
             }
             let _ = weak.update(cx, |this, cx| {
+                if this.qr_generation != generation {
+                    return;
+                }
                 this.qr_running = false;
+                this.qr_poll_task = None;
                 this.active_qr_flow_id = None;
-                if succeeded && this.qr_generation == generation {
+                if succeeded {
                     cx.emit(LoginViewEvent::NavigateToAccount);
-                } else if this.qr_generation != generation {
-                    this.start_cstoa_qr_flow(cx);
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn start_provider_oauth(&mut self, provider_id: String, cx: &mut Context<Self>) {
@@ -905,70 +938,103 @@ impl Render for LoginView {
                     .map(|(_, pname)| pname.clone())
                     .unwrap_or_else(|| self.selected_provider_id.clone());
 
-                provider_menu_opt = self.provider_dropdown_open.then(|| {
-                    let mut list = div()
-                        .id("login-apikey-provider-menu-scroll")
-                        .track_scroll(&self.provider_scroll)
-                        .w_full()
-                        .max_h(px(220.0))
-                        .overflow_y_scroll()
-                        .flex()
-                        .flex_col()
-                        .gap(space::MICRO);
+                let provider_menu_p = motion::surface_presence(
+                    "login-apikey-provider-pop-p",
+                    self.provider_dropdown_open,
+                    motion::POPOVER_OPEN,
+                    window,
+                    cx,
+                );
+                let provider_interactive = self.provider_dropdown_open;
+                provider_menu_opt = (provider_interactive || provider_menu_p > 0.001).then(|| {
+                    let mut list_rows = div().w_full().flex().flex_col().gap(space::MICRO);
 
                     for (idx, (pid, pname)) in key_providers.iter().enumerate() {
                         let active = self.provider_index == idx;
-                        let pid_click = pid.clone();
-                        let opt_id = SharedString::from(format!("login-apikey-provider-{pid}"));
                         let opt_label = SharedString::from(pname.clone());
-                        list = list.child(
-                            apply_scale(div(), scale::UI)
+                        let base_item = apply_scale(div(), scale::UI)
+                            .flex_shrink_0()
+                            .h(height::CONTROL)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .bg(if active {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::SM)
+                            .child(div().min_w_0().truncate().child(opt_label.clone()))
+                            .children(active.then(|| {
+                                Icon::new(IconName::Check)
+                                    .size(px(14.0))
+                                    .text_color(palette.accent_ink)
+                            }));
+                        let item = if provider_interactive {
+                            let pid_click = pid.clone();
+                            let opt_id = SharedString::from(format!("login-apikey-provider-{pid}"));
+                            let hover_bg = if active {
+                                palette.bg_item_active
+                            } else {
+                                palette.bg_item_hover
+                            };
+                            base_item
                                 .id(opt_id.clone())
                                 .test_support()
-                                .a11y_listitem(opt_id, opt_label.clone(), active)
-                                .flex_shrink_0()
-                                .h(height::CONTROL)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .bg(if active {
-                                    palette.bg_item_active
-                                } else {
-                                    gpui_kit::transparent_black()
-                                })
-                                .text_color(palette.text_primary)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .a11y_listitem(opt_id, opt_label, active)
+                                .hover(move |s| s.bg(hover_bg))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.select_api_key_provider(&pid_click, window, cx);
                                 }))
-                                .child(div().min_w_0().truncate().child(opt_label))
-                                .children(active.then(|| {
-                                    Icon::new(IconName::Check)
-                                        .size(px(14.0))
-                                        .text_color(palette.accent_ink)
-                                })),
-                        );
+                                .into_any_element()
+                        } else {
+                            base_item.into_any_element()
+                        };
+                        list_rows = list_rows.child(item);
                     }
 
-                    div().absolute().top(px(62.0)).left_0().right_0().child(
-                        motion::animate_popover_enter(
-                            "login-apikey-provider-pop-anim",
-                            render_frosted_surface(
-                                "login-apikey-provider-popover",
-                                FrostedGlassSpec::popover(&palette),
-                                palette.bg_elevated,
-                                transparency_enabled,
-                                scale_factor,
-                            )
+                    let list = if provider_interactive {
+                        div()
+                            .id("login-apikey-provider-menu-scroll")
+                            .track_scroll(&self.provider_scroll)
+                            .w_full()
+                            .max_h(px(220.0))
+                            .overflow_y_scroll()
+                            .child(list_rows)
+                            .into_any_element()
+                    } else {
+                        let offset_y = self.provider_scroll.offset().y;
+                        div()
+                            .w_full()
+                            .max_h(px(220.0))
+                            .overflow_hidden()
+                            .child(div().relative().top(offset_y).child(list_rows))
+                            .into_any_element()
+                    };
+
+                    let popover_panel = render_frosted_surface(
+                        if provider_interactive {
+                            "login-apikey-provider-popover"
+                        } else {
+                            "login-apikey-provider-popover-exit"
+                        },
+                        FrostedGlassSpec::popover(&palette).with_opacity(provider_menu_p),
+                        palette.bg_elevated,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .p(space::XS)
+                    .rounded(radius::ROW)
+                    .border_1()
+                    .border_color(palette.border_hairline);
+
+                    let popover_panel = if provider_interactive {
+                        popover_panel
                             .test_support()
                             .a11y_dialog("login-apikey-provider-popover", "选择服务提供商")
-                            .p(space::XS)
-                            .rounded(radius::ROW)
-                            .border_1()
-                            .border_color(palette.border_hairline)
                             .occlude()
                             .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
@@ -1003,9 +1069,19 @@ impl Render for LoginView {
                                         }
                                     }))
                                     .child(list),
-                            ),
-                            palette.craft_stack_shadows(),
+                            )
+                            .into_any_element()
+                    } else {
+                        popover_panel.child(list).into_any_element()
+                    };
+
+                    div().absolute().top(px(62.0)).left_0().right_0().child(
+                        motion::apply_popover_motion(
+                            div().rounded(radius::ROW).child(popover_panel),
+                            provider_menu_p,
                             -6.0,
+                            scale_factor,
+                            palette.craft_stack_shadows(),
                         ),
                     )
                 });

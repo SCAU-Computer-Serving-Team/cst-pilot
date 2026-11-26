@@ -454,6 +454,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
     let active_gate = AnimationGateInputs {
         route_has_sky_shader: true,
         web_active_locked: false,
+        occluded_by_modal: false,
         window_focused: true,
         window_minimized: false,
         hardware_diagnostic_active: false,
@@ -471,7 +472,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
     assert!((u1 - 0.05).abs() < 1e-4);
     assert!(req1);
 
-    // Freeze at 0 FPS when off-page, unfocused, minimized, WebActive, or sys(gpu/sensor) active
+    // Freeze at 0 FPS when off-page, unfocused, minimized, modal-occluded, WebActive, or sys(gpu/sensor) active
     for frozen in [
         AnimationGateInputs {
             route_has_sky_shader: false,
@@ -483,6 +484,10 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
         },
         AnimationGateInputs {
             window_minimized: true,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            occluded_by_modal: true,
             ..active_gate
         },
         AnimationGateInputs {

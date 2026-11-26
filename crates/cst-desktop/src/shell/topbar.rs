@@ -35,13 +35,12 @@ pub struct TopbarCallbacks {
     pub on_request_close: TopbarActionFn,
 }
 
-/// Maps a normalized `[0.0, 1.0]` progress into a staggered sub-window `[start, end]` with ease-out.
+/// Maps an already-eased `[0.0, 1.0]` progress into a staggered sub-window `[start, end]`.
 fn stagger_progress(t: f32, start: f32, end: f32) -> f32 {
     if end <= start {
         return t.clamp(0.0, 1.0);
     }
-    let raw = ((t - start) / (end - start)).clamp(0.0, 1.0);
-    motion::ease_out()(raw)
+    ((t - start) / (end - start)).clamp(0.0, 1.0)
 }
 
 /// Exact horizontal span (`28px` avatar + `4px` gap + `28px` settings) occupied by the
@@ -832,7 +831,7 @@ pub fn render_topbar(
         space::TIGHT
     };
 
-    let slot_t = motion::ease_out()(collapsed_t);
+    let slot_t = collapsed_t.clamp(0.0, 1.0);
     let slot_w = px(RIGHT_COMPENSATION_WIDTH_PX * slot_t);
     let slot_gap = px(f32::from(space::XS) * slot_t);
 

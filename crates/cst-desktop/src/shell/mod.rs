@@ -31,10 +31,12 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::account_view::{AccountView, AccountViewEvent};
 use crate::auth::login_view::{LoginView, LoginViewEvent};
-use crate::auth::missing_key::{MissingKeyModalState, render_missing_key_dialog};
+use crate::auth::missing_key::{
+    MissingKeyModalState, render_missing_key_dialog, render_missing_key_dialog_inert,
+};
 use crate::background::{
     FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, has_active_hardware_diagnostic,
-    render_frosted_surface, render_sky_background_rounded,
+    render_frosted_scrim, render_frosted_surface, render_sky_background_rounded,
 };
 use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget, PaletteMode};
 use crate::sessions::all_sessions::{AllSessionsEvent, AllSessionsView};
@@ -42,10 +44,10 @@ use crate::sessions::branch_tree::{BranchTreeEvent, BranchTreeView};
 use crate::sessions::export_view::{ExportView, ExportViewEvent};
 use crate::settings::update_dialog::{UpdateDialogState, render_update_dialog};
 use crate::settings::{SettingsCategory, SettingsView, SettingsViewEvent};
-use crate::shell::exit_dialog::render_exit_confirm_dialog;
+use crate::shell::exit_dialog::{render_exit_confirm_dialog, render_exit_confirm_dialog_inert};
 use crate::shell::overlays::{
     BannerCountdownState, BannerDeadline, render_top_notice_banner, render_web_active_lock_overlay,
-    render_workspace_error_bar,
+    render_web_active_lock_overlay_inert, render_workspace_error_bar,
 };
 use crate::shell::search_state::{
     ExpandAction, SEARCH_PAGE_SIZE, SidebarSearchState, search_local_preloaded_sessions,
@@ -256,6 +258,10 @@ pub struct AppShell {
     account_presence: TransitionState<f32>,
     sidebar_menu_presence: TransitionState<f32>,
     last_sidebar_menu: Option<(String, Point<Pixels>)>,
+    last_topbar_session_more_id: Option<String>,
+    last_rename_title: Option<String>,
+    last_missing_key: Option<MissingKeyModalState>,
+    last_exit_dialog: Option<(ExitCheckReport, bool)>,
     banner_presence: TransitionState<f32>,
     last_banner: Option<(bool, SharedString)>,
     tooltip_session: Option<String>,
@@ -497,6 +503,10 @@ impl AppShell {
             account_presence: TransitionState::default(),
             sidebar_menu_presence: TransitionState::default(),
             last_sidebar_menu: None,
+            last_topbar_session_more_id: None,
+            last_rename_title: None,
+            last_missing_key: None,
+            last_exit_dialog: None,
             banner_presence: TransitionState::default(),
             last_banner: None,
             tooltip_session: None,
@@ -3282,9 +3292,18 @@ impl Render for AppShell {
             self.sidebar_presence = TransitionState::default();
         }
         let hw_diag_active = has_active_hardware_diagnostic(&self.snapshot);
+        let modal_occluding_sky = self.exit_dialog.is_some()
+            || self.web_switch_confirm.is_some()
+            || self.missing_key_modal.is_some()
+            || self.rename_modal.is_some()
+            || self.update_dialog.open
+            || self.update_dialog.handoff_locked
+            || self.command_palette.is_some()
+            || (active_chat && self.workbench.read(cx).has_modal());
         let sky_time = self.shader_scheduler.sample_for_window(
             self.route.uses_sky_shader(),
             web_locked,
+            modal_occluding_sky,
             hw_diag_active,
             cx.reduce_motion(),
             window,
@@ -4100,12 +4119,12 @@ impl Render for AppShell {
                 self.last_sidebar_menu = None;
             }
 
-            if self.sidebar_collapsed && !web_locked {
-                let open = self.recent_drawer_open;
+            if !web_locked {
+                let recent_open = self.sidebar_collapsed && self.recent_drawer_open;
                 let progress = transition(
                     "shell-recent-drawer-presence",
-                    if open { 1.0_f32 } else { 0.0 },
-                    Transition::new(if open {
+                    if recent_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if recent_open {
                         motion::POPOVER_OPEN
                     } else {
                         motion::SURFACE_CLOSE
@@ -4114,7 +4133,7 @@ impl Render for AppShell {
                     window,
                     cx,
                 );
-                if open || progress > 0.0 {
+                if recent_open || progress > 0.001 {
                     root = root.child(self.render_recent_drawer_popover(
                         progress,
                         active_session_id.as_deref(),
@@ -4125,23 +4144,31 @@ impl Render for AppShell {
                     ));
                 }
 
-                if let Some(ref sid) = active_session_id
+                let more_open = self.sidebar_collapsed
                     && active_chat
-                {
-                    let more_open = self.topbar_session_more_open;
-                    let more_progress = transition(
-                        "shell-topbar-session-more-presence",
-                        if more_open { 1.0_f32 } else { 0.0 },
-                        Transition::new(if more_open {
-                            motion::POPOVER_OPEN
-                        } else {
-                            motion::SURFACE_CLOSE
-                        })
-                        .ease(motion::ease_out()),
-                        window,
-                        cx,
-                    );
-                    if more_open || more_progress > 0.001 {
+                    && active_session_id.is_some()
+                    && self.topbar_session_more_open;
+                if more_open && let Some(ref sid) = active_session_id {
+                    self.last_topbar_session_more_id = Some(sid.clone());
+                }
+                let more_progress = transition(
+                    "shell-topbar-session-more-presence",
+                    if more_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if more_open {
+                        motion::POPOVER_OPEN
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                );
+                if more_open || more_progress > 0.001 {
+                    if let Some(sid) = active_session_id
+                        .as_deref()
+                        .filter(|_| more_open)
+                        .or(self.last_topbar_session_more_id.as_deref())
+                    {
                         root = root.child(self.render_topbar_session_more_popover(
                             more_open,
                             more_progress,
@@ -4152,6 +4179,8 @@ impl Render for AppShell {
                             &entity,
                         ));
                     }
+                } else {
+                    self.last_topbar_session_more_id = None;
                 }
             }
 
@@ -4191,16 +4220,20 @@ impl Render for AppShell {
         let kbd_style = self.snapshot.desktop_settings.keyboard_focus_style;
 
         // Rename Session Modal (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
+        let rename_open = self.rename_modal.is_some();
+        if let Some(ref rm) = self.rename_modal {
+            self.last_rename_title = Some(rm.input.read(cx).value().to_string());
+        }
         let rename_scrim_p = motion::surface_presence(
             "rename-session-scrim-p",
-            self.rename_modal.is_some(),
+            rename_open,
             motion::MODAL_OPEN,
             window,
             cx,
         );
         let rename_nav = crate::theme::kbd_focus::use_dialog_action_nav(
             "rename-session",
-            self.rename_modal.is_some(),
+            rename_open,
             1,
             window,
             cx,
@@ -4249,14 +4282,13 @@ impl Render for AppShell {
             let click_confirm = Rc::clone(&on_confirm_rc);
 
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "rename-session-scrim",
                     FrostedGlassSpec::scrim(&palette).with_opacity(rename_scrim_p),
                     palette.bg_scrim,
                     transparency_enabled,
                     scale_factor,
                 )
-                .opacity(0.01 + 0.99 * rename_scrim_p)
                 .absolute()
                 .top_0()
                 .left_0()
@@ -4267,8 +4299,7 @@ impl Render for AppShell {
                 .justify_center()
                 .occlude()
                 .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
-                .child(motion::animate_modal_enter(
-                    "rename-session-modal-anim",
+                .child(motion::apply_modal_motion(
                     render_frosted_surface(
                         "rename-session-modal",
                         FrostedGlassSpec::modal(&palette, 8.0).with_opacity(rename_scrim_p),
@@ -4445,12 +4476,115 @@ impl Render for AppShell {
                     )
                     .tab_stop(false)
                     .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
+                    rename_scrim_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );
+        } else if rename_scrim_p > 0.001 {
+            let title_text = self.last_rename_title.as_deref().unwrap_or("");
+            let inert_card = render_frosted_surface(
+                "rename-session-modal-exit",
+                FrostedGlassSpec::modal(&palette, 8.0).with_opacity(rename_scrim_p),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .w(layout::MODAL_STANDARD_WIDTH)
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .relative()
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label("重命名对话")),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .relative()
+                    .w_full()
+                    .h(height::FIELD)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(title_text.to_owned())),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_elevated)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("取消")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.accent_solid)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("保存")),
+                    ),
+            );
+            root = root.child(
+                render_frosted_scrim(
+                    "rename-session-scrim-exit",
+                    FrostedGlassSpec::scrim(&palette).with_opacity(rename_scrim_p),
+                    palette.bg_scrim,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(motion::apply_modal_motion(
+                    inert_card,
+                    rename_scrim_p,
+                    scale_factor,
+                    palette.craft_stack_shadows(),
+                )),
+            );
+        } else {
+            self.last_rename_title = None;
         }
 
         // `384px` Missing Key Dialog (`e7fEty`)
+        if let Some(ref mk_state) = self.missing_key_modal {
+            self.last_missing_key = Some(mk_state.clone());
+        }
         let missing_key_p = motion::surface_presence(
             "missing-key-scrim-p",
             self.missing_key_modal.is_some(),
@@ -4500,6 +4634,18 @@ impl Render for AppShell {
                 window,
                 cx,
             ));
+        } else if missing_key_p > 0.001 {
+            if let Some(ref mk_state) = self.last_missing_key {
+                root = root.child(render_missing_key_dialog_inert(
+                    mk_state,
+                    missing_key_p,
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                ));
+            }
+        } else {
+            self.last_missing_key = None;
         }
 
         // `384px` Software Update Dialog (`kOm7J` / `TqiZo`)
@@ -4615,14 +4761,13 @@ impl Render for AppShell {
             let click_proceed = Rc::clone(&on_proceed_rc);
 
             root = root.child(
-                render_frosted_surface(
+                render_frosted_scrim(
                     "web-switch-confirm-scrim",
                     FrostedGlassSpec::scrim(&palette).with_opacity(web_confirm_p),
                     palette.bg_scrim,
                     transparency_enabled,
                     scale_factor,
                 )
-                .opacity(0.01 + 0.99 * web_confirm_p)
                 .absolute()
                 .top_0()
                 .left_0()
@@ -4633,8 +4778,7 @@ impl Render for AppShell {
                 .justify_center()
                 .occlude()
                 .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
-                .child(motion::animate_modal_enter(
-                    "web-switch-confirm-anim",
+                .child(motion::apply_modal_motion(
                     render_frosted_surface(
                         "web-switch-confirm-card",
                         FrostedGlassSpec::modal(&palette, 8.0).with_opacity(web_confirm_p),
@@ -4745,6 +4889,95 @@ impl Render for AppShell {
                             )
                             .child(kbd_overlay),
                     ),
+                    web_confirm_p,
+                    scale_factor,
+                    palette.craft_stack_shadows(),
+                )),
+            );
+        } else if web_confirm_p > 0.001 {
+            let inert_card = render_frosted_surface(
+                "web-switch-confirm-card-exit",
+                FrostedGlassSpec::modal(&palette, 8.0).with_opacity(web_confirm_p),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .w(layout::MODAL_STANDARD_WIDTH)
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .p(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("切换到网页端？")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_secondary)
+                            .child("当前存在未发送草稿或待确认消息。切换至网页端期间桌面输入框将暂时锁定。"),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_elevated)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("取消")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.accent_solid)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label("继续切换")),
+                    ),
+            );
+            root = root.child(
+                render_frosted_scrim(
+                    "web-switch-confirm-scrim-exit",
+                    FrostedGlassSpec::scrim(&palette).with_opacity(web_confirm_p),
+                    palette.bg_scrim,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(motion::apply_modal_motion(
+                    inert_card,
+                    web_confirm_p,
+                    scale_factor,
                     palette.craft_stack_shadows(),
                 )),
             );
@@ -4789,9 +5022,19 @@ impl Render for AppShell {
                 window,
                 cx,
             ));
+        } else if web_lock_p > 0.001 {
+            root = root.child(render_web_active_lock_overlay_inert(
+                web_lock_p,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+            ));
         }
 
         // Exit confirmation dialog (`pFooK`) — sits topmost so user can always safely exit even during `WebActive`
+        if let Some(ref dialog) = self.exit_dialog {
+            self.last_exit_dialog = Some((dialog.report.clone(), dialog.exiting));
+        }
         let exit_dialog_p = motion::surface_presence(
             "exit-dialog-scrim-p",
             self.exit_dialog.is_some(),
@@ -4832,6 +5075,19 @@ impl Render for AppShell {
                 window,
                 cx,
             ));
+        } else if exit_dialog_p > 0.001 {
+            if let Some((ref report, exiting)) = self.last_exit_dialog {
+                root = root.child(render_exit_confirm_dialog_inert(
+                    report,
+                    exiting,
+                    exit_dialog_p,
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                ));
+            }
+        } else {
+            self.last_exit_dialog = None;
         }
 
         root = root.child(self.tooltip_overlay.clone());

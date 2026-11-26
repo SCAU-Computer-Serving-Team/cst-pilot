@@ -1,6 +1,6 @@
 # 工具契约统一、联网检索与 `runbook` 重设计
 
-本文记录阶段 9.3 中全工具运行时间与错误契约收敛、`read` 工具 JSON 化、联网检索工具重设计及单工具 `runbook` 改造的背景、决策与对照验收项。架构决策见 [ADR-019](../ADR.md#adr-019全量工具注入-elapsedmsread-改-json-并统一错误与降级)、[ADR-020](../ADR.md#adr-020联网检索重设计为-exa-与-deepseek-双提供商三工具体系) 与 [ADR-021](../ADR.md#adr-021收敛为单工具-runbook双端卡片支持一键导出文本)，总览进度见 [9.3.optimization.md](../rust/plan/9.3.optimization.md)。
+本文记录阶段 9.3 中全工具运行时间与错误契约收敛、`read` 工具 JSON 化、联网检索工具重设计及单工具 `runbook` 改造的背景、决策与对照验收项。架构决策见 [ADR-020](../ADR.md#adr-020全量工具注入-elapsedmsread-改-json-并统一错误与降级)、[ADR-021](../ADR.md#adr-021联网检索重设计为-exa-与-deepseek-双提供商三工具体系) 与 [ADR-022](../ADR.md#adr-022收敛为单工具-runbook双端卡片支持一键导出文本)，总览进度见 [9.3.optimization.md](../rust/plan/9.3.optimization.md)。
 
 ## 一、背景
 

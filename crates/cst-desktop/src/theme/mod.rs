@@ -177,7 +177,57 @@ pub mod motion {
         shadows
     }
 
-    /// Animates a popover panel (`220ms` `ease_out`, fade + subtle `6px` lift, shadow alpha ramp `d^3`, `0ms` in `reduce_motion`).
+    /// Snaps a logical pixel offset to the nearest physical device pixel at the window's scale factor
+    /// (`125%`, `150%`, `200%`, etc.) so ClearType glyph stems stay crisp across heterogeneous DPI monitors (`ADR-008`).
+    pub fn snap_device_px(logical_px: f32, scale_factor: f32) -> f32 {
+        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+            scale_factor
+        } else {
+            1.0
+        };
+        (logical_px * scale).round() / scale
+    }
+
+    /// Applies single-signal interruptible modal motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
+    /// Uses physical-pixel-snapped relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp
+    /// (`p^2` shadow alpha × container `opacity(p)`).
+    pub fn apply_modal_motion<E: Styled>(
+        el: E,
+        progress: f32,
+        scale_factor: f32,
+        shadows: Vec<BoxShadow>,
+    ) -> E {
+        let p = progress.clamp(0.0, 1.0);
+        let dy = snap_device_px(6.0 * (1.0 - p), scale_factor);
+        let el = el.relative().top(px(dy)).opacity(0.01 + 0.99 * p);
+        if shadows.is_empty() {
+            el
+        } else {
+            el.shadow(scale_shadows(shadows, p * p))
+        }
+    }
+
+    /// Applies single-signal interruptible popover motion driven by [`surface_presence`] (`0.0 <-> 1.0`).
+    /// Uses physical-pixel-snapped relative offset (`ADR-008` ClearType boundary) and cubic `p^3` effective shadow ramp.
+    pub fn apply_popover_motion<E: Styled>(
+        el: E,
+        progress: f32,
+        slide_y_px: f32,
+        scale_factor: f32,
+        shadows: Vec<BoxShadow>,
+    ) -> E {
+        let p = progress.clamp(0.0, 1.0);
+        let dy = snap_device_px(slide_y_px * (1.0 - p), scale_factor);
+        let el = el.relative().top(px(dy)).opacity(0.01 + 0.99 * p);
+        if shadows.is_empty() {
+            el
+        } else {
+            el.shadow(scale_shadows(shadows, p * p))
+        }
+    }
+
+    /// Compatibility one-shot popover entrance helper retained for unmigrated call sites.
+    /// Prefer [`surface_presence`] + [`apply_popover_motion`] for interruptible open/close cycles.
     pub fn animate_popover_enter<E: IntoElement + Styled + 'static>(
         id: impl Into<gpui::ElementId>,
         el: E,
@@ -1258,8 +1308,12 @@ pub mod motion {
                 let total_glyphs = crate::workbench::turn_segments::light_glyphs(line_text).len();
                 if !enable_sweep && digit_anims.is_empty() {
                     return super::apply_scale(div(), typography)
+                        .pb(super::space::MICRO)
+                        .relative()
+                        .flex()
+                        .items_center()
                         .text_color(base_color)
-                        .child(super::cjk_inline_label(line_text.to_owned()))
+                        .child(SharedString::from(line_text.to_owned()))
                         .into_any_element();
                 }
 

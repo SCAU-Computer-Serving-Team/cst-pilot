@@ -25,19 +25,108 @@ export function useStandbyDialogClose(dialogRef: RefObject<HTMLDialogElement | n
 	}, [shell?.appActive, dialogRef]);
 }
 
-/** 执行模态弹窗 150ms (--duration-quick) 关闭过渡后再卸载；支持入场中途打断与减少动态即时关闭。 */
+/** 构造脱离原生顶层的纯视觉退场副本，使原生 `<dialog>` 可在关闭首帧立即 `close()` 解锁并归焦。 */
+function spawnInertDialogExitGhost(modal: HTMLDialogElement): void {
+	const rect = modal.getBoundingClientRect();
+	if (rect.width <= 0 || rect.height <= 0) return;
+
+	const style = getComputedStyle(modal);
+	const startOpacity = style.opacity || "1";
+	const startTransform = style.transform === "none" ? "scale(1)" : style.transform;
+	const scale = style.getPropertyValue("--scale-modal").trim() || "0.96";
+	const easing = readEasing(modal);
+	const duration = readDurationMs(modal, "--duration-quick", 150);
+
+	const layer = document.createElement("div");
+	layer.className = "dialog-exit-layer";
+	layer.setAttribute("aria-hidden", "true");
+	layer.inert = true;
+
+	const backdrop = document.createElement("div");
+	backdrop.className = "dialog-exit-backdrop tier-3-scrim";
+	layer.appendChild(backdrop);
+
+	const ghostCard = document.createElement("div");
+	ghostCard.className = `${modal.className} dialog-exit-card`;
+	ghostCard.style.left = `${rect.left}px`;
+	ghostCard.style.top = `${rect.top}px`;
+	ghostCard.style.width = `${rect.width}px`;
+	ghostCard.style.height = `${rect.height}px`;
+
+	const sourceInputs = modal.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+	for (const child of Array.from(modal.childNodes)) {
+		ghostCard.appendChild(child.cloneNode(true));
+	}
+	const clonedInputs = ghostCard.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+	sourceInputs.forEach((src, index) => {
+		const dst = clonedInputs[index];
+		if (!dst) return;
+		if (
+			src instanceof HTMLInputElement &&
+			dst instanceof HTMLInputElement &&
+			(src.type === "checkbox" || src.type === "radio")
+		) {
+			dst.checked = src.checked;
+		} else {
+			dst.value = src.value;
+		}
+	});
+	for (const el of ghostCard.querySelectorAll<HTMLElement>("[id], [role], [aria-labelledby], [aria-describedby]")) {
+		el.removeAttribute("id");
+		el.removeAttribute("role");
+		el.removeAttribute("aria-labelledby");
+		el.removeAttribute("aria-describedby");
+	}
+	layer.appendChild(ghostCard);
+	document.body.appendChild(layer);
+
+	const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+	const cardAnim = ghostCard.animate(
+		[
+			{ opacity: startOpacity, transform: startTransform },
+			{ opacity: 0, transform: `scale(${scale})` },
+		],
+		{ duration, easing, fill: "forwards" },
+	);
+	const backdropAnim = backdrop.animate([{ opacity: 1 }, { opacity: 0 }], {
+		duration,
+		easing,
+		fill: "forwards",
+	});
+
+	let removed = false;
+	const cleanup = () => {
+		if (removed) return;
+		removed = true;
+		motion.removeEventListener("change", onReduceMotion);
+		cardAnim.cancel();
+		backdropAnim.cancel();
+		layer.remove();
+	};
+	const onReduceMotion = () => {
+		if (motion.matches) cleanup();
+	};
+	motion.addEventListener("change", onReduceMotion);
+	if (motion.matches) {
+		cleanup();
+		return;
+	}
+	void cardAnim.finished.then(cleanup, cleanup);
+}
+
+/**
+ * 关闭首帧立即退出原生 `<dialog>` 模态锁并卸载归焦，同时由无交互、无语义的同位置视觉副本完成 150ms 淡出；
+ * 减少动态开启时跳过退场副本直接关闭。保持与 `CredentialDialog` 相同的导出签名。
+ */
 export function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) {
 	const [closing, setClosing] = useState(false);
 	const mounted = useRef(false);
 	const closingRef = useRef(false);
-	const cleanupRef = useRef<(() => void) | null>(null);
 
 	useEffect(() => {
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
-			cleanupRef.current?.();
-			cleanupRef.current = null;
 		};
 	}, []);
 
@@ -48,46 +137,11 @@ export function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | 
 			setClosing(true);
 			const modal = dialogRef.current;
 			const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-			if (!modal?.open || motion.matches) {
-				if (modal?.open) modal.close();
-				onDone();
-				return;
+			if (modal?.open && !motion.matches) {
+				spawnInertDialogExitGhost(modal);
 			}
-			const style = getComputedStyle(modal);
-			const startOpacity = style.opacity || "1";
-			const startTransform = style.transform === "none" ? "scale(1)" : style.transform;
-			const scale = style.getPropertyValue("--scale-modal").trim() || "0.96";
-			const easing = readEasing(modal);
-			const duration = readDurationMs(modal, "--duration-quick", 150);
-
-			modal.dataset.closing = "true";
-			const animation = modal.animate(
-				[
-					{ opacity: startOpacity, transform: startTransform },
-					{ opacity: 0, transform: `scale(${scale})` },
-				],
-				{ duration, easing, fill: "forwards" },
-			);
-
-			let finished = false;
-			const finish = () => {
-				if (finished || !mounted.current) return;
-				finished = true;
-				cleanupRef.current = null;
-				motion.removeEventListener("change", onReduceMotion);
-				animation.cancel();
-				if (modal.open) modal.close();
-				onDone();
-			};
-			const onReduceMotion = () => {
-				if (motion.matches) finish();
-			};
-			motion.addEventListener("change", onReduceMotion);
-			cleanupRef.current = () => {
-				motion.removeEventListener("change", onReduceMotion);
-				animation.cancel();
-			};
-			void animation.finished.then(finish, finish);
+			if (modal?.open) modal.close();
+			onDone();
 		},
 		[dialogRef],
 	);

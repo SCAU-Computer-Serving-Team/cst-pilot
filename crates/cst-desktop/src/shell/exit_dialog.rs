@@ -11,7 +11,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim, render_frosted_surface};
 use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
@@ -74,14 +74,13 @@ pub fn render_exit_confirm_dialog(
         cx,
     );
 
-    let scrim = render_frosted_surface(
+    let scrim = render_frosted_scrim(
         "exit-dialog-scrim",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
-    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -237,11 +236,128 @@ pub fn render_exit_confirm_dialog(
                     cx.stop_propagation();
                 }
             })
-            .child(motion::animate_modal_enter(
-                "exit-dialog-anim",
+            .child(motion::apply_modal_motion(
                 card,
+                scrim_progress,
+                scale_factor,
                 palette.craft_stack_shadows(),
             ))
             .focus_trap("exit-dialog-focus-trap", trap_focus),
     )
+}
+
+/// Visual-only inert exit snapshot for [`render_exit_confirm_dialog`] during `150ms` close fade-out.
+pub fn render_exit_confirm_dialog_inert(
+    report: &ExitCheckReport,
+    exiting_in_progress: bool,
+    scrim_progress: f32,
+    palette: &DesktopPalette,
+    transparency_enabled: bool,
+    scale_factor: f32,
+) -> impl IntoElement {
+    let summary_text = summarize_exit_message(report);
+    let card = render_frosted_surface(
+        "exit-dialog-card-pfook-exit",
+        FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+        palette.bg_modal,
+        transparency_enabled,
+        scale_factor,
+    )
+    .w(layout::MODAL_STANDARD_WIDTH)
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_subtle)
+    .p(px(20.0))
+    .flex()
+    .flex_col()
+    .gap(space::MD)
+    .child(
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .gap(space::SM)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        Icon::new(IconName::CircleAlert)
+                            .size(px(16.0))
+                            .text_color(palette.status_danger),
+                    )
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("退出 CST Pilot？")),
+                    ),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_secondary)
+                    .child(summary_text),
+            ),
+    )
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(space::SM)
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_elevated)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(cjk_inline_label("取消")),
+            )
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .h(height::CONTROL)
+                    .px(space::LG)
+                    .rounded(radius::CONTROL)
+                    .bg(palette.status_danger)
+                    .text_color(palette.text_on_accent)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(if exiting_in_progress { 0.65 } else { 1.0 })
+                    .child(cjk_inline_label(if exiting_in_progress {
+                        "正在退出…"
+                    } else {
+                        "退出"
+                    })),
+            ),
+    );
+
+    render_frosted_scrim(
+        "exit-dialog-scrim-exit",
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
+        palette.bg_scrim,
+        transparency_enabled,
+        scale_factor,
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .right_0()
+    .bottom_0()
+    .flex()
+    .items_center()
+    .justify_center()
+    .child(motion::apply_modal_motion(
+        card,
+        scrim_progress,
+        scale_factor,
+        palette.craft_stack_shadows(),
+    ))
 }

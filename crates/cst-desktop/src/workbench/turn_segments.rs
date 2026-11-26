@@ -5,7 +5,7 @@ use gpui_kit::{Hsla, IntoElement, ParentElement, SharedString, Styled, Window, d
 use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::theme::{DesktopPalette, TypographyScale, apply_scale, cjk_inline_label, scale};
+use crate::theme::{DesktopPalette, TypographyScale, apply_scale, scale};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecialToolKind {
@@ -846,8 +846,12 @@ pub fn render_running_light_label_with_scale(
 
     if !should_sweep {
         return apply_scale(div(), typography)
+            .pb(crate::theme::space::MICRO)
+            .relative()
+            .flex()
+            .items_center()
             .text_color(base)
-            .child(cjk_inline_label(text.to_owned()));
+            .child(SharedString::from(text.to_owned()));
     }
 
     let cycle_ms = crate::theme::motion::RUNNING_LIGHT_CYCLE.as_millis();

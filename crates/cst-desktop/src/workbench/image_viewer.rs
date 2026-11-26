@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::background::{FrostedGlassSpec, render_frosted_scrim};
 use crate::theme::{DesktopPalette, height, motion, radius, space};
 
 #[derive(Debug, Clone)]
@@ -56,14 +56,13 @@ pub fn render_image_lightbox_modal(
         None => target.title.clone(),
     };
 
-    let scrim = render_frosted_surface(
+    let scrim = render_frosted_scrim(
         "image-lightbox-scrim",
         FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
-    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -146,12 +145,13 @@ pub fn render_image_lightbox_modal(
             .items_center()
             .justify_center()
             .tab_stop(false)
-            .child(motion::animate_modal_enter(
-                "image-lightbox-anim",
+            .child(motion::apply_modal_motion(
                 image_frame,
+                scrim_progress,
+                scale_factor,
                 Vec::new(),
             ))
-            .child(close_circle_btn)
+            .child(close_circle_btn.opacity(0.01 + 0.99 * scrim_progress.clamp(0.0, 1.0)))
             .focus_trap("image-lightbox-focus-trap", trap_focus),
     )
 }

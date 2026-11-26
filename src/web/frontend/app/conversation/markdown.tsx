@@ -7,7 +7,7 @@ import { rehypeStreamWords } from "./stream-words";
 
 const markdownRemarkPlugins = [remarkGfm];
 const markdownRehypePlugins = [rehypeHighlight];
-// 已开始流式显示的文本在定稿后保留逐词结构；历史文本无需逐字包装。
+// 已开始流式显示的文本在定稿后保留逐词结构与整篇单解析树，避免切块破坏列表/引用链接或卸载选区。
 const markdownRehypeStreamPlugins = [rehypeHighlight, rehypeStreamWords];
 const markdownRehypeLivePlugins = [rehypeStreamWords];
 const markdownComponents: Components = {

@@ -1,6 +1,6 @@
 # 系统诊断原生采集与事件日志优化
 
-本文记录阶段 9.3 中 `sys`、`startup`、`driver` 与 `eventlog` 四组诊断工具的底层改造背景、技术决策与实测对照。架构决策见 [ADR-022](../ADR.md#adr-022系统诊断改用原生-win32nt-接口与结构化事件渲染)，总览进度见 [9.3.optimization.md](../rust/plan/9.3.optimization.md)，接口契约见 [API.md](../tools/API.md)。
+本文记录阶段 9.3 中 `sys`、`startup`、`driver` 与 `eventlog` 四组诊断工具的底层改造背景、技术决策与实测对照。架构决策见 [ADR-023](../ADR.md#adr-023系统诊断改用原生-win32nt-接口与结构化事件渲染)，总览进度见 [9.3.optimization.md](../rust/plan/9.3.optimization.md)，接口契约见 [API.md](../tools/API.md)。
 
 ## 一、背景
 

@@ -61,9 +61,28 @@ function AssistantTurnImpl({
 	const tooltipsDisabled = Boolean(shell?.appActive);
 	useEffect(() => {
 		if (!live) return;
-		setNow(Date.now());
-		const timer = window.setInterval(() => setNow(Date.now()), 1000);
-		return () => window.clearInterval(timer);
+		let timer: number | null = null;
+		const start = () => {
+			if (document.hidden) return;
+			setNow(Date.now());
+			if (timer === null) timer = window.setInterval(() => setNow(Date.now()), 1000);
+		};
+		const stop = () => {
+			if (timer !== null) {
+				window.clearInterval(timer);
+				timer = null;
+			}
+		};
+		const onVisibility = () => {
+			if (document.hidden) stop();
+			else start();
+		};
+		start();
+		document.addEventListener("visibilitychange", onVisibility);
+		return () => {
+			stop();
+			document.removeEventListener("visibilitychange", onVisibility);
+		};
 	}, [live]);
 	const work = turn.assistants.map(({ message }) => message.work).filter((value) => value !== undefined);
 	const startedAt = turn.user?.message.timestamp ?? work[0]?.startedAt ?? turn.assistants[0]?.message.timestamp ?? now;

@@ -6,10 +6,11 @@ import { apiJson } from "../data/api";
 import { SessionRenameDialog } from "./app-dialogs";
 import { SessionDeleteDialog, SessionDeleteNotice, useSessionManagement } from "./session-management";
 import { useWorkspaceSessions } from "./sessions-context";
+import { usePresenceExit } from "./use-presence-exit";
 import { useWorkspaceShell } from "./workspace-shell-context";
 
 export type SessionItem = { id: string; title: string; updatedAt?: string };
-export type SessionMenuState = { id: string; title: string; x: number; y: number } | null;
+export type SessionMenuState = { id: string; title: string; x: number; y: number; managing: boolean } | null;
 
 /** 会话列表共用操作与删除恢复，列表外观由调用方决定。 */
 export function useSessionActions(
@@ -24,6 +25,7 @@ export function useSessionActions(
 	const [menu, setMenu] = useState<SessionMenuState>(null);
 	const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
+	const clampedMenuPosRef = useRef<{ rawX: number; rawY: number; x: number; y: number } | null>(null);
 	const deletionRoute = useRef<{ id: string; from: string; homeKey?: string } | null>(null);
 	const management = useSessionManagement(sessions, {
 		onStart: async (targets) => {
@@ -79,9 +81,16 @@ export function useSessionActions(
 		if (!menu) return;
 		const element = menuRef.current;
 		if (!element) return;
-		const bounds = element.getBoundingClientRect();
-		element.style.left = `${Math.max(16, Math.min(menu.x, window.innerWidth - bounds.width - 16))}px`;
-		element.style.top = `${Math.max(16, Math.min(menu.y, window.innerHeight - bounds.height - 16))}px`;
+		// 用未受缩放影响的 offsetWidth/offsetHeight 夹紧位置，避免首次入场缩放低估尺寸导致贴边裁切。
+		const width = element.offsetWidth || element.getBoundingClientRect().width;
+		const height = element.offsetHeight || element.getBoundingClientRect().height;
+		const marginX = Math.min(16, Math.max(8, (window.innerWidth - width) / 2));
+		const marginY = Math.min(16, Math.max(8, (window.innerHeight - height) / 2));
+		const x = Math.max(marginX, Math.min(menu.x, window.innerWidth - width - marginX));
+		const y = Math.max(marginY, Math.min(menu.y, window.innerHeight - height - marginY));
+		clampedMenuPosRef.current = { rawX: menu.x, rawY: menu.y, x, y };
+		element.style.left = `${x}px`;
+		element.style.top = `${y}px`;
 		element.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 	}, [menu]);
 	useEffect(() => {
@@ -93,7 +102,11 @@ export function useSessionActions(
 			if (trigger?.dataset.menuTriggerId === menu.id) return;
 			setMenu(null);
 		};
-		const dismiss = () => setMenu(null);
+		const dismiss = () => {
+			const focusInside = Boolean(menuRef.current?.contains(document.activeElement));
+			setMenu(null);
+			if (focusInside) focusSession(menu.id);
+		};
 		window.addEventListener("pointerdown", close);
 		window.addEventListener("scroll", dismiss, true);
 		window.addEventListener("resize", dismiss);
@@ -102,7 +115,7 @@ export function useSessionActions(
 			window.removeEventListener("scroll", dismiss, true);
 			window.removeEventListener("resize", dismiss);
 		};
-	}, [menu]);
+	}, [menu, focusSession]);
 	useEffect(() => {
 		if (!menu && !management.managing) return;
 		const closeOnEscape = (event: KeyboardEvent) => {
@@ -133,7 +146,7 @@ export function useSessionActions(
 			setMenu(null);
 			return;
 		}
-		setMenu({ ...session, x, y });
+		setMenu({ ...session, x, y, managing: management.managing });
 	}
 	function rename(id: string, current: string) {
 		setMenu(null);
@@ -163,6 +176,7 @@ export function useSessionActions(
 	return {
 		menu,
 		menuRef,
+		clampedMenuPosRef,
 		setMenu,
 		renaming,
 		cancelRename,
@@ -177,53 +191,79 @@ export function useSessionActions(
 }
 
 export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof useSessionActions> }) {
-	const { menu, menuRef, setMenu, management, rename, remove } = actions;
+	const { menu, menuRef, clampedMenuPosRef, setMenu, management, rename, remove } = actions;
+	const menuPresence = usePresenceExit(menu);
+	const activeMenu = menuPresence.value;
+	const clamped = clampedMenuPosRef.current;
+	const menuLeft =
+		activeMenu && clamped && clamped.rawX === activeMenu.x && clamped.rawY === activeMenu.y
+			? clamped.x
+			: activeMenu?.x;
+	const menuTop =
+		activeMenu && clamped && clamped.rawX === activeMenu.x && clamped.rawY === activeMenu.y
+			? clamped.y
+			: activeMenu?.y;
 	return (
 		<>
-			{menu &&
+			{menuPresence.mounted &&
+				activeMenu &&
 				createPortal(
 					<div
-						className="tier-2-glass tier-2-menu session-menu"
-						ref={menuRef}
-						role="menu"
-						aria-label={management.managing ? "批量会话操作" : `会话 ${menu.title}`}
-						style={{ left: menu.x, top: menu.y }}
-						onKeyDown={(event) => {
-							if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-							if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
-								const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-								if (!items.length) return;
-								event.preventDefault();
-								const current = items.indexOf(document.activeElement as HTMLElement);
-								const delta = event.shiftKey ? -1 : 1;
-								const index =
-									current < 0
-										? event.shiftKey
-											? items.length - 1
-											: 0
-										: (current + delta + items.length) % items.length;
-								items[index]?.focus();
-								return;
-							}
-							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-							event.preventDefault();
-							const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-							const current = items.indexOf(document.activeElement as HTMLElement);
-							const index =
-								event.key === "Home"
-									? 0
-									: event.key === "End"
-										? items.length - 1
-										: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-							items[index]?.focus();
+						className={`tier-2-glass tier-2-menu session-menu-surface${menuPresence.exiting ? "" : " session-menu"}`}
+						ref={(node) => {
+							menuRef.current = node;
+							menuPresence.surfaceRef(node);
 						}}
+						role="menu"
+						aria-label={activeMenu.managing ? "批量会话操作" : `会话 ${activeMenu.title}`}
+						aria-hidden={menuPresence.exiting || undefined}
+						data-state={menuPresence.state}
+						data-exiting={menuPresence.exiting ? "true" : undefined}
+						inert={menuPresence.exiting || undefined}
+						style={{ left: menuLeft, top: menuTop }}
+						onKeyDown={
+							menuPresence.exiting
+								? undefined
+								: (event) => {
+										if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+										if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+											const items = [
+												...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+											];
+											if (!items.length) return;
+											event.preventDefault();
+											const current = items.indexOf(document.activeElement as HTMLElement);
+											const delta = event.shiftKey ? -1 : 1;
+											const index =
+												current < 0
+													? event.shiftKey
+														? items.length - 1
+														: 0
+													: (current + delta + items.length) % items.length;
+											items[index]?.focus();
+											return;
+										}
+										if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+										event.preventDefault();
+										const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+										const current = items.indexOf(document.activeElement as HTMLElement);
+										const index =
+											event.key === "Home"
+												? 0
+												: event.key === "End"
+													? items.length - 1
+													: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+										items[index]?.focus();
+									}
+						}
 					>
-						{management.managing ? (
+						{activeMenu.managing ? (
 							<button
 								type="button"
 								role="menuitem"
 								className="menu-row danger"
 								onClick={() => {
+									if (menuPresence.exiting) return;
 									setMenu(null);
 									management.requestDelete();
 								}}
@@ -237,7 +277,10 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 									type="button"
 									role="menuitem"
 									className="menu-row"
-									onClick={() => void rename(menu.id, menu.title)}
+									onClick={() => {
+										if (menuPresence.exiting) return;
+										void rename(activeMenu.id, activeMenu.title);
+									}}
 								>
 									<Pencil size={16} aria-hidden="true" />
 									<span>重命名</span>
@@ -247,9 +290,10 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 									role="menuitem"
 									className="menu-row"
 									onClick={() => {
+										if (menuPresence.exiting) return;
 										setMenu(null);
-										management.start(menu.id);
-										actions.focusSession(menu.id);
+										management.start(activeMenu.id);
+										actions.focusSession(activeMenu.id);
 									}}
 								>
 									<ListChecks size={16} aria-hidden="true" />
@@ -260,7 +304,10 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 									type="button"
 									role="menuitem"
 									className="menu-row danger"
-									onClick={() => remove(menu.id)}
+									onClick={() => {
+										if (menuPresence.exiting) return;
+										remove(activeMenu.id);
+									}}
 								>
 									<Trash2 size={16} aria-hidden="true" />
 									<span>删除</span>

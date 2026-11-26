@@ -8,8 +8,8 @@
 |---|---|---|---|---|
 | [storage-ls-disk.md](storage-ls-disk.md) | `ls` 与 `disk` 存储诊断 | 全仓移除 `WizTree`，改用纯 Rust `ntfs-ng` `$MFT`、无条目上限并行 Win32 遍历与原生存储 IOCTL | [ADR-014](../ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) | `2026-11-24` |
 | [file-search-fff.md](file-search-fff.md) | `fffind` 与 `ffgrep` 文件检索 | 单次基线与单句柄 `PathGuardSession`、多线程并行遍历、相关性打分及 UTF-16 / GB18030 解码 | [ADR-018](../ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎) | `2026-11-25` |
-| [system-diagnostics-native.md](system-diagnostics-native.md) | `sys`、`startup`、`driver`、`eventlog` | `NtQuerySystemInformation` 单次快照、Win32/SCM/SetupAPI 替代 WMI、双显卡核显 LHM 与事件值渲染 | [ADR-022](../ADR.md#adr-022系统诊断改用原生-win32nt-接口与结构化事件渲染) | `2026-11-26` |
-| [tools-contract-web-runbook.md](tools-contract-web-runbook.md) | 全量工具契约、联网检索、`runbook` | 统一 `elapsedMs` 与 `read` JSON、Exa/DeepSeek 三工具联网检索、单工具 `runbook` 与一键导出 | [ADR-019](../ADR.md#adr-019全量工具注入-elapsedmsread-改-json-并统一错误与降级) / [ADR-020](../ADR.md#adr-020联网检索重设计为-exa-与-deepseek-双提供商三工具体系) / [ADR-021](../ADR.md#adr-021收敛为单工具-runbook双端卡片支持一键导出文本) | `2026-11-26` |
+| [system-diagnostics-native.md](system-diagnostics-native.md) | `sys`、`startup`、`driver`、`eventlog` | `NtQuerySystemInformation` 单次快照、Win32/SCM/SetupAPI 替代 WMI、双显卡核显 LHM 与事件值渲染 | [ADR-023](../ADR.md#adr-023系统诊断改用原生-win32nt-接口与结构化事件渲染) | `2026-11-26` |
+| [tools-contract-web-runbook.md](tools-contract-web-runbook.md) | 全量工具契约、联网检索、`runbook` | 统一 `elapsedMs` 与 `read` JSON、Exa/DeepSeek 三工具联网检索、单工具 `runbook` 与一键导出 | [ADR-020](../ADR.md#adr-020全量工具注入-elapsedmsread-改-json-并统一错误与降级) / [ADR-021](../ADR.md#adr-021联网检索重设计为-exa-与-deepseek-双提供商三工具体系) / [ADR-022](../ADR.md#adr-022收敛为单工具-runbook双端卡片支持一键导出文本) | `2026-11-26` |
 
 ## 编写约定
 

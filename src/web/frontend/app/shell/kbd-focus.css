@@ -41,15 +41,15 @@
   opacity: 0;
   will-change: transform, width, height, opacity;
   transition:
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    width 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-radius 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 140ms ease;
+    transform var(--kbd-glide) var(--ease-out),
+    width var(--kbd-glide) var(--ease-out),
+    height var(--kbd-glide) var(--ease-out),
+    border-radius var(--kbd-glide) var(--ease-out),
+    opacity var(--fast) var(--ease-out);
 }
 
 .kbd-focus-halo[data-instant="true"] {
-  transition: opacity 140ms ease;
+  transition: opacity var(--fast) var(--ease-out);
 }
 
 .kbd-focus-halo[data-visible="true"] {
