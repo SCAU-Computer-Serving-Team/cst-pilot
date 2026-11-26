@@ -444,7 +444,9 @@ export default function CustomModelService() {
 						}
 					>
 						<div className="settings-custom-models" ref={modelList}>
-							{modelSearchOpen && <SettingsSearch label="搜索自定义模型" value={modelQuery} onChange={setModelQuery} />}
+							{modelSearchOpen && (
+								<SettingsSearch label="搜索自定义模型" value={modelQuery} onChange={setModelQuery} />
+							)}
 							<div className="settings-custom-table-head" aria-hidden="true">
 								<span>模型 ID</span>
 								<span>显示名称</span>

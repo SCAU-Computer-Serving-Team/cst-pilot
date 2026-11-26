@@ -83,7 +83,7 @@ export function ModelPicker({
 			Boolean(popoverDialogRef.current?.contains(active)) ||
 			active === triggerButton.current;
 		if (onlyIfWithinPicker && !withinPicker) return;
-		const target = saved?.element && saved.element.isConnected ? saved.element : triggerButton.current;
+		const target = saved?.element?.isConnected ? saved.element : triggerButton.current;
 		window.setTimeout(() => {
 			if (!target?.isConnected) return;
 			target.focus({ preventScroll: true });

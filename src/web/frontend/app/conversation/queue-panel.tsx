@@ -256,8 +256,7 @@ export function QueuePanel({
 			}
 		}
 	}
-	const validTargetId =
-		kbdActive && activeTargetId && itemRefs.current.has(activeTargetId) ? activeTargetId : null;
+	const validTargetId = kbdActive && activeTargetId && itemRefs.current.has(activeTargetId) ? activeTargetId : null;
 	return (
 		<section
 			className="queue-panel"

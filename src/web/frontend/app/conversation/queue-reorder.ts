@@ -1,9 +1,7 @@
 import type { InboxSnapshot } from "../data/web-state";
 
 export function queuedIdsOf(queue: InboxSnapshot): string[] {
-	return queue.items
-		.filter((item) => item.status === "pending" && item.delivery === "queue")
-		.map((item) => item.id);
+	return queue.items.filter((item) => item.status === "pending" && item.delivery === "queue").map((item) => item.id);
 }
 
 /**
