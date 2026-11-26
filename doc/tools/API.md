@@ -65,8 +65,8 @@
 
 | 工具 | 核心参数（标 `*` 为必填） | 返回契约（均含 `elapsedMs`） |
 |---|---|---|
-| `fffind` | `{ path*, pattern?, kind?: "file"\|"dir"\|"any", ext?, exclude?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?: "relevance"\|"modified"\|"size", caseSensitive?, limit? }`（`path` 传 `"*"` 扫全电脑或传盘符/目录/文件；`limit` 1–1000 默认 30；`maxDepth` 1–1024；越界与冲突组合直接报错） | `{ root, scannedRoots?, partialRoots?, skippedRoots?: { root, reason }[], matches: { path, kind, sizeBytes, modified }[], truncated, truncatedReason?: "timeout"\|"output_bytes"\|"limit", degraded?, skipped, notice?, elapsedMs }`；`sizeBytes` 为默认流逻辑字节（目录 `null`），`modified` 为本机偏移 RFC3339 |
-| `ffgrep` | `{ pattern*, path*, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit? }`（`path` 传目录或单文件，单文件不可传 `include`/`exclude`；正则省略 `caseSensitive` 默认 `false`；`context` 0–20 默认 0；`limit` 1–1000 默认 30） | `{ root, matches: { path, line, text, matched }[], truncated, truncatedReason?: "timeout"\|"read_budget"\|"visited_limit"\|"output_bytes"\|"limit"\|"line_limit", degraded?, skipped, skippedLargeFiles?, notice?, elapsedMs }`；目录单文件限 `10 MiB`，单文件模式 `256 KiB` 块流式扫描，多因共存按 `timeout > read_budget > visited_limit > output_bytes > limit > line_limit` 优先输出 |
+| `fffind` | `{ path*, pattern?, kind?: "file"\|"dir"\|"any", ext?, exclude?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?: "relevance"\|"modified"\|"size", caseSensitive?, limit?, timeoutSec? }`（`path` 传 `"*"` 扫全电脑或传盘符/目录/文件；`limit` 1–1000 默认 30；`maxDepth` 1–1024；`timeoutSec` 1–180 默认 30，全电脑按卷独立起算；越界与冲突组合直接报错） | `{ root, scannedRoots?, partialRoots?, skippedRoots?: { root, reason }[], matches: { path, kind, sizeBytes, modified }[], truncated, truncatedReason?: "timeout"\|"visited_limit"\|"output_bytes"\|"limit", degraded?, skipped, notice?, elapsedMs }`；`sizeBytes` 为默认流逻辑字节（目录 `null`），`modified` 为本机偏移 RFC3339 |
+| `ffgrep` | `{ pattern*, path*, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit?, timeoutSec? }`（`path` 传目录或单文件，单文件不可传 `include`/`exclude`；正则省略 `caseSensitive` 默认 `false`；`context` 0–20 默认 0；`limit` 1–1000 默认 30；`timeoutSec` 1–180 默认 30） | `{ root, matches: { path, line, text, matched }[], truncated, truncatedReason?: "timeout"\|"read_budget"\|"visited_limit"\|"output_bytes"\|"limit"\|"line_limit", degraded?, skipped, skippedLargeFiles?, notice?, elapsedMs }`；目录单文件限 `10 MiB`，单文件模式 `256 KiB` 块流式扫描，多因共存按 `timeout > read_budget > visited_limit > output_bytes > limit > line_limit` 优先输出 |
 
 ## sys
 
@@ -142,7 +142,7 @@
 
 ### web-search 配置与服务端接口
 
-配置文件位于 `data/config/web-search.json`（v2，兼容读取 v1，上限 `64 KiB`），默认启用 `exa`（含免费 MCP 回退），可选切换 `deepseek`（官方 `https://api.deepseek.com` 支持 `reuseModelApiKey`）。服务端路由位于 `cst-server`：
+配置文件位于 `data/config/web-search.json`（v2，兼容读取 v1，上限 `64 KiB`），默认启用 `exa`（含免费 MCP 回退），可选切换 `deepseek`（官方 `https://api.deepseek.com` 支持 `reuseModelApiKey`）；单次请求默认常规超时 `timeoutMs: 30000`（范围 `1000–180000`）、深度超时 `deepTimeoutMs: 60000`（范围 `5000–180000`）。服务端路由位于 `cst-server`：
 
 | 方法与路径 | 用途与安全规则 |
 |---|---|

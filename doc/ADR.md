@@ -170,3 +170,10 @@
 - **结论**：拆分为独立 `FffindInput` 与 `FfgrepInput`，`path` 均设为必填。`fffind` 传 `"*"` 扫描全电脑本地卷，支持 `maxDepth`、`kind`、`ext`、`minSizeMiB`/`maxSizeMiB`、`modifiedWithinHours`、`sortBy` 并返回 `sizeBytes`/`modified`；提权 NTFS 启用对象与名称边分离的内存索引加 USN V2 增量同步，其余走双梯队并行 Win32 遍历。`ffgrep` 补齐正牌 `include`、时间过滤与单文件 `256 KiB` 持久化流式解码。两工具关闭 `.gitignore`、首版拒绝 UNC、整条裁剪 `50 KiB` 并输出 `structured_content`。
 - **依据**：解决默认目录漏检、通配符零命中、50 万条目截断与大日志跳过问题，同时满足零磁盘残留与单句柄安全守卫。
 - **放弃**：共用 `SearchInput`；`path` 内嵌通配符；无 USN 卷静态快照；`modifiedBeforeHours` 与 `encoding` 参数占位。
+
+## ADR-026：`fff` 改为按卷独立可配超时与 `$MFT` 排队淘汰，联网检索默认超时升至 30/60 秒
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（`feat/fff-and-web-timeouts` 实施）
+- **结论**：`fffind` 与 `ffgrep` 开放 `timeoutSec`（默认 30 秒，范围 1 至 180 秒）；`fffind` 多卷扫描按卷在开始执行时独立起算预算，`$MFT` 并发冷建满槽时改为条件变量排队并在内存预留前按需淘汰空闲 LRU 缓存卷。联网检索常规超时默认升至 30 秒（上限 180 秒），深度检索默认升至 60 秒，`ssrf.rs` 默认超时同步升至 30 秒。
+- **依据**：多盘主机冷建超 2 槽直接回退慢速遍历会撞上共享 30 秒上限并误报提权提示；外网检索与网页抓取在弱网与深度模式下 15/45 秒过紧。
+- **放弃**：全电脑共享单截止时间；`$MFT` 满槽立即回退目录遍历；15 秒联网默认超时。

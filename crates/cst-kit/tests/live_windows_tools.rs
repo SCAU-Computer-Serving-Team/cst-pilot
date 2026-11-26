@@ -906,6 +906,7 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
             sort_by: None,
             case_sensitive: None,
             limit: Some(50),
+            timeout_sec: None,
         },
         &cancel,
     )
@@ -936,6 +937,7 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
             case_sensitive: Some(true),
             context: Some(1),
             limit: Some(20),
+            timeout_sec: None,
         },
         &cancel,
     )
@@ -965,6 +967,7 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
             case_sensitive: Some(true),
             context: None,
             limit: Some(10),
+            timeout_sec: None,
         },
         &cancel,
     )
@@ -985,6 +988,7 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
             case_sensitive: Some(true),
             context: None,
             limit: Some(10),
+            timeout_sec: None,
         },
         &cancel,
     )
@@ -1005,6 +1009,7 @@ fn live_read_fffind_ffgrep_perf_encoding_and_security() {
             case_sensitive: Some(true),
             context: None,
             limit: Some(10),
+            timeout_sec: None,
         },
         &cancel,
     )

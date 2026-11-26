@@ -277,10 +277,10 @@ fn default_true() -> bool {
     true
 }
 fn default_timeout_ms() -> u64 {
-    15_000
+    30_000
 }
 fn default_deep_timeout_ms() -> u64 {
-    45_000
+    60_000
 }
 fn default_max_concurrent() -> usize {
     3
@@ -405,8 +405,8 @@ impl WebSearchConfig {
         {
             return Err("联网检索 SSRF 放行列表仅允许 198.18.0.0/15。".into());
         }
-        if !(1_000..=120_000).contains(&self.timeout_ms) {
-            return Err("常规超时 timeoutMs 须在 1000–120000 毫秒之间。".into());
+        if !(1_000..=180_000).contains(&self.timeout_ms) {
+            return Err("常规超时 timeoutMs 须在 1000–180000 毫秒之间。".into());
         }
         if !(5_000..=180_000).contains(&self.deep_timeout_ms) {
             return Err("深度检索超时 deepTimeoutMs 须在 5000–180000 毫秒之间。".into());
@@ -2608,5 +2608,28 @@ mod tests {
             build_deepseek_query("BSOD", &["bad domain.com".into()], &[], None, None, &[]).is_err()
         );
         assert!(build_deepseek_query("BSOD", &[], &[], Some("2026-02-30"), None, &[]).is_err());
+    }
+
+    #[test]
+    fn web_search_timeout_defaults_and_bounds_match_contract() {
+        let mut cfg = WebSearchConfig::default();
+        assert_eq!(cfg.timeout_ms, 30_000);
+        assert_eq!(cfg.deep_timeout_ms, 60_000);
+        assert!(cfg.validate().is_ok());
+
+        cfg.timeout_ms = 180_000;
+        assert!(cfg.validate().is_ok());
+        cfg.timeout_ms = 180_001;
+        assert!(cfg.validate().is_err());
+        cfg.timeout_ms = 999;
+        assert!(cfg.validate().is_err());
+
+        cfg.timeout_ms = 30_000;
+        cfg.deep_timeout_ms = 180_000;
+        assert!(cfg.validate().is_ok());
+        cfg.deep_timeout_ms = 180_001;
+        assert!(cfg.validate().is_err());
+        cfg.deep_timeout_ms = 4_999;
+        assert!(cfg.validate().is_err());
     }
 }

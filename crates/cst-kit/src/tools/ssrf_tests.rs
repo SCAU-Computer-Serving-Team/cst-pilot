@@ -196,4 +196,5 @@ fn decode_http_body_supports_utf8_and_gb18030_while_rejecting_binary() {
     );
     assert!(decode_http_body(&[0xff, 0xfe], None).is_err());
     assert!(decode_http_body(b"abc\0def", None).is_err());
+    assert_eq!(DEFAULT_TIMEOUT_MS, 30_000);
 }

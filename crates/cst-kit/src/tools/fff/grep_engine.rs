@@ -928,6 +928,7 @@ pub(crate) fn run_grep(
     modified_window: Option<(i64, i64)>,
     limit: usize,
     context: usize,
+    timeout_sec: u64,
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<GrepRunOutcome, String> {
@@ -939,6 +940,7 @@ pub(crate) fn run_grep(
             modified_window,
             limit,
             context,
+            timeout_sec,
             deadline,
             cancel,
         );
@@ -1005,10 +1007,10 @@ pub(crate) fn run_grep(
     let degraded = timed_out || budget_exceeded || skipped_large > 0;
     let mut notices = Vec::new();
     if timed_out {
-        notices.push(
-            "内容检索达到 30 秒返回期限，已保留已提交的命中结果；请缩小 path 或补充 include 与 modifiedWithinHours。"
-                .to_owned(),
-        );
+        notices.push(format!(
+            "内容检索达到 {timeout_sec} 秒返回期限，已保留已提交的命中结果；可缩小 path、补充 include 与 modifiedWithinHours 或调高 timeoutSec（最高 {} 秒）。",
+            super::MAX_TIMEOUT_SECS
+        ));
     }
     if budget_exceeded {
         notices.push(
@@ -1044,6 +1046,7 @@ fn run_grep_single_file(
     modified_window: Option<(i64, i64)>,
     limit: usize,
     context: usize,
+    timeout_sec: u64,
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<GrepRunOutcome, String> {
@@ -1113,8 +1116,9 @@ fn run_grep_single_file(
     let mut notices = Vec::new();
     if outcome.timed_out {
         notices.push(format!(
-            "单文件流式检索达到 30 秒返回期限，仅覆盖文件头前 {} 字节，已保留已命中行。",
-            outcome.bytes_read
+            "单文件流式检索达到 {timeout_sec} 秒返回期限，仅覆盖文件头前 {} 字节，已保留已命中行；可调高 timeoutSec（最高 {} 秒）重试。",
+            outcome.bytes_read,
+            super::MAX_TIMEOUT_SECS
         ));
     }
     if outcome.budget_truncated {
