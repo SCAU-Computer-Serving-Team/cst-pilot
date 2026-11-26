@@ -37,7 +37,7 @@ pub fn localized_normal_tool_title(tool_name: &str) -> &'static str {
         "fffind" => "按名查找文件",
         "ffgrep" => "内容全文检索",
         "source_check" => "软件来源核验",
-        "fetch_content" => "抓取网页正文",
+        "web_fetch" | "fetch_content" => "抓取网页正文",
         "get_search_content" => "读取检索缓存",
         _ => "诊断工具调用",
     }

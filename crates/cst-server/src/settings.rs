@@ -649,3 +649,66 @@ impl UiHintsStore {
         })
     }
 }
+
+/// Manages `data/config/web-search.json` v2 with masked reads and atomic updates.
+#[derive(Clone)]
+pub struct WebSearchSettingsStore {
+    config_dir: PathBuf,
+    file: PathBuf,
+    serial: Arc<AsyncMutex<()>>,
+}
+
+impl WebSearchSettingsStore {
+    pub fn new(config_dir: impl AsRef<Path>) -> Self {
+        let dir = config_dir.as_ref().to_path_buf();
+        Self {
+            file: dir.join("web-search.json"),
+            config_dir: dir,
+            serial: Arc::new(AsyncMutex::new(())),
+        }
+    }
+
+    pub async fn read_config(
+        &self,
+    ) -> Result<cst_kit::tools::web_access::WebSearchConfig, SettingsError> {
+        let path = self.file.clone();
+        tokio::task::spawn_blocking(move || {
+            cst_kit::tools::web_access::WebSearchConfig::load_from_file(&path)
+                .map_err(SettingsError::ConfigurationUnavailable)
+        })
+        .await
+        .map_err(|_| {
+            SettingsError::ConfigurationUnavailable("读取联网检索配置任务异常结束".to_owned())
+        })?
+    }
+
+    pub async fn read_masked(&self) -> Result<Value, SettingsError> {
+        let cfg = self.read_config().await?;
+        Ok(cfg.masked_view(Some(&self.config_dir)))
+    }
+
+    pub async fn patch(&self, patch: Value) -> Result<Value, SettingsError> {
+        let _guard = self.serial.lock().await;
+        let mut cfg = self.read_config().await?;
+        cfg.apply_patch(patch)
+            .map_err(SettingsError::InvalidInput)?;
+        atomic_write_json(&self.file, &cfg, "保存联网检索配置")
+            .await
+            .map_err(SettingsError::Storage)?;
+        Ok(cfg.masked_view(Some(&self.config_dir)))
+    }
+
+    pub async fn probe(
+        &self,
+        provider: cst_kit::tools::web_access::WebSearchProvider,
+        candidate_api_key: Option<String>,
+        candidate_base_url: Option<String>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<Value, SettingsError> {
+        let web = cst_kit::tools::web_access::WebAccess::from_config(&self.file)
+            .map_err(SettingsError::ConfigurationUnavailable)?;
+        Ok(web
+            .probe_provider(provider, candidate_api_key, candidate_base_url, cancel)
+            .await)
+    }
+}

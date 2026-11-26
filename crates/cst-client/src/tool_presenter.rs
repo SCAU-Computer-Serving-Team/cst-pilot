@@ -639,13 +639,16 @@ fn base_field_title(key: &str) -> Option<&'static str> {
         "passageCount" => "引文数",
         "responseId" => "研究结果标识",
         "successful" => "成功",
+        "successfulQueries" => "成功查询",
+        "queryCount" => "查询数",
+        "fetchMode" => "抓取方式",
         "mode" => "模式",
-        "totalChars" => "总字符",
+        "totalChars" | "totalCharacters" => "总字符",
         "hasImage" => "含图片",
         "resultCount" => "结果数",
         "contentLength" => "内容长度",
         "offset" => "当前偏移",
-        "returnedChars" => "返回字符",
+        "returnedChars" | "returnedCharacters" => "返回字符",
         "findMode" => "匹配模式",
         "matchCount" => "命中数",
         "returnedMatches" => "返回命中",
@@ -804,6 +807,14 @@ fn is_nullable_key(key: &str) -> bool {
     )
 }
 
+fn is_non_empty_error(val: &Value) -> bool {
+    match val {
+        Value::Array(arr) => !arr.is_empty(),
+        Value::Object(obj) => !obj.is_empty(),
+        other => is_js_truthy(other),
+    }
+}
+
 fn is_notice_key(key: &str) -> bool {
     matches!(
         key,
@@ -822,6 +833,7 @@ fn is_notice_key(key: &str) -> bool {
             | "truncation"
             | "omitted"
             | "stats"
+            | "elapsedMs"
     )
 }
 
@@ -829,7 +841,9 @@ fn is_hidden_key(tool_name: &str, key: &str) -> bool {
     match tool_name {
         "eventlog" => matches!(key, "level" | "found" | "time" | "logName"),
         "disk" => key == "evt",
-        "fetch_content" | "get_search_content" => key == "responseId",
+        "read" => matches!(key, "content" | "path"),
+        "fetch_content" | "web_fetch" => key == "responseId",
+        "get_search_content" => matches!(key, "responseId" | "content"),
         _ => false,
     }
 }
@@ -860,7 +874,7 @@ fn is_diagnostic_tool(name: &str) -> bool {
 fn is_text_tool(name: &str) -> bool {
     matches!(
         name,
-        "read" | "ffgrep" | "fffind" | "fetch_content" | "get_search_content"
+        "read" | "ffgrep" | "fffind" | "web_fetch" | "fetch_content" | "get_search_content"
     )
 }
 
@@ -969,7 +983,7 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
             "counterErrors",
         ]
         .iter()
-        .any(|k| src.get(*k).is_some_and(is_js_truthy))
+        .any(|k| src.get(*k).is_some_and(is_non_empty_error))
     });
     let partially_searched = detail
         .and_then(|d| {
@@ -1111,7 +1125,10 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
             append_group(&call.name, scope_ref, d, "result", None, 0, &mut blocks);
         }
         if call.name == "read"
-            && let Some(p) = call.arguments.get("path").filter(|v| is_js_truthy(v))
+            && let Some(p) = detail
+                .and_then(|d| d.get("path"))
+                .filter(|v| is_js_truthy(v))
+                .or_else(|| call.arguments.get("path").filter(|v| is_js_truthy(v)))
         {
             blocks.insert(
                 0,
@@ -1125,10 +1142,37 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
                 },
             );
         }
-        if !raw.is_empty()
+        let read_kind = if call.name == "read" {
+            detail.and_then(|d| d.get("kind")).and_then(Value::as_str)
+        } else {
+            None
+        };
+        if read_kind == Some("text") {
+            if let Some(content) = detail
+                .and_then(|d| d.get("content"))
+                .and_then(Value::as_str)
+                && !content.is_empty()
+            {
+                blocks.push(ToolBlock::Text {
+                    id: "content".into(),
+                    text: content.to_owned(),
+                });
+            }
+        } else if call.name == "get_search_content"
+            && let Some(content) = detail
+                .and_then(|d| d.get("content"))
+                .and_then(Value::as_str)
+        {
+            if !content.is_empty() {
+                blocks.push(ToolBlock::Text {
+                    id: "content".into(),
+                    text: content.to_owned(),
+                });
+            }
+        } else if !raw.is_empty()
             && !(call.name == "read"
-                && !result.images.is_empty()
-                && raw.starts_with("Read image file ["))
+                && (read_kind == Some("image")
+                    || (!result.images.is_empty() && raw.starts_with("Read image file ["))))
         {
             blocks.push(ToolBlock::Text {
                 id: "content".into(),
@@ -1426,13 +1470,17 @@ fn append_group(
     }
 
     if let Some(stats) = data.get("stats").and_then(Value::as_object) {
-        let stat_row = FieldRow {
-            label: "扫描统计".into(),
-            value: format!(
+        let stat_value = match stats.get("elapsedSec").filter(|v| !v.is_null()) {
+            Some(sec) => format!(
                 "{} 个文件 · 用时 {}s",
                 words(stats.get("filesScanned")),
-                words(stats.get("elapsedSec"))
+                words(Some(sec))
             ),
+            None => format!("{} 个文件", words(stats.get("filesScanned"))),
+        };
+        let stat_row = FieldRow {
+            label: "扫描统计".into(),
+            value: stat_value,
         };
         if let Some(ToolBlock::Fields { rows: r, .. }) = blocks
             .iter_mut()
@@ -1699,6 +1747,9 @@ fn push_notices(
             continue;
         }
         if matches!(key, "collectionErrors" | "counterErrors" | "smartErrors") {
+            if !is_non_empty_error(val) {
+                continue;
+            }
             let items: Vec<&Value> = match val.as_array() {
                 Some(arr) => arr.iter().collect(),
                 None => vec![val],
@@ -2234,6 +2285,9 @@ pub fn map_special_tool(
             let failed = successful == Some(0) && count > 0;
             let has_top_error = !common_errors.is_empty();
             let mut errors = common_errors;
+            if let Some(d) = details {
+                extend_special_errors(&mut errors, &[d.get("collectionErrors")]);
+            }
             if let Some(q_arr) = details
                 .and_then(|d| d.get("queries"))
                 .and_then(Value::as_array)
@@ -2242,10 +2296,13 @@ pub fn map_special_tool(
                     extend_special_errors(&mut errors, &[q.get("error")]);
                 }
             }
+            let degraded_flag = details
+                .and_then(|d| d.get("degraded"))
+                .is_some_and(is_js_truthy);
             let status = match result {
                 None => initial,
                 Some(res) if res.is_error || has_top_error || failed => SpecialStatus::Error,
-                Some(_) if partial || !errors.is_empty() || details.is_none() => {
+                Some(_) if partial || degraded_flag || !errors.is_empty() || details.is_none() => {
                     SpecialStatus::Degraded
                 }
                 Some(_) => SpecialStatus::Success,

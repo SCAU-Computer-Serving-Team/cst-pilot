@@ -108,9 +108,15 @@ impl OaClient {
         if let Some(token) = token {
             headers.push(("Authorization".into(), format!("Bearer {token}")));
         }
-        let request = self
-            .transport
-            .request(HttpRequest { url, body, headers }, cancel.clone());
+        let request = self.transport.request(
+            HttpRequest {
+                url,
+                body,
+                headers,
+                timeout_ms: Some(seconds.saturating_mul(1000)),
+            },
+            cancel.clone(),
+        );
         let response = tokio::select! { biased;
             _ = cancel.cancelled() => return Err("Login cancelled".into()),
             result = tokio::time::timeout(Duration::from_secs(seconds), request) => result.ok().and_then(Result::ok).ok_or("无法连接账号服务，请检查网络后重试。")?,

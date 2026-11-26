@@ -393,8 +393,11 @@ impl Collector {
         if agg.name == "web_search" {
             distribution(&mut agg.providers, details.get("provider"));
         }
-        if agg.name == "fetch_content" {
-            distribution(&mut agg.modes, details.get("mode"));
+        if matches!(agg.name.as_str(), "web_fetch" | "fetch_content") {
+            distribution(
+                &mut agg.modes,
+                details.get("fetchMode").or_else(|| details.get("mode")),
+            );
         }
     }
     pub fn has_activity(&self) -> bool {

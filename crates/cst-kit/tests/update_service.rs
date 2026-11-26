@@ -978,8 +978,8 @@ async fn same_root_activity_gate_is_shared_isolated_across_roots_and_blocks_writ
     let runbook_a2 = cst_kit::runbook::RunbookStore::new(&a.0).unwrap();
     assert!(
         runbook_a2
-            .write(
-                cst_kit::runbook::model::RunbookInput {
+            .plan(
+                cst_kit::runbook::model::PlanInput {
                     title: "blocked-during-handoff".into(),
                     level: cst_kit::runbook::model::Level::Safe,
                     items: vec![cst_kit::runbook::model::RunbookItem {
@@ -989,7 +989,9 @@ async fn same_root_activity_gate_is_shared_isolated_across_roots_and_blocks_writ
                         admin: false,
                     }],
                     date: None,
-                    sequence: None,
+                    runbook_id: None,
+                    base_version: None,
+                    export_txt: true,
                 },
                 CancellationToken::new(),
             )

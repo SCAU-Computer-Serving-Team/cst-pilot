@@ -21,13 +21,26 @@ pub fn run(
 ) -> Result<Value, String> {
     let snapshot = source.startup(control).map_err(|e| e.to_string())?;
     let mut errors = snapshot.errors;
-    let mut services = collect(
-        source,
-        CIMV2,
-        "SELECT Name,DisplayName,State,PathName FROM Win32_Service WHERE StartMode='Auto'",
-        control,
-        &mut errors,
-    );
+    let mut services = match source.native_auto_services(control) {
+        Ok(Some(rows)) => rows,
+        Ok(None) => collect(
+            source,
+            CIMV2,
+            "SELECT Name,DisplayName,State,PathName FROM Win32_Service WHERE StartMode='Auto'",
+            control,
+            &mut errors,
+        ),
+        Err(e) => {
+            errors.push(e);
+            collect(
+                source,
+                CIMV2,
+                "SELECT Name,DisplayName,State,PathName FROM Win32_Service WHERE StartMode='Auto'",
+                control,
+                &mut errors,
+            )
+        }
+    };
     services.sort_by(|a, b| {
         (b["State"] == "Running")
             .cmp(&(a["State"] == "Running"))
@@ -35,7 +48,7 @@ pub fn run(
     });
     let mut result = json!({"regItems":snapshot.reg_items,"startupFolders":snapshot.folders,"services":services.iter().map(|r|{
         let mut row=selected(r,&[("name","Name"),("display","DisplayName"),("state","State")]);
-        row["path"]=json!(r["PathName"].as_str().map(|s|if s.chars().count()>140{s.chars().take(140).collect::<String>()+"..."}else{s.into()}));row
+        row["path"]=json!(r["PathName"].as_str().map(|s|if s.chars().count()>140{format!("{}…",s.chars().take(140).collect::<String>())}else{s.into()}));row
     }).collect::<Vec<_>>(),"notice":"只读盘点当前运行系统的注册表 Run/RunOnce、启动文件夹与自动启动服务。disabled 为 true/false/null 三态；RunOnce 不套用 Run 禁用记录。未采集计划任务或 WMI 事件订阅。"});
     control.check()?;
     add_errors(&mut result, errors);

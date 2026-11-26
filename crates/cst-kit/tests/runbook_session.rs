@@ -62,15 +62,20 @@ async fn real_sdk_session_plans_and_exports_two_revisions_using_complete_tool_re
         })
         .unwrap();
     let created = create_agent_session(options).await.unwrap();
-    for name in ["command_plan", "runbook_deliver", "runbook"] {
-        assert!(
-            created
-                .session
-                .get_active_tool_names()
-                .iter()
-                .any(|tool| tool == name)
-        );
-    }
+    assert!(
+        created
+            .session
+            .get_active_tool_names()
+            .iter()
+            .any(|tool| tool == "runbook")
+    );
+    assert!(
+        !created
+            .session
+            .get_active_tool_names()
+            .iter()
+            .any(|tool| tool == "command_plan" || tool == "runbook_deliver")
+    );
     let exported = Arc::new(Mutex::new(Vec::<Value>::new()));
     let collected = exported.clone();
     let count = Arc::new(AtomicUsize::new(0));
@@ -105,14 +110,14 @@ async fn real_sdk_session_plans_and_exports_two_revisions_using_complete_tool_re
                 params["runbookId"] = previous["runbookId"].clone();
                 params["baseVersion"] = previous["version"].clone();
             }
-            ("command_plan", params)
+            ("runbook", params)
         } else {
             let previous = previous.unwrap();
             assert_eq!(previous["action"], "planned");
             assert_eq!(previous["commands"][0]["admin"], false);
             (
-                "runbook_deliver",
-                json!({"runbookId":previous["runbookId"],"version":previous["version"]}),
+                "runbook",
+                json!({"action":"export","runbookId":previous["runbookId"],"version":previous["version"]}),
             )
         };
         faux_assistant_message(

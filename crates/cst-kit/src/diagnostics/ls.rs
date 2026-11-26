@@ -58,6 +58,7 @@ pub fn run_with_filter(
 
     // Use warm volume snapshot when allowed by the index (enabled by default for elevated local
     // NTFS volumes, bypassed when `CST_DISABLE_MFT=1`).
+    let mut mft_degraded_from: Option<String> = None;
     let snapshot = if !index.allows_mft() {
         None
     } else if let Some(cached) = index.cached(target) {
@@ -69,8 +70,9 @@ pub fn run_with_filter(
         );
         match index.scan(target, false, &scan_control) {
             Ok(snapshot) => snapshot,
-            Err(_) => {
+            Err(err) => {
                 control.check()?;
+                mft_degraded_from = Some(format!("native-mft: {err}"));
                 None
             }
         }
@@ -87,6 +89,7 @@ pub fn run_with_filter(
         control,
         &mut budget,
         snapshot.as_deref(),
+        mft_degraded_from.as_deref(),
         page.entries,
         page.truncated,
         filter,
@@ -101,6 +104,7 @@ fn measure(
     control: &Control,
     budget: &mut WalkBudget,
     snapshot: Option<&ScanSnapshot>,
+    mft_degraded_from: Option<&str>,
     entries: impl IntoIterator<Item = Result<DirectChild, ()>>,
     children_truncated: bool,
     filter: &SensitivePathFilter,
@@ -326,6 +330,12 @@ fn measure(
     if let Some(text) = notice {
         result["notice"] = json!(text);
     }
+    if let Some(from) = mft_degraded_from {
+        result["degradedFrom"] = json!(from);
+        result["degraded"] = json!(true);
+    } else if budget.incomplete {
+        result["degraded"] = json!(true);
+    }
     if children_truncated {
         result["childrenTruncated"] = json!(true);
     }
@@ -355,6 +365,7 @@ mod tests {
             10,
             &control,
             &mut budget,
+            None,
             None,
             entries,
             page.truncated,

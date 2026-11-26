@@ -100,6 +100,9 @@ pub fn run(
                 }
                 clauses.push(ids(values));
             }
+            if let Some(text) = &input.provider && is_literal_provider(text) {
+                clauses.push(format!("Provider[@Name='{text}']"));
+            }
             ("query",vec![input.log_name.clone().unwrap_or_else(||"System".into())],clauses.join(" and "),input.msg.as_deref())
         }
         EventScope::Detail=>unreachable!(),
@@ -141,6 +144,7 @@ pub fn run(
     let mut counts_truncated = false;
     let mut first: Option<String> = None;
     let mut last: Option<String> = None;
+    let mut channel_errors = 0usize;
     let filter = filter.map(str::to_lowercase);
     for log in &logs {
         control.check()?;
@@ -221,8 +225,19 @@ pub fn run(
                 unreadable += read.unreadable;
                 scan_truncated |= read.truncated;
             }
-            Err(error) => errors.push(error),
+            Err(error) => {
+                channel_errors += 1;
+                errors.push(error);
+            }
         }
+    }
+    if channel_errors == logs.len() {
+        let summary = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(format!("目标事件通道采集全部失败：{summary}"));
     }
     let mut rows = Vec::with_capacity(events.len());
     for (mut event, message) in events {
@@ -300,13 +315,26 @@ fn detail(
     }
     if let Some(e) = &found {
         value["machine"] = json!(e.machine);
-        if e.message.is_none() {
+        if let Some(msg) = &e.message {
+            let orig_chars = msg.chars().count();
+            if orig_chars > 20_000 {
+                value["msgTruncated"] = json!(true);
+                value["originalChars"] = json!(orig_chars);
+            }
+        } else {
             value["degraded"] = json!(true);
         }
     }
     value["notice"] =
         json!("单条事件原文最多 20,000 字符，保留换行；消息资源不可读时 msg 为 null。");
     Ok(json!({"detail":value}))
+}
+fn is_literal_provider(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 128
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b" _/-".contains(&b))
 }
 fn ids(ids: &[u16]) -> String {
     format!(

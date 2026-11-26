@@ -451,6 +451,121 @@ async fn runbook_open_validates_delivered_artifact_and_launches_opener() {
     assert_eq!(open_res.status(), 200);
     assert_eq!(fixture.opened_runbooks.lock().unwrap().len(), 1);
 
+    // Also verify `POST /api/sessions/:id/runbook/export` exports a planned runbook to `.txt` and opens it!
+    let store = cst_kit::runbook::RunbookStore::new(&fixture.root).unwrap();
+    let planned = store
+        .plan(
+            cst_kit::runbook::model::PlanInput {
+                title: "导出接口测试".into(),
+                level: cst_kit::runbook::model::Level::Safe,
+                items: vec![cst_kit::runbook::model::RunbookItem {
+                    summary: "刷新 DNS 缓存".into(),
+                    command: "ipconfig /flushdns".into(),
+                    shell: cst_kit::runbook::model::Shell::Cmd,
+                    admin: false,
+                }],
+                date: Some("2026-11-26".into()),
+                runbook_id: None,
+                base_version: None,
+                export_txt: false,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let runbook_id = planned["runbook"]["runbookId"].as_str().unwrap().to_owned();
+    let export_entry_id = slot
+        .session()
+        .with_session_manager_mut(|sm| {
+            let msg = faux_assistant_message(
+                vec![faux_tool_call(
+                    "runbook",
+                    json!({"title": "导出接口测试"})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    Some("tc-rb-export".to_owned()),
+                )],
+                Some(StopReason::ToolUse),
+            );
+            let eid = sm.append_message(AgentMessage::Assistant(msg)).unwrap();
+            sm.append_message(AgentMessage::ToolResult(ToolResultMessage {
+                tool_call_id: "tc-rb-export".to_owned(),
+                tool_name: "runbook".to_owned(),
+                content: vec![UserContentBlock::Text(TextContent::new("{}"))],
+                details: Some(planned.clone()),
+                is_error: false,
+                timestamp: now_ms(),
+                usage: None,
+                nested_calls: None,
+                duration_ms: Some(4),
+            }))
+            .unwrap();
+            Ok(eid)
+        })
+        .unwrap();
+    let export_res = client
+        .post(format!(
+            "{}/api/sessions/{session_id}/runbook/export",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "export-rb-1")
+        .json(&json!({
+            "entryId": export_entry_id,
+            "toolCallId": "tc-rb-export",
+            "open": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(export_res.status(), 200);
+    let exported: Value = export_res.json().await.unwrap();
+    assert_eq!(exported["runbook"]["runbookId"], runbook_id);
+    assert_eq!(exported["runbook"]["action"], "exported");
+    assert_eq!(exported["launched"], true);
+    let exported_file = exported["runbook"]["file"].as_str().unwrap();
+    assert!(exported_file.ends_with("-v1.txt"));
+    assert!(std::path::Path::new(exported_file).is_file());
+    assert_eq!(fixture.opened_runbooks.lock().unwrap().len(), 2);
+
+    // Verify `GET/PATCH /api/settings/web-search` returns v2 defaults and masks secrets on patch.
+    let ws_get: Value = client
+        .get(format!("{}/api/settings/web-search", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ws_get["version"], 2);
+    assert_eq!(ws_get["defaultProvider"], "exa");
+
+    let ws_patch = client
+        .patch(format!("{}/api/settings/web-search", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "patch-ws-1")
+        .json(&json!({
+            "defaultProvider": "deepseek",
+            "providers": {
+                "deepseek": { "apiKey": "sk-secret-deepseek-9876", "reuseModelApiKey": false }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ws_patch.status(), 200);
+    let ws_patched: Value = ws_patch.json().await.unwrap();
+    assert_eq!(ws_patched["defaultProvider"], "deepseek");
+    assert_eq!(ws_patched["providers"]["deepseek"]["hasApiKey"], true);
+    assert_eq!(ws_patched["providers"]["deepseek"]["apiKeyTail"], "9876");
+    assert!(!ws_patched.to_string().contains("sk-secret-deepseek-9876"));
+
     server.shutdown().await;
 }
 

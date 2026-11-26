@@ -34,6 +34,7 @@ pub struct RunbookCardProps<'a> {
 }
 
 pub type OpenRunbookFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
+pub type ExportRunbookFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
 
 fn risk_tier_plain_label(level: &str) -> &'static str {
     match level.to_ascii_lowercase().as_str() {
@@ -73,6 +74,7 @@ pub fn render_runbook_card<V: 'static>(
     is_copied_fn: &dyn Fn(&str) -> bool,
     on_toggle_details: crate::tools::ToggleDetailsFn,
     on_open_runbook: OpenRunbookFn,
+    on_export_runbook: ExportRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
     cx: &mut Context<V>,
@@ -391,6 +393,61 @@ pub fn render_runbook_card<V: 'static>(
                                 .text_color(palette.accent_ink),
                         )
                 }),
+        );
+    } else if props.status == SpecialStatus::Success && props.planned {
+        let eid = props.entry_id.to_owned();
+        let cid = props.call_id.to_owned();
+        let export_fn = Rc::clone(&on_export_runbook);
+        let export_btn_id =
+            SharedString::from(format!("runbook-export-file-btn-{}", props.call_id));
+        card = card.child(
+            div()
+                .w_full()
+                .pt(space::MD)
+                .border_t_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::MD)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .min_w_0()
+                        .child(
+                            Icon::new(IconName::FileText)
+                                .size(px(14.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .truncate()
+                                .text_color(palette.text_secondary)
+                                .child(cjk_inline_label("核对无误后可直接导出纯文本清单")),
+                        ),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .id(export_btn_id.clone())
+                        .test_support()
+                        .a11y_button(export_btn_id, "导出并用记事本打开 TXT")
+                        .cursor(CursorStyle::PointingHand)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .flex_shrink_0()
+                        .text_color(palette.accent_ink)
+                        .hover(|s| s.text_color(palette.accent_hover))
+                        .on_click(move |_, w, cx| (export_fn)(eid.clone(), cid.clone(), w, cx))
+                        .child(cjk_inline_label("导出并用记事本打开 TXT"))
+                        .child(
+                            Icon::new(IconName::ExternalLink)
+                                .size(px(12.0))
+                                .text_color(palette.accent_ink),
+                        ),
+                ),
         );
     }
 

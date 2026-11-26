@@ -48,7 +48,7 @@ pub fn run_with(
     let top = input.top.unwrap_or(10).clamp(1, 50);
     control.check()?;
     match input.scope {
-        SysScope::Io => Ok(json!({"io":super::sys_load::io(source,top,control)?})),
+        SysScope::Io => Ok(json!({"io":super::sys_load::io(source,hardware,top,control)?})),
         SysScope::Gpu => Ok(json!({"gpu":super::sys_load::gpu(source,hardware,top,control)?})),
         SysScope::Sensor => Ok(json!({"sensor":super::sys_load::sensor(source,hardware,control)?})),
         SysScope::Overview => Ok(json!({"overview": overview(source,control)?})),
@@ -58,9 +58,56 @@ pub fn run_with(
             control.sleep(Duration::from_millis(1200))?;
             let second = source.processes(control).map_err(|e| e.to_string())?;
             let elapsed = started.elapsed().as_secs_f64();
-            Ok(
-                json!({"proc": process_result(&first,&second,elapsed,std::thread::available_parallelism().map_or(1,usize::from),top)}),
-            )
+            let mut proc_val = process_result(
+                &first,
+                &second,
+                elapsed,
+                std::thread::available_parallelism().map_or(1, usize::from),
+                top,
+            );
+            populate_top_paths(source, &mut proc_val);
+            Ok(json!({"proc": proc_val}))
+        }
+    }
+}
+
+fn populate_top_paths(source: &dyn DiagnosticSource, proc_val: &mut Value) {
+    let mut missing: Vec<u32> = Vec::new();
+    for key in ["byCpu", "byMem"] {
+        if let Some(arr) = proc_val[key].as_array() {
+            for row in arr {
+                if row["path"].is_null()
+                    && let Some(pid) = row["pid"].as_u64().and_then(|v| u32::try_from(v).ok())
+                    && !missing.contains(&pid)
+                {
+                    missing.push(pid);
+                }
+            }
+        }
+    }
+    if missing.is_empty() {
+        return;
+    }
+    let mut slots: Vec<(u32, Option<String>)> =
+        missing.into_iter().map(|pid| (pid, None)).collect();
+    source.fill_process_paths(&mut slots);
+    let resolved: HashMap<u32, String> = slots
+        .into_iter()
+        .filter_map(|(pid, path)| path.map(|p| (pid, p)))
+        .collect();
+    if resolved.is_empty() {
+        return;
+    }
+    for key in ["byCpu", "byMem"] {
+        if let Some(arr) = proc_val[key].as_array_mut() {
+            for row in arr {
+                if row["path"].is_null()
+                    && let Some(pid) = row["pid"].as_u64().and_then(|v| u32::try_from(v).ok())
+                    && let Some(path) = resolved.get(&pid)
+                {
+                    row["path"] = json!(path);
+                }
+            }
         }
     }
 }
@@ -99,6 +146,65 @@ pub fn process_result(
 
 fn overview(source: &dyn DiagnosticSource, control: &Control) -> Result<Value, String> {
     let mut errors = Vec::new();
+    match source.native_overview(control) {
+        Ok(Some(native)) => {
+            errors.extend(native.errors);
+            let pagefile = match native.pagefile {
+                Some(rows) => rows,
+                None => collect(
+                    source,
+                    CIMV2,
+                    "SELECT Name,AllocatedBaseSize,CurrentUsage,PeakUsage FROM Win32_PageFileUsage",
+                    control,
+                    &mut errors,
+                )
+                .iter()
+                .map(|r| {
+                    super::win_native::selected(
+                        r,
+                        &[
+                            ("name", "Name"),
+                            ("allocMB", "AllocatedBaseSize"),
+                            ("usedMB", "CurrentUsage"),
+                            ("peakMB", "PeakUsage"),
+                        ],
+                    )
+                })
+                .collect(),
+            };
+            control.check()?;
+            let mut result = json!({
+                "cpuTotalPct": native.cpu_total_pct,
+                "logicalCores": native.logical_cores,
+                "mem": {
+                    "totalMB": native.total_mb,
+                    "freeMB": native.free_mb,
+                    "usedMB": native.used_mb,
+                    "usedPct": native.used_pct,
+                },
+                "pagefile": pagefile,
+                "pool": {
+                    "nonpagedMB": native.nonpaged_mb,
+                    "pagedMB": native.paged_mb,
+                },
+                "machine": {
+                    "vendor": native.vendor,
+                    "model": native.model,
+                    "cpu": native.cpu,
+                    "physicalCores": native.physical_cores,
+                    "bios": native.bios,
+                    "biosDate": native.bios_date,
+                },
+                "uptime": native.uptime,
+                "notice": "Windows 原生 Win32 快照。内存与内核池单位为 MiB；cpuTotalPct 为 200ms 短窗 GetSystemTimes 差分均值。null 表示未采集到数据，部分失败见 collectionErrors。"
+            });
+            add_errors(&mut result, errors);
+            return Ok(result);
+        }
+        Ok(None) => {}
+        Err(e) => errors.push(e),
+    }
+    let wmi_start_errors = errors.len();
     let cpu = collect(
         source,
         CIMV2,
@@ -152,7 +258,7 @@ fn overview(source: &dyn DiagnosticSource, control: &Control) -> Result<Value, S
         &mut errors,
     );
     control.check()?;
-    if errors.len() == 7 {
+    if errors.len().saturating_sub(wmi_start_errors) == 7 {
         return Err("整机信息采集全部失败，请检查 WMI 服务状态。".into());
     }
     let total = number(&os, "TotalVisibleMemorySize").map(|v| v / 1024.0);

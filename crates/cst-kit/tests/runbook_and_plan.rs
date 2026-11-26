@@ -4,9 +4,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use cst_kit::runbook::{
-    RunbookStore,
-    model::{DeliverInput, PlanInput, RunbookInput},
-    sequence_store::DirectoryLock,
+    DirectoryLock, RunbookStore,
+    model::{DeliverInput, PlanInput, RunbookToolInput},
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -440,19 +439,24 @@ async fn archive_date_is_fixed_and_foreign_ids_or_versions_are_rejected() {
 }
 
 #[tokio::test]
-async fn sequence_encoding_normalization_and_rename_preserve_one_file() {
+async fn unified_runbook_encoding_sequence_and_version_naming() {
     let fixture = Fixture::new();
     let store = fixture.store();
     let mut source = input();
     source["title"] = json!("清/理:*?<缓存>.  ");
     source["items"][0]["admin"] = json!(true);
+    source["exportTxt"] = json!(true);
     let first = store
-        .write(decode(source), CancellationToken::new())
+        .plan(decode(source), CancellationToken::new())
         .await
         .unwrap();
     assert_eq!(first["runbook"]["sequence"], 1);
+    assert_eq!(first["runbook"]["version"], 1);
+    assert_eq!(first["runbook"]["action"], "exported");
     assert_eq!(first["runbook"]["title"], "清理缓存");
-    assert_eq!(first["runbook"]["commands"][0]["shell"], "PowerShell");
+    assert_eq!(first["runbook"]["commands"][0]["shell"], "powershell");
+    assert_eq!(first["runbook"]["name"], "01-安全-清理缓存-v1.txt");
+    assert_eq!(file(&first).parent().unwrap(), fixture.day());
     let bytes = fs::read(file(&first)).unwrap();
     assert_eq!(&bytes[..3], b"\xef\xbb\xbf");
     assert_eq!(first["runbook"]["bytes"], bytes.len());
@@ -468,53 +472,35 @@ async fn sequence_encoding_normalization_and_rename_preserve_one_file() {
             "echo manual-only"
         ]
     );
-    let mut change = input();
-    change["title"] = json!("新标题");
-    change["sequence"] = json!(1);
-    change["level"] = json!("confirm");
+    let mut rev = revision(&first);
+    rev["title"] = json!("新标题");
+    rev["level"] = json!("confirm");
+    rev["exportTxt"] = json!(true);
     let second = store
-        .write(decode(change), CancellationToken::new())
+        .plan(decode(rev), CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(second["runbook"]["action"], "replaced");
-    assert!(!file(&first).exists());
+    assert_eq!(second["runbook"]["sequence"], 1);
+    assert_eq!(second["runbook"]["version"], 2);
+    assert_eq!(second["runbook"]["action"], "exported");
+    assert_eq!(second["runbook"]["name"], "01-需确认-新标题-v2.txt");
+    assert!(file(&first).is_file());
     assert!(file(&second).is_file());
-    assert_eq!(entries(&fixture.day()).len(), 1);
-    assert!(
-        second["runbook"]["name"]
-            .as_str()
-            .unwrap()
-            .starts_with("01-需确认-")
-    );
+    assert_eq!(entries(&fixture.day()).len(), 2);
 }
 
 #[tokio::test]
-async fn same_name_replacement_and_parallel_allocations_are_unique_and_daily() {
+async fn parallel_plan_allocations_assign_unique_daily_sequences() {
     let fixture = Fixture::new();
     let store = fixture.store();
-    let initial = store
-        .write(decode(input()), CancellationToken::new())
-        .await
-        .unwrap();
-    let mut change = input();
-    change["sequence"] = json!(1);
-    change["items"][0]["command"] = json!("echo change");
-    let result = store
-        .write(decode(change), CancellationToken::new())
-        .await
-        .unwrap();
-    assert_eq!(file(&initial), file(&result));
-    assert!(
-        fs::read_to_string(file(&result))
-            .unwrap()
-            .contains("echo change")
-    );
     let mut tasks = Vec::new();
     for _ in 0..8 {
         let cloned = fixture.store();
         tasks.push(tokio::spawn(async move {
+            let mut req = input();
+            req["exportTxt"] = json!(true);
             cloned
-                .write(decode(input()), CancellationToken::new())
+                .plan(decode(req), CancellationToken::new())
                 .await
                 .unwrap()["runbook"]["sequence"]
                 .as_u64()
@@ -526,80 +512,33 @@ async fn same_name_replacement_and_parallel_allocations_are_unique_and_daily() {
         numbers.push(task.await.unwrap());
     }
     numbers.sort();
-    assert_eq!(numbers, (2..=9).collect::<Vec<_>>());
+    assert_eq!(numbers, (1..=8).collect::<Vec<_>>());
     let mut tomorrow = input();
     tomorrow["date"] = json!("2026-11-09");
+    tomorrow["exportTxt"] = json!(true);
     assert_eq!(
         store
-            .write(decode(tomorrow), CancellationToken::new())
+            .plan(decode(tomorrow), CancellationToken::new())
             .await
             .unwrap()["runbook"]["sequence"],
         1
     );
-    assert_eq!(entries(&fixture.day()).len(), 9);
+    assert_eq!(entries(&fixture.day()).len(), 8);
 }
 
 #[tokio::test]
-async fn duplicate_missing_and_exhausted_slots_are_rejected_without_changes() {
+async fn exhausted_daily_sequence_slots_are_rejected_without_changes() {
     let fixture = Fixture::new();
     let store = fixture.store();
-    for sequence in [0, 1000, 1] {
-        let mut bad = input();
-        bad["sequence"] = json!(sequence);
-        assert!(
-            store
-                .write(decode(bad), CancellationToken::new())
-                .await
-                .is_err()
-        );
-    }
-    fixture.put("artifacts/2026-11-08/runbook/01-安全-a.txt", "a");
-    fixture.put("artifacts/2026-11-08/runbook/01-较安全-b.txt", "b");
+    fixture.put("artifacts/2026-11-08/runbook/999-安全-full-v1.txt", "full");
     assert!(
         store
-            .write(decode(input()), CancellationToken::new())
-            .await
-            .unwrap_err()
-            .contains("重复")
-    );
-    fs::remove_file(fixture.day().join("01-较安全-b.txt")).unwrap();
-    fixture.put("artifacts/2026-11-08/runbook/999-安全-full.txt", "full");
-    assert!(
-        store
-            .write(decode(input()), CancellationToken::new())
+            .plan(decode(input()), CancellationToken::new())
             .await
             .unwrap_err()
             .contains("999")
     );
-    assert_eq!(entries(&fixture.day()).len(), 2);
-}
-
-#[tokio::test]
-async fn blocked_output_preserves_old_slot_and_cleans_temporary_files() {
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let first = store
-        .write(decode(input()), CancellationToken::new())
-        .await
-        .unwrap();
-    let original = fs::read(file(&first)).unwrap();
-    let obstruction = fixture.day().join("01-安全-阻挡.txt");
-    fs::create_dir(&obstruction).unwrap();
-    let mut input = input();
-    input["title"] = json!("阻挡");
-    input["sequence"] = json!(1);
-    assert!(
-        store
-            .write(decode(input), CancellationToken::new())
-            .await
-            .is_err()
-    );
-    assert_eq!(fs::read(file(&first)).unwrap(), original);
-    assert!(
-        !entries(&fixture.day())
-            .iter()
-            .any(|name| name.ends_with(".tmp"))
-    );
+    assert_eq!(entries(&fixture.day()).len(), 1);
 }
 
 #[tokio::test]
@@ -615,7 +554,6 @@ async fn cancelled_requests_do_not_create_files_or_propagate_cancellation_to_the
             .unwrap_err()
             .contains("取消")
     );
-    assert!(store.write(decode(input()), cancel).await.is_err());
     assert!(!fixture.path("agent").exists());
     assert!(!fixture.path("artifacts").exists());
     let parent = CancellationToken::new();
@@ -662,36 +600,6 @@ async fn hardlinks_to_plans_and_delivered_files_are_rejected_without_touching_th
 
 #[cfg(windows)]
 #[tokio::test]
-async fn cleanup_failure_rolls_back_new_name_while_the_old_file_is_open() {
-    use std::os::windows::fs::OpenOptionsExt;
-    let fixture = Fixture::new();
-    let store = fixture.store();
-    let first = store
-        .write(decode(input()), CancellationToken::new())
-        .await
-        .unwrap();
-    let original = fs::read(file(&first)).unwrap();
-    let held = fs::OpenOptions::new()
-        .read(true)
-        .share_mode(1)
-        .open(file(&first))
-        .unwrap();
-    let mut change = input();
-    change["title"] = json!("新标题");
-    change["sequence"] = json!(1);
-    assert!(
-        store
-            .write(decode(change), CancellationToken::new())
-            .await
-            .is_err()
-    );
-    assert_eq!(entries(&fixture.day()).len(), 1);
-    assert_eq!(fs::read(file(&first)).unwrap(), original);
-    drop(held);
-}
-
-#[cfg(windows)]
-#[tokio::test]
 async fn junctions_at_each_writable_boundary_are_rejected_before_any_outside_write() {
     for relative in [
         "data",
@@ -714,17 +622,12 @@ async fn junctions_at_each_writable_boundary_are_rejected_before_any_outside_wri
             .status()
             .unwrap();
         assert!(status.success());
-        let result = if relative.starts_with("data") {
-            fixture
-                .store()
-                .plan(decode(input()), CancellationToken::new())
-                .await
-        } else {
-            fixture
-                .store()
-                .write(decode(input()), CancellationToken::new())
-                .await
-        };
+        let mut req = input();
+        req["exportTxt"] = json!(!relative.starts_with("data"));
+        let result = fixture
+            .store()
+            .plan(decode(req), CancellationToken::new())
+            .await;
         assert!(result.is_err(), "{relative}");
         assert!(entries(&outside.0).is_empty(), "{relative}");
         fs::remove_dir(path).unwrap();
@@ -773,28 +676,19 @@ fn lock_child(directory: &Path, ready: &Path) -> ChildGuard {
     child
 }
 #[tokio::test]
-async fn independent_process_locks_cover_both_plan_and_sequence_writers_and_release_on_exit() {
-    for relative in ["data/plans", "artifacts/2026-11-08/runbook"] {
-        let fixture = Fixture::new();
-        let dir = fixture.path(relative);
-        fs::create_dir_all(&dir).unwrap();
-        let child = lock_child(&dir, &fixture.path("ready"));
-        let result = if relative.starts_with("data") {
-            fixture
-                .store()
-                .plan(decode(input()), CancellationToken::new())
-                .await
-        } else {
-            fixture
-                .store()
-                .write(decode(input()), CancellationToken::new())
-                .await
-        };
-        assert!(result.unwrap_err().contains("另一进程"));
-        assert!(entries(&dir).is_empty());
-        drop(child);
-        assert!(DirectoryLock::acquire(&dir).is_ok());
-    }
+async fn independent_process_locks_cover_plan_writers_and_release_on_exit() {
+    let fixture = Fixture::new();
+    let dir = fixture.path("data/plans");
+    fs::create_dir_all(&dir).unwrap();
+    let child = lock_child(&dir, &fixture.path("ready"));
+    let result = fixture
+        .store()
+        .plan(decode(input()), CancellationToken::new())
+        .await;
+    assert!(result.unwrap_err().contains("另一进程"));
+    assert!(entries(&dir).is_empty());
+    drop(child);
+    assert!(DirectoryLock::acquire(&dir).is_ok());
 }
 
 #[tokio::test]
@@ -803,7 +697,7 @@ async fn public_definitions_are_schema_checked_and_never_replay_writes() {
     let defs = cst_kit::runbook::definitions(&fixture.0).unwrap();
     assert_eq!(
         defs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
-        ["command_plan", "runbook_deliver", "runbook"]
+        ["runbook"]
     );
     for definition in &defs {
         assert!(definition.prompt_snippet.is_some());
@@ -811,7 +705,7 @@ async fn public_definitions_are_schema_checked_and_never_replay_writes() {
         assert_eq!(definition.replay_policy, pi_agent::ToolReplayPolicy::Never);
     }
     assert!(
-        serde_json::from_value::<RunbookInput>(
+        serde_json::from_value::<RunbookToolInput>(
             json!({"title":"a","level":"safe","items":[],"path":"../../outside"})
         )
         .is_err()

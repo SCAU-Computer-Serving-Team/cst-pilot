@@ -22,7 +22,9 @@ use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, motion
 use crate::tools::bitlocker_card::{
     BitLockerCardProps, PendingBitLockerPrompt, SecretInput, render_bitlocker_card,
 };
-use crate::tools::runbook_card::{OpenRunbookFn, RunbookCardProps, render_runbook_card};
+use crate::tools::runbook_card::{
+    ExportRunbookFn, OpenRunbookFn, RunbookCardProps, render_runbook_card,
+};
 use crate::tools::sys_overview::{SysOverviewProps, render_sys_overview_card};
 use crate::tools::web_search_bar::{WebSearchBarProps, render_web_search_bar};
 use crate::workbench::markdown_view::{
@@ -61,6 +63,7 @@ pub fn render_special_tool_component<V: 'static>(
     on_toggle_details: ToggleDetailsFn,
     on_hover_warning: HoverWarningFn,
     on_open_runbook: OpenRunbookFn,
+    on_export_runbook: ExportRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     on_error_notice: impl Fn(String, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
@@ -145,6 +148,7 @@ pub fn render_special_tool_component<V: 'static>(
             is_copied_fn,
             on_toggle_details,
             on_open_runbook,
+            on_export_runbook,
             on_mark_copied,
             window,
             cx,

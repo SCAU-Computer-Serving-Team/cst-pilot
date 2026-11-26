@@ -3,6 +3,7 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) use cst_os::fs_safe::{DirectoryLease, Storage, io_error};
+pub use cst_os::locks::RunbookDirectoryLock as DirectoryLock;
 
 pub(crate) trait StorageAtomicExt {
     fn atomic(

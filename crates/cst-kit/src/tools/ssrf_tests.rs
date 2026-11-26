@@ -58,6 +58,7 @@ fn get() -> HttpRequest {
         url: "https://public.example/page".into(),
         body: None,
         headers: vec![],
+        timeout_ms: None,
     }
 }
 
@@ -176,4 +177,23 @@ async fn production_connector_handles_loopback_mock_body_limits_and_invalid_utf8
         assert_eq!(result.is_ok(), expected_ok);
         server.await.unwrap();
     }
+}
+
+#[test]
+fn decode_http_body_supports_utf8_and_gb18030_while_rejecting_binary() {
+    let (gb_bytes, _, _) = encoding_rs::GB18030.encode("中文页面内容 2026");
+    assert_eq!(
+        decode_http_body(&gb_bytes, Some("text/html; charset=gbk")).unwrap(),
+        "中文页面内容 2026"
+    );
+    assert_eq!(
+        decode_http_body(&gb_bytes, None).unwrap(),
+        "中文页面内容 2026"
+    );
+    assert_eq!(
+        decode_http_body("UTF-8 中文".as_bytes(), Some("text/plain; charset=utf-8")).unwrap(),
+        "UTF-8 中文"
+    );
+    assert!(decode_http_body(&[0xff, 0xfe], None).is_err());
+    assert!(decode_http_body(b"abc\0def", None).is_err());
 }

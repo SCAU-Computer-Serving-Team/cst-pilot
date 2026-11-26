@@ -73,6 +73,7 @@ const rawOf = (result?: Message) =>
 const errorText = (v: unknown): string => {
 	const e = record(v);
 	if (!e) return v == null || v === "" ? "" : String(v);
+	if (Object.keys(e).length === 0) return "";
 	const code = number(e.code);
 	const text = [
 		string(e.source),
@@ -245,12 +246,16 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 			count = number(details?.queryCount) ?? queries.length;
 		const partial = successful !== null && successful < count,
 			failed = successful === 0 && count > 0;
-		const errors = [...commonErrors, ...objects(details?.queries).flatMap((q) => errorsOf(q.error))];
+		const errors = [
+			...commonErrors,
+			...errorsOf(details?.collectionErrors),
+			...objects(details?.queries).flatMap((q) => errorsOf(q.error)),
+		];
 		const status = !result
 			? initial
 			: result.isError || details?.error != null || failed
 				? "error"
-				: partial || !details
+				: partial || details?.degraded || errors.length > 0 || !details
 					? "degraded"
 					: "success";
 		return {

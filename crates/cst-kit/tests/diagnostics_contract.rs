@@ -204,6 +204,8 @@ fn process(pid: u32, created: u64, cpu: u64, mem: u64) -> ProcessSample {
         name: format!("p{pid}"),
         working_set: Some(mem),
         path: None,
+        read_bytes: None,
+        write_bytes: None,
     }
 }
 fn event(record: u64, id: u16, provider: &str) -> EventRecord {
@@ -503,7 +505,13 @@ fn startup_disabled_tristate_and_running_service_order_are_stable() {
             .unwrap()
             .chars()
             .count(),
-        143
+        141
+    );
+    assert!(
+        value["services"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with('…')
     );
     assert!(value["regItems"][0]["disabled"].is_null());
 }
@@ -603,10 +611,12 @@ fn event_filters_counts_bounds_errors_and_detail_contract() {
     }
     let mut source = MockSource::default();
     source.fail("System", 15007);
-    let result = eventlog::run(&source, input(json!({"scope":"query"})), &control()).unwrap();
-    assert_eq!(result["query"]["degraded"], true);
-    assert_eq!(result["query"]["collectionErrors"][0]["code"], 15007);
-    assert!(result["query"]["noMatch"].is_null());
+    assert!(eventlog::run(&source, input(json!({"scope":"query"})), &control()).is_err());
+    // Partial channel failure in `recent` (System fails, Application succeeds) returns degraded result.
+    let partial = eventlog::run(&source, input(json!({"scope":"recent"})), &control()).unwrap();
+    assert_eq!(partial["recent"]["degraded"], true);
+    assert_eq!(partial["recent"]["collectionErrors"][0]["code"], 15007);
+    assert!(partial["recent"]["noMatch"].is_null());
 }
 #[test]
 fn event_formats_only_final_top_after_provider_filter_and_joining_logs() {
@@ -783,6 +793,8 @@ fn event_detail_keeps_newlines_and_caps_twenty_thousand_characters() {
     let message = result["detail"]["msg"].as_str().unwrap();
     assert_eq!(message.chars().count(), 20000);
     assert!(message.contains('\n'));
+    assert_eq!(result["detail"]["msgTruncated"], true);
+    assert_eq!(result["detail"]["originalChars"], 30000);
 }
 
 #[tokio::test]
