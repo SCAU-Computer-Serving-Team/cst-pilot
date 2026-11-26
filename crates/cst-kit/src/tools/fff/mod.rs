@@ -431,6 +431,7 @@ fn find_paths_with_details(
     let mut had_non_policy_failure = false;
     let mut extra_notices: Vec<String> = Vec::new();
     let mut skipped = 0usize;
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut walk_budget = per_vol_budget;
 
     #[cfg(windows)]
