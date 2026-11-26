@@ -394,7 +394,8 @@ impl AppShell {
                             "recent-sessions-drawer-exit"
                         })
                         .opacity(0.01 + 0.99 * progress)
-                        .mt(px(-8.0 * (1.0 - progress)))
+                        .relative()
+                        .top(px((-8.0 * (1.0 - progress)).round()))
                         .shadow(motion::scale_shadows(
                             palette.flat_popover_shadows(),
                             progress.powi(3),

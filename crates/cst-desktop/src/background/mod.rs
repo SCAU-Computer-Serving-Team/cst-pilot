@@ -23,6 +23,7 @@ pub use presets::{FrostedGlassSpec, SkyPreset};
 pub struct AnimationGateInputs {
     pub route_has_sky_shader: bool,
     pub web_active_locked: bool,
+    pub occluded_by_modal: bool,
     pub window_focused: bool,
     pub window_minimized: bool,
     pub hardware_diagnostic_active: bool,
@@ -33,11 +34,12 @@ pub struct AnimationGateInputs {
 }
 
 impl AnimationGateInputs {
-    /// Returns `true` ONLY when all 7 runtime conditions permit VSync animation frame advancement.
-    /// Off-page, unfocused, minimized, `WebActive`, or `sys(gpu/sensor)` sampling freezes at `0 FPS`.
+    /// Returns `true` ONLY when all runtime conditions permit VSync animation frame advancement.
+    /// Off-page, unfocused, minimized, modal-occluded, `WebActive`, or `sys(gpu/sensor)` sampling freezes at `0 FPS`.
     pub fn should_animate(self) -> bool {
         self.route_has_sky_shader
             && !self.web_active_locked
+            && !self.occluded_by_modal
             && self.window_focused
             && !self.window_minimized
             && !self.hardware_diagnostic_active
@@ -102,15 +104,18 @@ impl ShaderFrameScheduler {
         &mut self,
         route_has_sky_shader: bool,
         web_active_locked: bool,
+        occluded_by_modal: bool,
         hardware_diagnostic_active: bool,
         reduce_motion: bool,
         window: &mut Window,
     ) -> f32 {
+        self.remote_session = is_remote_desktop_session();
         let vp = window.viewport_size();
         let minimized = !window.is_visible() || vp.width <= px(1.0) || vp.height <= px(1.0);
         let inputs = AnimationGateInputs {
             route_has_sky_shader,
             web_active_locked,
+            occluded_by_modal,
             window_focused: window.is_window_active(),
             window_minimized: minimized,
             hardware_diagnostic_active,
@@ -307,31 +312,36 @@ pub fn render_frosted_surface(
 ) -> Stateful<Div> {
     let is_elevated_card = spec.specular > 0.0;
     let is_light_tint = spec.tint_rgb[0] > 0.5;
-    let shadow_contact: Hsla = gpui_kit::rgba(if is_light_tint {
+    let opacity = spec.opacity.clamp(0.0, 1.0);
+    let shadow_factor = opacity * opacity * opacity;
+    let mut shadow_contact: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_110F
     } else {
         0x0000_003D
     })
     .into();
-    let shadow_mid: Hsla = gpui_kit::rgba(if is_light_tint {
+    shadow_contact.a *= shadow_factor;
+    let mut shadow_mid: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_110F
     } else {
         0x0000_0047
     })
     .into();
-    let shadow_lg: Hsla = gpui_kit::rgba(if is_light_tint {
+    shadow_mid.a *= shadow_factor;
+    let mut shadow_lg: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_1117
     } else {
         0x0000_0061
     })
     .into();
+    shadow_lg.a *= shadow_factor;
     let mut highlight_top: Hsla = gpui_kit::rgba(if is_light_tint {
         0xFFFF_FFF2
     } else {
         0xFFFF_FF1F
     })
     .into();
-    highlight_top.a *= spec.opacity.clamp(0.0, 1.0);
+    highlight_top.a *= opacity;
 
     let mut container = div().id(id).relative();
     if is_elevated_card {
@@ -395,5 +405,7 @@ pub fn render_frosted_surface(
     }
 
     let _ = (spec, transparency_enabled, scale_factor);
-    container.bg(fallback_bg)
+    let mut bg = fallback_bg;
+    bg.a *= opacity;
+    container.bg(bg)
 }

@@ -845,7 +845,12 @@ export function Sidebar({
 										}}
 									/>
 								</div>
-								{recentOpen && (
+								<div
+									className="sidebar-recent-panel"
+									data-open={recentOpen ? "true" : "false"}
+									inert={!recentOpen || undefined}
+									aria-hidden={!recentOpen || undefined}
+								>
 									<div className="sidebar-recent-list">
 										{sessions.map((session, index) => (
 											<SessionEntry
@@ -878,7 +883,7 @@ export function Sidebar({
 											<p className="sidebar-empty">暂无会话</p>
 										)}
 									</div>
-								)}
+								</div>
 							</div>
 						</>
 					)}

@@ -88,7 +88,6 @@ pub fn render_missing_key_dialog(
         transparency_enabled,
         scale_factor,
     )
-    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -117,8 +116,7 @@ pub fn render_missing_key_dialog(
                     cx.stop_propagation();
                 }
             })
-            .child(motion::animate_modal_enter(
-                "missing-key-dialog-anim",
+            .child(motion::apply_modal_motion(
                 render_frosted_surface(
                     "missing-key-dialog-e7fety",
                     FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
@@ -215,7 +213,124 @@ pub fn render_missing_key_dialog(
                         )
                         .child(kbd_overlay),
                 ),
+                scrim_progress,
                 palette.craft_stack_shadows(),
             )),
     )
+}
+
+/// Visual-only inert exit snapshot for [`render_missing_key_dialog`] during `150ms` close fade-out.
+pub fn render_missing_key_dialog_inert(
+    state: &MissingKeyModalState,
+    scrim_progress: f32,
+    palette: &DesktopPalette,
+    transparency_enabled: bool,
+    scale_factor: f32,
+) -> impl IntoElement {
+    let clean_prov = state.provider_label.as_deref().filter(|s| !s.is_empty());
+    let title_text = match clean_prov {
+        Some(prov) => SharedString::from(format!("缺少 {prov} 凭据")),
+        None => SharedString::from("缺少提供商凭据"),
+    };
+    let body_text = match clean_prov {
+        Some(prov) => SharedString::from(format!(
+            "当前所选模型所属的 {prov} 尚未配置有效凭据。已保留输入框内的草稿与附图，配置完成后可返回原会话继续发送。"
+        )),
+        None => SharedString::from(
+            "当前尚未配置任何可用的提供商凭据。前往「设置 · 提供商」或登录页完成配置即可开始诊断。",
+        ),
+    };
+
+    let card = render_frosted_surface(
+        "missing-key-dialog-e7fety-exit",
+        FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+        palette.bg_modal,
+        transparency_enabled,
+        scale_factor,
+    )
+    .w(layout::MODAL_STANDARD_WIDTH)
+    .p(px(20.0))
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_subtle)
+    .flex()
+    .flex_col()
+    .gap(space::MD)
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .child(
+                Icon::new(IconName::TriangleAlert)
+                    .size(px(16.0))
+                    .text_color(palette.status_warning),
+            )
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .min_w_0()
+                    .truncate()
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label(title_text)),
+            ),
+    )
+    .child(
+        apply_scale(div(), scale::UI)
+            .relative()
+            .text_color(palette.text_secondary)
+            .child(body_text),
+    )
+    .child(
+        div()
+            .relative()
+            .flex()
+            .justify_end()
+            .gap(space::SM)
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .child(cjk_inline_label("取消")),
+            )
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .h(height::CONTROL)
+                    .px(space::LG)
+                    .rounded(radius::CONTROL)
+                    .bg(palette.accent_solid)
+                    .text_color(palette.text_on_accent)
+                    .flex()
+                    .items_center()
+                    .child(cjk_inline_label("去配置")),
+            ),
+    );
+
+    render_frosted_surface(
+        "missing-key-scrim-ywnbk-exit",
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
+        palette.bg_scrim,
+        transparency_enabled,
+        scale_factor,
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .right_0()
+    .bottom_0()
+    .flex()
+    .items_center()
+    .justify_center()
+    .child(motion::apply_modal_motion(
+        card,
+        scrim_progress,
+        palette.craft_stack_shadows(),
+    ))
 }

@@ -234,11 +234,19 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
             .text_color(status_color)
             .into_any_element()
     };
+    let stable_started_at = started_at.unwrap_or_else(|| {
+        let start_state = window.use_keyed_state(
+            SharedString::from(format!("normal-tool-start-{call_id}")),
+            cx,
+            |_, cx| cx.background_executor().now(),
+        );
+        *start_state.read(cx)
+    });
     let summary_el = if is_running && running_light_allowed {
         crate::workbench::turn_segments::render_running_light_label_with_scale(
             &summary_text,
             true,
-            started_at.unwrap_or_else(Instant::now),
+            stable_started_at,
             hdr_fg,
             palette.text_primary,
             scale::UI,
@@ -635,6 +643,31 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                 } else {
                     for block in &card_view.blocks {
                         match block {
+                            ToolBlock::Image {
+                                mime_type, data, ..
+                            } => {
+                                if let Ok(bytes) =
+                                    base64::engine::general_purpose::STANDARD.decode(data.trim())
+                                    && !bytes.is_empty()
+                                {
+                                    let gpui_img = gpui_image_from_bytes(mime_type, bytes);
+                                    right_col = right_col.child(
+                                        div()
+                                            .w(px(300.0))
+                                            .h(px(132.0))
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .border_color(palette.border_subtle)
+                                            .bg(palette.bg_surface)
+                                            .overflow_hidden()
+                                            .child(
+                                                img(ImageSource::Image(gpui_img))
+                                                    .size_full()
+                                                    .object_fit(ObjectFit::Contain),
+                                            ),
+                                    );
+                                }
+                            }
                             ToolBlock::Fields { title, rows, .. } => {
                                 let mut group = div().w_full().flex().flex_col().gap(space::MICRO);
                                 if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
@@ -644,7 +677,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                                             .child(SharedString::from(t.to_owned())),
                                     );
                                 }
-                                for row in rows.iter().take(6) {
+                                for row in rows {
                                     group = group.child(render_aligned_field_row(
                                         row,
                                         label_col_px,
@@ -654,6 +687,39 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                                 }
                                 right_col = right_col.child(group);
                             }
+                            ToolBlock::Listing { items, .. } => {
+                                right_col = right_col.child(render_listing_table(
+                                    items,
+                                    mono_family.clone(),
+                                    palette,
+                                ));
+                            }
+                            ToolBlock::Commands { items, .. } => {
+                                right_col = right_col.child(render_inline_commands_list_inert(
+                                    items,
+                                    mono_family.clone(),
+                                    palette,
+                                ));
+                            }
+                            ToolBlock::Notice { text, status, .. } => {
+                                let (icon, color) = match status {
+                                    NoticeStatus::Danger => {
+                                        (IconName::CircleAlert, palette.status_danger)
+                                    }
+                                    NoticeStatus::Warning => {
+                                        (IconName::TriangleAlert, palette.status_warning)
+                                    }
+                                    NoticeStatus::Default => {
+                                        (IconName::Info, palette.text_secondary)
+                                    }
+                                };
+                                right_col = right_col.child(super::render_tool_notice_line(
+                                    icon,
+                                    color,
+                                    text.clone(),
+                                    palette,
+                                ));
+                            }
                             ToolBlock::Text { text, .. } => {
                                 right_col = right_col.child(render_copyable_text_block_inert(
                                     text.clone(),
@@ -662,8 +728,50 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                                     palette,
                                 ));
                             }
-                            _ => {}
                         }
+                    }
+
+                    if !card_view.raw.trim().is_empty() {
+                        let mut raw_section =
+                            div().w_full().flex().flex_col().gap(space::TIGHT).child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .w_full()
+                                    .h(height::INLINE)
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .text_color(palette.text_secondary)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::SM)
+                                            .child(
+                                                Icon::new(IconName::Braces)
+                                                    .size(px(12.0))
+                                                    .text_color(palette.text_secondary),
+                                            )
+                                            .child(cjk_inline_label("原始数据")),
+                                    )
+                                    .child(
+                                        Icon::new(if is_raw_expanded {
+                                            IconName::ChevronDown
+                                        } else {
+                                            IconName::ChevronRight
+                                        })
+                                        .size(px(12.0))
+                                        .text_color(palette.text_secondary),
+                                    ),
+                            );
+                        if is_raw_expanded {
+                            raw_section = raw_section.child(render_copyable_text_block_inert(
+                                card_view.raw.clone(),
+                                true,
+                                mono_family.clone(),
+                                palette,
+                            ));
+                        }
+                        right_col = right_col.child(raw_section);
                     }
                 }
             }
@@ -939,6 +1047,54 @@ fn render_inline_commands_list<V: 'static>(
                             window,
                             cx,
                         )),
+                ),
+        );
+    }
+    col
+}
+
+fn render_inline_commands_list_inert(
+    items: &[CommandItem],
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+) -> impl IntoElement {
+    let mut col = div().w_full().flex().flex_col().gap(space::XS);
+    for cmd in items {
+        col = col.child(
+            div()
+                .h(height::FIELD)
+                .pl(space::MD)
+                .pr(space::XS)
+                .rounded(radius::CONTROL)
+                .border_1()
+                .border_color(palette.border_subtle)
+                .bg(palette.bg_surface)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::SM)
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(mono_family.clone())
+                        .text_color(palette.text_primary)
+                        .child(SharedString::from(cmd.command.clone())),
+                )
+                .child(
+                    div()
+                        .w(height::CONTROL)
+                        .h(height::CONTROL)
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Icon::new(IconName::Copy)
+                                .size(px(14.0))
+                                .text_color(palette.text_secondary),
+                        ),
                 ),
         );
     }

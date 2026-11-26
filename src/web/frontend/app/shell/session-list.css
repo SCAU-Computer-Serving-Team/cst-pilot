@@ -429,14 +429,34 @@
   transition: transform var(--normal) var(--ease-out);
 }
 
+.sidebar-recent-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  flex: 0 0 auto;
+  min-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: grid-template-rows var(--fast) var(--ease-out), opacity var(--fast) var(--ease-out);
+}
+.sidebar-recent-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+  flex: 1 1 0%;
+  opacity: 1;
+  transition: grid-template-rows var(--normal) var(--ease-out), opacity var(--normal) var(--ease-out);
+}
 .sidebar-recent-list {
   display: flex;
   flex-direction: column;
   gap: var(--space-detail);
-  flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding-bottom: var(--space-tight);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-recent-panel,
+  .sidebar-recent-panel[data-open="true"] {
+    transition: none;
+  }
 }
 
 /* 行内 Hover ⋯ 操作按钮（对齐桌面端 sidebar.rs:295-325） */
@@ -450,8 +470,26 @@
   border-radius: var(--radius-control);
   transition: background-color var(--fast) var(--ease-out);
 }
+.sidebar-session-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-control);
+  cursor: default;
+}
+.sidebar-session-hit:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-shadow);
+}
+.sidebar-session-row:has(.session-native-check:focus-visible) .session-check-control {
+  border-color: var(--border-focus);
+  box-shadow: var(--focus-shadow);
+}
 .sidebar-recent-list .sidebar-session-row:hover {
   background: var(--bg-hover);
+}
+.sidebar-recent-list .sidebar-session-row:hover .sidebar-session {
+  color: var(--text-primary);
 }
 .sidebar-recent-list .sidebar-session-row[data-active="true"] {
   background: var(--bg-item-active);
@@ -461,6 +499,7 @@
 }
 .sidebar-session-more {
   position: absolute;
+  z-index: 2;
   right: 6px;
   inset-block: 0;
   margin-block: auto;
@@ -479,6 +518,15 @@
 .sidebar-session-row:focus-within .sidebar-session:not(.sidebar-session-select),
 .sidebar-session-row[data-menu-open="true"] .sidebar-session:not(.sidebar-session-select) {
   padding-right: 34px;
+}
+@media (hover: none) {
+  .sidebar-session-more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sidebar-session-row .sidebar-session:not(.sidebar-session-select) {
+    padding-right: 34px;
+  }
 }
 
 .session-native-check {

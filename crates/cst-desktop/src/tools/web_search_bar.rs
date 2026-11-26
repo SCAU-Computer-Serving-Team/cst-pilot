@@ -76,11 +76,19 @@ pub fn render_web_search_bar(
         title => title,
     };
 
+    let stable_started_at = props.started_at.unwrap_or_else(|| {
+        let start_state = window.use_keyed_state(
+            SharedString::from(format!("web-search-start-{}", props.call_id)),
+            cx,
+            |_, cx| cx.background_executor().now(),
+        );
+        *start_state.read(cx)
+    });
     let title_el = if is_running && props.running_light_allowed {
         crate::workbench::turn_segments::render_running_light_label_with_scale(
             display_title,
             true,
-            props.started_at.unwrap_or_else(Instant::now),
+            stable_started_at,
             palette.text_secondary,
             palette.text_primary,
             scale::BODY_MEDIUM,

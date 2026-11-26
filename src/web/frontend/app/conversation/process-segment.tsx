@@ -41,7 +41,7 @@ export function Thinking({
 			{opened && !part.redacted && (
 				<section className="tool-text">
 					<CodeBlock className="tool-raw">
-						{format ? part.thinking : <StreamWords text={part.thinking} />}
+						{format || !live ? part.thinking : <StreamWords text={part.thinking} />}
 					</CodeBlock>
 				</section>
 			)}

@@ -63,7 +63,6 @@ pub fn render_image_lightbox_modal(
         transparency_enabled,
         scale_factor,
     )
-    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -146,12 +145,12 @@ pub fn render_image_lightbox_modal(
             .items_center()
             .justify_center()
             .tab_stop(false)
-            .child(motion::animate_modal_enter(
-                "image-lightbox-anim",
+            .child(motion::apply_modal_motion(
                 image_frame,
+                scrim_progress,
                 Vec::new(),
             ))
-            .child(close_circle_btn)
+            .child(close_circle_btn.opacity(0.01 + 0.99 * scrim_progress.clamp(0.0, 1.0)))
             .focus_trap("image-lightbox-focus-trap", trap_focus),
     )
 }

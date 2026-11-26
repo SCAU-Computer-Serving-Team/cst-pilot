@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { glyphLightFrames, lightGlyphs } from "./running-light-timing";
 
+const ASCII_DIGIT = /^[0-9]$/;
+
 function useLight(active: boolean) {
 	const ref = useRef<HTMLSpanElement>(null);
 	const [visible, setVisible] = useState(true);
@@ -23,23 +25,39 @@ function useLight(active: boolean) {
 	return { ref, "data-running": active || undefined, "data-paused": !visible || undefined };
 }
 
-/** 每个字素独立改变颜色；状态数字变化时沿用当前扫光进度。 */
+/** 每个字素独立改变颜色；状态数字变化时沿用当前扫光进度，仅变动数字位轻柔滚动。 */
 export function RunningLight({ active, children }: { active: boolean; children: string }) {
 	const light = useLight(active);
 	const glyphs = lightGlyphs(children);
 	const count = glyphs.length;
 	const animations = useRef<Animation[]>([]);
 	const phase = useRef(0);
+	const prevGlyphsRef = useRef<string[]>(glyphs);
+	const digitVersionsRef = useRef<number[]>([]);
+
+	// 仅对发生变化的数字位递增版本触发微滚动，静止文字与长度不变的字符保持原节点。
+	const prev = prevGlyphsRef.current;
+	if (prev.length !== glyphs.length) {
+		digitVersionsRef.current = glyphs.map(() => 0);
+	} else {
+		for (let i = 0; i < glyphs.length; i++) {
+			if (glyphs[i] !== prev[i] && ASCII_DIGIT.test(glyphs[i])) {
+				digitVersionsRef.current[i] = (digitVersionsRef.current[i] ?? 0) + 1;
+			}
+		}
+	}
+	prevGlyphsRef.current = glyphs;
+
 	useLayoutEffect(() => {
 		const element = light.ref.current;
 		if (!element || !active || !count) return;
 		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 		const token = getComputedStyle(element).getPropertyValue("--running-light-duration").trim();
 		const value = Number.parseFloat(token) * (token.endsWith("ms") ? 1 : 1000);
-		const duration = Number.isFinite(value) ? value : 2000;
+		const duration = Number.isFinite(value) && value > 0 ? value : 2000;
 		const stop = () => {
 			const time = animations.current[0]?.currentTime;
-			if (typeof time === "number") phase.current = time % duration;
+			if (typeof time === "number" && Number.isFinite(time)) phase.current = time % duration;
 			for (const animation of animations.current) animation.cancel();
 			animations.current = [];
 		};
@@ -72,12 +90,21 @@ export function RunningLight({ active, children }: { active: boolean; children: 
 	}, [light["data-paused"]]);
 	return (
 		<span className="running-light" {...light}>
-			{glyphs.map((glyph, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: 字位固定，状态数字更新保持原字位节点和光照进度。
-				<span className="running-glyph" key={index}>
-					{glyph}
-				</span>
-			))}
+			{glyphs.map((glyph, index) => {
+				const tick = digitVersionsRef.current[index] ?? 0;
+				return (
+					// biome-ignore lint/suspicious/noArrayIndexKey: 字位固定，状态数字更新保持原字位节点和光照进度。
+					<span className="running-glyph" key={index}>
+						{tick > 0 && ASCII_DIGIT.test(glyph) ? (
+							<span className="running-digit-tick" key={tick}>
+								{glyph}
+							</span>
+						) : (
+							glyph
+						)}
+					</span>
+				);
+			})}
 		</span>
 	);
 }

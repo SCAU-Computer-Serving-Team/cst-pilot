@@ -27,6 +27,7 @@ import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shel
 import { isNavigationKeyEvent, scrollRowIntoView } from "../shell/keyboard-navigation";
 import { Notification } from "../shell/notification";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { usePresenceExit } from "../shell/use-presence-exit";
 import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
 import { branchSummaryHref } from "../tree/branch-summary";
 import {
@@ -98,6 +99,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const filterTriggerRef = useRef<HTMLButtonElement>(null);
 	usePanelDismiss(filterOpen, () => setFilterOpen(false), undefined, filterTriggerRef);
 	const [choice, setChoice] = useState("");
+	const choicePresence = usePresenceExit(choice || null);
 	// 键盘光标在三个选项间的位置；对话框打开时重置。
 	const [choiceIndex, setChoiceIndex] = useState(0);
 	const choiceDialogRef = useRef<HTMLDivElement>(null);
@@ -642,45 +644,77 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 					insetY={1}
 				/>
 			</ul>
-			{!!choice && (
-				<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
-					<div
-						ref={choiceDialogRef}
-						tabIndex={-1}
-						className="summary-dialog tier-3-dialog"
-						role="dialog"
-						aria-modal="true"
-						aria-label="选择"
-						onMouseDown={(event) => event.stopPropagation()}
-					>
-						<div className="summary-dialog-head">
-							<h2>选择</h2>
-							<button type="button" className="btn-icon sm-28" aria-label="关闭" onClick={() => setChoice("")}>
-								<X size={16} aria-hidden="true" />
-							</button>
-						</div>
-						<div className="summary-dialog-options">
-							{[
-								{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
-								{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
-								{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
-							].map((option, index) => (
-								<button
-									type="button"
-									key={option.mode}
-									className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
-									onFocus={() => setChoiceIndex(index)}
-									onMouseEnter={() => setChoiceIndex(index)}
-									onClick={() => void choose(option.mode)}
-								>
-									<option.icon size={16} aria-hidden="true" />
-									<span>{option.label}</span>
-								</button>
-							))}
+			{choicePresence.mounted &&
+				(choicePresence.exiting ? (
+					<div className="summary-scrim-exiting tier-3-scrim" aria-hidden="true">
+						<div className="summary-dialog-exiting tier-3-dialog">
+							<div className="summary-dialog-head">
+								<h2>选择</h2>
+								<span className="btn-icon sm-28" aria-hidden="true">
+									<X size={16} aria-hidden="true" />
+								</span>
+							</div>
+							<div className="summary-dialog-options">
+								{[
+									{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
+									{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
+									{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
+								].map((option, index) => (
+									<div
+										key={option.mode}
+										className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									>
+										<option.icon size={16} aria-hidden="true" />
+										<span>{option.label}</span>
+									</div>
+								))}
+							</div>
 						</div>
 					</div>
-				</div>
-			)}
+				) : (
+					<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
+						<div
+							ref={choiceDialogRef}
+							tabIndex={-1}
+							className="summary-dialog tier-3-dialog"
+							role="dialog"
+							aria-modal="true"
+							aria-label="选择"
+							onMouseDown={(event) => event.stopPropagation()}
+						>
+							<div className="summary-dialog-head">
+								<h2>选择</h2>
+								<button
+									type="button"
+									className="btn-icon sm-28"
+									aria-label="关闭"
+									onClick={() => setChoice("")}
+								>
+									<X size={16} aria-hidden="true" />
+								</button>
+							</div>
+							<div className="summary-dialog-options">
+								{[
+									{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
+									{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
+									{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
+								].map((option, index) => (
+									<button
+										type="button"
+										key={option.mode}
+										className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+										onFocus={() => setChoiceIndex(index)}
+										onMouseEnter={() => setChoiceIndex(index)}
+										onClick={() => void choose(option.mode)}
+									>
+										<option.icon size={16} aria-hidden="true" />
+										<span>{option.label}</span>
+									</button>
+								))}
+							</div>
+						</div>
+					</div>
+				))}
 			{toast && (
 				<Notification
 					key={toast}

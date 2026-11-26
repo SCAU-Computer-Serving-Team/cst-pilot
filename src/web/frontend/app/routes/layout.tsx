@@ -20,6 +20,7 @@ import { Notification, NotificationRegion } from "../shell/notification";
 import { SessionsProvider, useWorkspaceSessions } from "../shell/sessions-context";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
+import { usePresenceExit } from "../shell/use-presence-exit";
 import { WorkspaceShellProvider } from "../shell/workspace-shell-context";
 
 /** 侧栏折叠偏好：1 = 收起，0 = 展开；无记录时按窗口宽度定初值。 */
@@ -649,6 +650,8 @@ function WorkspaceShell({
 		return () => window.clearTimeout(timer);
 	}, [collapsed]);
 
+	const standbyPresence = usePresenceExit(appActive ? true : null);
+
 	return (
 		<AccountProvider enabled={activeChannel}>
 			<WorkspaceShellProvider value={shellContext}>
@@ -764,7 +767,23 @@ function WorkspaceShell({
 							onDismiss={() => setPaletteMode(null)}
 						/>
 					)}
-					{appActive && <ChannelStandbyOverlay onRefresh={() => sessionsState.refresh()} />}
+					{standbyPresence.mounted &&
+						(standbyPresence.exiting ? (
+							<div className="standby-scrim-exiting tier-3-scrim" aria-hidden="true">
+								<div className="standby-card-exiting tier-3-dialog">
+									<div className="dialog-title-row dialog-title-row--info">
+										<Globe size={16} aria-hidden="true" />
+										<h2>软件端正在使用中</h2>
+									</div>
+									<p>Web 界面处于待机状态，草稿已保留。从软件端打开 Web 后可继续操作。</p>
+									<div className="standby-actions">
+										<div className="tier-1-btn-primary">重新检查</div>
+									</div>
+								</div>
+							</div>
+						) : (
+							<ChannelStandbyOverlay onRefresh={() => sessionsState.refresh()} />
+						))}
 				</NotificationRegion>
 			</WorkspaceShellProvider>
 		</AccountProvider>

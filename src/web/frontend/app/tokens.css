@@ -7,6 +7,7 @@
 
 /* 注册 <time> 自定义属性：确保 calc() 时长在计算值阶段直接产出确定时间，供 WAAPI 安全读取 */
 @property --fast { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+@property --kbd-glide { syntax: "<time>"; inherits: true; initial-value: 180ms; }
 @property --normal { syntax: "<time>"; inherits: true; initial-value: 240ms; }
 @property --slow { syntax: "<time>"; inherits: true; initial-value: 340ms; }
 @property --duration-press { syntax: "<time>"; inherits: true; initial-value: 120ms; }
@@ -65,6 +66,7 @@
   --motion-scale: 1;
   --instant: 0ms;
   --fast: calc(150ms * var(--motion-scale));
+  --kbd-glide: calc(180ms * var(--motion-scale));
   --normal: calc(240ms * var(--motion-scale));
   --slow: calc(340ms * var(--motion-scale));
   --duration-press: calc(120ms * var(--motion-scale));
@@ -180,7 +182,7 @@
   --shadow-dialog: var(--craft-stack);
 
   --tabs-dur: var(--normal);
-  --tabs-ease: var(--ease-out);
+  --tabs-ease: var(--ease-in-out);
   --tabs-text-muted: var(--text-secondary);
   --tabs-text-active: var(--text-primary);
   --tabs-bar-bg: var(--craft-bg-recess);

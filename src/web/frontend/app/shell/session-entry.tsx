@@ -111,14 +111,6 @@ export function SessionEntry({
 	}
 
 	const title = session.title.trim() || "新对话";
-	const content = (
-		<>
-			<span className="session-check-control" aria-hidden="true">
-				<Check size={12} />
-			</span>
-			<span className="sidebar-selection-text">{title}</span>
-		</>
-	);
 	return (
 		<div
 			className="sidebar-session-row"
@@ -126,12 +118,20 @@ export function SessionEntry({
 			data-active={(!managing && active) || undefined}
 			style={{ "--startup-row": Math.min(index + 1, 11) } as CSSProperties}
 		>
+			<div
+				className={`sidebar-session ${managing ? "sidebar-session-select" : active ? "selected" : ""}`}
+				data-selected={(managing && selected) || undefined}
+				data-disabled={(managing && disabled) || undefined}
+				aria-hidden="true"
+			>
+				<span className="session-check-control">
+					<Check size={12} />
+				</span>
+				<span className="sidebar-selection-text">{title}</span>
+			</div>
 			{managing ? (
 				<label
-					className="sidebar-session sidebar-session-select"
-					data-session-id={session.id}
-					data-selected={selected || undefined}
-					data-disabled={disabled || undefined}
+					className="sidebar-session-hit"
 					title={title}
 					onPointerDown={handlePointerDown}
 					onPointerMove={handlePointerMove}
@@ -154,6 +154,8 @@ export function SessionEntry({
 					<input
 						className="session-native-check"
 						type="checkbox"
+						data-session-id={session.id}
+						aria-label={title}
 						checked={selected}
 						disabled={disabled}
 						onChange={() => {
@@ -164,13 +166,13 @@ export function SessionEntry({
 							onToggle();
 						}}
 					/>
-					{content}
 				</label>
 			) : (
 				<>
 					<Link
-						className={`sidebar-session ${active ? "selected" : ""}`}
+						className="sidebar-session-hit"
 						data-session-id={session.id}
+						aria-label={title}
 						aria-current={active ? "page" : undefined}
 						to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
 						viewTransition={viewTransition}
@@ -194,9 +196,7 @@ export function SessionEntry({
 							}
 							onNavigate?.(event);
 						}}
-					>
-						{content}
-					</Link>
+					/>
 					{showMoreButton && !preview && (
 						<button
 							type="button"

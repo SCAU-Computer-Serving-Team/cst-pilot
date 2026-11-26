@@ -809,13 +809,18 @@ impl Render for CommandPaletteModal {
                 }
 
                 if !disabled {
-                    row = row.hover(move |s| s.bg(palette.bg_item_hover)).on_click(
-                        move |_, _, cx| {
+                    let hover_bg = if is_sel {
+                        palette.bg_item_active
+                    } else {
+                        palette.bg_item_hover
+                    };
+                    row = row
+                        .hover(move |s| s.bg(hover_bg))
+                        .on_click(move |_, _, cx| {
                             ent_click.update(cx, |_, cx| {
                                 cx.emit(CommandPaletteEvent::Execute(target.clone()));
                             });
-                        },
-                    );
+                        });
                 }
 
                 list = list.child(row);
