@@ -37,11 +37,10 @@
 .settings-workspace .settings-card { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .settings-flat-list { display: flex; flex-direction: column; }
 .settings-flat-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-section); min-height: 52px; padding: 0; border-bottom: 1px solid var(--border-subtle); }
-.settings-service-row { position: relative; min-height: 64px; margin-inline: -12px; padding-inline: 12px; border-bottom: 0; border-radius: var(--radius-row); transition: background-color var(--fast) var(--ease-out); }
-.settings-service-row::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1px; background: var(--border-subtle); pointer-events: none; }
-.settings-service-row:hover { background: var(--bg-hover); }
-.settings-service-row:active { background: var(--bg-active-press); }
-.settings-services[data-kbd-active="true"] .settings-service-row:hover { background: transparent; }
+.settings-service-row { min-height: 64px; background: transparent; transition: border-color var(--fast) var(--ease-out); }
+.settings-service-row:hover { border-bottom-color: var(--accent-solid); }
+.settings-service-row:active { border-bottom-color: var(--accent-solid-hover); }
+.settings-services[data-kbd-active="true"] .settings-service-row:hover { border-bottom-color: var(--border-subtle); }
 .settings-service-row--compact { min-height: 48px; }
 .settings-row-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; color: var(--text-primary); font-size: var(--font-body); line-height: var(--line-body); }
 .settings-row-inline { display: flex; align-items: baseline; gap: var(--space-component); min-width: 0; flex: 1; }
@@ -143,11 +142,10 @@
 
 /* 模型偏好 48px 通栏行 */
 .settings-workspace .settings-models { position: relative; max-height: none; overflow: visible; padding: 0; margin: 0; list-style: none; }
-.settings-workspace .settings-model { position: relative; display: flex; align-items: center; gap: var(--space-component); height: 48px; min-height: 48px; margin-inline: -12px; padding-inline: 12px; border-bottom: 0; border-radius: var(--radius-row); background: transparent; transition: background-color var(--fast) var(--ease-out); }
-.settings-workspace .settings-model::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1px; background: var(--border-subtle); pointer-events: none; }
-.settings-workspace .settings-model:not(.settings-model-unavailable):hover { background: var(--bg-hover); }
-.settings-workspace .settings-model:not(.settings-model-unavailable):active { background: var(--bg-active-press); }
-.settings-models[data-kbd-active="true"] .settings-model:hover { background: transparent; }
+.settings-workspace .settings-model { position: relative; display: flex; align-items: center; gap: var(--space-component); height: 48px; min-height: 48px; padding: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; transition: border-color var(--fast) var(--ease-out); }
+.settings-workspace .settings-model:not(.settings-model-unavailable):hover { border-bottom-color: var(--accent-solid); }
+.settings-workspace .settings-model:not(.settings-model-unavailable):active { border-bottom-color: var(--accent-solid-hover); }
+.settings-models[data-kbd-active="true"] .settings-model:hover { border-bottom-color: var(--border-subtle); }
 .settings-workspace .settings-model:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .settings-workspace .settings-models[data-kbd-overlay="true"] .settings-model:focus-visible { box-shadow: none; }
 .settings-model-main { display: flex; align-items: baseline; gap: var(--space-component); flex: 1; min-width: 0; }
@@ -162,10 +160,9 @@
 .settings-model-arrow:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .settings-models[data-kbd-active="true"] .settings-model-arrow:focus-visible { box-shadow: none; }
 .settings-model[data-dragging="true"] { opacity: 0.45; }
-.settings-models-toggle { position: relative; display: flex; align-items: center; gap: 6px; width: calc(100% + 24px); height: 44px; margin-inline: -12px; padding-inline: 12px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--text-secondary); font-size: var(--font-ui); line-height: var(--line-ui); cursor: default; transition: background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out); }
-.settings-models-toggle::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1px; background: var(--border-subtle); pointer-events: none; }
-.settings-models-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
-.settings-models-toggle:active { background: var(--bg-active-press); }
+.settings-models-toggle { display: flex; align-items: center; gap: 6px; width: 100%; height: 44px; padding: 0; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-secondary); font-size: var(--font-ui); line-height: var(--line-ui); cursor: default; transition: border-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out); }
+.settings-models-toggle:hover { border-bottom-color: var(--accent-solid); color: var(--text-primary); }
+.settings-models-toggle:active { border-bottom-color: var(--accent-solid-hover); }
 .settings-models-toggle:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 
 .settings-model-card[data-expanded="true"] .settings-model:nth-child(n+7), .settings-service-card[data-expanded="true"] .settings-service-row:nth-child(n+7) { animation: settings-row-in var(--fast) var(--ease-out) both; }
@@ -273,7 +270,7 @@
   .settings-page-heading { gap: var(--space-component); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .settings-advanced-trigger svg, .settings-nav-link, .settings-back, .settings-inline-action, .settings-chip { transition: none; }
+  .settings-advanced-trigger svg, .settings-nav-link, .settings-back, .settings-inline-action, .settings-chip, .settings-service-row, .settings-model, .settings-models-toggle { transition: none; }
   .settings-model-card[data-expanded="true"] .settings-model:nth-child(n+7), .settings-service-card[data-expanded="true"] .settings-service-row:nth-child(n+7), ::view-transition-old(settings-page), ::view-transition-new(settings-page) { animation: none; }
   .app-layout[data-view-transitions="false"] .settings-workspace[data-settings-slide] .settings-route { animation: none; }
 }

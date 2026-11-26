@@ -30,7 +30,7 @@ export default function AddModelService() {
 				<>
 					{!query.trim() && (
 						<div className="settings-flat-list">
-							<div className="settings-flat-row">
+							<div className="settings-flat-row settings-service-row settings-service-row--compact">
 								<div className="settings-row-inline">
 									<span className="settings-service-name">自定义提供商</span>
 									<span className="settings-description">兼容 OpenAI / Anthropic / Gemini API</span>

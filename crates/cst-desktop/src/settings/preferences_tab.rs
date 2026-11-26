@@ -1667,7 +1667,7 @@ impl Render for PreferencesTabView {
                     self.visible_row_ids
                         .iter()
                         .position(|x| x == id)
-                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(8.0))
+                        .map(|idx| KbdDynamicSpec::row(format!("pref-row-{idx}")).with_radius(4.0))
                 })
             })
             .flatten();
@@ -1703,395 +1703,379 @@ impl Render for PreferencesTabView {
             let viewport_h = px((display_row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32)
                 * PREF_LIST_ROW_HEIGHT_PX);
             list_body = list_body.child(
-                div().mx(px(-12.0)).flex_shrink_0().child(
-                    uniform_list(
-                        "pref-models-virtual-list",
-                        display_row_count,
-                        cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
-                            range
-                                .map(|vis_idx| {
-                                    let tr = this.list_tracker.clone();
-                                    let row_track_key =
-                                        SharedString::from(format!("pref-row-{vis_idx}"));
-                                    let kbd_active = this.list_kbd_active;
-                                    match &rows_arc[vis_idx] {
-                                        PrefRowItem::Enabled {
-                                            ordered_idx,
+                uniform_list(
+                    "pref-models-virtual-list",
+                    display_row_count,
+                    cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
+                        range
+                            .map(|vis_idx| {
+                                let tr = this.list_tracker.clone();
+                                let row_track_key =
+                                    SharedString::from(format!("pref-row-{vis_idx}"));
+                                let kbd_active = this.list_kbd_active;
+                                match &rows_arc[vis_idx] {
+                                    PrefRowItem::Enabled {
+                                        ordered_idx,
+                                        full_id,
+                                        provider,
+                                        name,
+                                    } => {
+                                        let idx = *ordered_idx;
+                                        let can_move_up = vis_idx > 0;
+                                        let can_move_down =
+                                            vis_idx + 1 < this.visible_enabled_indices.len();
+                                        let fid_chk = full_id.clone();
+                                        let fid_select = full_id.clone();
+                                        let selected =
+                                            this.selected_row_id.as_ref() == Some(full_id);
+                                        let row_id =
+                                            SharedString::from(format!("pref-enabled-row-{idx}"));
+                                        let chk_id = SharedString::from(format!(
+                                            "pref-toggle-enabled-{idx}"
+                                        ));
+                                        let up_id =
+                                            SharedString::from(format!("pref-move-up-{idx}"));
+                                        let down_id =
+                                            SharedString::from(format!("pref-move-down-{idx}"));
+                                        let flip_y = motion::flip_row_offset_y_with_duration(
+                                            "pref-enabled-models",
                                             full_id,
-                                            provider,
-                                            name,
-                                        } => {
-                                            let idx = *ordered_idx;
-                                            let can_move_up = vis_idx > 0;
-                                            let can_move_down =
-                                                vis_idx + 1 < this.visible_enabled_indices.len();
-                                            let fid_chk = full_id.clone();
-                                            let fid_select = full_id.clone();
-                                            let selected =
-                                                this.selected_row_id.as_ref() == Some(full_id);
-                                            let row_id = SharedString::from(format!(
-                                                "pref-enabled-row-{idx}"
-                                            ));
-                                            let chk_id = SharedString::from(format!(
-                                                "pref-toggle-enabled-{idx}"
-                                            ));
-                                            let up_id =
-                                                SharedString::from(format!("pref-move-up-{idx}"));
-                                            let down_id =
-                                                SharedString::from(format!("pref-move-down-{idx}"));
-                                            let flip_y = motion::flip_row_offset_y_with_duration(
-                                                "pref-enabled-models",
-                                                full_id,
-                                                &flip_scope,
-                                                px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
-                                                motion::FAST,
-                                                window,
-                                                cx,
-                                            );
-                                            let row = div()
-                                                .id(row_id.clone())
-                                                .test_support()
-                                                .relative()
-                                                .top(flip_y)
-                                                .a11y_listitem(
-                                                    row_id,
-                                                    format!("{name}（{provider}）"),
-                                                    selected,
-                                                )
-                                                .w_full()
-                                                .h(px(PREF_LIST_ROW_HEIGHT_PX - 4.0))
-                                                .my(px(2.0))
-                                                .px(px(12.0))
-                                                .rounded(radius::ROW)
-                                                .flex()
-                                                .items_center()
-                                                .gap(space::MD)
-                                                .hover(move |s| {
-                                                    if kbd_active {
-                                                        s
-                                                    } else {
-                                                        s.bg(palette.bg_item_hover)
-                                                    }
-                                                })
-                                                .active(|s| s.bg(palette.bg_active_press))
-                                                .on_click(cx.listener(move |this, _, w, cx| {
-                                                    this.selected_row_id = Some(fid_select.clone());
-                                                    this.list_kbd_active = false;
-                                                    this.focus_handle.focus(w, cx);
-                                                    cx.notify();
-                                                }))
-                                                .on_prepaint(move |bounds, _, _| {
-                                                    tr.set(row_track_key.clone(), bounds);
-                                                })
-                                                .child({
-                                                    let chk_mark = motion::animated_checkbox_mark(
-                                                        format!("pref-chk-{full_id}"),
+                                            &flip_scope,
+                                            px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
+                                            motion::FAST,
+                                            window,
+                                            cx,
+                                        );
+                                        let (hovered, hover_state) = motion::hairline_hover_state(
+                                            format!("pref-enabled-{full_id}"),
+                                            window,
+                                            cx,
+                                        );
+                                        let hairline_color = motion::hairline_hover_color(
+                                            format!("pref-enabled-{full_id}"),
+                                            hovered && !kbd_active,
+                                            palette.border_subtle,
+                                            palette.accent_solid,
+                                            window,
+                                            cx,
+                                        );
+                                        div()
+                                            .id(row_id.clone())
+                                            .test_support()
+                                            .relative()
+                                            .top(flip_y)
+                                            .a11y_listitem(
+                                                row_id,
+                                                format!("{name}（{provider}）"),
+                                                selected,
+                                            )
+                                            .w_full()
+                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                            .border_b_1()
+                                            .border_color(hairline_color)
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::MD)
+                                            .active(|s| s.border_color(palette.accent_hover))
+                                            .on_hover(move |&is_hovered, _, cx| {
+                                                motion::PointerFlag::set(
+                                                    &hover_state,
+                                                    is_hovered,
+                                                    cx,
+                                                );
+                                            })
+                                            .on_click(cx.listener(move |this, _, w, cx| {
+                                                this.selected_row_id = Some(fid_select.clone());
+                                                this.list_kbd_active = false;
+                                                this.focus_handle.focus(w, cx);
+                                                cx.notify();
+                                            }))
+                                            .on_prepaint(move |bounds, _, _| {
+                                                tr.set(row_track_key.clone(), bounds);
+                                            })
+                                            .child({
+                                                let chk_mark = motion::animated_checkbox_mark(
+                                                    format!("pref-chk-{full_id}"),
+                                                    true,
+                                                    px(11.0),
+                                                    palette.text_on_accent,
+                                                    window,
+                                                    cx,
+                                                );
+                                                div()
+                                                    .id(chk_id.clone())
+                                                    .test_support()
+                                                    .a11y_checkbox(
+                                                        chk_id,
+                                                        format!("启用模型：{name}"),
                                                         true,
-                                                        px(11.0),
-                                                        palette.text_on_accent,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                    div()
-                                                        .id(chk_id.clone())
-                                                        .test_support()
-                                                        .a11y_checkbox(
-                                                            chk_id,
-                                                            format!("启用模型：{name}"),
-                                                            true,
-                                                        )
-                                                        .w(px(16.0))
-                                                        .h(px(16.0))
-                                                        .rounded(radius::CONTROL)
-                                                        .border_1()
-                                                        .border_color(palette.accent_solid)
-                                                        .bg(palette.accent_solid)
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .flex_shrink_0()
-                                                        .on_click(cx.listener(
-                                                            move |this, _, _, cx| {
-                                                                this.list_kbd_active = false;
-                                                                this.toggle_model_enabled(
-                                                                    fid_chk.clone(),
-                                                                    cx,
-                                                                );
-                                                                cx.stop_propagation();
-                                                            },
-                                                        ))
-                                                        .children(chk_mark)
-                                                })
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap(space::MD)
-                                                        .child(
-                                                            apply_scale(div(), scale::BODY)
-                                                                .truncate()
-                                                                .text_color(palette.text_primary)
-                                                                .child(SharedString::from(
-                                                                    name.clone(),
-                                                                )),
-                                                        )
-                                                        .child(
-                                                            apply_scale(div(), scale::CAPTION)
-                                                                .pt(px(2.0))
-                                                                .flex_shrink_0()
-                                                                .text_color(palette.text_muted)
-                                                                .child(SharedString::from(
-                                                                    provider.clone(),
-                                                                )),
-                                                        ),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_shrink_0()
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap(space::MICRO)
-                                                        .child(
-                                                            div()
-                                                                .id(up_id.clone())
-                                                                .test_support()
-                                                                .a11y_button(
-                                                                    up_id,
-                                                                    format!("上移模型：{name}"),
-                                                                )
-                                                                .w(height::COMPACT)
-                                                                .h(height::COMPACT)
-                                                                .rounded(radius::CONTROL)
-                                                                .opacity(if can_move_up {
-                                                                    1.0
+                                                    )
+                                                    .w(px(16.0))
+                                                    .h(px(16.0))
+                                                    .rounded(radius::CONTROL)
+                                                    .border_1()
+                                                    .border_color(palette.accent_solid)
+                                                    .bg(palette.accent_solid)
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .flex_shrink_0()
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.list_kbd_active = false;
+                                                        this.toggle_model_enabled(
+                                                            fid_chk.clone(),
+                                                            cx,
+                                                        );
+                                                        cx.stop_propagation();
+                                                    }))
+                                                    .children(chk_mark)
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(space::MD)
+                                                    .child(
+                                                        apply_scale(div(), scale::BODY)
+                                                            .truncate()
+                                                            .text_color(palette.text_primary)
+                                                            .child(SharedString::from(
+                                                                name.clone(),
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        apply_scale(div(), scale::CAPTION)
+                                                            .pt(px(2.0))
+                                                            .flex_shrink_0()
+                                                            .text_color(palette.text_muted)
+                                                            .child(SharedString::from(
+                                                                provider.clone(),
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(space::MICRO)
+                                                    .child(
+                                                        div()
+                                                            .id(up_id.clone())
+                                                            .test_support()
+                                                            .a11y_button(
+                                                                up_id,
+                                                                format!("上移模型：{name}"),
+                                                            )
+                                                            .w(height::COMPACT)
+                                                            .h(height::COMPACT)
+                                                            .rounded(radius::CONTROL)
+                                                            .opacity(if can_move_up {
+                                                                1.0
+                                                            } else {
+                                                                0.35
+                                                            })
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .hover(move |s| {
+                                                                if can_move_up {
+                                                                    s.bg(palette.bg_item_hover)
                                                                 } else {
-                                                                    0.35
-                                                                })
-                                                                .flex()
-                                                                .items_center()
-                                                                .justify_center()
-                                                                .hover(move |s| {
-                                                                    if can_move_up {
-                                                                        s.bg(palette.bg_item_hover)
-                                                                    } else {
-                                                                        s
-                                                                    }
-                                                                })
-                                                                .active(move |s| {
-                                                                    if can_move_up {
-                                                                        s.bg(
-                                                                            palette.bg_active_press,
-                                                                        )
-                                                                    } else {
-                                                                        s
-                                                                    }
-                                                                })
-                                                                .on_click(cx.listener(
-                                                                    move |this, _, _, cx| {
-                                                                        this.list_kbd_active =
-                                                                            false;
-                                                                        if can_move_up {
-                                                                            this.move_enabled_row(
-                                                                                idx, -1, cx,
-                                                                            );
-                                                                        }
-                                                                        cx.stop_propagation();
-                                                                    },
-                                                                ))
-                                                                .child(
-                                                                    Icon::new(IconName::ArrowUp)
-                                                                        .size(px(13.0))
-                                                                        .text_color(
-                                                                            palette.text_secondary,
-                                                                        ),
-                                                                ),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .id(down_id.clone())
-                                                                .test_support()
-                                                                .a11y_button(
-                                                                    down_id,
-                                                                    format!("下移模型：{name}"),
-                                                                )
-                                                                .w(height::COMPACT)
-                                                                .h(height::COMPACT)
-                                                                .rounded(radius::CONTROL)
-                                                                .opacity(if can_move_down {
-                                                                    1.0
+                                                                    s
+                                                                }
+                                                            })
+                                                            .active(move |s| {
+                                                                if can_move_up {
+                                                                    s.bg(palette.bg_active_press)
                                                                 } else {
-                                                                    0.35
-                                                                })
-                                                                .flex()
-                                                                .items_center()
-                                                                .justify_center()
-                                                                .hover(move |s| {
-                                                                    if can_move_down {
-                                                                        s.bg(palette.bg_item_hover)
-                                                                    } else {
-                                                                        s
+                                                                    s
+                                                                }
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    this.list_kbd_active = false;
+                                                                    if can_move_up {
+                                                                        this.move_enabled_row(
+                                                                            idx, -1, cx,
+                                                                        );
                                                                     }
-                                                                })
-                                                                .active(move |s| {
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            ))
+                                                            .child(
+                                                                Icon::new(IconName::ArrowUp)
+                                                                    .size(px(13.0))
+                                                                    .text_color(
+                                                                        palette.text_secondary,
+                                                                    ),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .id(down_id.clone())
+                                                            .test_support()
+                                                            .a11y_button(
+                                                                down_id,
+                                                                format!("下移模型：{name}"),
+                                                            )
+                                                            .w(height::COMPACT)
+                                                            .h(height::COMPACT)
+                                                            .rounded(radius::CONTROL)
+                                                            .opacity(if can_move_down {
+                                                                1.0
+                                                            } else {
+                                                                0.35
+                                                            })
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .hover(move |s| {
+                                                                if can_move_down {
+                                                                    s.bg(palette.bg_item_hover)
+                                                                } else {
+                                                                    s
+                                                                }
+                                                            })
+                                                            .active(move |s| {
+                                                                if can_move_down {
+                                                                    s.bg(palette.bg_active_press)
+                                                                } else {
+                                                                    s
+                                                                }
+                                                            })
+                                                            .on_click(cx.listener(
+                                                                move |this, _, _, cx| {
+                                                                    this.list_kbd_active = false;
                                                                     if can_move_down {
-                                                                        s.bg(
-                                                                            palette.bg_active_press,
-                                                                        )
-                                                                    } else {
-                                                                        s
+                                                                        this.move_enabled_row(
+                                                                            idx, 1, cx,
+                                                                        );
                                                                     }
-                                                                })
-                                                                .on_click(cx.listener(
-                                                                    move |this, _, _, cx| {
-                                                                        this.list_kbd_active =
-                                                                            false;
-                                                                        if can_move_down {
-                                                                            this.move_enabled_row(
-                                                                                idx, 1, cx,
-                                                                            );
-                                                                        }
-                                                                        cx.stop_propagation();
-                                                                    },
-                                                                ))
-                                                                .child(
-                                                                    Icon::new(IconName::ArrowDown)
-                                                                        .size(px(13.0))
-                                                                        .text_color(
-                                                                            palette.text_secondary,
-                                                                        ),
-                                                                ),
-                                                        ),
-                                                );
-                                            div()
-                                                .relative()
-                                                .w_full()
-                                                .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                                .child(row)
-                                                .child(
-                                                    div()
-                                                        .absolute()
-                                                        .left(px(12.0))
-                                                        .right(px(12.0))
-                                                        .bottom_0()
-                                                        .h(px(1.0))
-                                                        .bg(palette.border_subtle),
-                                                )
-                                                .into_any_element()
-                                        }
-                                        PrefRowItem::Unchecked {
-                                            full_id,
-                                            provider,
-                                            name,
-                                        } => {
-                                            let fid_add = full_id.clone();
-                                            let unchk_id = SharedString::from(format!(
-                                                "pref-unchecked-{full_id}"
-                                            ));
-                                            let row = div()
-                                                .id(unchk_id.clone())
-                                                .test_support()
-                                                .a11y_checkbox(
-                                                    unchk_id,
-                                                    format!("启用模型：{name}（{provider}）"),
-                                                    false,
-                                                )
-                                                .w_full()
-                                                .h(px(PREF_LIST_ROW_HEIGHT_PX - 4.0))
-                                                .my(px(2.0))
-                                                .px(px(12.0))
-                                                .rounded(radius::ROW)
-                                                .flex()
-                                                .items_center()
-                                                .gap(space::MD)
-                                                .hover(move |s| {
-                                                    if kbd_active {
-                                                        s
-                                                    } else {
-                                                        s.bg(palette.bg_item_hover)
-                                                    }
-                                                })
-                                                .active(|s| s.bg(palette.bg_active_press))
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.list_kbd_active = false;
-                                                    this.toggle_model_enabled(fid_add.clone(), cx);
-                                                }))
-                                                .on_prepaint(move |bounds, _, _| {
-                                                    tr.set(row_track_key.clone(), bounds);
-                                                })
-                                                .child({
-                                                    let unchk_mark = motion::animated_checkbox_mark(
-                                                        format!("pref-chk-{full_id}"),
-                                                        false,
-                                                        px(11.0),
-                                                        palette.text_on_accent,
-                                                        window,
-                                                        cx,
-                                                    );
-                                                    div()
-                                                        .w(px(16.0))
-                                                        .h(px(16.0))
-                                                        .rounded(radius::CONTROL)
-                                                        .border_1()
-                                                        .border_color(palette.border_strong)
-                                                        .bg(palette.bg_workspace)
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .flex_shrink_0()
-                                                        .children(unchk_mark)
-                                                })
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap(space::MD)
-                                                        .child(
-                                                            apply_scale(div(), scale::BODY)
-                                                                .truncate()
-                                                                .text_color(palette.text_secondary)
-                                                                .child(SharedString::from(
-                                                                    name.clone(),
-                                                                )),
-                                                        )
-                                                        .child(
-                                                            apply_scale(div(), scale::CAPTION)
-                                                                .pt(px(2.0))
-                                                                .flex_shrink_0()
-                                                                .text_color(palette.text_muted)
-                                                                .child(SharedString::from(
-                                                                    provider.clone(),
-                                                                )),
-                                                        ),
-                                                );
-                                            div()
-                                                .relative()
-                                                .w_full()
-                                                .h(px(PREF_LIST_ROW_HEIGHT_PX))
-                                                .child(row)
-                                                .child(
-                                                    div()
-                                                        .absolute()
-                                                        .left(px(12.0))
-                                                        .right(px(12.0))
-                                                        .bottom_0()
-                                                        .h(px(1.0))
-                                                        .bg(palette.border_subtle),
-                                                )
-                                                .into_any_element()
-                                        }
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            ))
+                                                            .child(
+                                                                Icon::new(IconName::ArrowDown)
+                                                                    .size(px(13.0))
+                                                                    .text_color(
+                                                                        palette.text_secondary,
+                                                                    ),
+                                                            ),
+                                                    ),
+                                            )
+                                            .into_any_element()
                                     }
-                                })
-                                .collect()
-                        }),
-                    )
-                    .track_scroll(&self.list_scroll)
-                    .w_full()
-                    .h(viewport_h),
-                ),
+                                    PrefRowItem::Unchecked {
+                                        full_id,
+                                        provider,
+                                        name,
+                                    } => {
+                                        let fid_add = full_id.clone();
+                                        let unchk_id =
+                                            SharedString::from(format!("pref-unchecked-{full_id}"));
+                                        let (hovered, hover_state) = motion::hairline_hover_state(
+                                            format!("pref-unchecked-{full_id}"),
+                                            window,
+                                            cx,
+                                        );
+                                        let hairline_color = motion::hairline_hover_color(
+                                            format!("pref-unchecked-{full_id}"),
+                                            hovered && !kbd_active,
+                                            palette.border_subtle,
+                                            palette.accent_solid,
+                                            window,
+                                            cx,
+                                        );
+                                        div()
+                                            .id(unchk_id.clone())
+                                            .test_support()
+                                            .a11y_checkbox(
+                                                unchk_id,
+                                                format!("启用模型：{name}（{provider}）"),
+                                                false,
+                                            )
+                                            .w_full()
+                                            .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                            .border_b_1()
+                                            .border_color(hairline_color)
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::MD)
+                                            .active(|s| s.border_color(palette.accent_hover))
+                                            .on_hover(move |&is_hovered, _, cx| {
+                                                motion::PointerFlag::set(
+                                                    &hover_state,
+                                                    is_hovered,
+                                                    cx,
+                                                );
+                                            })
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.list_kbd_active = false;
+                                                this.toggle_model_enabled(fid_add.clone(), cx);
+                                            }))
+                                            .on_prepaint(move |bounds, _, _| {
+                                                tr.set(row_track_key.clone(), bounds);
+                                            })
+                                            .child({
+                                                let unchk_mark = motion::animated_checkbox_mark(
+                                                    format!("pref-chk-{full_id}"),
+                                                    false,
+                                                    px(11.0),
+                                                    palette.text_on_accent,
+                                                    window,
+                                                    cx,
+                                                );
+                                                div()
+                                                    .w(px(16.0))
+                                                    .h(px(16.0))
+                                                    .rounded(radius::CONTROL)
+                                                    .border_1()
+                                                    .border_color(palette.border_strong)
+                                                    .bg(palette.bg_workspace)
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .flex_shrink_0()
+                                                    .children(unchk_mark)
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(space::MD)
+                                                    .child(
+                                                        apply_scale(div(), scale::BODY)
+                                                            .truncate()
+                                                            .text_color(palette.text_secondary)
+                                                            .child(SharedString::from(
+                                                                name.clone(),
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        apply_scale(div(), scale::CAPTION)
+                                                            .pt(px(2.0))
+                                                            .flex_shrink_0()
+                                                            .text_color(palette.text_muted)
+                                                            .child(SharedString::from(
+                                                                provider.clone(),
+                                                            )),
+                                                    ),
+                                            )
+                                            .into_any_element()
+                                    }
+                                }
+                            })
+                            .collect()
+                    }),
+                )
+                .track_scroll(&self.list_scroll)
+                .w_full()
+                .h(viewport_h),
             );
             if can_collapse_models {
                 let expanded = self.models_expanded;
@@ -2100,59 +2084,63 @@ impl Render for PreferencesTabView {
                 } else {
                     SharedString::from(format!("查看全部模型（{total_matching_rows}）"))
                 };
+                let (expand_hovered, expand_hover_state) =
+                    motion::hairline_hover_state("pref-expand-models", window, cx);
+                let expand_border = motion::hairline_hover_color(
+                    "pref-expand-models",
+                    expand_hovered,
+                    palette.border_subtle,
+                    palette.accent_solid,
+                    window,
+                    cx,
+                );
                 list_body = list_body.child(
-                    div()
+                    apply_scale(div(), scale::UI)
+                        .id("pref-toggle-expand-models-btn")
+                        .test_support()
+                        .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
+                        .tab_index(0)
                         .w_full()
                         .h(height::HEADER)
                         .border_b_1()
-                        .border_color(palette.border_subtle)
+                        .border_color(expand_border)
+                        .text_color(palette.text_secondary)
                         .flex()
                         .items_center()
+                        .gap(space::SM)
+                        .hover(|s| s.text_color(palette.text_primary))
+                        .active(|s| {
+                            s.border_color(palette.accent_hover)
+                                .text_color(palette.text_primary)
+                        })
+                        .on_hover(move |&is_hovered, _, cx| {
+                            motion::PointerFlag::set(&expand_hover_state, is_hovered, cx);
+                        })
+                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                            if !ev.is_held
+                                && ev.keystroke.modifiers == gpui::Modifiers::default()
+                                && matches!(ev.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                cx.stop_propagation();
+                                this.models_expanded = !this.models_expanded;
+                                this.list_scroll = UniformListScrollHandle::new();
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.models_expanded = !this.models_expanded;
+                            this.list_scroll = UniformListScrollHandle::new();
+                            cx.notify();
+                        }))
+                        .child(cjk_inline_label(toggle_label))
                         .child(
-                            apply_scale(div(), scale::UI)
-                                .id("pref-toggle-expand-models-btn")
-                                .test_support()
-                                .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
-                                .tab_index(0)
-                                .flex_1()
-                                .mx(px(-12.0))
-                                .h(px(40.0))
-                                .px(px(12.0))
-                                .rounded(radius::ROW)
-                                .text_color(palette.text_secondary)
-                                .flex()
-                                .items_center()
-                                .gap(space::SM)
-                                .hover(|s| {
-                                    s.bg(palette.bg_item_hover).text_color(palette.text_primary)
-                                })
-                                .active(|s| s.bg(palette.bg_active_press))
-                                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                                    if !ev.is_held
-                                        && ev.keystroke.modifiers == gpui::Modifiers::default()
-                                        && matches!(ev.keystroke.key.as_str(), "enter" | "space")
-                                    {
-                                        cx.stop_propagation();
-                                        this.models_expanded = !this.models_expanded;
-                                        this.list_scroll = UniformListScrollHandle::new();
-                                        cx.notify();
-                                    }
-                                }))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.models_expanded = !this.models_expanded;
-                                    this.list_scroll = UniformListScrollHandle::new();
-                                    cx.notify();
-                                }))
-                                .child(cjk_inline_label(toggle_label))
-                                .child(
-                                    Icon::new(if expanded {
-                                        IconName::ChevronUp
-                                    } else {
-                                        IconName::ChevronRight
-                                    })
-                                    .size(px(14.0))
-                                    .text_color(palette.text_secondary),
-                                ),
+                            Icon::new(if expanded {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
                         ),
                 );
             }

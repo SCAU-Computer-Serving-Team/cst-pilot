@@ -594,8 +594,8 @@ export default function ModelPreferences() {
 										kbdActive && focusedRowId && listed.ids.includes(focusedRowId) ? focusedRowId : null
 									}
 									style={kbdStyle}
-									railPlacement="inside"
-									bracketOutset={2}
+									railPlacement="outside"
+									bracketOutset={4}
 								/>
 							</div>
 							{listed.hasMore && (

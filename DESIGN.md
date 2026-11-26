@@ -48,7 +48,7 @@
 
 界面骨架、母版复用与三档表面材质配方以 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 为准。静态设计稿与前端实现共同遵守以下结构与运行期保护规则：
 
-1. **亲密性与对齐脊线**：同级分组靠留白与 `1px` `$border-subtle` 细线区分，禁止卡片嵌套卡片。普通工具折叠组与卡内明细各缩进 `24px`，不再产生第三级缩进；垂直引导线起于状态图标或分支圆点正下方并连续延伸至末行；卡内数值列按最长标签左对齐。
+1. **亲密性与对齐脊线**：同级分组靠留白与 `1px` `$border-subtle` 细线区分，禁止卡片嵌套卡片。设置页等采用底部 `1px` 细线分隔的无框流式列表行，保持 `0..816px` 对齐脊线，鼠标悬停不铺灰色背景块，改为将底部 `1px` 细线沿 `150ms ease-out` 平滑过渡至 `$accent-solid`（按下为 `$accent-solid-hover`，减少动态下 `0ms` 瞬切）；浮层菜单项无底边细线，维持轻底悬停。普通工具折叠组与卡内明细各缩进 `24px`，不再产生第三级缩进；垂直引导线起于状态图标或分支圆点正下方并连续延伸至末行；卡内数值列按最长标签左对齐。
 2. **动态背景与毛玻璃**：主页与登录页背景对应 [blue-hour.glsl](design/asset/blue-hour.glsl)、[blue-sky.glsl](design/asset/blue-sky.glsl) 与 [night-sky.glsl](design/asset/night-sky.glsl)（配套调色板见 [design/asset/](design/asset/)），浮层毛玻璃对应 [frosted-glass.glsl](design/asset/frosted-glass.glsl)。常规聊天工作台、会话管理与设置页保持静态底面。
 3. **硬件诊断停帧与静态回退**：激活期间按显示器刷新率（60–240 Hz）垂直同步并保留 ClearType 亚像素锐度。离开动态页、窗口失焦或最小化、覆盖 `WebActive` 锁定层，以及执行 `sys(gpu)` / `sys(sensor)` 硬件采样期间立即冻结时间轴（`0 FPS`）。系统开启减少动态、处于远程桌面或使用软光栅及低特性级驱动时，回退单帧静态画面或 [blue-hour.css](design/asset/blue-hour.css) 与半透明实底浮层。
 

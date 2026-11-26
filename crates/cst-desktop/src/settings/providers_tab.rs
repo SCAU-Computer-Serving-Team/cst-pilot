@@ -1354,7 +1354,7 @@ impl Render for ProvidersTabView {
                         "add-row-{}",
                         self.list_selected_idx.min(total_kbd_items - 1)
                     ))
-                    .with_radius(8.0)
+                    .with_radius(4.0)
                 });
             let kbd_active = self.list_kbd_active;
             let search_focused = self
@@ -1365,80 +1365,68 @@ impl Render for ProvidersTabView {
             let search_focus_ent = self.add_search_input.clone();
 
             let tr_custom = self.list_tracker.clone();
+            let (custom_hovered, custom_hover_state) =
+                motion::hairline_hover_state("providers-add-custom", window, cx);
+            let custom_border = motion::hairline_hover_color(
+                "providers-add-custom",
+                custom_hovered && !kbd_active,
+                palette.border_subtle,
+                palette.accent_solid,
+                window,
+                cx,
+            );
             let custom_row = div()
-                .relative()
-                .mx(px(-12.0))
+                .id("providers-add-custom-row")
+                .test_support()
+                .a11y_button(
+                    "providers-add-custom-row",
+                    "自定义提供商，兼容 OpenAI / Anthropic / Gemini API",
+                )
+                .w_full()
                 .h(px(52.0))
+                .border_b_1()
+                .border_color(custom_border)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::LG)
+                .active(|s| s.border_color(palette.accent_hover))
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&custom_hover_state, is_hovered, cx);
+                })
+                .on_click(cx.listener(|this, _, w, cx| {
+                    this.list_kbd_active = false;
+                    this.open_new_custom_provider(w, cx);
+                }))
+                .on_prepaint(move |bounds, _, _| tr_custom.set("add-row-0", bounds))
                 .child(
                     div()
-                        .id("providers-add-custom-row")
-                        .test_support()
-                        .a11y_button(
-                            "providers-add-custom-row",
-                            "自定义提供商，兼容 OpenAI / Anthropic / Gemini API",
-                        )
-                        .w_full()
-                        .h(px(46.0))
-                        .my(px(3.0))
-                        .px(px(12.0))
-                        .rounded(radius::ROW)
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .gap(space::LG)
-                        .hover(move |s| {
-                            if kbd_active {
-                                s
-                            } else {
-                                s.bg(palette.bg_item_hover)
-                            }
-                        })
-                        .active(|s| s.bg(palette.bg_active_press))
-                        .on_click(cx.listener(|this, _, w, cx| {
-                            this.list_kbd_active = false;
-                            this.open_new_custom_provider(w, cx);
-                        }))
-                        .on_prepaint(move |bounds, _, _| tr_custom.set("add-row-0", bounds))
+                        .gap(space::MD)
+                        .min_w_0()
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::MD)
-                                .min_w_0()
-                                .child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(palette.text_primary)
-                                        .child("自定义提供商"),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .pt(px(2.0))
-                                        .truncate()
-                                        .text_color(palette.text_muted)
-                                        .child("兼容 OpenAI / Anthropic / Gemini API"),
-                                ),
+                            apply_scale(div(), scale::BODY)
+                                .text_color(palette.text_primary)
+                                .child("自定义提供商"),
                         )
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::XS)
-                                .flex_shrink_0()
-                                .text_color(palette.text_secondary)
-                                .child(
-                                    apply_scale(div(), scale::UI).child(cjk_inline_label("配置")),
-                                )
-                                .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                            apply_scale(div(), scale::CAPTION)
+                                .pt(px(2.0))
+                                .truncate()
+                                .text_color(palette.text_muted)
+                                .child("兼容 OpenAI / Anthropic / Gemini API"),
                         ),
                 )
                 .child(
                     div()
-                        .absolute()
-                        .bottom_0()
-                        .left(px(12.0))
-                        .right(px(12.0))
-                        .h(px(1.0))
-                        .bg(palette.border_subtle),
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .flex_shrink_0()
+                        .text_color(palette.text_secondary)
+                        .child(apply_scale(div(), scale::UI).child(cjk_inline_label("配置")))
+                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
                 );
 
             let mut avail_rows = div().w_full().flex().flex_col();
@@ -1462,88 +1450,70 @@ impl Render for ProvidersTabView {
                     } else {
                         "API Key"
                     };
+                    let (row_hovered, row_hover_state) =
+                        motion::hairline_hover_state(format!("providers-add-{pid}"), window, cx);
+                    let row_border = motion::hairline_hover_color(
+                        format!("providers-add-{pid}"),
+                        row_hovered && !kbd_active,
+                        palette.border_subtle,
+                        palette.accent_solid,
+                        window,
+                        cx,
+                    );
                     avail_rows = avail_rows.child(
                         div()
-                            .relative()
-                            .mx(px(-12.0))
+                            .id(row_id.clone())
+                            .test_support()
+                            .a11y_listitem(row_id, format!("{}（{auth_hint}）", prov.name), false)
+                            .w_full()
                             .h(px(48.0))
+                            .border_b_1()
+                            .border_color(row_border)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::LG)
+                            .active(|s| s.border_color(palette.accent_hover))
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
+                            })
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.list_kbd_active = false;
+                                this.select_provider(pid.clone(), w, cx);
+                            }))
+                            .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
                             .child(
                                 div()
-                                    .id(row_id.clone())
-                                    .test_support()
-                                    .a11y_listitem(
-                                        row_id,
-                                        format!("{}（{auth_hint}）", prov.name),
-                                        false,
-                                    )
-                                    .w_full()
-                                    .h(px(44.0))
-                                    .my(px(2.0))
-                                    .px(px(12.0))
-                                    .rounded(radius::ROW)
                                     .flex()
                                     .items_center()
-                                    .justify_between()
-                                    .gap(space::LG)
-                                    .hover(move |s| {
-                                        if kbd_active {
-                                            s
-                                        } else {
-                                            s.bg(palette.bg_item_hover)
-                                        }
-                                    })
-                                    .active(|s| s.bg(palette.bg_active_press))
-                                    .on_click(cx.listener(move |this, _, w, cx| {
-                                        this.list_kbd_active = false;
-                                        this.select_provider(pid.clone(), w, cx);
-                                    }))
-                                    .on_prepaint(move |bounds, _, _| {
-                                        tr.set(track_key.clone(), bounds)
-                                    })
+                                    .gap(space::MD)
+                                    .min_w_0()
                                     .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::MD)
-                                            .min_w_0()
-                                            .child(
-                                                apply_scale(div(), scale::BODY)
-                                                    .truncate()
-                                                    .text_color(palette.text_primary)
-                                                    .child(SharedString::from(prov.name.clone())),
-                                            )
-                                            .child(
-                                                apply_scale(div(), scale::CAPTION)
-                                                    .pt(px(2.0))
-                                                    .flex_shrink_0()
-                                                    .text_color(palette.text_muted)
-                                                    .child(auth_hint),
-                                            ),
+                                        apply_scale(div(), scale::BODY)
+                                            .truncate()
+                                            .text_color(palette.text_primary)
+                                            .child(SharedString::from(prov.name.clone())),
                                     )
                                     .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(space::XS)
+                                        apply_scale(div(), scale::CAPTION)
+                                            .pt(px(2.0))
                                             .flex_shrink_0()
-                                            .text_color(palette.text_secondary)
-                                            .child(
-                                                apply_scale(div(), scale::UI)
-                                                    .child(cjk_inline_label("连接")),
-                                            )
-                                            .child(
-                                                Icon::new(IconName::ChevronRight).size(px(14.0)),
-                                            ),
+                                            .text_color(palette.text_muted)
+                                            .child(auth_hint),
                                     ),
                             )
                             .child(
                                 div()
-                                    .absolute()
-                                    .bottom_0()
-                                    .left(px(12.0))
-                                    .right(px(12.0))
-                                    .h(px(1.0))
-                                    .bg(palette.border_subtle),
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::XS)
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .child(cjk_inline_label("连接")),
+                                    )
+                                    .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
                             ),
                     );
                 }
@@ -1554,55 +1524,50 @@ impl Render for ProvidersTabView {
                     } else {
                         SharedString::from(format!("查看全部提供商（{total_avail}）"))
                     };
+                    let (exp_hovered, exp_hover_state) =
+                        motion::hairline_hover_state("providers-add-expand", window, cx);
+                    let exp_border = motion::hairline_hover_color(
+                        "providers-add-expand",
+                        exp_hovered,
+                        palette.border_subtle,
+                        palette.accent_solid,
+                        window,
+                        cx,
+                    );
                     avail_rows = avail_rows.child(
-                        div()
-                            .relative()
-                            .mx(px(-12.0))
+                        apply_scale(div(), scale::UI)
+                            .id("providers-toggle-expand-btn")
+                            .test_support()
+                            .a11y_button("providers-toggle-expand-btn", toggle_label.clone())
+                            .w_full()
                             .h(height::HEADER)
+                            .border_b_1()
+                            .border_color(exp_border)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .hover(|s| s.text_color(palette.text_primary))
+                            .active(|s| {
+                                s.border_color(palette.accent_hover)
+                                    .text_color(palette.text_primary)
+                            })
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&exp_hover_state, is_hovered, cx);
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.providers_expanded = !this.providers_expanded;
+                                cx.notify();
+                            }))
+                            .child(cjk_inline_label(toggle_label))
                             .child(
-                                apply_scale(div(), scale::UI)
-                                    .id("providers-toggle-expand-btn")
-                                    .test_support()
-                                    .a11y_button(
-                                        "providers-toggle-expand-btn",
-                                        toggle_label.clone(),
-                                    )
-                                    .w_full()
-                                    .h(px(40.0))
-                                    .my(px(2.0))
-                                    .px(px(12.0))
-                                    .rounded(radius::ROW)
-                                    .text_color(palette.text_secondary)
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::SM)
-                                    .hover(|s| {
-                                        s.bg(palette.bg_item_hover).text_color(palette.text_primary)
-                                    })
-                                    .active(|s| s.bg(palette.bg_active_press))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.providers_expanded = !this.providers_expanded;
-                                        cx.notify();
-                                    }))
-                                    .child(cjk_inline_label(toggle_label))
-                                    .child(
-                                        Icon::new(if expanded {
-                                            IconName::ChevronUp
-                                        } else {
-                                            IconName::ChevronRight
-                                        })
-                                        .size(px(14.0))
-                                        .text_color(palette.text_secondary),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom_0()
-                                    .left(px(12.0))
-                                    .right(px(12.0))
-                                    .h(px(1.0))
-                                    .bg(palette.border_subtle),
+                                Icon::new(if expanded {
+                                    IconName::ChevronUp
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .size(px(14.0))
+                                .text_color(palette.text_secondary),
                             ),
                     );
                 }
@@ -1851,42 +1816,93 @@ impl Render for ProvidersTabView {
                         window,
                         cx,
                     );
+                    let (row_hovered, row_hover_state) = motion::hairline_hover_state(
+                        format!("provider-model-{full_id}"),
+                        window,
+                        cx,
+                    );
+                    let row_border = motion::hairline_hover_color(
+                        format!("provider-model-{full_id}"),
+                        is_configured && row_hovered,
+                        palette.border_subtle,
+                        palette.accent_solid,
+                        window,
+                        cx,
+                    );
                     model_rows = model_rows.child(
                         div()
-                            .relative()
-                            .mx(px(-12.0))
+                            .id(row_id)
+                            .w_full()
                             .h(px(52.0))
+                            .border_b_1()
+                            .border_color(row_border)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::MD)
+                            .active(move |s| {
+                                if is_configured {
+                                    s.border_color(palette.accent_hover)
+                                } else {
+                                    s
+                                }
+                            })
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if is_configured {
+                                    this.toggle_builtin_model_enabled(fid_row.clone(), cx);
+                                }
+                            }))
                             .child(
                                 div()
-                                    .id(row_id)
-                                    .w_full()
-                                    .h(px(46.0))
-                                    .my(px(3.0))
-                                    .px(px(12.0))
-                                    .rounded(radius::ROW)
+                                    .flex_1()
+                                    .min_w_0()
                                     .flex()
                                     .items_center()
-                                    .justify_between()
                                     .gap(space::MD)
-                                    .hover(move |s| {
-                                        if is_configured {
-                                            s.bg(palette.bg_item_hover)
-                                        } else {
-                                            s
-                                        }
-                                    })
-                                    .active(move |s| {
-                                        if is_configured {
-                                            s.bg(palette.bg_active_press)
-                                        } else {
-                                            s
-                                        }
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if is_configured {
-                                            this.toggle_builtin_model_enabled(fid_row.clone(), cx);
-                                        }
-                                    }))
+                                    .child(
+                                        div()
+                                            .id(chk_id.clone())
+                                            .test_support()
+                                            .a11y_checkbox(
+                                                chk_id,
+                                                SharedString::from(format!(
+                                                    "启用模型：{display_name}"
+                                                )),
+                                                is_enabled,
+                                            )
+                                            .w(px(16.0))
+                                            .h(px(16.0))
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .opacity(if is_configured { 1.0 } else { 0.45 })
+                                            .border_color(if is_enabled {
+                                                palette.accent_solid
+                                            } else {
+                                                palette.border_strong
+                                            })
+                                            .bg(if is_enabled {
+                                                palette.accent_solid
+                                            } else {
+                                                palette.bg_workspace
+                                            })
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .flex_shrink_0()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                if is_configured {
+                                                    this.toggle_builtin_model_enabled(
+                                                        fid_chk.clone(),
+                                                        cx,
+                                                    );
+                                                }
+                                                cx.stop_propagation();
+                                            }))
+                                            .children(chk_mark),
+                                    )
                                     .child(
                                         div()
                                             .flex_1()
@@ -1895,91 +1911,29 @@ impl Render for ProvidersTabView {
                                             .items_center()
                                             .gap(space::MD)
                                             .child(
-                                                div()
-                                                    .id(chk_id.clone())
-                                                    .test_support()
-                                                    .a11y_checkbox(
-                                                        chk_id,
-                                                        SharedString::from(format!(
-                                                            "启用模型：{display_name}"
-                                                        )),
-                                                        is_enabled,
-                                                    )
-                                                    .w(px(16.0))
-                                                    .h(px(16.0))
-                                                    .rounded(radius::CONTROL)
-                                                    .border_1()
-                                                    .opacity(if is_configured { 1.0 } else { 0.45 })
-                                                    .border_color(if is_enabled {
-                                                        palette.accent_solid
+                                                apply_scale(div(), scale::BODY)
+                                                    .truncate()
+                                                    .text_color(if is_enabled {
+                                                        palette.text_primary
                                                     } else {
-                                                        palette.border_strong
+                                                        palette.text_secondary
                                                     })
-                                                    .bg(if is_enabled {
-                                                        palette.accent_solid
-                                                    } else {
-                                                        palette.bg_workspace
-                                                    })
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .flex_shrink_0()
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if is_configured {
-                                                            this.toggle_builtin_model_enabled(
-                                                                fid_chk.clone(),
-                                                                cx,
-                                                            );
-                                                        }
-                                                        cx.stop_propagation();
-                                                    }))
-                                                    .children(chk_mark),
+                                                    .child(SharedString::from(display_name)),
                                             )
                                             .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(space::MD)
-                                                    .child(
-                                                        apply_scale(div(), scale::BODY)
-                                                            .truncate()
-                                                            .text_color(if is_enabled {
-                                                                palette.text_primary
-                                                            } else {
-                                                                palette.text_secondary
-                                                            })
-                                                            .child(SharedString::from(
-                                                                display_name,
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        apply_scale(div(), scale::CAPTION)
-                                                            .pt(px(2.0))
-                                                            .truncate()
-                                                            .text_color(palette.text_muted)
-                                                            .child(SharedString::from(
-                                                                m.id.clone(),
-                                                            )),
-                                                    ),
+                                                apply_scale(div(), scale::CAPTION)
+                                                    .pt(px(2.0))
+                                                    .truncate()
+                                                    .text_color(palette.text_muted)
+                                                    .child(SharedString::from(m.id.clone())),
                                             ),
-                                    )
-                                    .child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .flex_shrink_0()
-                                            .text_color(palette.text_muted)
-                                            .child(SharedString::from(ctx_spec)),
                                     ),
                             )
                             .child(
-                                div()
-                                    .absolute()
-                                    .bottom_0()
-                                    .left(px(12.0))
-                                    .right(px(12.0))
-                                    .h(px(1.0))
-                                    .bg(palette.border_subtle),
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_muted)
+                                    .child(SharedString::from(ctx_spec)),
                             ),
                     );
                 }
@@ -2372,96 +2326,86 @@ impl Render for ProvidersTabView {
                     ProviderListTarget::AddProvider => {
                         KbdDynamicSpec::control("cfg-row-add", KbdRailPlacement::BottomCenter)
                     }
-                    _ => KbdDynamicSpec::row(format!("cfg-row-{clamped_idx}")).with_radius(8.0),
+                    _ => KbdDynamicSpec::row(format!("cfg-row-{clamped_idx}")).with_radius(4.0),
                 }
             });
         let kbd_active = self.list_kbd_active;
         let tr_cstoa = self.list_tracker.clone();
+        let (cstoa_hovered, cstoa_hover_state) =
+            motion::hairline_hover_state("providers-cstoa-row", window, cx);
+        let cstoa_border = motion::hairline_hover_color(
+            "providers-cstoa-row",
+            cstoa_hovered && !kbd_active,
+            palette.border_subtle,
+            palette.accent_solid,
+            window,
+            cx,
+        );
 
         let mut rows_list = div().w_full().flex().flex_col().child(
             div()
-                .relative()
-                .mx(px(-12.0))
+                .id("providers-cstoa-pinned-card")
+                .test_support()
+                .w_full()
                 .h(px(64.0))
+                .border_b_1()
+                .border_color(cstoa_border)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::LG)
+                .active(|s| s.border_color(palette.accent_hover))
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&cstoa_hover_state, is_hovered, cx);
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.list_kbd_active = false;
+                    cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
+                        signed_in: cstoa_signed_in,
+                    });
+                }))
+                .on_prepaint(move |bounds, _, _| tr_cstoa.set("cfg-row-0", bounds))
                 .child(
                     div()
-                        .id("providers-cstoa-pinned-card")
-                        .test_support()
-                        .w_full()
-                        .h(px(58.0))
-                        .my(px(3.0))
-                        .px(px(12.0))
-                        .rounded(radius::ROW)
                         .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(space::LG)
-                        .hover(move |s| {
-                            if kbd_active {
-                                s
-                            } else {
-                                s.bg(palette.bg_item_hover)
-                            }
-                        })
-                        .active(|s| s.bg(palette.bg_active_press))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.list_kbd_active = false;
-                            cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
-                                signed_in: cstoa_signed_in,
-                            });
-                        }))
-                        .on_prepaint(move |bounds, _, _| tr_cstoa.set("cfg-row-0", bounds))
+                        .flex_col()
+                        .gap(space::MICRO)
+                        .min_w_0()
                         .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(space::MICRO)
-                                .min_w_0()
-                                .child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(palette.text_primary)
-                                        .child("计维CSTOA"),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .text_color(cstoa_meta_color)
-                                        .child(SharedString::from(cstoa_meta)),
-                                ),
+                            apply_scale(div(), scale::BODY)
+                                .text_color(palette.text_primary)
+                                .child("计维CSTOA"),
                         )
                         .child(
-                            div()
-                                .id("providers-cstoa-action-btn")
-                                .test_support()
-                                .a11y_button(
-                                    "providers-cstoa-action-btn",
-                                    if cstoa_signed_in {
-                                        "管理 计维CSTOA 账号"
-                                    } else {
-                                        "扫码登录 计维CSTOA"
-                                    },
-                                )
-                                .flex()
-                                .items_center()
-                                .gap(space::XS)
-                                .text_color(palette.text_secondary)
-                                .child(apply_scale(div(), scale::UI).child(cjk_inline_label(
-                                    if cstoa_signed_in {
-                                        "管理"
-                                    } else {
-                                        "扫码登录"
-                                    },
-                                )))
-                                .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(cstoa_meta_color)
+                                .child(SharedString::from(cstoa_meta)),
                         ),
                 )
                 .child(
                     div()
-                        .absolute()
-                        .bottom_0()
-                        .left(px(12.0))
-                        .right(px(12.0))
-                        .h(px(1.0))
-                        .bg(palette.border_subtle),
+                        .id("providers-cstoa-action-btn")
+                        .test_support()
+                        .a11y_button(
+                            "providers-cstoa-action-btn",
+                            if cstoa_signed_in {
+                                "管理 计维CSTOA 账号"
+                            } else {
+                                "扫码登录 计维CSTOA"
+                            },
+                        )
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .text_color(palette.text_secondary)
+                        .child(apply_scale(div(), scale::UI).child(cjk_inline_label(
+                            if cstoa_signed_in {
+                                "管理"
+                            } else {
+                                "扫码登录"
+                            },
+                        )))
+                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
                 ),
         );
 
@@ -2477,88 +2421,73 @@ impl Render for ProvidersTabView {
             };
             let row_id = SharedString::from(format!("provider-row-{pid}"));
             let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
+            let (row_hovered, row_hover_state) =
+                motion::hairline_hover_state(format!("provider-cfg-{pid}"), window, cx);
+            let row_border = motion::hairline_hover_color(
+                format!("provider-cfg-{pid}"),
+                row_hovered && !kbd_active,
+                palette.border_subtle,
+                palette.accent_solid,
+                window,
+                cx,
+            );
             rows_list = rows_list.child(
                 div()
-                    .relative()
-                    .mx(px(-12.0))
+                    .id(row_id.clone())
+                    .test_support()
+                    .a11y_listitem(row_id, format!("{}（{status_label}）", prov.name), false)
+                    .w_full()
                     .h(px(64.0))
+                    .border_b_1()
+                    .border_color(row_border)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(space::LG)
+                    .active(|s| s.border_color(palette.accent_hover))
+                    .on_hover(move |&is_hovered, _, cx| {
+                        motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
+                    })
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.list_kbd_active = false;
+                        this.select_provider(pid.clone(), w, cx);
+                    }))
+                    .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
                     .child(
                         div()
-                            .id(row_id.clone())
-                            .test_support()
-                            .a11y_listitem(
-                                row_id,
-                                format!("{}（{status_label}）", prov.name),
-                                false,
-                            )
-                            .w_full()
-                            .h(px(58.0))
-                            .my(px(3.0))
-                            .px(px(12.0))
-                            .rounded(radius::ROW)
                             .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(space::LG)
-                            .hover(move |s| {
-                                if kbd_active {
-                                    s
-                                } else {
-                                    s.bg(palette.bg_item_hover)
-                                }
-                            })
-                            .active(|s| s.bg(palette.bg_active_press))
-                            .on_click(cx.listener(move |this, _, w, cx| {
-                                this.list_kbd_active = false;
-                                this.select_provider(pid.clone(), w, cx);
-                            }))
-                            .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
+                            .flex_col()
+                            .gap(space::MICRO)
+                            .min_w_0()
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(space::MICRO)
-                                    .min_w_0()
-                                    .child(
-                                        apply_scale(div(), scale::BODY)
-                                            .text_color(palette.text_primary)
-                                            .child(SharedString::from(prov.name.clone())),
-                                    )
-                                    .child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .text_color(status_color)
-                                            .child(status_label),
-                                    ),
+                                apply_scale(div(), scale::BODY)
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(prov.name.clone())),
                             )
                             .child(
-                                div()
-                                    .id(manage_id.clone())
-                                    .test_support()
-                                    .a11y_button(manage_id, format!("{action_label} {}", prov.name))
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::XS)
-                                    .text_color(palette.text_secondary)
-                                    .on_click(cx.listener(move |this, _, w, cx| {
-                                        this.list_kbd_active = false;
-                                        this.select_provider(pid_btn.clone(), w, cx);
-                                        cx.stop_propagation();
-                                    }))
-                                    .child(
-                                        apply_scale(div(), scale::UI)
-                                            .child(cjk_inline_label(action_label)),
-                                    )
-                                    .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(status_color)
+                                    .child(status_label),
                             ),
                     )
                     .child(
                         div()
-                            .absolute()
-                            .bottom_0()
-                            .left(px(12.0))
-                            .right(px(12.0))
-                            .h(px(1.0))
-                            .bg(palette.border_subtle),
+                            .id(manage_id.clone())
+                            .test_support()
+                            .a11y_button(manage_id, format!("{action_label} {}", prov.name))
+                            .flex()
+                            .items_center()
+                            .gap(space::XS)
+                            .text_color(palette.text_secondary)
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.list_kbd_active = false;
+                                this.select_provider(pid_btn.clone(), w, cx);
+                                cx.stop_propagation();
+                            }))
+                            .child(
+                                apply_scale(div(), scale::UI).child(cjk_inline_label(action_label)),
+                            )
+                            .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
                     ),
             );
         }

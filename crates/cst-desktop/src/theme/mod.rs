@@ -769,6 +769,52 @@ pub mod motion {
         }
     }
 
+    /// Keyed hover flag for hairline list rows. Automatically clears when the window deactivates
+    /// without blocking background `WM_MOUSEMOVE` hit-testing.
+    pub(crate) fn hairline_hover_state(
+        id: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (bool, Entity<PointerFlag>) {
+        let state_id = SharedString::from(format!("hairline-hover-flag-{}", id.into()));
+        let state = window.use_keyed_state(
+            state_id,
+            cx,
+            |window, cx: &mut gpui::Context<PointerFlag>| PointerFlag {
+                active: false,
+                _activation: cx.observe_window_activation(window, |this, window, cx| {
+                    if !window.is_window_active() && this.active {
+                        this.active = false;
+                        cx.notify();
+                    }
+                }),
+            },
+        );
+        (state.read(cx).active, state)
+    }
+
+    /// Interruptible `150ms ease_out` hairline bottom-border accent color (`$border-subtle` <-> `$accent-solid`).
+    /// Snaps in `0ms` when `reduce_motion` is enabled and requests zero idle frames once settled.
+    pub fn hairline_hover_color(
+        id: impl Into<SharedString>,
+        hovered: bool,
+        rest_color: Hsla,
+        hover_color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Hsla {
+        let tid: TransitionId = SharedString::from(format!("hairline-hover-{}", id.into())).into();
+        let prog = transition(
+            tid,
+            if hovered { 1.0_f32 } else { 0.0 },
+            Transition::new(FAST).ease(ease_out()),
+            window,
+            cx,
+        )
+        .clamp(0.0, 1.0);
+        lerp_hsla(rest_color, hover_color, prog)
+    }
+
     pub(crate) fn icon_press_state(
         id: &str,
         window: &mut Window,
