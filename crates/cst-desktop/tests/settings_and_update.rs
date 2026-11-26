@@ -175,6 +175,10 @@ struct Step6MockState {
     update_phase: String,
     update_cancel_calls: usize,
     update_launch_bodies: Vec<Value>,
+    scoped_requests: Vec<Value>,
+    scoped_gate: Option<Arc<tokio::sync::Notify>>,
+    scoped_fail: bool,
+    enabled_models: Option<Vec<String>>,
 }
 
 impl Default for Step6MockState {
@@ -196,6 +200,10 @@ impl Default for Step6MockState {
             update_phase: "idle".into(),
             update_cancel_calls: 0,
             update_launch_bodies: Vec::new(),
+            scoped_requests: Vec::new(),
+            scoped_gate: None,
+            scoped_fail: false,
+            enabled_models: None,
         }
     }
 }
@@ -305,6 +313,18 @@ impl Step6MockBackend {
                                 Arc::clone(&guard.finish_compact)
                             };
                             gate.notified().await;
+                        }
+                        if method == "POST" && path == "/api/models/scoped" {
+                            let gate = {
+                                let mut guard = st.lock().unwrap();
+                                if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                    guard.scoped_requests.push(v);
+                                }
+                                guard.scoped_gate.clone()
+                            };
+                            if let Some(gate) = gate {
+                                gate.notified().await;
+                            }
                         }
                         let (status_line, resp_json) = {
                             let mut guard = st.lock().unwrap();
@@ -559,9 +579,36 @@ impl Step6MockBackend {
                                     "HTTP/1.1 200 OK",
                                     json!({ "supported": true, "provider": "cstoa", "unit": "credit", "balance": 8600.0 }),
                                 ),
+                                ("POST", "/api/models/scoped") => {
+                                    if guard.scoped_fail {
+                                        (
+                                            "HTTP/1.1 500 Internal Server Error",
+                                            json!({
+                                                "error": {
+                                                    "code": "internal_error",
+                                                    "message": "模拟保存模型范围失败"
+                                                }
+                                            }),
+                                        )
+                                    } else {
+                                        let patterns: Vec<String> = serde_json::from_str::<Value>(body_str)
+                                            .ok()
+                                            .and_then(|v| {
+                                                v.get("patterns").and_then(Value::as_array).map(|arr| {
+                                                    arr.iter()
+                                                        .filter_map(|item| item.as_str().map(str::to_owned))
+                                                        .collect()
+                                                })
+                                            })
+                                            .unwrap_or_default();
+                                        guard.enabled_models = Some(patterns.clone());
+                                        ("HTTP/1.1 200 OK", json!({ "enabled": patterns }))
+                                    }
+                                }
                                 ("GET", p) if p.starts_with("/api/models") => (
                                     "HTTP/1.1 200 OK",
                                     json!({
+                                        "enabled": guard.enabled_models,
                                         "models": [{
                                             "provider": "deepseek",
                                             "id": "deepseek-chat",
@@ -1756,4 +1803,120 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     assert_eq!(launch_bodies[0]["ui"], "desktop");
     assert_eq!(launch_bodies[0]["appPid"], self_id.pid);
     assert_eq!(launch_bodies[0]["appCreated"], self_id.created);
+}
+
+#[gpui_kit::test]
+async fn headless_settings_optimistic_model_toggle_coalescing_and_rollback(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = Step6MockBackend::start();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut st = backend.state.lock().unwrap();
+        st.credential_ready = true;
+        st.enabled_models = Some(vec!["deepseek/deepseek-chat".into()]);
+        st.scoped_gate = Some(Arc::clone(&gate));
+    }
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+    backend.rt().block_on(handle.refresh_models(None)).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    // 1. Built-in Provider Detail: immediate 0ms toggle while POST /api/models/scoped is blocked on gate,
+    //    plus lock-free rapid toggle back on before the first request completes.
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        shell.read(cx).settings_view().clone().update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::Providers, cx);
+        });
+        window.render_frame(cx);
+        window.click("provider-row-deepseek", cx);
+        window.render_frame(cx);
+
+        // First click: immediately updates `checked` to false on the same frame (0ms)
+        window.click("provider-model-chk-deepseek-chat", cx);
+        window.render_frame(cx);
+        assert!(
+            window.find("provider-model-chk-deepseek-chat").visible(),
+            "Checkbox remains interactive immediately after click"
+        );
+
+        // Rapid second click while first POST is still gated: must NOT be locked
+        window.click("provider-model-chk-deepseek-chat", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    // Wait for first gated request to arrive, then release gate so coalesced second state flushes
+    let st_ref = Arc::clone(&backend.state);
+    cx.wait_for(win_handle, Duration::from_secs(2), move |_, _| {
+        !st_ref.lock().unwrap().scoped_requests.is_empty()
+    })
+    .await;
+    {
+        backend.state.lock().unwrap().scoped_gate = None;
+    }
+    gate.notify_waiters();
+
+    let st_ref2 = Arc::clone(&backend.state);
+    cx.wait_for(win_handle, Duration::from_secs(2), move |_, _| {
+        st_ref2
+            .lock()
+            .unwrap()
+            .enabled_models
+            .as_ref()
+            .is_some_and(|v| v == &vec!["deepseek/deepseek-chat".to_owned()])
+    })
+    .await;
+
+    // 2. Model Preferences: verify deferred popovers open cleanly and rollback works on 500 error
+    {
+        backend.state.lock().unwrap().scoped_fail = true;
+    }
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.read(cx).settings_view().clone().update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::Preferences, cx);
+        });
+        window.render_frame(cx);
+
+        window.click("pref-default-model-trigger", cx);
+        window.render_frame(cx);
+        assert!(window.find("pref-default-model-popover").visible());
+        window.press("escape", cx);
+        window.render_frame(cx);
+
+        window.click("pref-filter-dropdown-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("pref-filter-popover").visible());
+        window.press("escape", cx);
+        window.render_frame(cx);
+
+        // Toggle model when server returns 500 -> should surface top error bar and roll back
+        window.click("pref-toggle-enabled-0", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("workspace-top-error-bar").is_some()
+    })
+    .await;
 }

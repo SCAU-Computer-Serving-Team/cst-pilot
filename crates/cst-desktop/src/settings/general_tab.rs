@@ -154,12 +154,14 @@ pub fn render_general_tab(
                     .test_support()
                     .a11y_button("settings-update-cancel-btn", "取消更新")
                     .h(height::COMPACT)
-                    .px(space::SM)
+                    .px(px(10.0))
+                    .mr(px(-10.0))
                     .rounded(radius::CONTROL)
                     .text_color(palette.text_secondary)
                     .flex()
                     .items_center()
                     .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .active(|s| s.bg(palette.bg_active_press))
                     .on_click(move |_, w, cx| (on_cancel_update)(w, cx))
                     .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
                     .child(cjk_inline_label("取消")),
@@ -183,12 +185,14 @@ pub fn render_general_tab(
             .test_support()
             .a11y_button("settings-update-action-btn", btn_label)
             .h(height::COMPACT)
-            .px(space::SM)
+            .px(px(10.0))
+            .mr(px(-10.0))
             .rounded(radius::CONTROL)
             .text_color(palette.text_primary)
             .flex()
             .items_center()
             .hover(|s| s.bg(palette.bg_item_hover))
+            .active(|s| s.bg(palette.bg_active_press))
             .on_click(move |_, w, cx| (on_check_or_open_update)(w, cx))
             .on_prepaint(move |bounds, _, _| tr_update_btn.set("gen-update", bounds))
             .child(cjk_inline_label(btn_label))
@@ -212,16 +216,16 @@ pub fn render_general_tab(
                 .flex_1()
                 .min_w_0()
                 .flex()
-                .items_end()
+                .items_center()
                 .gap(space::MD)
                 .child(
                     apply_scale(div(), scale::BODY)
                         .text_color(palette.text_primary)
-                        .child(cjk_inline_label(status_title)),
+                        .child(status_title),
                 )
                 .children((!status_detail.is_empty()).then(|| {
                     apply_scale(div(), scale::CAPTION)
-                        .pb(px(1.0))
+                        .pt(px(2.0))
                         .min_w_0()
                         .truncate()
                         .text_color(if phase == UpdatePhaseDto::Failed {
@@ -427,16 +431,16 @@ pub fn render_general_tab(
                 .child(
                     div()
                         .flex()
-                        .items_end()
+                        .items_center()
                         .gap(space::MD)
                         .child(
                             apply_scale(div(), scale::BODY_SEMIBOLD)
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label("软件更新")),
+                                .child("软件更新"),
                         )
                         .child(
                             apply_scale(div(), scale::CAPTION)
-                                .pb(px(1.0))
+                                .pt(px(2.0))
                                 .text_color(palette.text_muted)
                                 .child(SharedString::from(ver_badge)),
                         ),
@@ -519,6 +523,13 @@ fn light_chip_custom(
                 s
             } else {
                 s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+            }
+        })
+        .active(move |s| {
+            if active {
+                s
+            } else {
+                s.bg(palette.bg_active_press)
             }
         })
         .on_click(move |_, w, cx| on_click(w, cx))

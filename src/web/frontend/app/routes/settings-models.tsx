@@ -94,9 +94,9 @@ export default function ModelPreferences() {
 	}, [allIds.length, byId, canonicalOrder, catalogKey, displayOrderState]);
 	// 外部数据源变更（如刷新、其他端修改或保存失败回滚）时，同步对账到最新确认顺序。
 	const lastSelectionRef = useRef<string[] | null | undefined>(undefined);
-	const pendingReorderRef = useRef(false);
+	const pendingReorderCountRef = useRef(0);
 	useEffect(() => {
-		if (pendingReorderRef.current) return;
+		if (pendingReorderCountRef.current > 0) return;
 		if (lastSelectionRef.current !== selection) {
 			lastSelectionRef.current = selection;
 			setDisplayOrderState((prev) => {
@@ -151,44 +151,57 @@ export default function ModelPreferences() {
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
 	const allVisibleEnabled = visible.length > 0 && visible.every((id) => selection === null || selection.includes(id));
 
-	async function save(next: string[] | null, nextDisplayOrder?: string[]) {
-		if (!state.data || state.working) return;
-		const previousOrder = displayOrderState;
+	async function save(
+		nextOrFn: string[] | null | ((current: ModelsPayload) => string[] | null),
+		nextDisplayOrder?: string[],
+	) {
+		if (!state.data) return;
 		if (nextDisplayOrder) {
-			pendingReorderRef.current = true;
-			setDisplayOrderState({ baseSelection: next, baseCatalogKey: catalogKey, order: nextDisplayOrder });
+			pendingReorderCountRef.current++;
+			const resolvedNext = typeof nextOrFn === "function" ? nextOrFn(state.data) : nextOrFn;
+			setDisplayOrderState({ baseSelection: resolvedNext, baseCatalogKey: catalogKey, order: nextDisplayOrder });
 		}
-		const optimistic = { ...state.data, enabled: next };
-		const ok = await state.mutate(async (current) => {
-			const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
-				method: "POST",
-				body: { patterns: next ?? [], empty: next !== null && next.length === 0 },
-			});
-			return { ...current, enabled: result.enabled, unavailableEnabled: [] };
-		}, optimistic);
-		pendingReorderRef.current = false;
-		if (ok) {
-			feedback();
-		} else if (nextDisplayOrder) {
-			// 保存失败时同步回滚展示顺序，避免列表残留乐观位置。
-			setDisplayOrderState(previousOrder);
-		}
+		const ok = await state.mutateLatest(
+			(current) => {
+				const resolved = typeof nextOrFn === "function" ? nextOrFn(current) : nextOrFn;
+				return { ...current, enabled: resolved };
+			},
+			async (draft, confirmed) => {
+				const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
+					method: "POST",
+					body: { patterns: draft.enabled ?? [], empty: draft.enabled !== null && draft.enabled.length === 0 },
+				});
+				return { ...confirmed, enabled: result.enabled, unavailableEnabled: [] };
+			},
+			{
+				coalesceKey: "scope",
+				onRollback: () => {
+					if (nextDisplayOrder) setDisplayOrderState(null);
+				},
+			},
+		);
+		if (nextDisplayOrder) pendingReorderCountRef.current = Math.max(0, pendingReorderCountRef.current - 1);
+		if (ok) feedback();
 	}
 
 	async function saveDefault(model: ModelChoice) {
-		const ok = await state.mutate(async (current) => {
-			await apiJson("/api/models/default", {
-				method: "POST",
-				body: { provider: model.provider, modelId: model.id },
-			});
-			return { ...current, defaultModel: model, selected: model };
-		});
+		const ok = await state.mutateLatest(
+			(current) => ({ ...current, defaultModel: model, selected: model }),
+			async (draft, confirmed) => {
+				const target = draft.defaultModel;
+				await apiJson("/api/models/default", {
+					method: "POST",
+					body: { provider: target.provider, modelId: target.id },
+				});
+				return { ...confirmed, defaultModel: target, selected: target };
+			},
+			{ coalesceKey: "default" },
+		);
 		if (ok) feedback("已保存默认模型");
 		return ok;
 	}
 
 	function reorderByDelta(id: string, delta: -1 | 1) {
-		if (state.working) return;
 		const baseOrder = selection === null ? [...sorted] : [...selection];
 		const visPos = visibleEnabledOrder.indexOf(id);
 		if (visPos < 0) return;
@@ -237,7 +250,7 @@ export default function ModelPreferences() {
 			if ((event.target as HTMLElement)?.closest("button")) return;
 			event.preventDefault();
 			setKbdActive(true);
-			void save(toggleModel(selection, allIds, id));
+			void save((current) => toggleModel(current.enabled, current.models.map(fullId), id));
 			return;
 		}
 		const nextIdx = resolveListNavKey(
@@ -275,7 +288,7 @@ export default function ModelPreferences() {
 					<DefaultModelPicker
 						model={state.data.defaultModel}
 						models={state.data.catalog}
-						busy={state.working}
+						busy={false}
 						onSelect={saveDefault}
 					/>
 					<SettingsSection
@@ -286,20 +299,24 @@ export default function ModelPreferences() {
 								<button
 									type="button"
 									className="settings-inline-action"
-									disabled={state.working || !visible.length}
+									disabled={!visible.length}
 									onClick={() => {
 										if (allVisibleEnabled) {
-											void save(
-												normalizeScope(
-													(selection ?? allIds).filter((id) => !visible.includes(id)),
-													allIds,
-												),
-											);
+											void save((current) => {
+												const ids = current.models.map(fullId);
+												return normalizeScope(
+													(current.enabled ?? ids).filter((id) => !visible.includes(id)),
+													ids,
+												);
+											});
 										} else {
-											const merged = sorted.filter(
-												(id) => (selection ?? allIds).includes(id) || visible.includes(id),
-											);
-											void save(normalizeScope(merged, allIds));
+											void save((current) => {
+												const ids = current.models.map(fullId);
+												const merged = sorted.filter(
+													(id) => (current.enabled ?? ids).includes(id) || visible.includes(id),
+												);
+												return normalizeScope(merged, ids);
+											});
 										}
 									}}
 								>
@@ -308,7 +325,7 @@ export default function ModelPreferences() {
 								<button
 									type="button"
 									className="settings-inline-action"
-									disabled={state.working || state.loading}
+									disabled={state.loading}
 									onClick={() => void state.refresh()}
 								>
 									刷新
@@ -419,6 +436,7 @@ export default function ModelPreferences() {
 								role="listbox"
 								aria-label="启用模型列表"
 								ref={listRoot}
+								data-kbd-overlay="true"
 								data-kbd-active={kbdActive && focusedRowId !== null ? "true" : undefined}
 								onBlur={(event) => {
 									if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -447,14 +465,26 @@ export default function ModelPreferences() {
 											data-enabled={enabled ? "true" : "false"}
 											className="settings-model"
 											data-dragging={dragId === id || undefined}
-											draggable={enabled && !state.working}
+											draggable={enabled}
+											onClick={(event) => {
+												if (
+													(event.target as HTMLElement).closest(
+														".settings-check-box, label, input, button",
+													)
+												)
+													return;
+												setKbdActive(false);
+												void save((current) =>
+													toggleModel(current.enabled, current.models.map(fullId), id),
+												);
+											}}
 											onFocus={(event) => {
 												setFocusedRowId(id);
 												if (event.currentTarget.matches(":focus-visible")) setKbdActive(true);
 											}}
 											onKeyDown={(event) => handleRowKeyDown(event, id, idx, enabled)}
 											onDragStart={(event) => {
-												if (!enabled || state.working) {
+												if (!enabled) {
 													event.preventDefault();
 													return;
 												}
@@ -473,10 +503,14 @@ export default function ModelPreferences() {
 										>
 											<Checkbox
 												isSelected={enabled}
-												isDisabled={state.working}
 												aria-label={`启用 ${model.name}`}
 												className="settings-check-box"
-												onChange={() => void save(toggleModel(selection, allIds, id))}
+												onChange={() => {
+													setKbdActive(false);
+													void save((current) =>
+														toggleModel(current.enabled, current.models.map(fullId), id),
+													);
+												}}
 											>
 												<Checkbox.Content>
 													<Checkbox.Control>
@@ -509,11 +543,12 @@ export default function ModelPreferences() {
 													<button
 														type="button"
 														className="settings-model-arrow"
-														disabled={state.working || !canMoveUp}
+														disabled={!canMoveUp}
 														aria-label={`上移 ${model.name}`}
 														title="上移（Alt + ↑）"
 														onClick={(event) => {
 															event.stopPropagation();
+															setKbdActive(false);
 															reorderByDelta(id, -1);
 														}}
 													>
@@ -522,11 +557,12 @@ export default function ModelPreferences() {
 													<button
 														type="button"
 														className="settings-model-arrow"
-														disabled={state.working || !canMoveDown}
+														disabled={!canMoveDown}
 														aria-label={`下移 ${model.name}`}
 														title="下移（Alt + ↓）"
 														onClick={(event) => {
 															event.stopPropagation();
+															setKbdActive(false);
 															reorderByDelta(id, 1);
 														}}
 													>
@@ -558,8 +594,8 @@ export default function ModelPreferences() {
 										kbdActive && focusedRowId && listed.ids.includes(focusedRowId) ? focusedRowId : null
 									}
 									style={kbdStyle}
-									railPlacement="inside"
-									bracketOutset={2}
+									railPlacement="outside"
+									bracketOutset={4}
 								/>
 							</div>
 							{listed.hasMore && (

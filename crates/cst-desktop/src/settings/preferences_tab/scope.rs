@@ -22,13 +22,13 @@ struct OriginalRule {
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub(super) struct ModelScope {
+pub(in crate::settings) struct ModelScope {
     original: Vec<OriginalRule>,
     rows: Vec<ScopeRow>,
 }
 
 impl ModelScope {
-    pub(super) fn from_snapshot(snapshot: &ModelsSnapshot) -> Self {
+    pub(in crate::settings) fn from_snapshot(snapshot: &ModelsSnapshot) -> Self {
         if let Some(rules) = &snapshot.scope_rules {
             return Self::from_rules(rules);
         }
@@ -83,7 +83,7 @@ impl ModelScope {
         scope
     }
 
-    pub(super) fn patterns(&self) -> Vec<String> {
+    pub(in crate::settings) fn patterns(&self) -> Vec<String> {
         let mut patterns = Vec::new();
         let mut offset = 0;
         while offset < self.rows.len() {
@@ -115,7 +115,7 @@ impl ModelScope {
         patterns
     }
 
-    pub(super) fn model_rows(&self) -> impl Iterator<Item = (usize, &str)> {
+    pub(in crate::settings) fn model_rows(&self) -> impl Iterator<Item = (usize, &str)> {
         let mut seen = HashSet::new();
         self.rows
             .iter()
@@ -126,7 +126,7 @@ impl ModelScope {
             })
     }
 
-    pub(super) fn model_id_at(&self, index: usize) -> Option<&str> {
+    pub(in crate::settings) fn model_id_at(&self, index: usize) -> Option<&str> {
         self.rows.get(index)?.id.as_deref()
     }
 
@@ -138,13 +138,13 @@ impl ModelScope {
         });
     }
 
-    pub(super) fn toggle(&mut self, id: String) {
+    pub(in crate::settings) fn toggle(&mut self, id: String) {
         if !self.clear([id.as_str()]) {
             self.push(id);
         }
     }
 
-    pub(super) fn select(&mut self, ids: Vec<String>) -> bool {
+    pub(in crate::settings) fn select(&mut self, ids: Vec<String>) -> bool {
         let mut enabled: HashSet<String> = self.model_rows().map(|(_, id)| id.to_owned()).collect();
         let previous_len = self.rows.len();
         for id in ids {
@@ -155,7 +155,10 @@ impl ModelScope {
         self.rows.len() != previous_len
     }
 
-    pub(super) fn clear<'a>(&mut self, ids: impl IntoIterator<Item = &'a str>) -> bool {
+    pub(in crate::settings) fn clear<'a>(
+        &mut self,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) -> bool {
         let ids: HashSet<_> = ids.into_iter().collect();
         let previous_len = self.rows.len();
         self.rows
@@ -163,7 +166,7 @@ impl ModelScope {
         self.rows.len() != previous_len
     }
 
-    pub(super) fn swap(&mut self, a: usize, b: usize) -> bool {
+    pub(in crate::settings) fn swap(&mut self, a: usize, b: usize) -> bool {
         let (first, last) = (a.min(b), a.max(b));
         let Some(moving_later) = self.model_id_at(first).map(str::to_owned) else {
             return false;

@@ -30,8 +30,8 @@ export function useAnimatedHeight(revision: string | number) {
 		const duration = readDurationMs(node, "--duration-fast", 240);
 		const next = node.animate(
 			[
-				{ height: `${from}px`, overflow: "clip" },
-				{ height: `${to}px`, overflow: "clip" },
+				{ height: `${from}px`, overflowY: "clip" },
+				{ height: `${to}px`, overflowY: "clip" },
 			],
 			{
 				duration,

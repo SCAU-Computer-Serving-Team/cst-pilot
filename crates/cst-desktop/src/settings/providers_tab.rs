@@ -1,6 +1,9 @@
 mod editor;
 
-use cst_client::{ClientError, ClientHandle};
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use cst_client::{AccountStatusDto, ClientError, ClientHandle, ModelsSnapshot};
 use gpui::{KeyDownEvent, MouseDownEvent, MouseMoveEvent, Pixels, Point};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
@@ -15,6 +18,7 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::settings::preferences_tab::scope::ModelScope;
 use crate::theme::kbd_focus::{
     DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdMenuStep, KbdRailPlacement, KbdTone,
     pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
@@ -24,6 +28,35 @@ use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
 };
+
+pub(crate) fn format_cstoa_status(
+    account: Option<&AccountStatusDto>,
+    requires_login: bool,
+) -> (String, bool) {
+    let signed_in = account.is_some_and(|a| a.signed_in);
+    if signed_in && !requires_login {
+        let profile = account.map(|a| &a.profile);
+        let name = profile
+            .and_then(|p| p.name.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "--");
+        let student_id = profile
+            .and_then(|p| p.student_id.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "--");
+        let text = match (name, student_id) {
+            (Some(nm), Some(sid)) => format!("{nm}（{sid}） · 已登录"),
+            (Some(nm), None) => format!("{nm} · 已登录"),
+            (None, Some(sid)) => format!("{sid} · 已登录"),
+            (None, None) => "账号授权 · 已登录".to_owned(),
+        };
+        (text, false)
+    } else if requires_login {
+        ("凭据已失效，请重新登录".to_owned(), true)
+    } else {
+        ("账号授权 · 未登录".to_owned(), true)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomApiProtocol {
@@ -204,6 +237,12 @@ pub struct ProvidersTabView {
     key_error: Option<SharedString>,
     form_error: Option<SharedString>,
     providers_expanded: bool,
+    enabled_scope: ModelScope,
+    confirmed_scope: ModelScope,
+    observed_models: Option<Arc<ModelsSnapshot>>,
+    scope_saving: bool,
+    scope_pending: bool,
+    scope_revision: u64,
     page_slide: motion::PageSlide,
     _subscriptions: Vec<Subscription>,
 }
@@ -336,6 +375,12 @@ impl ProvidersTabView {
             key_error: None,
             form_error: None,
             providers_expanded: false,
+            enabled_scope: ModelScope::default(),
+            confirmed_scope: ModelScope::default(),
+            observed_models: None,
+            scope_saving: false,
+            scope_pending: false,
+            scope_revision: 0,
             page_slide: motion::PageSlide::default(),
             _subscriptions: subs,
         }
@@ -533,6 +578,7 @@ impl ProvidersTabView {
         let mut changed = false;
         if self.protocol_dropdown_open {
             self.protocol_dropdown_open = false;
+            self.protocol_kbd_active = false;
             changed = true;
         }
         if self.inline_token_edit.take().is_some() {
@@ -549,6 +595,7 @@ impl ProvidersTabView {
             return false;
         }
         self.protocol_dropdown_open = false;
+        self.protocol_kbd_active = false;
         cx.notify();
         true
     }
@@ -612,35 +659,175 @@ impl ProvidersTabView {
         self.form_error = None;
     }
 
-    fn toggle_builtin_model_enabled(&mut self, full_id: String, cx: &mut Context<Self>) {
+    pub(super) fn current_scope(&self) -> Option<ModelScope> {
+        (self.observed_models.is_some() || self.scope_saving || self.scope_pending)
+            .then(|| self.enabled_scope.clone())
+    }
+
+    pub(super) fn mirror_external_scope(&mut self, scope: ModelScope, cx: &mut Context<Self>) {
+        if self.scope_saving || self.scope_pending {
+            return;
+        }
+        if self.enabled_scope != scope {
+            self.enabled_scope = scope;
+            cx.notify();
+        }
+    }
+
+    fn sync_scope_from_snapshot(&mut self) {
+        if self.scope_saving || self.scope_pending {
+            return;
+        }
         let snap = self.client.snapshot();
         let Some(models) = snap.models.as_ref() else {
             return;
         };
-        let mut next: Vec<String> = match models.enabled.as_ref() {
-            Some(list) => list.clone(),
-            None => models
-                .models
-                .iter()
-                .filter(|m| m.credential_ready && m.catalog_present)
-                .map(|m| format!("{}/{}", m.provider, m.id))
-                .collect(),
-        };
-        if let Some(pos) = next.iter().position(|x| x == &full_id) {
-            next.remove(pos);
-        } else {
-            next.push(full_id);
+        if self
+            .observed_models
+            .as_ref()
+            .is_some_and(|old| Arc::ptr_eq(old, models))
+        {
+            return;
         }
+        self.observed_models = Some(models.clone());
+        let next = ModelScope::from_snapshot(models);
+        self.confirmed_scope = next.clone();
+        if next != self.enabled_scope {
+            self.enabled_scope = next;
+        }
+    }
+
+    fn compute_auto_default(
+        &self,
+        snap_models: Option<&ModelsSnapshot>,
+    ) -> Option<(String, String)> {
+        let ready_keys: HashSet<(&str, &str)> = snap_models
+            .into_iter()
+            .flat_map(|m| &m.models)
+            .filter(|m| m.credential_ready && m.catalog_present)
+            .map(|m| (m.provider.as_str(), m.id.as_str()))
+            .collect();
+        let enabled_pairs: Vec<(String, String)> = self
+            .enabled_scope
+            .model_rows()
+            .filter_map(|(_, full_id)| {
+                let (prov, mid) = full_id.split_once('/')?;
+                ready_keys
+                    .contains(&(prov, mid))
+                    .then(|| (prov.to_owned(), mid.to_owned()))
+            })
+            .collect();
+        let current_default = snap_models
+            .and_then(|m| m.default_model.as_ref())
+            .map(|d| (d.provider.clone(), d.id.clone()));
+        match (current_default, enabled_pairs.first()) {
+            (Some(cur), Some(first)) if !enabled_pairs.contains(&cur) => Some(first.clone()),
+            (None, Some(first)) => Some(first.clone()),
+            _ => None,
+        }
+    }
+
+    fn toggle_builtin_model_enabled(&mut self, full_id: String, cx: &mut Context<Self>) {
+        self.sync_scope_from_snapshot();
+        self.enabled_scope.toggle(full_id);
+        self.enqueue_scope_save(cx);
+    }
+
+    fn enqueue_scope_save(&mut self, cx: &mut Context<Self>) {
+        self.scope_revision = self.scope_revision.wrapping_add(1);
+        self.scope_pending = true;
+        cx.notify();
+
+        if self.scope_saving {
+            return;
+        }
+        self.scope_saving = true;
         let client = self.client.clone();
+
         cx.spawn(async move |weak, cx| {
-            let res = client.set_explicit_model_scope(next).await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |_, cx| {
-                if let Err(err) = res {
-                    cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+            loop {
+                let step = weak.update(cx, |this, _| {
+                    if !this.scope_pending {
+                        return None;
+                    }
+                    this.scope_pending = false;
+                    let rev = this.scope_revision;
+                    let scope_snapshot = this.enabled_scope.clone();
+                    let patterns = scope_snapshot.patterns();
+                    let snap = this.client.snapshot();
+                    let auto_default = this.compute_auto_default(snap.models.as_deref());
+                    Some((rev, scope_snapshot, patterns, auto_default))
+                });
+                let Ok(Some((rev, saved_scope, patterns, auto_default))) = step else {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.scope_saving = false;
+                        cx.notify();
+                    });
+                    break;
+                };
+
+                let res = client.set_explicit_model_scope(patterns).await;
+                let default_res = if res.is_ok() {
+                    if let Some((prov, mid)) = auto_default {
+                        Some(client.set_default_model(prov, mid).await)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let action = weak
+                    .update(cx, |this, cx| {
+                        if res.is_ok() {
+                            this.confirmed_scope = saved_scope;
+                        }
+                        if this.scope_pending || this.scope_revision != rev {
+                            return 1u8;
+                        }
+                        if let Err(err) = res {
+                            this.enabled_scope = this.confirmed_scope.clone();
+                            this.scope_saving = false;
+                            cx.emit(ProvidersTabEvent::ErrorMessage(format!(
+                                "保存启用模型范围失败，已自动回滚：{err}"
+                            )));
+                            cx.notify();
+                            return 0u8;
+                        }
+                        if let Some(Err(err)) = default_res {
+                            cx.emit(ProvidersTabEvent::ErrorMessage(format!(
+                                "同步默认模型失败：{err}"
+                            )));
+                        }
+                        2u8
+                    })
+                    .unwrap_or(0);
+
+                if action == 1 {
+                    continue;
                 }
-                cx.notify();
-            });
+                if action == 0 {
+                    break;
+                }
+
+                let refreshed = client.refresh_models(None).await.is_ok();
+                let again = weak
+                    .update(cx, |this, cx| {
+                        if this.scope_pending || this.scope_revision != rev {
+                            return true;
+                        }
+                        this.scope_saving = false;
+                        if refreshed {
+                            this.sync_scope_from_snapshot();
+                        }
+                        cx.notify();
+                        false
+                    })
+                    .unwrap_or(false);
+                if !again {
+                    break;
+                }
+            }
         })
         .detach();
     }
@@ -1048,29 +1235,44 @@ impl ProvidersTabView {
     fn render_back_bar(
         &self,
         palette: &DesktopPalette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let (hovered, hover_state) =
+            motion::hairline_hover_state("providers-back-to-list", window, cx);
+        let fg = motion::hairline_hover_color(
+            "providers-back-to-list",
+            hovered,
+            palette.text_secondary,
+            palette.text_primary,
+            window,
+            cx,
+        );
         div().w_full().flex().items_center().child(
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("providers-back-to-list-btn")
                 .test_support()
                 .a11y_button("providers-back-to-list-btn", "返回提供商列表")
+                .ml(px(-8.0))
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
-                .text_color(palette.text_secondary)
+                .text_color(fg)
                 .flex()
                 .items_center()
                 .gap(space::XS)
-                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                .hover(|s| s.bg(palette.bg_item_hover))
+                .active(|s| {
+                    s.bg(palette.bg_active_press)
+                        .text_color(palette.text_primary)
+                })
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&hover_state, is_hovered, cx);
+                })
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.return_to_provider_list(window, cx);
                 }))
-                .child(
-                    Icon::new(IconName::ArrowLeft)
-                        .size(px(14.0))
-                        .text_color(palette.text_secondary),
-                )
+                .child(Icon::new(IconName::ArrowLeft).size(px(14.0)).text_color(fg))
                 .child(cjk_inline_label("提供商")),
         )
     }
@@ -1078,6 +1280,7 @@ impl ProvidersTabView {
 
 impl Render for ProvidersTabView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_scope_from_snapshot();
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
@@ -1103,6 +1306,7 @@ impl Render for ProvidersTabView {
                     gpui::MouseButton::Left,
                     cx.listener(|this, _, _, cx| {
                         this.protocol_dropdown_open = false;
+                        this.protocol_kbd_active = false;
                         cx.notify();
                     }),
                 )
@@ -1112,11 +1316,11 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             apply_scale(div(), scale::TITLE)
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label("自定义提供商")),
+                                .child("自定义提供商"),
                         ),
                 )
                 .child(self.render_custom_provider_editor(mono_family, &palette, window, cx));
@@ -1174,6 +1378,18 @@ impl Render for ProvidersTabView {
             let search_focus_ent = self.add_search_input.clone();
 
             let tr_custom = self.list_tracker.clone();
+            let (custom_hovered, custom_hover_state) =
+                motion::hairline_hover_state("providers-add-custom", window, cx);
+            let custom_t = motion::hairline_hover_progress(
+                "providers-add-custom",
+                custom_hovered && !kbd_active,
+                window,
+                cx,
+            );
+            let custom_border =
+                motion::lerp_hsla(palette.border_subtle, palette.accent_solid, custom_t);
+            let custom_action_fg =
+                motion::lerp_hsla(palette.text_secondary, palette.text_primary, custom_t);
             let custom_row = div()
                 .id("providers-add-custom-row")
                 .test_support()
@@ -1184,36 +1400,34 @@ impl Render for ProvidersTabView {
                 .w_full()
                 .h(px(52.0))
                 .border_b_1()
-                .border_color(palette.border_subtle)
+                .border_color(custom_border)
                 .flex()
                 .items_center()
                 .justify_between()
                 .gap(space::LG)
-                .hover(move |s| {
-                    if kbd_active {
-                        s
-                    } else {
-                        s.bg(palette.bg_item_hover)
-                    }
+                .active(|s| s.border_color(palette.accent_hover))
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&custom_hover_state, is_hovered, cx);
                 })
                 .on_click(cx.listener(|this, _, w, cx| {
+                    this.list_kbd_active = false;
                     this.open_new_custom_provider(w, cx);
                 }))
                 .on_prepaint(move |bounds, _, _| tr_custom.set("add-row-0", bounds))
                 .child(
                     div()
                         .flex()
-                        .items_end()
+                        .items_center()
                         .gap(space::MD)
                         .min_w_0()
                         .child(
                             apply_scale(div(), scale::BODY)
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label("自定义提供商")),
+                                .child("自定义提供商"),
                         )
                         .child(
                             apply_scale(div(), scale::CAPTION)
-                                .pb(px(1.0))
+                                .pt(px(2.0))
                                 .truncate()
                                 .text_color(palette.text_muted)
                                 .child("兼容 OpenAI / Anthropic / Gemini API"),
@@ -1225,9 +1439,13 @@ impl Render for ProvidersTabView {
                         .items_center()
                         .gap(space::XS)
                         .flex_shrink_0()
-                        .text_color(palette.text_secondary)
+                        .text_color(custom_action_fg)
                         .child(apply_scale(div(), scale::UI).child(cjk_inline_label("配置")))
-                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(px(14.0))
+                                .text_color(custom_action_fg),
+                        ),
                 );
 
             let mut avail_rows = div().w_full().flex().flex_col();
@@ -1251,6 +1469,18 @@ impl Render for ProvidersTabView {
                     } else {
                         "API Key"
                     };
+                    let (row_hovered, row_hover_state) =
+                        motion::hairline_hover_state(format!("providers-add-{pid}"), window, cx);
+                    let row_t = motion::hairline_hover_progress(
+                        format!("providers-add-{pid}"),
+                        row_hovered && !kbd_active,
+                        window,
+                        cx,
+                    );
+                    let row_border =
+                        motion::lerp_hsla(palette.border_subtle, palette.accent_solid, row_t);
+                    let row_action_fg =
+                        motion::lerp_hsla(palette.text_secondary, palette.text_primary, row_t);
                     avail_rows = avail_rows.child(
                         div()
                             .id(row_id.clone())
@@ -1259,26 +1489,24 @@ impl Render for ProvidersTabView {
                             .w_full()
                             .h(px(48.0))
                             .border_b_1()
-                            .border_color(palette.border_subtle)
+                            .border_color(row_border)
                             .flex()
                             .items_center()
                             .justify_between()
                             .gap(space::LG)
-                            .hover(move |s| {
-                                if kbd_active {
-                                    s
-                                } else {
-                                    s.bg(palette.bg_item_hover)
-                                }
+                            .active(|s| s.border_color(palette.accent_hover))
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
                             })
                             .on_click(cx.listener(move |this, _, w, cx| {
+                                this.list_kbd_active = false;
                                 this.select_provider(pid.clone(), w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
                             .child(
                                 div()
                                     .flex()
-                                    .items_end()
+                                    .items_center()
                                     .gap(space::MD)
                                     .min_w_0()
                                     .child(
@@ -1289,7 +1517,7 @@ impl Render for ProvidersTabView {
                                     )
                                     .child(
                                         apply_scale(div(), scale::CAPTION)
-                                            .pb(px(1.0))
+                                            .pt(px(2.0))
                                             .flex_shrink_0()
                                             .text_color(palette.text_muted)
                                             .child(auth_hint),
@@ -1301,12 +1529,16 @@ impl Render for ProvidersTabView {
                                     .items_center()
                                     .gap(space::XS)
                                     .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
+                                    .text_color(row_action_fg)
                                     .child(
                                         apply_scale(div(), scale::UI)
                                             .child(cjk_inline_label("连接")),
                                     )
-                                    .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(px(14.0))
+                                            .text_color(row_action_fg),
+                                    ),
                             ),
                     );
                 }
@@ -1317,6 +1549,18 @@ impl Render for ProvidersTabView {
                     } else {
                         SharedString::from(format!("查看全部提供商（{total_avail}）"))
                     };
+                    let (exp_hovered, exp_hover_state) =
+                        motion::hairline_hover_state("providers-add-expand", window, cx);
+                    let exp_t = motion::hairline_hover_progress(
+                        "providers-add-expand",
+                        exp_hovered,
+                        window,
+                        cx,
+                    );
+                    let exp_border =
+                        motion::lerp_hsla(palette.border_subtle, palette.accent_solid, exp_t);
+                    let exp_fg =
+                        motion::lerp_hsla(palette.text_secondary, palette.text_primary, exp_t);
                     avail_rows = avail_rows.child(
                         apply_scale(div(), scale::UI)
                             .id("providers-toggle-expand-btn")
@@ -1325,12 +1569,18 @@ impl Render for ProvidersTabView {
                             .w_full()
                             .h(height::HEADER)
                             .border_b_1()
-                            .border_color(palette.border_subtle)
-                            .text_color(palette.text_secondary)
+                            .border_color(exp_border)
+                            .text_color(exp_fg)
                             .flex()
                             .items_center()
                             .gap(space::SM)
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .active(|s| {
+                                s.border_color(palette.accent_hover)
+                                    .text_color(palette.text_primary)
+                            })
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&exp_hover_state, is_hovered, cx);
+                            })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.providers_expanded = !this.providers_expanded;
                                 cx.notify();
@@ -1343,7 +1593,7 @@ impl Render for ProvidersTabView {
                                     IconName::ChevronRight
                                 })
                                 .size(px(14.0))
-                                .text_color(palette.text_secondary),
+                                .text_color(exp_fg),
                             ),
                     );
                 }
@@ -1404,7 +1654,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             div()
                                 .w_full()
@@ -1414,13 +1664,14 @@ impl Render for ProvidersTabView {
                                 .child(
                                     apply_scale(div(), scale::TITLE)
                                         .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("添加提供商")),
+                                        .child("添加提供商"),
                                 )
                                 .child(
                                     apply_scale(div(), scale::UI)
                                         .id("providers-add-refresh-btn")
                                         .test_support()
                                         .a11y_button("providers-add-refresh-btn", "更新模型")
+                                        .mr(px(-8.0))
                                         .h(height::COMPACT)
                                         .px(space::SM)
                                         .rounded(radius::CONTROL)
@@ -1432,6 +1683,7 @@ impl Render for ProvidersTabView {
                                             s.bg(palette.bg_item_hover)
                                                 .text_color(palette.text_primary)
                                         })
+                                        .active(|s| s.bg(palette.bg_active_press))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.trigger_refresh_models(cx);
                                         }))
@@ -1448,22 +1700,10 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .child(
-                            div()
-                                .flex()
-                                .items_end()
-                                .gap(space::SM)
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
                                 .mb(space::SM)
-                                .child(
-                                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                                        .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("可添加的提供商")),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .pb(px(1.0))
-                                        .text_color(palette.text_muted)
-                                        .child(SharedString::from(total_avail.to_string())),
-                                ),
+                                .text_color(palette.text_primary)
+                                .child("可添加的提供商"),
                         )
                         .child(
                             div()
@@ -1536,6 +1776,19 @@ impl Render for ProvidersTabView {
                 })
                 .unwrap_or_default();
             let total_models_count = all_provider_models.len();
+            let enabled_set: HashSet<String> = self
+                .enabled_scope
+                .model_rows()
+                .map(|(_, id)| id.to_owned())
+                .collect();
+            let enabled_in_provider = if is_configured {
+                all_provider_models
+                    .iter()
+                    .filter(|m| enabled_set.contains(&format!("{}/{}", m.provider, m.id)))
+                    .count()
+            } else {
+                0
+            };
             let catalog_models: Vec<_> = all_provider_models
                 .into_iter()
                 .filter(|mc| {
@@ -1544,11 +1797,6 @@ impl Render for ProvidersTabView {
                         || mc.name.to_lowercase().contains(&filter_q)
                 })
                 .collect();
-            let enabled_set: Option<std::collections::HashSet<String>> = snap
-                .models
-                .as_ref()
-                .and_then(|m| m.enabled.as_ref())
-                .map(|list| list.iter().cloned().collect());
 
             let url_focused = self
                 .base_url_input
@@ -1572,11 +1820,10 @@ impl Render for ProvidersTabView {
             } else {
                 for m in &catalog_models {
                     let full_id = format!("{}/{}", m.provider, m.id);
-                    let is_enabled = match &enabled_set {
-                        Some(set) => set.contains(&full_id),
-                        None => true,
-                    };
-                    let fid_toggle = full_id.clone();
+                    let is_enabled = is_configured && enabled_set.contains(&full_id);
+                    let fid_row = full_id.clone();
+                    let fid_chk = full_id.clone();
+                    let row_id = SharedString::from(format!("provider-model-row-{}", m.id));
                     let chk_id = SharedString::from(format!("provider-model-chk-{}", m.id));
                     let display_name = if m.name.trim().is_empty() {
                         m.id.clone()
@@ -1587,17 +1834,53 @@ impl Render for ProvidersTabView {
                         "{} 上下文",
                         format_token_window(m.context_window.unwrap_or(128_000))
                     );
+                    let chk_mark = motion::animated_checkbox_mark(
+                        format!("prov-chk-{full_id}"),
+                        is_enabled,
+                        px(11.0),
+                        palette.text_on_accent,
+                        window,
+                        cx,
+                    );
+                    let (row_hovered, row_hover_state) = motion::hairline_hover_state(
+                        format!("provider-model-{full_id}"),
+                        window,
+                        cx,
+                    );
+                    let row_border = motion::hairline_hover_color(
+                        format!("provider-model-{full_id}"),
+                        is_configured && row_hovered,
+                        palette.border_subtle,
+                        palette.accent_solid,
+                        window,
+                        cx,
+                    );
                     model_rows = model_rows.child(
                         div()
+                            .id(row_id)
                             .w_full()
                             .h(px(52.0))
                             .border_b_1()
-                            .border_color(palette.border_subtle)
+                            .border_color(row_border)
                             .flex()
                             .items_center()
                             .justify_between()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .active(move |s| {
+                                if is_configured {
+                                    s.border_color(palette.accent_hover)
+                                } else {
+                                    s
+                                }
+                            })
+                            .on_hover(move |&is_hovered, _, cx| {
+                                motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if is_configured {
+                                    this.toggle_builtin_model_enabled(fid_row.clone(), cx);
+                                }
+                            }))
                             .child(
                                 div()
                                     .flex_1()
@@ -1605,24 +1888,53 @@ impl Render for ProvidersTabView {
                                     .flex()
                                     .items_center()
                                     .gap(space::MD)
-                                    .child(capability_checkbox(
-                                        chk_id,
-                                        SharedString::from(format!("启用模型：{display_name}")),
-                                        is_enabled,
-                                        &palette,
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.toggle_builtin_model_enabled(
-                                                fid_toggle.clone(),
-                                                cx,
-                                            );
-                                        }),
-                                    ))
+                                    .child(
+                                        div()
+                                            .id(chk_id.clone())
+                                            .test_support()
+                                            .a11y_checkbox(
+                                                chk_id,
+                                                SharedString::from(format!(
+                                                    "启用模型：{display_name}"
+                                                )),
+                                                is_enabled,
+                                            )
+                                            .w(px(16.0))
+                                            .h(px(16.0))
+                                            .rounded(radius::CONTROL)
+                                            .border_1()
+                                            .opacity(if is_configured { 1.0 } else { 0.45 })
+                                            .border_color(if is_enabled {
+                                                palette.accent_solid
+                                            } else {
+                                                palette.border_strong
+                                            })
+                                            .bg(if is_enabled {
+                                                palette.accent_solid
+                                            } else {
+                                                palette.bg_workspace
+                                            })
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .flex_shrink_0()
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                if is_configured {
+                                                    this.toggle_builtin_model_enabled(
+                                                        fid_chk.clone(),
+                                                        cx,
+                                                    );
+                                                }
+                                                cx.stop_propagation();
+                                            }))
+                                            .children(chk_mark),
+                                    )
                                     .child(
                                         div()
                                             .flex_1()
                                             .min_w_0()
                                             .flex()
-                                            .items_end()
+                                            .items_center()
                                             .gap(space::MD)
                                             .child(
                                                 apply_scale(div(), scale::BODY)
@@ -1636,7 +1948,7 @@ impl Render for ProvidersTabView {
                                             )
                                             .child(
                                                 apply_scale(div(), scale::CAPTION)
-                                                    .pb(px(1.0))
+                                                    .pt(px(2.0))
                                                     .truncate()
                                                     .text_color(palette.text_muted)
                                                     .child(SharedString::from(m.id.clone())),
@@ -1652,14 +1964,6 @@ impl Render for ProvidersTabView {
                     );
                 }
             }
-
-            let enabled_in_provider = match &enabled_set {
-                Some(set) => catalog_models
-                    .iter()
-                    .filter(|m| set.contains(&format!("{}/{}", m.provider, m.id)))
-                    .count(),
-                None => catalog_models.len(),
-            };
 
             return div()
                 .id("settings-providers-tab")
@@ -1677,7 +1981,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .flex_col()
                         .gap(space::MD)
-                        .child(self.render_back_bar(&palette, cx))
+                        .child(self.render_back_bar(&palette, window, cx))
                         .child(
                             div()
                                 .flex()
@@ -1795,6 +2099,7 @@ impl Render for ProvidersTabView {
                                                 "保存密钥"
                                             },
                                         )
+                                        .mr(px(-8.0))
                                         .h(height::COMPACT)
                                         .px(space::SM)
                                         .rounded(radius::CONTROL)
@@ -1803,6 +2108,7 @@ impl Render for ProvidersTabView {
                                         .items_center()
                                         .flex_shrink_0()
                                         .hover(|s| s.bg(palette.bg_item_hover))
+                                        .active(|s| s.bg(palette.bg_active_press))
                                         .on_click(cx.listener(|this, _, w, cx| {
                                             this.save_builtin_api_key(w, cx);
                                         }))
@@ -1840,16 +2146,16 @@ impl Render for ProvidersTabView {
                                 .child(
                                     div()
                                         .flex()
-                                        .items_end()
+                                        .items_center()
                                         .gap(space::SM)
                                         .child(
                                             apply_scale(div(), scale::BODY_SEMIBOLD)
                                                 .text_color(palette.text_primary)
-                                                .child(cjk_inline_label("可用模型")),
+                                                .child("可用模型"),
                                         )
                                         .child(
                                             apply_scale(div(), scale::CAPTION)
-                                                .pb(px(1.0))
+                                                .pt(px(2.0))
                                                 .text_color(palette.text_muted)
                                                 .child(SharedString::from(format!(
                                                     "{enabled_in_provider} / {total_models_count}"
@@ -1858,6 +2164,7 @@ impl Render for ProvidersTabView {
                                 )
                                 .child(
                                     div()
+                                        .mr(px(-4.0))
                                         .flex()
                                         .items_center()
                                         .gap(space::XS)
@@ -1877,6 +2184,7 @@ impl Render for ProvidersTabView {
                                                 .items_center()
                                                 .justify_center()
                                                 .hover(|s| s.bg(palette.bg_item_hover))
+                                                .active(|s| s.bg(palette.bg_active_press))
                                                 .on_click(cx.listener(|this, _, w, cx| {
                                                     this.search_visible = !this.search_visible;
                                                     if this.search_visible {
@@ -1906,6 +2214,7 @@ impl Render for ProvidersTabView {
                                                 .items_center()
                                                 .justify_center()
                                                 .hover(|s| s.bg(palette.bg_item_hover))
+                                                .active(|s| s.bg(palette.bg_active_press))
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.trigger_refresh_models(cx);
                                                 }))
@@ -1998,24 +2307,25 @@ impl Render for ProvidersTabView {
         }
 
         // 4. Configured Providers List (`Q4QFim`) — frameless 64px hairline rows, no repeated H1
-        let cstoa_signed_in = snap.account.as_ref().is_some_and(|a| a.signed_in);
-        let (cstoa_meta, cstoa_meta_color) = if cstoa_signed_in {
-            let acc = snap.account.as_ref().unwrap();
-            let sid = acc.profile.student_id.as_deref().unwrap_or("--");
-            let nm = acc.profile.name.as_deref().unwrap_or("已登录");
-            (
-                format!("扫码登录 · 已就绪 · {nm}（{sid}）"),
-                palette.text_secondary,
-            )
-        } else {
-            ("扫码登录 · 未登录".to_owned(), palette.status_warning)
-        };
-
         let providers = snap
             .auth_providers
             .as_ref()
             .map(|p| p.as_slice())
             .unwrap_or(&[]);
+        let cstoa_requires_login = providers
+            .iter()
+            .find(|p| p.id == "cstoa")
+            .is_some_and(|p| p.requires_login);
+        let cstoa_signed_in =
+            snap.account.as_ref().is_some_and(|a| a.signed_in) && !cstoa_requires_login;
+        let (cstoa_meta, cstoa_warning) =
+            format_cstoa_status(snap.account.as_deref(), cstoa_requires_login);
+        let cstoa_meta_color = if cstoa_warning {
+            palette.status_warning
+        } else {
+            palette.text_secondary
+        };
+
         let configured_others: Vec<_> = providers
             .iter()
             .filter(|p| p.id != "cstoa" && (p.configured == Some(true) || p.requires_login))
@@ -2026,7 +2336,6 @@ impl Render for ProvidersTabView {
             Configured(String),
             AddProvider,
         }
-        let configured_total = 1 + configured_others.len();
         let kbd_targets: Vec<ProviderListTarget> = std::iter::once(ProviderListTarget::Cstoa)
             .chain(
                 configured_others
@@ -2048,6 +2357,17 @@ impl Render for ProvidersTabView {
             });
         let kbd_active = self.list_kbd_active;
         let tr_cstoa = self.list_tracker.clone();
+        let (cstoa_hovered, cstoa_hover_state) =
+            motion::hairline_hover_state("providers-cstoa-row", window, cx);
+        let cstoa_t = motion::hairline_hover_progress(
+            "providers-cstoa-row",
+            cstoa_hovered && !kbd_active,
+            window,
+            cx,
+        );
+        let cstoa_border = motion::lerp_hsla(palette.border_subtle, palette.accent_solid, cstoa_t);
+        let cstoa_action_fg =
+            motion::lerp_hsla(palette.text_secondary, palette.text_primary, cstoa_t);
 
         let mut rows_list = div().w_full().flex().flex_col().child(
             div()
@@ -2056,19 +2376,17 @@ impl Render for ProvidersTabView {
                 .w_full()
                 .h(px(64.0))
                 .border_b_1()
-                .border_color(palette.border_subtle)
+                .border_color(cstoa_border)
                 .flex()
                 .items_center()
                 .justify_between()
                 .gap(space::LG)
-                .hover(move |s| {
-                    if kbd_active {
-                        s
-                    } else {
-                        s.bg(palette.bg_item_hover)
-                    }
+                .active(|s| s.border_color(palette.accent_hover))
+                .on_hover(move |&is_hovered, _, cx| {
+                    motion::PointerFlag::set(&cstoa_hover_state, is_hovered, cx);
                 })
-                .on_click(cx.listener(move |_, _, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.list_kbd_active = false;
                     cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
                         signed_in: cstoa_signed_in,
                     });
@@ -2083,7 +2401,7 @@ impl Render for ProvidersTabView {
                         .child(
                             apply_scale(div(), scale::BODY)
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label("计维CSTOA")),
+                                .child("计维CSTOA"),
                         )
                         .child(
                             apply_scale(div(), scale::CAPTION)
@@ -2106,7 +2424,7 @@ impl Render for ProvidersTabView {
                         .flex()
                         .items_center()
                         .gap(space::XS)
-                        .text_color(palette.text_secondary)
+                        .text_color(cstoa_action_fg)
                         .child(apply_scale(div(), scale::UI).child(cjk_inline_label(
                             if cstoa_signed_in {
                                 "管理"
@@ -2114,7 +2432,11 @@ impl Render for ProvidersTabView {
                                 "扫码登录"
                             },
                         )))
-                        .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                        .child(
+                            Icon::new(IconName::ChevronRight)
+                                .size(px(14.0))
+                                .text_color(cstoa_action_fg),
+                        ),
                 ),
         );
 
@@ -2130,6 +2452,17 @@ impl Render for ProvidersTabView {
             };
             let row_id = SharedString::from(format!("provider-row-{pid}"));
             let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
+            let (row_hovered, row_hover_state) =
+                motion::hairline_hover_state(format!("provider-cfg-{pid}"), window, cx);
+            let row_t = motion::hairline_hover_progress(
+                format!("provider-cfg-{pid}"),
+                row_hovered && !kbd_active,
+                window,
+                cx,
+            );
+            let row_border = motion::lerp_hsla(palette.border_subtle, palette.accent_solid, row_t);
+            let row_action_fg =
+                motion::lerp_hsla(palette.text_secondary, palette.text_primary, row_t);
             rows_list = rows_list.child(
                 div()
                     .id(row_id.clone())
@@ -2138,19 +2471,17 @@ impl Render for ProvidersTabView {
                     .w_full()
                     .h(px(64.0))
                     .border_b_1()
-                    .border_color(palette.border_subtle)
+                    .border_color(row_border)
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(space::LG)
-                    .hover(move |s| {
-                        if kbd_active {
-                            s
-                        } else {
-                            s.bg(palette.bg_item_hover)
-                        }
+                    .active(|s| s.border_color(palette.accent_hover))
+                    .on_hover(move |&is_hovered, _, cx| {
+                        motion::PointerFlag::set(&row_hover_state, is_hovered, cx);
                     })
                     .on_click(cx.listener(move |this, _, w, cx| {
+                        this.list_kbd_active = false;
                         this.select_provider(pid.clone(), w, cx);
                     }))
                     .on_prepaint(move |bounds, _, _| tr.set(track_key.clone(), bounds))
@@ -2168,7 +2499,7 @@ impl Render for ProvidersTabView {
                             .child(
                                 apply_scale(div(), scale::CAPTION)
                                     .text_color(status_color)
-                                    .child(cjk_inline_label(status_label)),
+                                    .child(status_label),
                             ),
                     )
                     .child(
@@ -2179,15 +2510,20 @@ impl Render for ProvidersTabView {
                             .flex()
                             .items_center()
                             .gap(space::XS)
-                            .text_color(palette.text_secondary)
+                            .text_color(row_action_fg)
                             .on_click(cx.listener(move |this, _, w, cx| {
+                                this.list_kbd_active = false;
                                 this.select_provider(pid_btn.clone(), w, cx);
                                 cx.stop_propagation();
                             }))
                             .child(
                                 apply_scale(div(), scale::UI).child(cjk_inline_label(action_label)),
                             )
-                            .child(Icon::new(IconName::ChevronRight).size(px(14.0))),
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size(px(14.0))
+                                    .text_color(row_action_fg),
+                            ),
                     ),
             );
         }
@@ -2260,21 +2596,9 @@ impl Render for ProvidersTabView {
                     .items_center()
                     .justify_between()
                     .child(
-                        div()
-                            .flex()
-                            .items_end()
-                            .gap(space::SM)
-                            .child(
-                                apply_scale(div(), scale::BODY_SEMIBOLD)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("已配置")),
-                            )
-                            .child(
-                                apply_scale(div(), scale::CAPTION)
-                                    .pb(px(1.0))
-                                    .text_color(palette.text_muted)
-                                    .child(SharedString::from(configured_total.to_string())),
-                            ),
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child("已配置"),
                     )
                     .child({
                         let tr_add = self.list_tracker.clone();
@@ -2283,6 +2607,7 @@ impl Render for ProvidersTabView {
                             .test_support()
                             .a11y_button("providers-new-custom-btn", "添加提供商")
                             .tab_index(0)
+                            .mr(px(-8.0))
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -2297,6 +2622,7 @@ impl Render for ProvidersTabView {
                                     s.bg(palette.bg_item_hover)
                                 }
                             })
+                            .active(|s| s.bg(palette.bg_active_press))
                             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
                                 if !ev.is_held
                                     && ev.keystroke.modifiers == gpui::Modifiers::default()
@@ -2307,6 +2633,7 @@ impl Render for ProvidersTabView {
                                 }
                             }))
                             .on_click(cx.listener(|this, _, w, cx| {
+                                this.list_kbd_active = false;
                                 this.open_add_provider_catalog(w, cx);
                             }))
                             .on_prepaint(move |bounds, _, _| tr_add.set("cfg-row-add", bounds))
@@ -2429,6 +2756,7 @@ impl ProvidersTabView {
                                 s.bg(palette.bg_item_hover).text_color(palette.text_primary)
                             }
                         })
+                        .active(|s| s.bg(palette.bg_active_press))
                         .on_click(cx.listener(|this, _, w, cx| {
                             this.cancel_remove_confirm(w, cx);
                         }))
@@ -2442,6 +2770,7 @@ impl ProvidersTabView {
                         .a11y_button("providers-remove-confirm-btn", "确认移除")
                         .track_focus(&self.remove_confirm_focus)
                         .tab_index(0)
+                        .mr(px(-8.0))
                         .h(height::COMPACT)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
@@ -2455,6 +2784,7 @@ impl ProvidersTabView {
                                 s.bg(palette.status_danger_subtle)
                             }
                         })
+                        .active(|s| s.bg(palette.status_danger_subtle).opacity(0.85))
                         .on_click(cx.listener(|this, _, w, cx| {
                             this.remove_active_provider_credentials(w, cx);
                         }))
@@ -2482,6 +2812,7 @@ impl ProvidersTabView {
                 .a11y_button("providers-remove-cred-btn", "移除")
                 .track_focus(&self.remove_trigger_focus)
                 .tab_index(0)
+                .mr(px(-8.0))
                 .h(height::COMPACT)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
@@ -2491,6 +2822,7 @@ impl ProvidersTabView {
                 .gap(space::TIGHT)
                 .flex_shrink_0()
                 .hover(|s| s.bg(palette.status_danger_subtle))
+                .active(|s| s.bg(palette.status_danger_subtle).opacity(0.85))
                 .on_key_down(cx.listener(|this, ev: &KeyDownEvent, w, cx| {
                     if !ev.is_held
                         && ev.keystroke.modifiers == gpui::Modifiers::default()
@@ -2571,4 +2903,71 @@ where
                 .size(px(11.0))
                 .text_color(palette.text_on_accent)
         }))
+}
+
+#[cfg(test)]
+mod tests {
+    use cst_client::AccountStatusDto;
+    use serde_json::json;
+
+    use super::format_cstoa_status;
+
+    fn account(signed_in: bool, name: Option<&str>, student_id: Option<&str>) -> AccountStatusDto {
+        serde_json::from_value(json!({
+            "providerId": "cstoa",
+            "signedIn": signed_in,
+            "profile": {
+                "supported": true,
+                "name": name,
+                "studentId": student_id
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn cstoa_status_omits_placeholder_dashes_and_redundant_ready_copy() {
+        let missing = account(true, None, None);
+        let (text, warn) = format_cstoa_status(Some(&missing), false);
+        assert_eq!(text, "账号授权 · 已登录");
+        assert!(!warn);
+        assert!(!text.contains("--"));
+        assert!(!text.contains("已就绪"));
+
+        let dash_only = account(true, Some("--"), Some("  "));
+        assert_eq!(
+            format_cstoa_status(Some(&dash_only), false),
+            ("账号授权 · 已登录".to_owned(), false)
+        );
+
+        let full = account(true, Some("张同学"), Some("20260888"));
+        assert_eq!(
+            format_cstoa_status(Some(&full), false),
+            ("张同学（20260888） · 已登录".to_owned(), false)
+        );
+
+        let name_only = account(true, Some("张同学"), None);
+        assert_eq!(
+            format_cstoa_status(Some(&name_only), false),
+            ("张同学 · 已登录".to_owned(), false)
+        );
+
+        let sid_only = account(true, None, Some("20260888"));
+        assert_eq!(
+            format_cstoa_status(Some(&sid_only), false),
+            ("20260888 · 已登录".to_owned(), false)
+        );
+
+        let expired = account(true, Some("张同学"), Some("20260888"));
+        assert_eq!(
+            format_cstoa_status(Some(&expired), true),
+            ("凭据已失效，请重新登录".to_owned(), true)
+        );
+
+        let signed_out = account(false, None, None);
+        assert_eq!(
+            format_cstoa_status(Some(&signed_out), false),
+            ("账号授权 · 未登录".to_owned(), true)
+        );
+    }
 }

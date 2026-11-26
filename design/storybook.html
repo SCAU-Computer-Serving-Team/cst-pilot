@@ -3947,6 +3947,70 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     justify-content: space-between;
     gap: 16px;
     font-size: 16px;
+    transition: border-color var(--fast) var(--ease-out);
+  }
+  .info-row-master.is-interactive:hover,
+  .info-row-master.is-interactive[data-force="hover"] {
+    border-bottom-color: var(--accent-solid);
+  }
+  .info-row-master.is-interactive:active,
+  .info-row-master.is-interactive[data-force="active"] {
+    border-bottom-color: var(--accent-solid-hover);
+  }
+
+  /* 设置页无框直线流式列表行（0..816px 脊线对齐，无灰底块，悬停底线平滑过渡为主题色） */
+  .settings-hairline-list {
+    width: 100%;
+    max-width: 816px;
+    display: flex;
+    flex-direction: column;
+  }
+  .settings-hairline-row {
+    width: 100%;
+    min-height: 64px;
+    padding: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    text-align: left;
+    transition: border-color var(--fast) var(--ease-out);
+  }
+  .settings-hairline-row--compact {
+    min-height: 48px;
+  }
+  .settings-hairline-row:hover,
+  .settings-hairline-row[data-force="hover"] {
+    background: transparent;
+    border-bottom-color: var(--accent-solid);
+  }
+  .settings-hairline-row:active,
+  .settings-hairline-row[data-force="active"] {
+    background: transparent;
+    border-bottom-color: var(--accent-solid-hover);
+  }
+  .settings-hairline-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: color var(--fast) var(--ease-out);
+  }
+  .settings-hairline-row:hover .settings-hairline-action,
+  .settings-hairline-row[data-force="hover"] .settings-hairline-action,
+  .settings-hairline-row:active .settings-hairline-action,
+  .settings-hairline-row[data-force="active"] .settings-hairline-action {
+    color: var(--text-primary);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .settings-hairline-row,
+    .settings-hairline-action,
+    .info-row-master {
+      transition: none;
+    }
   }
 
   /* 消息输入框 ZWAs1 + 叠栈实底质感 */
@@ -6681,19 +6745,79 @@ const STORIES = [
         </label>
       `;
       stageEl.classList.add("stretch");
+      const tabRowsHtml = [
+        `<div class="settings-hairline-list">
+          <div class="settings-hairline-row settings-hairline-row--compact">
+            <span style="font-size:15px;color:var(--text-primary);">界面主题</span>
+            <span style="font-size:13px;color:var(--text-secondary);">跟随系统 / 浅色 / 深色</span>
+          </div>
+          <div class="settings-hairline-row settings-hairline-row--compact">
+            <span style="font-size:15px;color:var(--text-primary);">方向键选中样式</span>
+            <span style="font-size:13px;color:var(--text-secondary);">四角 / 游标</span>
+          </div>
+        </div>`,
+        `<div class="settings-hairline-list">
+          <button type="button" class="settings-hairline-row">
+            <span style="display:flex;flex-direction:column;gap:2px;">
+              <span style="font-size:15px;color:var(--text-primary);">计维CSTOA</span>
+              <span style="font-size:12px;color:var(--text-secondary);">账号授权 · 已登录</span>
+            </span>
+            <span class="settings-hairline-action">管理 ${icon("chevron-right", 14)}</span>
+          </button>
+          <button type="button" class="settings-hairline-row">
+            <span style="display:flex;flex-direction:column;gap:2px;">
+              <span style="font-size:15px;color:var(--text-primary);">DeepSeek</span>
+              <span style="font-size:12px;color:var(--text-secondary);">已连接</span>
+            </span>
+            <span class="settings-hairline-action">管理 ${icon("chevron-right", 14)}</span>
+          </button>
+        </div>`,
+        `<div class="settings-hairline-list">
+          <button type="button" class="settings-hairline-row settings-hairline-row--compact">
+            <span style="display:inline-flex;align-items:center;gap:12px;">
+              <span class="chk-box" data-checked="true">${icon("check", 11)}</span>
+              <span style="font-size:15px;color:var(--text-primary);">DeepSeek V4.1 Flash</span>
+              <span style="font-size:12px;color:var(--text-muted);">deepseek</span>
+            </span>
+            <span style="font-size:12px;color:var(--text-muted);">1M 上下文</span>
+          </button>
+          <button type="button" class="settings-hairline-row settings-hairline-row--compact">
+            <span style="display:inline-flex;align-items:center;gap:12px;">
+              <span class="chk-box" data-checked="true">${icon("check", 11)}</span>
+              <span style="font-size:15px;color:var(--text-primary);">DeepSeek V4 Pro</span>
+              <span style="font-size:12px;color:var(--text-muted);">deepseek</span>
+            </span>
+            <span style="font-size:12px;color:var(--text-muted);">1M 上下文</span>
+          </button>
+        </div>`,
+        `<div class="settings-hairline-list">
+          <div class="settings-hairline-row settings-hairline-row--compact">
+            <span style="font-size:15px;color:var(--text-primary);">打开命令面板与常见导航操作</span>
+            <span class="kbd-master">Ctrl + P</span>
+          </div>
+          <div class="settings-hairline-row settings-hairline-row--compact">
+            <span style="font-size:15px;color:var(--text-primary);">打开设置页面</span>
+            <span class="kbd-master">Ctrl + ,</span>
+          </div>
+        </div>`
+      ];
       stageEl.innerHTML = `
-        <div class="settings-tabs-bar" id="vp-bar" data-pen-id="VPWAF" role="tablist" style="max-width:816px;margin:0 auto;">
-          ${tabs.map((t, i) => `
-            <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};transition:color var(--fast) var(--ease-out);">
-              ${t}
-            </button>
-          `).join("")}
-          <span class="settings-tab-line" id="vp-line"></span>
+        <div style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
+          <div class="settings-tabs-bar" id="vp-bar" data-pen-id="VPWAF" role="tablist">
+            ${tabs.map((t, i) => `
+              <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};transition:color var(--fast) var(--ease-out);">
+                ${t}
+              </button>
+            `).join("")}
+            <span class="settings-tab-line" id="vp-line"></span>
+          </div>
+          <div id="vp-hairline-demo">${tabRowsHtml[activeIdx]}</div>
         </div>
       `;
 
       const bar = stageEl.querySelector("#vp-bar");
       const line = stageEl.querySelector("#vp-line");
+      const demoBody = stageEl.querySelector("#vp-hairline-demo");
 
       function syncTabs() {
         const btns = bar.querySelectorAll(".vp-tab-btn");
@@ -6708,6 +6832,7 @@ const STORIES = [
           line.style.width = `${curBtn.offsetWidth}px`;
           line.style.transform = `translateX(${curBtn.offsetLeft}px)`;
         }
+        if (demoBody) demoBody.innerHTML = tabRowsHtml[activeIdx];
       }
 
       controlsEl.querySelector("#vp-dirty-chk").addEventListener("click", (e) => {
@@ -6742,14 +6867,16 @@ const STORIES = [
     states: [
       { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },
       { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` },
+      { name: "直线行悬停", sub: "无灰底 · 底线主色 + 动作高亮", html: `<div class="settings-hairline-row settings-hairline-row--compact" data-force="hover" style="width:240px;"><span style="font-size:14px;color:var(--text-primary);">DeepSeek</span><span class="settings-hairline-action" style="font-size:12px;">管理 ›</span></div>` },
       { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<div class="vp-tab-kbd-pill">模型偏好</div>` }
     ],
     hosts: {
-      gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
-      web: { note: "保持 16px 字号与 24px 间距，支持左右方向键切换焦点。", html: `<span class="mono" style="font-size:12px;">role='tablist' 键盘导航</span>` }
+      gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动；下方直线列表行悬停时底线平滑过渡至 $accent-solid，跳转动作字样与箭头同步由 $text-secondary 高亮至 $text-primary。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
+      web: { note: "保持 16px 字号与 24px 间距，支持左右方向键切换焦点；直线列表行底线与跳转动作采用 150ms ease-out 同步过渡，减弱动态下 0ms 瞬切。", html: `<span class="mono" style="font-size:12px;">role='tablist' 键盘导航</span>` }
     },
     contracts: [
-      ["底线连续插值", "底部 2px $accent-solid 指示条按目标项宽度与偏移量平滑滑动，半程反向点击原位折返", "脏表单切换时先弹确认"]
+      ["底线连续插值", "底部 2px $accent-solid 指示条按目标项宽度与偏移量平滑滑动，半程反向点击原位折返", "脏表单切换时先弹确认"],
+      ["直线行与跳转动作悬停", "无框直线列表行保持 0..816px 脊线对齐，悬停不铺灰色背景，底部 1px 细线沿 150ms ease-out 过渡至 $accent-solid，行内跳转/展开字样及箭头同步由 $text-secondary 高亮至 $text-primary", "键盘导航态下遵循键鼠互斥，减弱动态下 0ms 瞬切"]
     ]
   },
 
@@ -8332,21 +8459,23 @@ const STORIES = [
       controlsEl.innerHTML = "";
       stageEl.classList.add("stretch");
       stageEl.innerHTML = `
-        <div class="info-row-master" data-pen-id="c4PWw" style="max-width:816px;margin:0 auto;font-size:16px;">
+        <div class="info-row-master is-interactive" data-pen-id="c4PWw" style="max-width:816px;margin:0 auto;font-size:16px;">
           <span style="color:var(--text-secondary);">字段名称</span>
           <span style="color:var(--text-primary);">字段内容</span>
         </div>
       `;
     },
     states: [
-      { name: "默认母版", sub: "c4PWw (56px)", html: `<div class="info-row-master" style="width:220px;font-size:16px;"><span style="color:var(--text-secondary);">字段名称</span><span>字段内容</span></div>` }
+      { name: "默认母版", sub: "c4PWw (56px)", html: `<div class="info-row-master" style="width:220px;font-size:16px;"><span style="color:var(--text-secondary);">字段名称</span><span>字段内容</span></div>` },
+      { name: "可交互悬停态", sub: "无灰底 · 底线 -> $accent-solid", html: `<div class="info-row-master is-interactive" data-force="hover" style="width:220px;font-size:16px;"><span style="color:var(--text-secondary);">字段名称</span><span>字段内容</span></div>` }
     ],
     hosts: {
-      gpui: { note: "用于账号页与设置页键值陈列，仅保留 1px 底边细线，外层不再套卡片框。", html: `<span class="mono" style="font-size:12px;">c4PWw · 816 × 56px</span>` },
-      web: { note: "同构渲染，字段值支持文本选中复制。", html: `<span class="mono" style="font-size:12px;">56px 底线分割行</span>` }
+      gpui: { note: "用于账号页与设置页键值陈列，仅保留 1px 底边细线，外层不再套卡片框；可交互行悬停时将底线过渡为 $accent-solid。", html: `<span class="mono" style="font-size:12px;">c4PWw · 816 × 56px</span>` },
+      web: { note: "同构渲染，字段值支持文本选中复制；可交互直线行悬停走 150ms ease-out 底线变色。", html: `<span class="mono" style="font-size:12px;">56px 底线分割行</span>` }
     },
     contracts: [
-      ["细线分隔", "同组多行信息仅用 1px $border-subtle 底线串联，禁止逐行加圆角边框", "左右两端对齐"]
+      ["细线分隔", "同组多行信息仅用 1px $border-subtle 底线串联，禁止逐行加圆角边框", "左右两端对齐"],
+      ["悬停底线高亮", "可交互细线行悬停时不铺灰色背景块，改为将底部 1px 直线平滑过渡至 $accent-solid", "减弱动态下 0ms 瞬切"]
     ]
   },
 
@@ -9087,7 +9216,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
     penIds: ["VM8ko"],
     meta: [
       ["母版尺寸", "宽 816px · 统计标量键宽 84px · 排行名称列宽 160px"],
-      ["母版内容", "disk(usage) · wiztree-mft · 统一 $text-secondary 次要文字色与 18px 紧凑行距"]
+      ["母版内容", "disk(usage) · ntfs-mft · 统一 $text-secondary 次要文字色与 18px 紧凑行距"]
     ],
     thumb: `
       <div style="display:flex;gap:6px;font-size:10px;width:176px;color:var(--text-secondary);">
@@ -9118,7 +9247,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
             </div>
 
             <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
-              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">统计方式</span><span>wiztree-mft</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">统计方式</span><span>ntfs-mft</span></div>
               <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">扫描根</span><span class="mono">C:\\</span></div>
               <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">总大小</span><span>238.4 GB</span></div>
               <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">扫描统计</span><span>412850 个文件 · 用时 1.8s</span></div>

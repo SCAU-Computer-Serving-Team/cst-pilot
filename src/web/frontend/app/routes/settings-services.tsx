@@ -15,7 +15,6 @@ export default function ModelServices() {
 			{state.data && (
 				<SettingsSection
 					title="已配置"
-					summary={configured.length}
 					action={
 						<SettingsLink to="/settings/add" className="settings-inline-action settings-inline-action--primary">
 							<Plus size={14} aria-hidden="true" />

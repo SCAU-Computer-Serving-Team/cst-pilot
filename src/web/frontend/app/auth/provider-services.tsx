@@ -128,8 +128,8 @@ export function ProviderServices({
 				itemRefs={itemRefs}
 				targetId={kbdActive && activeId && providers.some((p) => p.id === activeId) ? activeId : null}
 				style={kbdStyle}
-				railPlacement="inside"
-				bracketOutset={2}
+				railPlacement="outside"
+				bracketOutset={4}
 			/>
 		</div>
 	);
