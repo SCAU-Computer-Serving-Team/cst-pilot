@@ -39,6 +39,26 @@ pub(crate) struct MemoryReservation {
     bytes: usize,
 }
 
+impl MemoryReservation {
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub(crate) fn merge(&mut self, mut extra: MemoryReservation) {
+        debug_assert!(Arc::ptr_eq(&self.ledger, &extra.ledger));
+        self.bytes = self.bytes.saturating_add(extra.bytes);
+        extra.bytes = 0;
+    }
+
+    pub(crate) fn shrink_to(&mut self, new_bytes: usize) {
+        if new_bytes < self.bytes {
+            let delta = self.bytes - new_bytes;
+            self.ledger.reserved.fetch_sub(delta, Ordering::AcqRel);
+            self.bytes = new_bytes;
+        }
+    }
+}
+
 impl Drop for MemoryReservation {
     fn drop(&mut self) {
         if self.bytes > 0 {

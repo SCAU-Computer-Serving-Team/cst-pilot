@@ -9,10 +9,10 @@
 | 维度 | `fffind`（路径与属性检索） | `ffgrep`（文件内容检索） |
 |---|---|---|
 | 必填参数 | `path`（`"*"` 扫描本机全部就绪固定盘与可移动盘，或指定盘符/目录/文件） | `pattern`、`path`（目录或单个文件路径） |
-| 可选筛选项 | `pattern`、`kind`、`ext`、`exclude`、`maxDepth`、`modifiedWithinHours`、`minSizeMiB`、`maxSizeMiB`、`sortBy`、`caseSensitive`、`limit` | `include`、`exclude`、`modifiedWithinHours`、`literal`、`caseSensitive`、`context`、`limit` |
+| 可选筛选项 | `pattern`、`kind`、`ext`、`exclude`、`maxDepth`、`modifiedWithinHours`、`minSizeMiB`、`maxSizeMiB`、`sortBy`、`caseSensitive`、`limit`、`timeoutSec` | `include`、`exclude`、`modifiedWithinHours`、`literal`、`caseSensitive`、`context`、`limit`、`timeoutSec` |
 | 执行引擎 | 阶段 1 落地受控多盘并行 Win32 `FileIdBothDirectoryInfo` 双梯队遍历；阶段 2 按独立安全与一致性门禁启用提权 NTFS 并发 `$MFT` 索引 + USN 增量同步（受 `CST_DISABLE_MFT=1` 统一熔断） | 目录模式并行遍历（单文件上限 `10 MiB`）；单文件模式解除 `10 MiB` 跳过限制，改为 `256 KiB` 持久化解码器分块流式扫描 |
 | 忽略与网络策略 | 关闭宿主 `.gitignore`/`.ignore`；固定跳过 `.git`、重解析目录与云占位目录；首版在触发 I/O 前拒绝 UNC 与网络映射盘 | 与 `fffind` 一致，额外跳过云占位文件与解码后含 NUL 的二进制文件 |
-| 截断与降级策略 | 取消 50 万条目上限；超时与超限保留已核验高分结果，按固定优先级输出 `truncatedReason`；仅覆盖或质量受损时置 `degraded: true` | 保留 `256 MiB` 读取预算与 30 秒期限；触及预算或超时保留已提交命中行并标 `truncatedReason` 与 `degraded: true` |
+| 截断与降级策略 | 取消 50 万条目上限；每卷在开始扫描时独立起算 `timeoutSec`（默认 30 秒，范围 1 至 180 秒），超时与超限保留已核验高分结果，按固定优先级输出 `truncatedReason`；仅覆盖或质量受损时置 `degraded: true` | 保留 `256 MiB` 读取预算与可配置 `timeoutSec`（默认 30 秒，范围 1 至 180 秒）；触及预算或超时保留已提交命中行并标 `truncatedReason` 与 `degraded: true` |
 
 ## 二、`fffind` 全电脑扫描架构与健壮性设计
 
@@ -51,9 +51,9 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
 
 内存预算、并发单飞与生命周期规则如下：
 
-1. **进程级统一内存账本**：进程级磁盘与搜索缓存合计上限 `384 MiB`（既有存储 `VolumeIndex` 快照上限 `128 MiB`，搜索索引池上限 `256 MiB`，单卷记录上限 `4,000,000` 条）。预算计入实际分配容量、构建临时内存与仍被在途读者持有的旧代际，超限时按访问时间 LRU 淘汰最久未用卷。
+1. **进程级统一内存账本与按需淘汰**：进程级磁盘与搜索缓存合计上限 `384 MiB`（既有存储 `VolumeIndex` 快照上限 `128 MiB`，搜索索引池上限 `256 MiB`，单卷记录上限 `4,000,000` 条）。预算计入实际分配容量、构建临时内存与仍被在途读者持有的旧代际。冷建或增量同步预留内存遇到剩余额度不足时，优先按访问时间 LRU 淘汰未被活跃读者持有的空闲缓存卷，保障多盘顺序冷建顺利通过 `$MFT` 路径，同时保持在途读者的不可变快照不受影响。
 2. **服务级空闲回收**：按实际查询访问时间维护 `180 s` 空闲 TTL，由服务级定时清理任务统一卸载超时卷的 `Arc` 引用；验收以缓存持有字节量归零为准，不强求操作系统立即收回进程 RSS。
-3. **单飞构建与锁外启动**：冷建与 USN 刷新按 `(drive, VolumeIdentity)` 合并订阅（复用 `VolumeIndex` 引用计数单飞模式，最后一位调用方取消时才中止底层构建）。在状态锁内登记 `Flight`，在锁外调用可失败的 `std::thread::Builder::spawn` 启动构建线程，防止启动失败或 panic 时析构重入同一把锁；启动失败立即发布终态并唤醒全部订阅者。
+3. **单飞构建、有界槽位排队与锁外启动**：冷建与 USN 刷新按 `(drive, VolumeIdentity)` 合并订阅（复用 `VolumeIndex` 引用计数单飞模式，最后一位调用方取消时才中止底层构建）。在状态锁内登记 `Flight`，在锁外调用可失败的 `std::thread::Builder::spawn` 启动构建线程并核验卷身份，防止启动失败、慢盘阻塞或 panic 锁死状态机；通过 RAII 终态守卫保证启动失败或 panic 立即发布终态并唤醒全部订阅者。并发冷建槽位上限为 2，超额卷在槽位条件变量队列中等待并响应取消信号；排队等待独立受 `min(2 × timeoutSec, 180)` 秒上限保护（避免慢盘卡死后续卷），且不扣减单卷扫描预算；同一卷的 USN 刷新、冷建与目录回退累计共享该卷剩余的 `timeoutSec` 预算。
 4. **不可变代际发布**：冷建与同步在锁外构造新不可变 `Arc<VolumeFileIndex>`，锁内短交换并核对卷身份、日志代际与已消费游标，禁止旧任务覆盖新代际，读者全程无锁读取。
 
 ### 2.2 提权 NTFS 卷：USN 屏障冷建与增量同步
@@ -67,7 +67,7 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
 
 1. **原生批量目录访问器**：在 `diagnostics/walk.rs` 之上提取面向检索的有界批次访问器，调用 `GetFileInformationByHandleEx(FileIdBothDirectoryInfo)` 按 `64 KiB` 批读，直接传递原生 `OsString`、原始属性、默认流逻辑字节大小与 `LastWriteTime`（云重解析标签不单靠各文件系统 `EaSize`，必要时从已核验句柄复查）。`FindFirstFileExW` 回退须满足同等范围与身份核验，无法验证时明确降级并禁止不安全回退。
 2. **双梯队队列与原子终止**：跨请求设置全局线程上限 8（预留 2 逻辑核）与队列字节上限。单次扫描由同一把互斥锁保护 `{ high, low, active, stop }`：第一梯队 `high`（广度优先 `VecDeque`）扫描数据盘常规目录与 `C:\Users` 可见用户目录，第二梯队 `low`（深度优先 `Vec`）延后扫描 `Windows`、`WinSxS`、`ProgramData`、`$Recycle.Bin`、`AppData`、`node_modules`、`.cargo`、`.rustup`、`.cache`。子任务入队与当前任务 `active -= 1` 在同一状态锁转换内完成，仅当 `high.is_empty() && low.is_empty() && active == 0` 时正常结束，消除队列暂空误退。
-3. **panic 与 30 秒调用期限**：工作线程与看门狗均使用可失败线程启动与 RAII 析构守卫；任一线程 panic 立即广播 `stop` 并发送 `CancelSynchronousIo`。30 秒定义为调用返回期限：预留汇总时间冻结已提交结果并立即返回；若底层驱动导致 I/O 线程滞留，该线程继续持有全局并发许可直至真正退出。
+3. **panic 与按卷独立超时预算**：工作线程与看门狗均使用可失败线程启动与 RAII 析构守卫；任一线程 panic 立即广播 `stop` 并发送 `CancelSynchronousIo`，未领取卷记入 `skippedRoots` 并置 `degraded: true`。全电脑卷枚举使用流式有界探测窗口（上限 `min(timeoutSec, 10)` 秒），超时时保留已就绪卷继续扫描并将未完成卷记入 `skippedRoots`。每卷在真正取得工作许可并开始构建或目录遍历后起算 `timeoutSec` 预算（默认 30 秒，范围 1 至 180 秒）；单卷超时只中止该卷并记入 `partialRoots`，不中断其余未超时卷，仅在明确未提权且超时卷满足 `$MFT` 条件时提示可改用管理员权限重试。若底层驱动导致 I/O 线程滞留，该线程继续持有全局并发许可直至真正退出。
 
 ### 2.4 搜索专用守卫、授权边界与路径契约
 
@@ -199,6 +199,13 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
         "maximum": 1000,
         "default": 30,
         "description": "可选。最多返回的命中条目数，范围 1 至 1000，默认 30。"
+      },
+      "timeoutSec": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 180,
+        "default": 30,
+        "description": "可选。单卷或目标目录检索的超时预算，单位秒，范围 1 至 180，默认 30。全电脑 path=\"*\" 模式下各卷在开始扫描时独立起算该预算。"
       }
     }
   }
@@ -279,7 +286,7 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
 }
 ```
 
-#### 示例 3：普通权限全电脑通配查找触及 30 秒期限（降级保留高分命中并标明部分完成卷）
+#### 示例 3：普通权限全电脑通配查找部分卷触及单卷 30 秒预算（降级保留高分命中并标明部分完成卷）
 
 调用参数：`{"path": "*", "pattern": "*X-op7418*"}`
 
@@ -312,7 +319,7 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
   "truncatedReason": "timeout",
   "degraded": true,
   "skipped": 41,
-  "notice": "全电脑目录遍历达到 30 秒返回期限，已保留已扫范围内的高分命中，C:/ 未扫完；可缩小 path 或以管理员权限重试。",
+  "notice": "全电脑检索中部分卷达到单卷 30 秒预算，已保留已扫范围内的高分命中，C:/ 未扫完；可缩小 path、调高 timeoutSec（最高 180 秒）或以管理员权限重试。",
   "elapsedMs": 30004
 }
 ```
@@ -390,6 +397,13 @@ NTFS 文件引用包含 48 位记录号与 16 位序列号，且硬链接文件�
         "maximum": 1000,
         "default": 30,
         "description": "可选。返回总行数上限（含上下文行），范围 1 至 1000，默认 30。"
+      },
+      "timeoutSec": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 180,
+        "default": 30,
+        "description": "可选。内容检索的超时预算，单位秒，范围 1 至 180，默认 30。"
       }
     }
   }

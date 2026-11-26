@@ -455,6 +455,13 @@ pub(crate) fn scan_reader_streaming(
                 Ok(_) => reached_eof = false,
                 Err(_) => reached_eof = false,
             }
+            if cancel.is_cancelled() {
+                cancelled = true;
+                reached_eof = false;
+            } else if Instant::now() >= deadline {
+                timed_out = true;
+                reached_eof = false;
+            }
             break;
         }
 
@@ -477,6 +484,14 @@ pub(crate) fn scan_reader_streaming(
                 return Err(err);
             }
         };
+        if cancel.is_cancelled() {
+            cancelled = true;
+            break;
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            break;
+        }
         if n == 0 {
             reached_eof = true;
             break;
@@ -928,6 +943,7 @@ pub(crate) fn run_grep(
     modified_window: Option<(i64, i64)>,
     limit: usize,
     context: usize,
+    timeout_sec: u64,
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<GrepRunOutcome, String> {
@@ -939,6 +955,7 @@ pub(crate) fn run_grep(
             modified_window,
             limit,
             context,
+            timeout_sec,
             deadline,
             cancel,
         );
@@ -1005,10 +1022,10 @@ pub(crate) fn run_grep(
     let degraded = timed_out || budget_exceeded || skipped_large > 0;
     let mut notices = Vec::new();
     if timed_out {
-        notices.push(
-            "内容检索达到 30 秒返回期限，已保留已提交的命中结果；请缩小 path 或补充 include 与 modifiedWithinHours。"
-                .to_owned(),
-        );
+        notices.push(format!(
+            "内容检索达到 {timeout_sec} 秒预算，已保留已提交的命中结果；可缩小 path、补充 include 与 modifiedWithinHours 或调高 timeoutSec（最高 {} 秒）。",
+            super::MAX_TIMEOUT_SECS
+        ));
     }
     if budget_exceeded {
         notices.push(
@@ -1044,15 +1061,36 @@ fn run_grep_single_file(
     modified_window: Option<(i64, i64)>,
     limit: usize,
     context: usize,
+    timeout_sec: u64,
     deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<GrepRunOutcome, String> {
+    if cancel.is_cancelled() {
+        return Err("文件检索已取消。".into());
+    }
     let (file, verified) = session
         .open_grep_file(&verified_root.canonical_path, verified_root)
         .map_err(|err| match err {
             SearchGuardError::PolicyDenied => "权限拒绝：禁止读取受保护文件或链接目标。".to_owned(),
             SearchGuardError::IoOrAccess => "目标文件无法打开。".to_owned(),
         })?;
+    if cancel.is_cancelled() {
+        return Err("文件检索已取消。".into());
+    }
+    if Instant::now() >= deadline {
+        return Ok(GrepRunOutcome {
+            matches: Vec::new(),
+            truncated: true,
+            truncated_reason: Some(TruncatedReason::Timeout),
+            degraded: true,
+            skipped: 0,
+            skipped_large_files: 0,
+            notices: vec![format!(
+                "单文件流式检索达到 {timeout_sec} 秒预算，未完成读取；可调高 timeoutSec（最高 {} 秒）重试。",
+                super::MAX_TIMEOUT_SECS
+            )],
+        });
+    }
     if !path_within_modified_window(verified.modified_secs, modified_window) {
         return Ok(GrepRunOutcome {
             matches: Vec::new(),
@@ -1113,8 +1151,9 @@ fn run_grep_single_file(
     let mut notices = Vec::new();
     if outcome.timed_out {
         notices.push(format!(
-            "单文件流式检索达到 30 秒返回期限，仅覆盖文件头前 {} 字节，已保留已命中行。",
-            outcome.bytes_read
+            "单文件流式检索达到 {timeout_sec} 秒预算，仅覆盖文件头前 {} 字节，已保留已命中行；可调高 timeoutSec（最高 {} 秒）重试。",
+            outcome.bytes_read,
+            super::MAX_TIMEOUT_SECS
         ));
     }
     if outcome.budget_truncated {

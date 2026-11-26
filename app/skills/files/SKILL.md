@@ -10,8 +10,8 @@ description: 本地文件读取与检索：读文本与图片（read）、找文
 | 目标 | 调用 | 结束条件 |
 |---|---|---|
 | 已知文件路径，读日志、配置或截图 | `read({ path, offset?, limit? })` | 读完所需行区间或图片元信息，若被截断且有 `nextOffset` 则继续分页 |
-| 全电脑或指定目录找文件与目录 | `fffind({ path, pattern?, kind?, ext?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?, exclude?, caseSensitive?, limit? })` | 找到目标绝对路径、体积与修改时间，或交代跳过与未扫完卷 |
-| 在指定目录或单日志中搜错误码或关键字 | `ffgrep({ pattern, path, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit? })` | 定位匹配文件与行号，再按需对大文件定向 `ffgrep` 或 `read` |
+| 全电脑或指定目录找文件与目录 | `fffind({ path, pattern?, kind?, ext?, maxDepth?, modifiedWithinHours?, minSizeMiB?, maxSizeMiB?, sortBy?, exclude?, caseSensitive?, limit?, timeoutSec? })` | 找到目标绝对路径、体积与修改时间，或交代跳过与未扫完卷 |
+| 在指定目录或单日志中搜错误码或关键字 | `ffgrep({ pattern, path, include?, exclude?, modifiedWithinHours?, literal?, caseSensitive?, context?, limit?, timeoutSec? })` | 定位匹配文件与行号，再按需对大文件定向 `ffgrep` 或 `read` |
 
 ## read：文本分页与图片读取
 
@@ -38,8 +38,9 @@ description: 本地文件读取与检索：读文本与图片（read）、找文
 | `minSizeMiB` / `maxSizeMiB` | 可选非负二进制 MiB（`1 MiB = 1048576 B`），含端点换算整字节；`maxSizeMiB: 0` 仅匹配空文件 |
 | `sortBy` | 可选 `"relevance"`、`"modified"`、`"size"`，省略时按名称、时间、大小条件自动推断 |
 | `exclude` / `caseSensitive` / `limit` | `exclude` 为排除通配数组（尾 `/` 剪枝目录）；`caseSensitive` 在 Windows 默认 `false`；`limit` 范围 `1–1000`（默认 `30`，越界报错） |
+| `timeoutSec` | 可选整数 `1–180`，默认 `30` 秒（越界报错）。全电脑 `path: "*"` 模式下各卷在开始扫描时独立起算该预算，卷探测与 `$MFT` 槽位排队不扣减单卷预算 |
 
-返回字段：`root`（规范绝对路径或 `"*"`）、`scannedRoots?`、`partialRoots?`、`skippedRoots?: { root, reason }[]`、`matches[]: { path, kind, sizeBytes, modified }`、`truncated`、`truncatedReason?`（`"timeout"` / `"output_bytes"` / `"limit"`）、`degraded?`、`skipped`、`notice?`、`elapsedMs`。`matches[].path` 统一输出正斜杠规范绝对路径，可直接传给 `read` 或 `ffgrep`。
+返回字段：`root`（规范绝对路径或 `"*"`）、`scannedRoots?`、`partialRoots?`、`skippedRoots?: { root, reason }[]`、`matches[]: { path, kind, sizeBytes, modified }`、`truncated`、`truncatedReason?`（`"timeout"` / `"visited_limit"` / `"output_bytes"` / `"limit"`）、`degraded?`、`skipped`、`notice?`、`elapsedMs`。`matches[].path` 统一输出正斜杠规范绝对路径，可直接传给 `read` 或 `ffgrep`。
 
 ## ffgrep：指定目录与单文件大日志内容检索
 
@@ -53,12 +54,14 @@ description: 本地文件读取与检索：读文本与图片（read）、找文
 | `modifiedWithinHours` | 可选正数（`0 < N <= 87600`），在打开文件前按修改时间过滤旧文件并在句柄上复核 |
 | `literal` / `caseSensitive` | `literal` 默认 `false`（设 `true` 字面匹配）；`caseSensitive` 在字面模式下省略时智能大小写，正则模式下省略时固定 `false` |
 | `context` / `limit` | `context` 范围 `0–20`（默认 `0`），`limit` 范围 `1–1000`（默认 `30`，越界报错）；触及 `limit` 时优先保留命中行 |
+| `timeoutSec` | 可选整数 `1–180`，默认 `30` 秒（越界报错） |
 
 返回字段与边界：
 
 1. **返回字段**：`root`、`matches[]: { path, line, text, matched }`、`truncated`、`truncatedReason?`（优先级 `timeout > read_budget > visited_limit > output_bytes > limit > line_limit`）、`degraded?`、`skipped`、`skippedLargeFiles?`、`notice?`、`elapsedMs`。
-2. **遍历与大日志**：两工具不读取 `.gitignore` 或 `.ignore`，仅跳过 `.git`、重解析目录与云占位目录。`ffgrep` 目录模式跳过大于 10 MiB 的单文件（独立计入 `skippedLargeFiles`）；直接将单个大日志路径传给 `ffgrep` 时自动启用 256 KiB 分块流式扫描，支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030，单行上限 8 KiB，总读取上限 256 MiB，30 秒返回期限内保留已命中行。
-3. **零命中判读**：查找无结果时先核对 `partialRoots`、`skippedRoots`、`skipped` 与 `skippedLargeFiles`；目录模式跳过大日志时直接对该单文件调用 `ffgrep` 或 `read`。
+2. **遍历与大日志**：两工具不读取 `.gitignore` 或 `.ignore`，仅跳过 `.git`、重解析目录与云占位目录。`ffgrep` 目录模式跳过大于 10 MiB 的单文件（独立计入 `skippedLargeFiles`）；直接将单个大日志路径传给 `ffgrep` 时自动启用 256 KiB 分块流式扫描，支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030，单行上限 8 KiB，总读取上限 256 MiB，到达 `timeoutSec` 预算时保留已命中行。
+3. **超时预算调参**：两工具默认 `timeoutSec` 为 `30` 秒，单次最高可设 `180` 秒。常规单目录检索、管理员 NTFS 全电脑检索和小日志排查保持默认 `30` 秒即可。遇到非管理员或非 NTFS 大盘全盘遍历、数万级深层日志目录、百 MB 级单文件 `ffgrep` 流式扫描，或前一次返回 `truncatedReason: "timeout"` 且需要补全覆盖范围时，主动调高 `timeoutSec`（如 `60`、`120` 或 `180` 秒），同时优先配合 `path`、`include`、`exclude` 或 `modifiedWithinHours` 收窄扫描面。
+4. **零命中判读**：查找无结果时先核对 `partialRoots`、`skippedRoots`、`skipped` 与 `skippedLargeFiles`；目录模式跳过大日志时直接对该单文件调用 `ffgrep` 或 `read`。
 
 ## 访问拦截范围
 

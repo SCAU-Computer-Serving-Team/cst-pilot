@@ -5,20 +5,18 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::sync::Condvar;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex};
-#[cfg(windows)]
-use std::time::Duration;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use globset::GlobSet;
 use tokio_util::sync::CancellationToken;
 
 use super::super::path_guard::{PathGuardSession, SearchGuardError, VerifiedSearchEntry};
 use super::{
-    FffindKind, FffindSortBy, FindCandidate, QueryPlan, cmp_find_candidate, dir_is_excluded,
-    ext_matches, format_local_rfc3339, normalize_path, path_within_modified_window,
-    size_within_bounds, worker_threads,
+    FffindKind, FffindSortBy, FindCandidate, QueryPlan, SkippedRoot, cmp_find_candidate,
+    dir_is_excluded, ext_matches, format_local_rfc3339, normalize_path,
+    path_within_modified_window, size_within_bounds, worker_threads,
 };
 
 const MAX_DIR_DEPTH: usize = 1024;
@@ -26,6 +24,14 @@ const MAX_DIR_DEPTH: usize = 1024;
 const MAX_QUEUE_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(windows)]
 const RETURN_DEADLINE_MARGIN: Duration = Duration::from_millis(120);
+#[cfg(windows)]
+const MAX_PERMIT_WAIT: Duration = Duration::from_secs(5);
+
+const ROOT_STATE_UNCLAIMED: u8 = 0;
+const ROOT_STATE_RUNNING: u8 = 1;
+const ROOT_STATE_COMPLETED: u8 = 2;
+const ROOT_STATE_PARTIAL: u8 = 3;
+const ROOT_STATE_SKIPPED: u8 = 4;
 
 /// Global permit pool across concurrent search requests so stuck driver I/O threads
 /// continue holding their slot until exit without allowing unbounded thread growth.
@@ -56,10 +62,10 @@ impl GlobalWorkerPermit {
 
     fn acquire_bounded(
         max_global: usize,
-        deadline: Instant,
+        max_wait: Duration,
         cancel: &CancellationToken,
     ) -> Option<Self> {
-        let wait_until = deadline.min(Instant::now() + Duration::from_millis(250));
+        let wait_until = Instant::now() + max_wait;
         loop {
             if let Some(p) = Self::try_acquire(max_global) {
                 return Some(p);
@@ -97,6 +103,8 @@ pub(crate) struct WalkRootTarget {
     pub verified_root: VerifiedSearchEntry,
     #[cfg_attr(not(windows), allow(dead_code))]
     pub is_volume_root: bool,
+    /// Remaining scan budget for this root (starts ticking only once scanning begins).
+    pub budget: Duration,
 }
 
 pub(crate) struct WalkFindOutcome {
@@ -104,7 +112,10 @@ pub(crate) struct WalkFindOutcome {
     pub truncated_by_limit: bool,
     pub timed_out: bool,
     pub queue_overflowed: bool,
+    pub had_non_policy_failure: bool,
+    pub completed_roots: Vec<String>,
     pub partial_roots: Vec<String>,
+    pub skipped_roots: Vec<SkippedRoot>,
     pub skipped: usize,
 }
 
@@ -112,15 +123,18 @@ pub(crate) struct WalkShared {
     session: PathGuardSession,
     spec: WalkQuerySpec,
     targets: Vec<WalkRootTarget>,
-    deadline: Instant,
+    root_deadlines: Vec<OnceLock<Instant>>,
+    root_timed_out: Vec<AtomicBool>,
     cancel: CancellationToken,
     skipped: AtomicUsize,
     truncated_by_limit: AtomicBool,
     timed_out: AtomicBool,
     cancelled: AtomicBool,
     queue_overflowed: AtomicBool,
+    had_non_policy_failure: AtomicBool,
     stop: AtomicBool,
-    partial_flags: Vec<AtomicBool>,
+    root_states: Vec<AtomicU8>,
+    root_skip_reasons: Vec<Mutex<Option<&'static str>>>,
     collected: Mutex<Vec<FindCandidate>>,
 }
 
@@ -130,14 +144,79 @@ impl WalkShared {
         self.stop.store(true, AtomicOrdering::Relaxed);
     }
 
-    fn mark_timed_out(&self) {
+    fn root_budget(&self, root_idx: usize) -> Duration {
+        self.targets
+            .get(root_idx)
+            .map_or(Duration::from_secs(30), |t| t.budget)
+    }
+
+    fn start_root_if_needed(&self, root_idx: usize) -> Instant {
+        let budget = self.root_budget(root_idx);
+        if let Some(cell) = self.root_deadlines.get(root_idx) {
+            *cell.get_or_init(|| Instant::now() + budget)
+        } else {
+            Instant::now() + budget
+        }
+    }
+
+    fn mark_root_running(&self, root_idx: usize) {
+        if let Some(st) = self.root_states.get(root_idx) {
+            let _ = st.compare_exchange(
+                ROOT_STATE_UNCLAIMED,
+                ROOT_STATE_RUNNING,
+                AtomicOrdering::AcqRel,
+                AtomicOrdering::Acquire,
+            );
+        }
+    }
+
+    fn mark_root_timed_out(&self, root_idx: usize) {
         self.timed_out.store(true, AtomicOrdering::Relaxed);
-        self.stop.store(true, AtomicOrdering::Relaxed);
+        if let Some(flag) = self.root_timed_out.get(root_idx) {
+            flag.store(true, AtomicOrdering::Relaxed);
+        }
+        self.mark_root_partial(root_idx);
+    }
+
+    fn is_root_stopped(&self, root_idx: usize) -> bool {
+        self.stop.load(AtomicOrdering::Relaxed)
+            || self
+                .root_timed_out
+                .get(root_idx)
+                .is_some_and(|f| f.load(AtomicOrdering::Relaxed))
     }
 
     fn mark_root_partial(&self, root_idx: usize) {
-        if let Some(flag) = self.partial_flags.get(root_idx) {
-            flag.store(true, AtomicOrdering::Relaxed);
+        if let Some(st) = self.root_states.get(root_idx) {
+            let cur = st.load(AtomicOrdering::Acquire);
+            if cur != ROOT_STATE_SKIPPED {
+                st.store(ROOT_STATE_PARTIAL, AtomicOrdering::Release);
+            }
+        }
+    }
+
+    fn mark_root_skipped(&self, root_idx: usize, reason: &'static str) {
+        self.had_non_policy_failure
+            .store(true, AtomicOrdering::Relaxed);
+        if let Some(slot) = self.root_skip_reasons.get(root_idx)
+            && let Ok(mut g) = slot.lock()
+            && g.is_none()
+        {
+            *g = Some(reason);
+        }
+        if let Some(st) = self.root_states.get(root_idx) {
+            st.store(ROOT_STATE_SKIPPED, AtomicOrdering::Release);
+        }
+    }
+
+    fn try_mark_root_completed(&self, root_idx: usize) {
+        if let Some(st) = self.root_states.get(root_idx) {
+            let _ = st.compare_exchange(
+                ROOT_STATE_RUNNING,
+                ROOT_STATE_COMPLETED,
+                AtomicOrdering::AcqRel,
+                AtomicOrdering::Acquire,
+            );
         }
     }
 }
@@ -344,8 +423,13 @@ mod win_walk_find {
         }
     }
 
+    struct RegisteredThread {
+        handle: Arc<OwnedHandle>,
+        active_root: Arc<AtomicUsize>,
+    }
+
     struct CancelRegistry {
-        threads: Mutex<Vec<Arc<OwnedHandle>>>,
+        threads: Mutex<Vec<RegisteredThread>>,
     }
     impl CancelRegistry {
         fn new() -> Self {
@@ -356,6 +440,7 @@ mod win_walk_find {
 
         fn register_current_thread(self: &Arc<Self>) -> ThreadCancelGuard {
             let mut dup = HANDLE::default();
+            let active_root = Arc::new(AtomicUsize::new(usize::MAX));
             let handle = unsafe {
                 let proc = GetCurrentProcess();
                 let cur = GetCurrentThread();
@@ -370,19 +455,44 @@ mod win_walk_find {
             if let Some(ref h) = handle
                 && let Ok(mut list) = self.threads.lock()
             {
-                list.push(Arc::clone(h));
+                list.push(RegisteredThread {
+                    handle: Arc::clone(h),
+                    active_root: Arc::clone(&active_root),
+                });
             }
             ThreadCancelGuard {
                 registry: Arc::clone(self),
                 handle,
+                active_root,
+            }
+        }
+
+        fn cancel_root(&self, root_idx: usize) {
+            let handles: Vec<Arc<OwnedHandle>> = self
+                .threads
+                .lock()
+                .map(|g| {
+                    g.iter()
+                        .filter(|entry| entry.active_root.load(AtomicOrdering::Acquire) == root_idx)
+                        .map(|entry| Arc::clone(&entry.handle))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for h in handles {
+                unsafe {
+                    let _ = CancelSynchronousIo(h.0);
+                }
             }
         }
 
         fn cancel_all(&self) {
             // Clone `Arc<OwnedHandle>` under lock so handles stay alive during CancelSynchronousIo
             // even if the worker thread concurrently exits (prevents handle-reuse races).
-            let handles: Vec<Arc<OwnedHandle>> =
-                self.threads.lock().map(|g| g.clone()).unwrap_or_default();
+            let handles: Vec<Arc<OwnedHandle>> = self
+                .threads
+                .lock()
+                .map(|g| g.iter().map(|entry| Arc::clone(&entry.handle)).collect())
+                .unwrap_or_default();
             for h in handles {
                 unsafe {
                     let _ = CancelSynchronousIo(h.0);
@@ -394,13 +504,24 @@ mod win_walk_find {
     struct ThreadCancelGuard {
         registry: Arc<CancelRegistry>,
         handle: Option<Arc<OwnedHandle>>,
+        active_root: Arc<AtomicUsize>,
+    }
+    impl ThreadCancelGuard {
+        fn set_active_root(&self, root_idx: usize) {
+            self.active_root.store(root_idx, AtomicOrdering::Release);
+        }
+
+        fn clear_active_root(&self) {
+            self.active_root.store(usize::MAX, AtomicOrdering::Release);
+        }
     }
     impl Drop for ThreadCancelGuard {
         fn drop(&mut self) {
+            self.clear_active_root();
             if let Some(ref h) = self.handle
                 && let Ok(mut list) = self.registry.threads.lock()
             {
-                list.retain(|entry| !Arc::ptr_eq(entry, h));
+                list.retain(|entry| !Arc::ptr_eq(&entry.handle, h));
             }
         }
     }
@@ -477,7 +598,7 @@ mod win_walk_find {
             }
         }
 
-        fn pop(&self) -> Option<FindDirTask> {
+        fn pop(&self, shared: &WalkShared) -> Option<(FindDirTask, Instant)> {
             let mut guard = self.state.lock().ok()?;
             loop {
                 if guard.stop {
@@ -485,11 +606,16 @@ mod win_walk_find {
                 }
                 if let Some(task) = guard.high.pop_front().or_else(|| guard.low.pop()) {
                     guard.queued_bytes = guard.queued_bytes.saturating_sub(task.est_bytes);
+                    if shared.is_root_stopped(task.root_idx) {
+                        shared.mark_root_partial(task.root_idx);
+                        continue;
+                    }
+                    let root_deadline = shared.start_root_if_needed(task.root_idx);
                     guard.active += 1;
                     if let Some(slot) = guard.active_by_root.get_mut(task.root_idx) {
                         *slot += 1;
                     }
-                    return Some(task);
+                    return Some((task, root_deadline));
                 }
                 if guard.active == 0 {
                     return None;
@@ -509,7 +635,7 @@ mod win_walk_find {
             low_batch: Vec<FindDirTask>,
         ) {
             if let Ok(mut guard) = self.state.lock() {
-                if !guard.stop {
+                if !guard.stop && !shared.is_root_stopped(root_idx) {
                     for task in high_batch {
                         if guard.queued_bytes.saturating_add(task.est_bytes) > MAX_QUEUE_BYTES {
                             shared.queue_overflowed.store(true, AtomicOrdering::Relaxed);
@@ -528,6 +654,10 @@ mod win_walk_find {
                         guard.queued_bytes = guard.queued_bytes.saturating_add(task.est_bytes);
                         guard.low.push(task);
                     }
+                } else if shared.is_root_stopped(root_idx)
+                    && (!high_batch.is_empty() || !low_batch.is_empty())
+                {
+                    shared.mark_root_partial(root_idx);
                 }
                 guard.active = guard.active.saturating_sub(1);
                 if let Some(slot) = guard.active_by_root.get_mut(root_idx) {
@@ -546,6 +676,49 @@ mod win_walk_find {
                     *slot = slot.saturating_sub(1);
                 }
                 self.cv.notify_all();
+            }
+        }
+
+        fn drain_root_tasks_locked(
+            guard: &mut FindQueueState,
+            root_idx: usize,
+            shared: &WalkShared,
+        ) {
+            let mut removed = false;
+            guard.high.retain(|t| {
+                if t.root_idx == root_idx {
+                    guard.queued_bytes = guard.queued_bytes.saturating_sub(t.est_bytes);
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+            guard.low.retain(|t| {
+                if t.root_idx == root_idx {
+                    guard.queued_bytes = guard.queued_bytes.saturating_sub(t.est_bytes);
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+            if removed
+                || guard
+                    .active_by_root
+                    .get(root_idx)
+                    .is_some_and(|&cnt| cnt > 0)
+            {
+                shared.mark_root_partial(root_idx);
+            }
+        }
+
+        fn drain_root_tasks(&self, root_idx: usize, shared: &WalkShared) {
+            if let Ok(mut guard) = self.state.lock() {
+                Self::drain_root_tasks_locked(&mut guard, root_idx, shared);
+                if guard.active == 0 && guard.high.is_empty() && guard.low.is_empty() {
+                    self.cv.notify_all();
+                }
             }
         }
 
@@ -585,42 +758,47 @@ mod win_walk_find {
             &self,
             shared: &WalkShared,
             cancel_reg: &CancelRegistry,
-            stop_deadline: Instant,
-            return_deadline: Instant,
+            root_idx: usize,
+            root_deadline: Instant,
         ) {
+            let stop_dl = root_deadline
+                .checked_sub(RETURN_DEADLINE_MARGIN)
+                .unwrap_or(root_deadline);
             let mut guard = match self.state.lock() {
                 Ok(g) => g,
                 Err(e) => e.into_inner(),
             };
-            let mut cancelling = false;
+            let mut cancelling_deadline: Option<Instant> = None;
             while guard.workers_alive > 0 {
                 let now = Instant::now();
-                if !cancelling {
+                if cancelling_deadline.is_none() {
                     if shared.cancel.is_cancelled() {
                         shared.mark_cancelled();
                         guard.stop = true;
                         Self::mark_inflight_and_queued_partial(&mut guard, shared);
                         self.cv.notify_all();
-                        cancelling = true;
-                    } else if now >= stop_deadline {
-                        shared.mark_timed_out();
+                        cancelling_deadline = Some(now + RETURN_DEADLINE_MARGIN);
+                    } else if now >= stop_dl {
+                        shared.mark_root_timed_out(root_idx);
                         guard.stop = true;
                         Self::mark_inflight_and_queued_partial(&mut guard, shared);
                         self.cv.notify_all();
-                        cancelling = true;
-                    } else if guard.stop || shared.stop.load(AtomicOrdering::Relaxed) {
+                        cancelling_deadline = Some(root_deadline);
+                    } else if guard.stop
+                        || shared.stop.load(AtomicOrdering::Relaxed)
+                        || shared.is_root_stopped(root_idx)
+                    {
                         guard.stop = true;
                         Self::mark_inflight_and_queued_partial(&mut guard, shared);
                         self.cv.notify_all();
-                        cancelling = true;
+                        cancelling_deadline = Some(now + RETURN_DEADLINE_MARGIN);
                     }
                 }
-                if cancelling {
+                if let Some(return_dl) = cancelling_deadline {
                     drop(guard);
+                    cancel_reg.cancel_root(root_idx);
                     cancel_reg.cancel_all();
-                    if Instant::now() >= return_deadline {
-                        // Return AT OR BEFORE total request deadline; stuck I/O threads retain
-                        // their global permits until they unwind naturally.
+                    if Instant::now() >= return_dl {
                         return;
                     }
                     guard = match self.state.lock() {
@@ -654,6 +832,9 @@ mod win_walk_find {
                 self.shared.mark_root_partial(self.root_idx);
                 self.queue.abort_active_task(self.root_idx);
                 if std::thread::panicking() {
+                    self.shared
+                        .had_non_policy_failure
+                        .store(true, AtomicOrdering::Relaxed);
                     self.shared.stop.store(true, AtomicOrdering::Relaxed);
                     self.queue.stop_all_and_mark_partials(self.shared);
                     self.cancel_reg.cancel_all();
@@ -671,6 +852,9 @@ mod win_walk_find {
     impl Drop for WorkerLifetimeGuard {
         fn drop(&mut self) {
             if std::thread::panicking() {
+                self.shared
+                    .had_non_policy_failure
+                    .store(true, AtomicOrdering::Relaxed);
                 self.shared.stop.store(true, AtomicOrdering::Relaxed);
                 self.queue.stop_all_and_mark_partials(&self.shared);
                 self.cancel_reg.cancel_all();
@@ -841,7 +1025,7 @@ mod win_walk_find {
         low_batch: &mut Vec<FindDirTask>,
         scratch: &mut WorkerScratch,
     ) -> bool {
-        if shared.stop.load(AtomicOrdering::Relaxed) {
+        if shared.is_root_stopped(task.root_idx) {
             return false;
         }
         let lossless = decode_utf16_into(name_u16, &mut scratch.name_buf);
@@ -1014,6 +1198,7 @@ mod win_walk_find {
         worker: &mut FindWorker,
         shared: &WalkShared,
         task: &FindDirTask,
+        root_deadline: Instant,
         high_batch: &mut Vec<FindDirTask>,
         low_batch: &mut Vec<FindDirTask>,
         scratch: &mut WorkerScratch,
@@ -1021,6 +1206,9 @@ mod win_walk_find {
         let Ok((handle, dir_vol)) = open_dir_checked(task) else {
             worker.local_skipped += 1;
             if task.depth == 0 {
+                shared
+                    .had_non_policy_failure
+                    .store(true, AtomicOrdering::Relaxed);
                 shared.mark_root_partial(task.root_idx);
             }
             return;
@@ -1041,15 +1229,15 @@ mod win_walk_find {
             .unwrap_or_default();
 
         loop {
-            if shared.stop.load(AtomicOrdering::Relaxed) {
+            if shared.is_root_stopped(task.root_idx) {
                 break;
             }
             if shared.cancel.is_cancelled() {
                 shared.mark_cancelled();
                 break;
             }
-            if Instant::now() >= shared.deadline {
-                shared.mark_timed_out();
+            if Instant::now() >= root_deadline {
+                shared.mark_root_timed_out(task.root_idx);
                 break;
             }
             let buf_bytes = scratch.io_buf.len() * 8;
@@ -1106,6 +1294,9 @@ mod win_walk_find {
                 Err(_) => {
                     worker.local_skipped += 1;
                     if task.depth == 0 {
+                        shared
+                            .had_non_policy_failure
+                            .store(true, AtomicOrdering::Relaxed);
                         shared.mark_root_partial(task.root_idx);
                     }
                     break;
@@ -1114,32 +1305,43 @@ mod win_walk_find {
         }
     }
 
-    pub(super) fn run_parallel_walk_win(shared: Arc<WalkShared>) {
-        let root_count = shared.targets.len();
-        let mut initial = Vec::with_capacity(root_count);
-        for (idx, target) in shared.targets.iter().enumerate() {
-            let may_prot = shared
-                .session
-                .dir_may_contain_protected_key(&target.verified_root.canonical_path);
-            // Pin root volume & object identity even at depth 0 to prevent root rebind races.
-            initial.push(FindDirTask::new(
-                idx,
-                target.verified_root.canonical_path.clone(),
-                0,
-                false,
-                may_prot,
-                (target.verified_root.vol_serial != 0).then_some(target.verified_root.vol_serial),
-                (target.verified_root.index64 != 0).then_some(target.verified_root.index64),
-            ));
-        }
+    const MAX_CONCURRENT_WALK_ROOTS: usize = 2;
 
+    fn run_single_root_walk_win(shared: Arc<WalkShared>, root_idx: usize, max_workers: usize) {
+        if shared.cancel.is_cancelled() {
+            shared.mark_cancelled();
+            return;
+        }
+        if shared.stop.load(AtomicOrdering::Relaxed) {
+            shared.mark_root_skipped(root_idx, "aborted_after_worker_error");
+            return;
+        }
+        let target = &shared.targets[root_idx];
+        let may_prot = shared
+            .session
+            .dir_may_contain_protected_key(&target.verified_root.canonical_path);
+        // Pin root volume & object identity even at depth 0 to prevent root rebind races.
+        let initial = vec![FindDirTask::new(
+            root_idx,
+            target.verified_root.canonical_path.clone(),
+            0,
+            false,
+            may_prot,
+            (target.verified_root.vol_serial != 0).then_some(target.verified_root.vol_serial),
+            (target.verified_root.index64 != 0).then_some(target.verified_root.index64),
+        )];
+
+        // Acquire the first global worker permit BEFORE starting this root's scan budget timer.
+        // Permit congestion never masquerades as a `{timeout_sec}` scan timeout.
         let max_global = worker_threads();
-        let mut permits = Vec::with_capacity(max_global);
+        let target_workers = max_workers.clamp(1, max_global);
+        let permit_wait = shared.root_budget(root_idx).min(MAX_PERMIT_WAIT);
+        let mut permits = Vec::with_capacity(target_workers);
         if let Some(first) =
-            GlobalWorkerPermit::acquire_bounded(max_global, shared.deadline, &shared.cancel)
+            GlobalWorkerPermit::acquire_bounded(max_global, permit_wait, &shared.cancel)
         {
             permits.push(first);
-            for _ in 1..max_global {
+            for _ in 1..target_workers {
                 if let Some(p) = GlobalWorkerPermit::try_acquire(max_global) {
                     permits.push(p);
                 } else {
@@ -1149,26 +1351,29 @@ mod win_walk_find {
         }
         if permits.is_empty() {
             // Never bypass the global worker permit pool with unbounded inline blocking I/O.
-            for idx in 0..root_count {
-                shared.mark_root_partial(idx);
-            }
             if shared.cancel.is_cancelled() {
                 shared.mark_cancelled();
             } else {
-                shared.mark_timed_out();
+                shared.mark_root_skipped(root_idx, "worker_pool_busy");
             }
             return;
         }
 
+        shared.mark_root_running(root_idx);
+        let root_deadline = shared.start_root_if_needed(root_idx);
         let cancel_reg = Arc::new(CancelRegistry::new());
-        let queue = Arc::new(FindDirQueue::new(initial, root_count, permits.len()));
+        let queue = Arc::new(FindDirQueue::new(
+            initial,
+            shared.targets.len(),
+            permits.len(),
+        ));
         let mut spawned = 0usize;
         for permit in permits {
             let w_shared = Arc::clone(&shared);
             let w_queue = Arc::clone(&queue);
             let w_cancel = Arc::clone(&cancel_reg);
             let res = std::thread::Builder::new()
-                .name("cst-fffind-walk".into())
+                .name(format!("cst-fffind-walk-{root_idx}"))
                 .spawn(move || {
                     let _life = WorkerLifetimeGuard {
                         queue: Arc::clone(&w_queue),
@@ -1176,10 +1381,10 @@ mod win_walk_find {
                         cancel_reg: Arc::clone(&w_cancel),
                         _permit: permit,
                     };
-                    let _cancel_guard = w_cancel.register_current_thread();
+                    let cancel_guard = w_cancel.register_current_thread();
                     let mut worker = FindWorker::new(Arc::clone(&w_shared));
                     let mut scratch = WorkerScratch::new();
-                    while let Some(task) = w_queue.pop() {
+                    while let Some((task, task_deadline)) = w_queue.pop(&w_shared) {
                         let mut panic_guard = PanicTaskGuard {
                             queue: &w_queue,
                             shared: &w_shared,
@@ -1193,20 +1398,37 @@ mod win_walk_find {
                             panic_guard.completed = true;
                             break;
                         }
+                        if w_shared.is_root_stopped(task.root_idx) {
+                            w_shared.mark_root_partial(task.root_idx);
+                            w_queue.abort_active_task(task.root_idx);
+                            w_queue.drain_root_tasks(task.root_idx, &w_shared);
+                            panic_guard.completed = true;
+                            break;
+                        }
+                        cancel_guard.set_active_root(task.root_idx);
                         let mut high_batch = Vec::new();
                         let mut low_batch = Vec::new();
                         scan_dir(
                             &mut worker,
                             &w_shared,
                             &task,
+                            task_deadline,
                             &mut high_batch,
                             &mut low_batch,
                             &mut scratch,
                         );
+                        cancel_guard.clear_active_root();
                         if w_shared.stop.load(AtomicOrdering::Relaxed) {
                             w_shared.mark_root_partial(task.root_idx);
                             w_queue.abort_active_task(task.root_idx);
                             w_queue.stop_all_and_mark_partials(&w_shared);
+                            panic_guard.completed = true;
+                            break;
+                        }
+                        if w_shared.is_root_stopped(task.root_idx) {
+                            w_shared.mark_root_partial(task.root_idx);
+                            w_queue.abort_active_task(task.root_idx);
+                            w_queue.drain_root_tasks(task.root_idx, &w_shared);
                             panic_guard.completed = true;
                             break;
                         }
@@ -1222,17 +1444,46 @@ mod win_walk_find {
             }
         }
         if spawned == 0 {
-            for idx in 0..root_count {
-                shared.mark_root_partial(idx);
-            }
-            shared.mark_timed_out();
+            shared.mark_root_skipped(root_idx, "worker_spawn_failed");
             return;
         }
-        let stop_deadline = shared
-            .deadline
-            .checked_sub(RETURN_DEADLINE_MARGIN)
-            .unwrap_or(shared.deadline);
-        queue.wait_until_done_or_deadline(&shared, &cancel_reg, stop_deadline, shared.deadline);
+        queue.wait_until_done_or_deadline(&shared, &cancel_reg, root_idx, root_deadline);
+        if !shared.is_root_stopped(root_idx) && !shared.cancel.is_cancelled() {
+            shared.try_mark_root_completed(root_idx);
+        }
+    }
+
+    pub(super) fn run_parallel_walk_win(shared: Arc<WalkShared>) {
+        let root_count = shared.targets.len();
+        if root_count == 0 {
+            return;
+        }
+        let max_global = worker_threads();
+        if root_count == 1 {
+            run_single_root_walk_win(shared, 0, max_global);
+            return;
+        }
+        let concurrency = root_count.min(MAX_CONCURRENT_WALK_ROOTS);
+        let per_vol_workers = (max_global / concurrency).max(1);
+        let pending_roots: Mutex<VecDeque<usize>> = Mutex::new((0..root_count).collect());
+        std::thread::scope(|scope| {
+            for _ in 0..concurrency {
+                let s = Arc::clone(&shared);
+                let q = &pending_roots;
+                scope.spawn(move || {
+                    loop {
+                        if s.cancel.is_cancelled() || s.stop.load(AtomicOrdering::Relaxed) {
+                            break;
+                        }
+                        let next_root = q.lock().ok().and_then(|mut g| g.pop_front());
+                        let Some(root_idx) = next_root else {
+                            break;
+                        };
+                        run_single_root_walk_win(Arc::clone(&s), root_idx, per_vol_workers);
+                    }
+                });
+            }
+        });
     }
 }
 
@@ -1241,6 +1492,16 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
     use ignore::{WalkBuilder, WalkState};
 
     for (root_idx, target) in shared.targets.iter().enumerate() {
+        if shared.cancel.is_cancelled() {
+            shared.mark_cancelled();
+            break;
+        }
+        if shared.stop.load(AtomicOrdering::Relaxed) {
+            shared.mark_root_skipped(root_idx, "aborted_after_worker_error");
+            continue;
+        }
+        shared.mark_root_running(root_idx);
+        let root_deadline = shared.start_root_if_needed(root_idx);
         let root = &target.verified_root.canonical_path;
         let filter_session = shared.session.clone();
         let filter_root = root.clone();
@@ -1293,16 +1554,15 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                 .canonical_path
                 .clone();
             Box::new(move |entry| {
-                if worker_shared.stop.load(AtomicOrdering::Relaxed) {
+                if worker_shared.is_root_stopped(root_idx) {
                     return WalkState::Quit;
                 }
                 if worker_shared.cancel.is_cancelled() {
                     worker_shared.mark_cancelled();
                     return WalkState::Quit;
                 }
-                if Instant::now() >= worker_shared.deadline {
-                    worker_shared.mark_timed_out();
-                    worker_shared.mark_root_partial(root_idx);
+                if Instant::now() >= root_deadline {
+                    worker_shared.mark_root_timed_out(root_idx);
                     return WalkState::Quit;
                 }
                 let entry = match entry {
@@ -1342,6 +1602,14 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                     return WalkState::Continue;
                 }
                 let meta = entry.metadata().ok();
+                if worker_shared.cancel.is_cancelled() {
+                    worker_shared.mark_cancelled();
+                    return WalkState::Quit;
+                }
+                if Instant::now() >= root_deadline {
+                    worker_shared.mark_root_timed_out(root_idx);
+                    return WalkState::Quit;
+                }
                 let size = meta.as_ref().and_then(|m| (!is_dir).then_some(m.len()));
                 let mtime = meta
                     .as_ref()
@@ -1386,9 +1654,26 @@ fn run_parallel_walk_unix(shared: Arc<WalkShared>) {
                     None,
                     None,
                 );
+                if worker_shared.cancel.is_cancelled() {
+                    worker_shared.mark_cancelled();
+                    return WalkState::Quit;
+                }
+                if Instant::now() >= root_deadline {
+                    worker_shared.mark_root_timed_out(root_idx);
+                    return WalkState::Quit;
+                }
                 WalkState::Continue
             })
         });
+        if shared.cancel.is_cancelled() {
+            shared.mark_cancelled();
+            break;
+        }
+        if Instant::now() >= root_deadline {
+            shared.mark_root_timed_out(root_idx);
+        } else if !shared.is_root_stopped(root_idx) {
+            shared.try_mark_root_completed(root_idx);
+        }
     }
 }
 
@@ -1396,23 +1681,31 @@ pub(crate) fn run_walk_find(
     session: &PathGuardSession,
     targets: Vec<WalkRootTarget>,
     spec: WalkQuerySpec,
-    deadline: Instant,
     cancel: &CancellationToken,
 ) -> Result<WalkFindOutcome, String> {
-    let partial_flags = (0..targets.len()).map(|_| AtomicBool::new(false)).collect();
+    let root_count = targets.len();
+    let root_states = (0..root_count)
+        .map(|_| AtomicU8::new(ROOT_STATE_UNCLAIMED))
+        .collect();
+    let root_skip_reasons = (0..root_count).map(|_| Mutex::new(None)).collect();
+    let root_deadlines = (0..root_count).map(|_| OnceLock::new()).collect();
+    let root_timed_out = (0..root_count).map(|_| AtomicBool::new(false)).collect();
     let shared = Arc::new(WalkShared {
         session: session.clone(),
         spec,
         targets,
-        deadline,
+        root_deadlines,
+        root_timed_out,
         cancel: cancel.clone(),
         skipped: AtomicUsize::new(0),
         truncated_by_limit: AtomicBool::new(false),
         timed_out: AtomicBool::new(false),
         cancelled: AtomicBool::new(false),
         queue_overflowed: AtomicBool::new(false),
+        had_non_policy_failure: AtomicBool::new(false),
         stop: AtomicBool::new(false),
-        partial_flags,
+        root_states,
+        root_skip_reasons,
         collected: Mutex::new(Vec::new()),
     });
 
@@ -1427,10 +1720,36 @@ pub(crate) fn run_walk_find(
 
     let candidates =
         std::mem::take(&mut *shared.collected.lock().unwrap_or_else(|e| e.into_inner()));
+    let mut completed_roots = Vec::new();
     let mut partial_roots = Vec::new();
-    for (idx, flag) in shared.partial_flags.iter().enumerate() {
-        if flag.load(AtomicOrdering::Relaxed) {
-            partial_roots.push(shared.targets[idx].display_root.clone());
+    let mut skipped_roots = Vec::new();
+    let mut had_non_policy_failure = shared.had_non_policy_failure.load(AtomicOrdering::Relaxed);
+
+    for (idx, st) in shared.root_states.iter().enumerate() {
+        let display = shared.targets[idx].display_root.clone();
+        match st.load(AtomicOrdering::Acquire) {
+            ROOT_STATE_COMPLETED => completed_roots.push(display),
+            ROOT_STATE_PARTIAL | ROOT_STATE_RUNNING => partial_roots.push(display),
+            ROOT_STATE_SKIPPED => {
+                let reason = shared.root_skip_reasons[idx]
+                    .lock()
+                    .ok()
+                    .and_then(|g| *g)
+                    .unwrap_or("skipped");
+                had_non_policy_failure = true;
+                skipped_roots.push(SkippedRoot {
+                    root: display,
+                    reason: reason.to_owned(),
+                });
+            }
+            _ => {
+                // ROOT_STATE_UNCLAIMED: e.g. aborted after another worker panicked.
+                had_non_policy_failure = true;
+                skipped_roots.push(SkippedRoot {
+                    root: display,
+                    reason: "aborted_after_worker_error".to_owned(),
+                });
+            }
         }
     }
 
@@ -1439,7 +1758,10 @@ pub(crate) fn run_walk_find(
         truncated_by_limit: shared.truncated_by_limit.load(AtomicOrdering::Relaxed),
         timed_out: shared.timed_out.load(AtomicOrdering::Relaxed),
         queue_overflowed: shared.queue_overflowed.load(AtomicOrdering::Relaxed),
+        had_non_policy_failure,
+        completed_roots,
         partial_roots,
+        skipped_roots,
         skipped: shared.skipped.load(AtomicOrdering::Relaxed),
     })
 }

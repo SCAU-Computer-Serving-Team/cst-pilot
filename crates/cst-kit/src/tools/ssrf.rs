@@ -9,7 +9,7 @@ use url::{Host, Url};
 
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
-const DEFAULT_TIMEOUT_MS: u64 = 15_000;
+const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Clone, Default)]
 pub struct NetworkPolicy {

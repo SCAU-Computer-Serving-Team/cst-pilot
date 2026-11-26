@@ -30,7 +30,9 @@ pub(crate) const MAX_PATTERN_BYTES: usize = 4096;
 pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_TOTAL_READ_BYTES: usize = 256 * 1024 * 1024;
 pub(crate) const MAX_MODIFIED_HOURS: f64 = 87_600.0;
-pub(crate) const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
+pub(crate) const MAX_TIMEOUT_SECS: u64 = 180;
+const VOLUME_ENUM_TIMEOUT: Duration = Duration::from_secs(10);
 const WEAK_MATCH_SCORE_THRESHOLD: i32 = 400;
 const GLOB_BASE_SCORE: i32 = 5_000;
 const MIB_BYTES: f64 = 1_048_576.0;
@@ -114,6 +116,13 @@ pub struct FffindInput {
     #[serde(default)]
     #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
+    /// 可选。单卷或目标目录检索的超时预算，单位秒，范围 1 至 180，默认 30。全电脑 path="*" 模式下各卷在开始扫描时独立起算该预算。
+    #[serde(
+        default = "default_timeout_sec",
+        deserialize_with = "deserialize_timeout_sec"
+    )]
+    #[schemars(range(min = 1, max = 180))]
+    pub timeout_sec: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -151,6 +160,13 @@ pub struct FfgrepInput {
     #[serde(default)]
     #[schemars(range(min = 1, max = 1000))]
     pub limit: Option<usize>,
+    /// 可选。内容检索的超时预算，单位秒，范围 1 至 180，默认 30。
+    #[serde(
+        default = "default_timeout_sec",
+        deserialize_with = "deserialize_timeout_sec"
+    )]
+    #[schemars(range(min = 1, max = 180))]
+    pub timeout_sec: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -302,11 +318,12 @@ fn find_paths_with_details(
     input: FffindInput,
     cancel: &CancellationToken,
 ) -> Result<(Value, Value), String> {
-    let deadline = Instant::now() + SEARCH_TIMEOUT;
     if cancel.is_cancelled() {
         return Err("文件检索已取消。".into());
     }
 
+    let timeout_sec = validate_timeout_sec(input.timeout_sec)?;
+    let per_vol_budget = Duration::from_secs(timeout_sec);
     let kind = input.kind.unwrap_or(FffindKind::File);
     let limit = validate_limit(input.limit)?;
     if let Some(d) = input.max_depth
@@ -388,7 +405,7 @@ fn find_paths_with_details(
     };
 
     if path_arg == "*" {
-        return run_whole_pc_find(&session, spec, deadline, cancel);
+        return run_whole_pc_find(&session, spec, timeout_sec, cancel);
     }
 
     let resolved_path = resolve_explicit_search_path(cwd, path_arg)?;
@@ -399,7 +416,7 @@ fn find_paths_with_details(
         if input.max_depth.is_some() {
             return Err("单文件路径不支持 maxDepth 参数。".into());
         }
-        return run_single_file_find(&verified_root, &root_display, &spec);
+        return run_single_file_find(&verified_root, &root_display, &spec, timeout_sec);
     }
 
     // Try elevated NTFS MFT+USN memory index first (for volume root or subtree on NTFS).
@@ -411,46 +428,74 @@ fn find_paths_with_details(
     let mut truncated_by_limit = false;
     let mut timed_out = false;
     let mut queue_overflowed = false;
+    let mut had_non_policy_failure = false;
+    let mut extra_notices: Vec<String> = Vec::new();
     let mut skipped = 0usize;
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut walk_budget = per_vol_budget;
 
     #[cfg(windows)]
-    let mut used_mft = false;
+    let mut handled_by_mft = false;
     #[cfg(not(windows))]
-    let used_mft = false;
+    let handled_by_mft = false;
+
+    #[cfg(windows)]
+    let mut single_root_mft_eligible = false;
+    #[cfg(not(windows))]
+    let single_root_mft_eligible = false;
 
     #[cfg(windows)]
     if let Some((drive, subtree_rel)) =
         mft_index::split_windows_drive_and_subtree(&verified_root.canonical_path)
     {
+        if crate::diagnostics::volume::volume_identity(&drive)
+            .is_ok_and(|id| id.filesystem.eq_ignore_ascii_case("NTFS"))
+        {
+            single_root_mft_eligible = true;
+        }
         let mgr = mft_index::SearchIndexManager::global();
-        if let Some((idx, status)) = mgr.get_or_build_windows(&drive, false, deadline, cancel)? {
-            let (mft_cands, mft_limit, mft_skipped, mft_timed_out) = idx.query(
-                &session,
-                &verified_root,
-                subtree_rel.as_deref(),
-                &spec,
-                deadline,
-                cancel,
-            )?;
-            candidates = mft_cands;
-            truncated_by_limit = mft_limit;
-            skipped = mft_skipped;
-            timed_out = mft_timed_out;
-            method = "mft-index";
-            let mut st_map = Map::new();
-            st_map.insert(
-                format!("{drive}/"),
-                json!(match status {
-                    mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
-                    mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
-                }),
-            );
-            vol_index_status = Some(st_map);
-            used_mft = true;
+        match mgr.get_or_build_windows(&drive, false, per_vol_budget, cancel)? {
+            mft_index::MftVolumeResult::Ready {
+                index: idx,
+                status,
+                deadline: vol_deadline,
+            } => {
+                let (mft_cands, mft_limit, mft_skipped, mft_timed_out) = idx.query(
+                    &session,
+                    &verified_root,
+                    subtree_rel.as_deref(),
+                    &spec,
+                    vol_deadline,
+                    cancel,
+                )?;
+                candidates = mft_cands;
+                truncated_by_limit = mft_limit;
+                skipped = mft_skipped;
+                timed_out = mft_timed_out;
+                method = "mft-index";
+                let mut st_map = Map::new();
+                st_map.insert(
+                    format!("{drive}/"),
+                    json!(match status {
+                        mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
+                        mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
+                    }),
+                );
+                vol_index_status = Some(st_map);
+                handled_by_mft = true;
+            }
+            mft_index::MftVolumeResult::TimedOut => {
+                timed_out = true;
+                method = "mft-index";
+                handled_by_mft = true;
+            }
+            mft_index::MftVolumeResult::Fallback { remaining_budget } => {
+                walk_budget = remaining_budget;
+            }
         }
     }
 
-    if !used_mft {
+    if !handled_by_mft {
         let is_vol_root = is_volume_root_path(&verified_root.canonical_path);
         let outcome = walk_engine::run_walk_find(
             &session,
@@ -458,17 +503,28 @@ fn find_paths_with_details(
                 display_root: root_display.clone(),
                 verified_root,
                 is_volume_root: is_vol_root,
+                budget: walk_budget,
             }],
             spec.clone(),
-            deadline,
             cancel,
         )?;
         candidates = outcome.candidates;
         truncated_by_limit = outcome.truncated_by_limit;
         timed_out = outcome.timed_out;
         queue_overflowed = outcome.queue_overflowed;
+        had_non_policy_failure |= outcome.had_non_policy_failure;
         skipped = outcome.skipped;
+        if let Some(sk) = outcome.skipped_roots.first() {
+            let msg = match sk.reason.as_str() {
+                "worker_pool_busy" => "工作线程池繁忙，未启动目录扫描，请稍后重试。",
+                "worker_spawn_failed" => "目录扫描线程启动失败，请稍后重试。",
+                _ => "目录扫描异常中止，结果不完整，请重试。",
+            };
+            extra_notices.push(msg.to_owned());
+        }
     }
+
+    let suggest_admin_retry = should_suggest_admin_retry(single_root_mft_eligible);
 
     finalize_fffind_response(
         root_display,
@@ -480,10 +536,13 @@ fn find_paths_with_details(
         truncated_by_limit,
         timed_out,
         queue_overflowed,
-        false,
+        had_non_policy_failure,
         skipped,
         method,
         vol_index_status,
+        timeout_sec,
+        suggest_admin_retry,
+        extra_notices,
     )
 }
 
@@ -491,6 +550,7 @@ fn run_single_file_find(
     verified_root: &super::path_guard::VerifiedSearchEntry,
     root_display: &str,
     spec: &walk_engine::WalkQuerySpec,
+    timeout_sec: u64,
 ) -> Result<(Value, Value), String> {
     let mut candidates = Vec::new();
     if !matches!(spec.kind, FffindKind::Dir) {
@@ -536,16 +596,22 @@ fn run_single_file_find(
         0,
         if cfg!(windows) { "native-walk" } else { "walk" },
         None,
+        timeout_sec,
+        false,
+        Vec::new(),
     )
 }
 
 fn run_whole_pc_find(
     session: &PathGuardSession,
     spec: walk_engine::WalkQuerySpec,
-    deadline: Instant,
+    timeout_sec: u64,
     cancel: &CancellationToken,
 ) -> Result<(Value, Value), String> {
-    let enumeration = win_volumes::enumerate_whole_pc_volumes(deadline, cancel)?;
+    let per_vol_budget = Duration::from_secs(timeout_sec);
+    // Volume enumeration uses a bounded probe window that does not consume each volume's scan budget.
+    let enum_deadline = Instant::now() + per_vol_budget.min(VOLUME_ENUM_TIMEOUT);
+    let enumeration = win_volumes::enumerate_whole_pc_volumes(enum_deadline, cancel)?;
     if enumeration.ready.is_empty() {
         return Err("未找到任何可访问的本机固定盘或可移动盘。".into());
     }
@@ -555,6 +621,7 @@ fn run_whole_pc_find(
     let mut mft_roots = Vec::new();
     let mut mft_partial_roots = Vec::new();
     let mut walk_targets = Vec::new();
+    let mut mft_eligible_roots: HashSet<String> = HashSet::new();
     let mut vol_index_status = Map::new();
     let mut all_candidates = Vec::new();
     let mut truncated_by_limit = false;
@@ -584,8 +651,11 @@ fn run_whole_pc_find(
             }
         };
 
-        if !vol.is_subst
-            && vol.filesystem.eq_ignore_ascii_case("NTFS")
+        let is_ntfs_local = !vol.is_subst && vol.filesystem.eq_ignore_ascii_case("NTFS");
+        if is_ntfs_local {
+            mft_eligible_roots.insert(vol.display_root.clone());
+        }
+        if is_ntfs_local
             && crate::diagnostics::mft::mft_enabled()
             && cst_os::is_elevated().unwrap_or(false)
         {
@@ -595,20 +665,28 @@ fn run_whole_pc_find(
                 display_root: vol.display_root,
                 verified_root,
                 is_volume_root: !vol.is_subst,
+                budget: per_vol_budget,
             });
         }
     }
 
-    // Dispatch NTFS MFT volumes concurrently so a slow cold build on one volume never starves others.
-    type MftVolHit = (
-        Vec<FindCandidate>,
-        bool,
-        usize,
-        bool,
-        mft_index::IndexBuildStatus,
-    );
-    type MftVolOutcome = Result<(String, Option<MftVolHit>, walk_engine::WalkRootTarget), String>;
-    let mft_outcomes: Mutex<Vec<MftVolOutcome>> = Mutex::new(Vec::new());
+    // Dispatch NTFS MFT volumes concurrently; cold builds queue on `BuildSlotPool` (bounded) and
+    // each volume accumulates active USN + cold-build work against `per_vol_budget`.
+    enum MftVolDispatch {
+        Queried {
+            display_root: String,
+            candidates: Vec<FindCandidate>,
+            truncated_by_limit: bool,
+            skipped: usize,
+            timed_out: bool,
+            status: mft_index::IndexBuildStatus,
+        },
+        TimedOut {
+            display_root: String,
+        },
+        Fallback(walk_engine::WalkRootTarget),
+    }
+    let mft_outcomes: Mutex<Vec<Result<MftVolDispatch, String>>> = Mutex::new(Vec::new());
     if !mft_candidates_vols.is_empty() {
         std::thread::scope(|scope| {
             for (vol, verified_root) in mft_candidates_vols {
@@ -619,39 +697,42 @@ fn run_whole_pc_find(
                     let res = match mgr_ref.get_or_build_windows(
                         &vol.drive,
                         vol.is_subst,
-                        deadline,
+                        per_vol_budget,
                         cancel,
                     ) {
-                        Ok(Some((idx, status))) => {
-                            match idx.query(
-                                session,
-                                &verified_root,
-                                None,
-                                spec_ref,
-                                deadline,
-                                cancel,
-                            ) {
-                                Ok((cands, lim, sk, to)) => Ok((
-                                    vol.display_root.clone(),
-                                    Some((cands, lim, sk, to, status)),
-                                    walk_engine::WalkRootTarget {
-                                        display_root: vol.display_root,
-                                        verified_root,
-                                        is_volume_root: !vol.is_subst,
-                                    },
-                                )),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        Ok(None) => Ok((
-                            vol.display_root.clone(),
+                        Ok(mft_index::MftVolumeResult::Ready {
+                            index: idx,
+                            status,
+                            deadline: vol_deadline,
+                        }) => match idx.query(
+                            session,
+                            &verified_root,
                             None,
-                            walk_engine::WalkRootTarget {
+                            spec_ref,
+                            vol_deadline,
+                            cancel,
+                        ) {
+                            Ok((cands, lim, sk, to)) => Ok(MftVolDispatch::Queried {
+                                display_root: vol.display_root,
+                                candidates: cands,
+                                truncated_by_limit: lim,
+                                skipped: sk,
+                                timed_out: to,
+                                status,
+                            }),
+                            Err(e) => Err(e),
+                        },
+                        Ok(mft_index::MftVolumeResult::TimedOut) => Ok(MftVolDispatch::TimedOut {
+                            display_root: vol.display_root,
+                        }),
+                        Ok(mft_index::MftVolumeResult::Fallback { remaining_budget }) => {
+                            Ok(MftVolDispatch::Fallback(walk_engine::WalkRootTarget {
                                 display_root: vol.display_root,
                                 verified_root,
                                 is_volume_root: !vol.is_subst,
-                            },
-                        )),
+                                budget: remaining_budget,
+                            }))
+                        }
                         Err(e) => Err(e),
                     };
                     if let Ok(mut guard) = outcomes_ref.lock() {
@@ -661,27 +742,43 @@ fn run_whole_pc_find(
             }
         });
     }
+    let mut used_mft = false;
     for item in mft_outcomes.into_inner().unwrap_or_default() {
-        let (display_root, mft_res, fallback_target) = item?;
-        if let Some((cands, lim, sk, to, status)) = mft_res {
-            all_candidates.extend(cands);
-            truncated_by_limit |= lim;
-            skipped_count += sk;
-            timed_out |= to;
-            vol_index_status.insert(
-                display_root.clone(),
-                json!(match status {
-                    mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
-                    mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
-                }),
-            );
-            if to {
-                mft_partial_roots.push(display_root);
-            } else {
-                mft_roots.push(display_root);
+        match item? {
+            MftVolDispatch::Queried {
+                display_root,
+                candidates: cands,
+                truncated_by_limit: lim,
+                skipped: sk,
+                timed_out: to,
+                status,
+            } => {
+                used_mft = true;
+                all_candidates.extend(cands);
+                truncated_by_limit |= lim;
+                skipped_count += sk;
+                timed_out |= to;
+                vol_index_status.insert(
+                    display_root.clone(),
+                    json!(match status {
+                        mft_index::IndexBuildStatus::ColdBuilt => "cold-built",
+                        mft_index::IndexBuildStatus::UsnSynced => "usn-synced",
+                    }),
+                );
+                if to {
+                    mft_partial_roots.push(display_root);
+                } else {
+                    mft_roots.push(display_root);
+                }
             }
-        } else {
-            walk_targets.push(fallback_target);
+            MftVolDispatch::TimedOut { display_root } => {
+                used_mft = true;
+                timed_out = true;
+                mft_partial_roots.push(display_root);
+            }
+            MftVolDispatch::Fallback(fallback_target) => {
+                walk_targets.push(fallback_target);
+            }
         }
     }
 
@@ -692,44 +789,37 @@ fn run_whole_pc_find(
     let mut partial_roots = mft_partial_roots;
     let mut completed_walk_roots = Vec::new();
     let mut queue_overflowed = false;
+    let mut used_walk = false;
 
     if !walk_targets.is_empty() {
-        let all_walk_names: Vec<String> = walk_targets
-            .iter()
-            .map(|t| t.display_root.clone())
-            .collect();
-        let outcome =
-            walk_engine::run_walk_find(session, walk_targets, spec.clone(), deadline, cancel)?;
+        used_walk = true;
+        let outcome = walk_engine::run_walk_find(session, walk_targets, spec.clone(), cancel)?;
         all_candidates.extend(outcome.candidates);
         truncated_by_limit |= outcome.truncated_by_limit;
         timed_out |= outcome.timed_out;
         queue_overflowed |= outcome.queue_overflowed;
+        had_non_policy_failure |= outcome.had_non_policy_failure;
         skipped_count += outcome.skipped;
-        let partial_set: HashSet<&str> = outcome.partial_roots.iter().map(String::as_str).collect();
-        for r in all_walk_names {
-            if partial_set.contains(r.as_str()) {
-                partial_roots.push(r);
-            } else {
-                completed_walk_roots.push(r);
-            }
-        }
+        completed_walk_roots.extend(outcome.completed_roots);
+        partial_roots.extend(outcome.partial_roots);
+        skipped_roots.extend(outcome.skipped_roots);
     }
 
-    let mut scanned_roots = mft_roots.clone();
-    scanned_roots.extend(completed_walk_roots.iter().cloned());
+    let mut scanned_roots = mft_roots;
+    scanned_roots.extend(completed_walk_roots);
     scanned_roots.sort();
     partial_roots.sort();
     skipped_roots.sort_by(|a, b| a.root.cmp(&b.root));
 
-    let method = match (
-        !mft_roots.is_empty(),
-        !completed_walk_roots.is_empty() || !partial_roots.is_empty(),
-    ) {
+    let method = match (used_mft, used_walk) {
         (true, false) => "mft-index",
         (false, true) => "native-walk",
         (true, true) => "mixed",
         (false, false) => "native-walk",
     };
+
+    let any_partial_mft_eligible = partial_roots.iter().any(|r| mft_eligible_roots.contains(r));
+    let suggest_admin_retry = should_suggest_admin_retry(any_partial_mft_eligible);
 
     finalize_fffind_response(
         "*".to_owned(),
@@ -745,7 +835,24 @@ fn run_whole_pc_find(
         skipped_count,
         method,
         (!vol_index_status.is_empty()).then_some(vol_index_status),
+        timeout_sec,
+        suggest_admin_retry,
+        Vec::new(),
     )
+}
+
+fn should_suggest_admin_retry(has_mft_eligible_target: bool) -> bool {
+    #[cfg(windows)]
+    {
+        has_mft_eligible_target
+            && crate::diagnostics::mft::mft_enabled()
+            && matches!(cst_os::is_elevated(), Ok(false))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = has_mft_eligible_target;
+        false
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -763,6 +870,9 @@ fn finalize_fffind_response(
     skipped: usize,
     method: &str,
     vol_index_status: Option<Map<String, Value>>,
+    timeout_sec: u64,
+    suggest_admin_retry: bool,
+    extra_notices: Vec<String>,
 ) -> Result<(Value, Value), String> {
     // Deduplicate identical canonical paths BEFORE checking `limit`, keeping the best-ranked copy.
     candidates.sort_by(|a, b| cmp_find_candidate(a, b, spec.sort_by));
@@ -798,22 +908,38 @@ fn finalize_fffind_response(
         None
     };
     let degraded = timed_out || queue_overflowed || had_non_policy_failure;
-    let mut notices = Vec::new();
+    let mut notices = extra_notices;
     if timed_out {
         if let Some(ref partials) = partial_roots {
-            notices.push(format!(
-                "全电脑目录遍历达到 30 秒返回期限，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path 或以管理员权限重试。",
-                partials.join("、")
-            ));
+            if suggest_admin_retry {
+                notices.push(format!(
+                    "全电脑检索中部分卷达到单卷 {timeout_sec} 秒预算，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试。",
+                    partials.join("、")
+                ));
+            } else {
+                notices.push(format!(
+                    "全电脑检索中部分卷达到单卷 {timeout_sec} 秒预算，已保留已扫范围内的高分命中，{} 未扫完；可缩小 path 或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）重试。",
+                    partials.join("、")
+                ));
+            }
         } else if matches.is_empty() {
-            notices.push(
-                "文件检索达到 30 秒返回期限且未找到匹配项；请缩小 path 范围后重试。".to_owned(),
-            );
+            if suggest_admin_retry {
+                notices.push(format!(
+                    "文件检索达到 {timeout_sec} 秒预算且未找到匹配项；可缩小 path 范围、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试。"
+                ));
+            } else {
+                notices.push(format!(
+                    "文件检索达到 {timeout_sec} 秒预算且未找到匹配项；可缩小 path 范围或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）后重试。"
+                ));
+            }
+        } else if suggest_admin_retry {
+            notices.push(format!(
+                "文件检索达到 {timeout_sec} 秒预算，已保留已扫范围内的高分命中；可缩小 path 范围、调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）或以管理员权限重试获取完整结果。"
+            ));
         } else {
-            notices.push(
-                "文件检索达到 30 秒返回期限，已保留已扫范围内的高分命中；请缩小 path 范围获取完整结果。"
-                    .to_owned(),
-            );
+            notices.push(format!(
+                "文件检索达到 {timeout_sec} 秒预算，已保留已扫范围内的高分命中；可缩小 path 范围或调高 timeoutSec（最高 {MAX_TIMEOUT_SECS} 秒）获取完整结果。"
+            ));
         }
     } else if queue_overflowed {
         notices.push(
@@ -864,10 +990,11 @@ fn grep_files_with_details(
     input: FfgrepInput,
     cancel: &CancellationToken,
 ) -> Result<(Value, Value), String> {
-    let deadline = Instant::now() + SEARCH_TIMEOUT;
     if cancel.is_cancelled() {
         return Err("文件检索已取消。".into());
     }
+    let timeout_sec = validate_timeout_sec(input.timeout_sec)?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_sec);
     if input.pattern.is_empty() || input.pattern.len() > MAX_PATTERN_BYTES {
         return Err(format!(
             "pattern 不可为空且不得超过 {MAX_PATTERN_BYTES} 字节。"
@@ -929,6 +1056,7 @@ fn grep_files_with_details(
         modified_window,
         limit,
         context,
+        timeout_sec,
         deadline,
         cancel,
     )?;
@@ -959,6 +1087,27 @@ fn grep_files_with_details(
 // ============================================================================
 // Validation, Path Normalization, Glob & QueryPlan Helpers
 // ============================================================================
+
+fn default_timeout_sec() -> u64 {
+    DEFAULT_TIMEOUT_SECS
+}
+
+fn deserialize_timeout_sec<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<u64>::deserialize(deserializer)?.unwrap_or(DEFAULT_TIMEOUT_SECS))
+}
+
+fn validate_timeout_sec(timeout_sec: u64) -> Result<u64, String> {
+    if (1..=MAX_TIMEOUT_SECS).contains(&timeout_sec) {
+        Ok(timeout_sec)
+    } else {
+        Err(format!(
+            "timeoutSec 必须在 1 至 {MAX_TIMEOUT_SECS} 秒之间。"
+        ))
+    }
+}
 
 fn validate_limit(limit: Option<usize>) -> Result<usize, String> {
     match limit {

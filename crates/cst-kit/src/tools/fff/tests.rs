@@ -13,12 +13,14 @@ use crate::diagnostics::volume_index::VolumeIdentity;
 
 const MAX_BYTES: usize = 50 * 1024;
 
-use super::grep_engine::{ContentMatcher, merge_and_limit_grep_rows, scan_reader_streaming};
+use super::grep_engine::{self, ContentMatcher, merge_and_limit_grep_rows, scan_reader_streaming};
 use super::mft_index::{
-    NameEdge, ObjectNode, SearchIndexManager, USN_REASON_FILE_CREATE, USN_REASON_FILE_DELETE,
+    BuildFlight, BuildOutcome, BuildSlotPool, IndexBuildStatus, NameEdge, ObjectNode,
+    SearchIndexManager, SlotAcquire, USN_REASON_FILE_CREATE, USN_REASON_FILE_DELETE,
     USN_REASON_RENAME_NEW_NAME, USN_REASON_RENAME_OLD_NAME, UsnEventV2, UsnReadError,
     VolumeFileIndex, parse_usn_read_buffer,
 };
+use super::win_volumes;
 use super::{
     FffindInput, FffindOutput, FfgrepInput, FfgrepOutput, definitions, find_paths,
     find_paths_with_details, grep_files,
@@ -108,12 +110,23 @@ fn v1_schema_snapshot_and_independent_fields() {
         "sortBy",
         "caseSensitive",
         "limit",
+        "timeoutSec",
     ] {
         assert!(
             find_props.contains_key(expected),
             "fffind schema missing property `{expected}`"
         );
     }
+    assert_eq!(find_props["timeoutSec"]["type"], "integer");
+    assert_eq!(find_props["timeoutSec"]["default"], 30);
+    assert_eq!(find_props["timeoutSec"]["minimum"], 1);
+    assert_eq!(find_props["timeoutSec"]["maximum"], 180);
+    assert!(!find_req.contains(&"timeoutSec"));
+    assert_eq!(fffind_in(json!({ "path": "." })).timeout_sec, 30);
+    assert_eq!(
+        fffind_in(json!({ "path": ".", "timeoutSec": null })).timeout_sec,
+        30
+    );
     for forbidden in ["context", "literal", "include"] {
         assert!(
             !find_props.contains_key(forbidden),
@@ -142,12 +155,26 @@ fn v1_schema_snapshot_and_independent_fields() {
         "caseSensitive",
         "context",
         "limit",
+        "timeoutSec",
     ] {
         assert!(
             grep_props.contains_key(expected),
             "ffgrep schema missing property `{expected}`"
         );
     }
+    assert_eq!(grep_props["timeoutSec"]["type"], "integer");
+    assert_eq!(grep_props["timeoutSec"]["default"], 30);
+    assert_eq!(grep_props["timeoutSec"]["minimum"], 1);
+    assert_eq!(grep_props["timeoutSec"]["maximum"], 180);
+    assert!(!grep_req.contains("timeoutSec"));
+    assert_eq!(
+        ffgrep_in(json!({ "pattern": "a", "path": "." })).timeout_sec,
+        30
+    );
+    assert_eq!(
+        ffgrep_in(json!({ "pattern": "a", "path": ".", "timeoutSec": null })).timeout_sec,
+        30
+    );
     for forbidden in [
         "kind",
         "ext",
@@ -182,6 +209,71 @@ fn v1_validation_rejects_invalid_combinations_and_boundaries() {
 
     // Unknown fields rejected by deny_unknown_fields.
     assert!(serde_json::from_value::<FffindInput>(json!({"path": &root, "context": 1})).is_err());
+
+    // timeoutSec bounds: 0 and 181 rejected; 1 and 180 accepted.
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "timeoutSec": 0})),
+            &cancel
+        )
+        .is_err()
+    );
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "timeoutSec": 181})),
+            &cancel
+        )
+        .is_err()
+    );
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "timeoutSec": 1})),
+            &cancel
+        )
+        .is_ok()
+    );
+    assert!(
+        find_paths(
+            &guard,
+            &ws.root,
+            fffind_in(json!({"path": &root, "timeoutSec": 180})),
+            &cancel
+        )
+        .is_ok()
+    );
+    assert!(
+        grep_files(
+            &guard,
+            &ws.root,
+            ffgrep_in(json!({"path": &root, "pattern": "hello", "timeoutSec": 0})),
+            &cancel
+        )
+        .is_err()
+    );
+    assert!(
+        grep_files(
+            &guard,
+            &ws.root,
+            ffgrep_in(json!({"path": &root, "pattern": "hello", "timeoutSec": 181})),
+            &cancel
+        )
+        .is_err()
+    );
+    assert!(
+        grep_files(
+            &guard,
+            &ws.root,
+            ffgrep_in(json!({"path": &root, "pattern": "hello", "timeoutSec": 60})),
+            &cancel
+        )
+        .is_ok()
+    );
     assert!(
         serde_json::from_value::<FffindInput>(json!({"path": &root, "literal": true})).is_err()
     );
@@ -1443,4 +1535,280 @@ fn v1_and_v4_sol_review_regressions_cr_preservation_50kib_match_priority_and_usn
         parse_usn_read_buffer(&truncated_usn),
         Err(UsnReadError::IoFailed)
     ));
+}
+
+#[test]
+fn v7_mft_slot_pool_queues_five_volumes_respects_cancel_and_evicts_idle_lru() {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    // 1. 5 concurrent volumes queue cleanly on a 2-slot pool without dropping/falling back.
+    let pool = BuildSlotPool::new(2);
+    let cancel = CancellationToken::new();
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let max_seen = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(AtomicUsize::new(0));
+    std::thread::scope(|scope| {
+        for _ in 0..5 {
+            let p = Arc::clone(&pool);
+            let c = cancel.clone();
+            let cur = Arc::clone(&in_flight);
+            let peak = Arc::clone(&max_seen);
+            let done = Arc::clone(&completed);
+            scope.spawn(move || {
+                let SlotAcquire::Acquired(_permit) = p.acquire_bounded(Duration::from_secs(5), &c)
+                else {
+                    panic!("queued volume must acquire slot");
+                };
+                let now = cur.fetch_add(1, Ordering::AcqRel) + 1;
+                peak.fetch_max(now, Ordering::AcqRel);
+                std::thread::sleep(Duration::from_millis(25));
+                cur.fetch_sub(1, Ordering::AcqRel);
+                done.fetch_add(1, Ordering::AcqRel);
+            });
+        }
+    });
+    assert_eq!(completed.load(Ordering::Acquire), 5);
+    assert!(max_seen.load(Ordering::Acquire) <= 2);
+
+    // 2. Cancellation wakes a queued waiter promptly while slots are busy; wedged slots time out.
+    let SlotAcquire::Acquired(_p1) = pool.acquire_bounded(Duration::from_secs(1), &cancel) else {
+        panic!("slot 1");
+    };
+    let SlotAcquire::Acquired(_p2) = pool.acquire_bounded(Duration::from_secs(1), &cancel) else {
+        panic!("slot 2");
+    };
+    let cancel_waiter = CancellationToken::new();
+    let cw_clone = cancel_waiter.clone();
+    let p_clone = Arc::clone(&pool);
+    let handle = std::thread::spawn(move || {
+        matches!(
+            p_clone.acquire_bounded(Duration::from_secs(5), &cw_clone),
+            SlotAcquire::Cancelled
+        )
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    cancel_waiter.cancel();
+    assert!(handle.join().unwrap());
+
+    // Wedged slots: 3rd waiter hits bounded queue timeout instead of hanging forever.
+    let t_wedged = Instant::now();
+    assert!(matches!(
+        pool.acquire_bounded(Duration::from_millis(50), &cancel),
+        SlotAcquire::TimedOut
+    ));
+    assert!(t_wedged.elapsed() < Duration::from_secs(1));
+    drop(_p1);
+    drop(_p2);
+
+    // 3. BuildFlight queue wait time does NOT consume vol_budget, is independently bounded by
+    // queue_budget, and USN + cold-build work accumulates without reset.
+    let flight = Arc::new(BuildFlight::new());
+    let f_bg = Arc::clone(&flight);
+    let dummy_idx = Arc::new(make_test_volume_index("E:", Some(1024)));
+    let dummy_for_bg = Arc::clone(&dummy_idx);
+    std::thread::spawn(move || {
+        // Queue for 140ms (longer than 90ms vol_budget, shorter than 400ms queue_budget).
+        std::thread::sleep(Duration::from_millis(140));
+        f_bg.mark_work_started(Instant::now());
+        std::thread::sleep(Duration::from_millis(25));
+        f_bg.finish(BuildOutcome::Ready(
+            dummy_for_bg,
+            IndexBuildStatus::ColdBuilt,
+        ));
+    });
+    let (outcome, remaining) = flight.wait_with_budget(
+        Duration::from_millis(90),
+        Duration::from_millis(400),
+        &cancel,
+    );
+    assert!(
+        matches!(outcome, BuildOutcome::Ready(_, _)),
+        "queue wait before work_started must not trigger timeout"
+    );
+    assert!(remaining > Duration::ZERO && remaining <= Duration::from_millis(90));
+
+    // Queue timeout on wedged flight returns Fallback with FULL vol_budget preserved!
+    let wedged_flight = BuildFlight::new();
+    let (q_out, q_rem) = wedged_flight.wait_with_budget(
+        Duration::from_millis(300),
+        Duration::from_millis(50),
+        &cancel,
+    );
+    assert!(matches!(q_out, BuildOutcome::Fallback));
+    assert_eq!(q_rem, Duration::from_millis(300));
+
+    // Cumulative active work: USN sync (60ms) -> queue pause (80ms) -> cold build (60ms)
+    // exceeds 100ms vol_budget even though neither phase alone exceeded 100ms!
+    let cum_flight = Arc::new(BuildFlight::new());
+    let cf_bg = Arc::clone(&cum_flight);
+    std::thread::spawn(move || {
+        cf_bg.mark_work_started(Instant::now());
+        std::thread::sleep(Duration::from_millis(60));
+        cf_bg.pause_work_for_queue(Instant::now());
+        std::thread::sleep(Duration::from_millis(80));
+        cf_bg.mark_work_started(Instant::now());
+        std::thread::sleep(Duration::from_millis(60));
+        cf_bg.finish(BuildOutcome::Fallback);
+    });
+    let (cum_out, cum_rem) = cum_flight.wait_with_budget(
+        Duration::from_millis(100),
+        Duration::from_millis(400),
+        &cancel,
+    );
+    assert!(
+        matches!(cum_out, BuildOutcome::TimedOut),
+        "USN + cold build active work must accumulate without reset"
+    );
+    assert_eq!(cum_rem, Duration::ZERO);
+
+    // 4. reserve_with_eviction + same-volume stale generation eviction (with & without pinned reader).
+    let mgr = SearchIndexManager::new(Duration::from_secs(60), 100 * 1024 * 1024);
+    let now = Instant::now();
+    let c_idx = make_test_volume_index("C:", Some(50 * 1024 * 1024));
+    let d_idx = make_test_volume_index("D:", Some(40 * 1024 * 1024));
+    let c_id = c_idx.identity.clone();
+    let c_journal = c_idx.journal_id;
+    let c_cursor = c_idx.applied_cursor;
+    let c_arc = mgr
+        .insert_for_test(c_idx, now - Duration::from_secs(10))
+        .unwrap();
+    let d_arc = mgr
+        .insert_for_test(d_idx, now - Duration::from_secs(2))
+        .unwrap();
+    // Evicting stale C: while pinned removes it from cache map but keeps ledger bytes charged until drop.
+    mgr.evict_stale_volume_generation("C:", &c_id, c_journal, c_cursor);
+    assert_eq!(mgr.cached_bytes(), 40 * 1024 * 1024);
+    assert_eq!(mgr.reserved_bytes(), 90 * 1024 * 1024);
+    // Dropping C:'s reader frees its 50 MiB so a 55 MiB reservation succeeds while D: stays pinned.
+    drop(c_arc);
+    let reserved = mgr
+        .reserve_with_eviction(55 * 1024 * 1024, &cancel)
+        .expect("evicting unpinned stale C: frees enough room for 55 MiB");
+    assert_eq!(mgr.reserved_bytes(), 95 * 1024 * 1024);
+    drop(reserved);
+    drop(d_arc);
+    // D: remains cached (40 MiB) until evicted; a subsequent 80 MiB reservation evicts idle D:.
+    assert_eq!(mgr.reserved_bytes(), 40 * 1024 * 1024);
+    let big = mgr
+        .reserve_with_eviction(80 * 1024 * 1024, &cancel)
+        .expect("now-idle D: is evicted to make room for 80 MiB");
+    assert_eq!(mgr.cached_bytes(), 0);
+    drop(big);
+    assert_eq!(mgr.reserved_bytes(), 0);
+}
+
+#[test]
+fn v8_usn_growth_reconciles_memory_ledger_and_probe_timeout_preserves_ready_volumes() {
+    use crate::diagnostics::volume_index::ProcessMemoryLedger;
+    use std::io::Read;
+
+    // 1. P1-4: USN replay growth synchronizes MemoryReservation and rolls back cleanly on OOM.
+    let ledger = ProcessMemoryLedger::new_isolated(64 * 1024, 64 * 1024);
+    let base = make_test_volume_index("C:", None);
+    let mut cloned = base
+        .clone_with_reservation_fn(|n| ledger.try_reserve(n))
+        .expect("base clone fits in 64 KiB ledger");
+    assert_eq!(ledger.reserved_bytes(), cloned.estimated_bytes);
+    let many_events: Vec<UsnEventV2> = (0..64u64)
+        .map(|i| UsnEventV2 {
+            file_ref: ((1u64) << 48) | (1000 + i),
+            parent_ref: cloned.root_ref,
+            usn: 200 + i as i64,
+            reason: USN_REASON_FILE_CREATE,
+            file_attributes: 0x20,
+            name_utf8: format!("generated_file_with_long_name_{i:04}.log"),
+            name_lossless: true,
+        })
+        .collect();
+    cloned
+        .apply_usn_events_with_reserve(&many_events, 500, |n| ledger.try_reserve(n))
+        .expect("USN growth fits in 64 KiB ledger");
+    assert_eq!(
+        ledger.reserved_bytes(),
+        cloned.estimated_bytes,
+        "ledger reservation must match grown estimated_bytes"
+    );
+    drop(cloned);
+    assert_eq!(ledger.reserved_bytes(), 0);
+
+    // Tight ledger: USN growth fails and dropping rolled-back clone frees 100% of bytes.
+    let tight =
+        ProcessMemoryLedger::new_isolated(base.estimated_bytes + 64, base.estimated_bytes + 64);
+    let mut tight_clone = base
+        .clone_with_reservation_fn(|n| tight.try_reserve(n))
+        .expect("initial clone fits");
+    assert!(
+        tight_clone
+            .apply_usn_events_with_reserve(&many_events, 500, |n| tight.try_reserve(n))
+            .is_err(),
+        "USN growth exceeding tight ledger must fail"
+    );
+    drop(tight_clone);
+    assert_eq!(tight.reserved_bytes(), 0);
+
+    // 2. P1-9: Volume enumeration preserves already-ready volumes when a later volume hangs.
+    let cancel = CancellationToken::new();
+    let enum_res = win_volumes::enumerate_volumes_with_probe(
+        vec!['C', 'D', 'E'],
+        Instant::now() + Duration::from_millis(80),
+        &cancel,
+        |letter, _dl, _c| {
+            if letter == 'C' {
+                Ok(win_volumes::ProbeDecision::Ready(
+                    win_volumes::ReadyVolume {
+                        display_root: "C:/".into(),
+                        native_root: PathBuf::from(r"C:\"),
+                        drive: "C:".into(),
+                        filesystem: "NTFS".into(),
+                        volume_guid: None,
+                        is_subst: false,
+                        serial: 1,
+                    },
+                ))
+            } else {
+                std::thread::sleep(Duration::from_millis(300));
+                Ok(win_volumes::ProbeDecision::Skipped {
+                    root: format!("{letter}:/"),
+                    reason: "unavailable".into(),
+                    non_policy_failure: true,
+                })
+            }
+        },
+    )
+    .expect("ready C:/ must be preserved despite D:/ hanging");
+    assert_eq!(enum_res.ready.len(), 1);
+    assert_eq!(enum_res.ready[0].display_root, "C:/");
+    assert!(enum_res.had_non_policy_failure);
+    let skipped_names: Vec<&str> = enum_res.skipped.iter().map(|s| s.root.as_str()).collect();
+    assert_eq!(skipped_names, vec!["D:/", "E:/"]);
+    assert!(enum_res.skipped.iter().all(|s| s.reason == "probe_timeout"));
+
+    // 3. P1-8: ffgrep streaming reader checks deadline after EOF read so slow EOF does not masquerade as complete.
+    struct SlowEofReader;
+    impl Read for SlowEofReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            std::thread::sleep(Duration::from_millis(50));
+            Ok(0)
+        }
+    }
+    let remaining = AtomicUsize::new(1024 * 1024);
+    let matcher = grep_engine::ContentMatcher::build("needle", true, false).unwrap();
+    let stream_out = grep_engine::scan_reader_streaming(
+        SlowEofReader,
+        "slow.log",
+        1024,
+        &remaining,
+        &matcher,
+        0,
+        10,
+        Instant::now() + Duration::from_millis(15),
+        &cancel,
+        1024,
+    )
+    .unwrap();
+    assert!(
+        stream_out.timed_out,
+        "slow read returning EOF past deadline must still mark timed_out"
+    );
 }

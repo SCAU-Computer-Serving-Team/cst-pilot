@@ -43,8 +43,8 @@
 ### fffind 与 ffgrep
 
 - **独立契约与路径边界**：两工具采用各自独立入参且 `path` 均必填，不接受 `path` 内嵌通配符，首版在触发 I/O 前拒绝 UNC、网络映射盘与经链接导向的网络路径。关闭宿主 `.gitignore` 与 `.ignore` 过滤，固定跳过 `.git`、重解析目录与云端未驻留占位目录。顶层 `root` 与每条 `matches[].path` 统一输出正斜杠规范绝对路径（全电脑模式 `root: "*"`）。
-- **`fffind` 全电脑双模检索**：`path: "*"` 自动枚举并并发扫描本机可见且可访问的固定盘与可移动盘（按卷去重并抑制介质弹窗，跳过光驱与网络盘记入 `skippedRoots`）。`pattern` 支持完整精确名、通配符与多词模糊匹配，可省略并配合 `kind`、`ext`、`maxDepth`、`modifiedWithinHours`、`minSizeMiB`/`maxSizeMiB` 与 `sortBy` 筛选，取消 50 万条目上限。提权且启用 USN 的本地 NTFS 卷使用对象与名称边分离的内存索引加 USN V2 增量同步（先读 `U0` 再扫 `$MFT` 并重放 `[U0, U1)`，受 `CST_DISABLE_MFT=1` 统一禁用，进程缓存总上限 `384 MiB`，空闲 `180 s` 定时回收）；其余卷走双梯队并行 Win32 `FileIdBothDirectoryInfo` 遍历。仅对可能入榜候选执行搜索专用守卫单句柄核验，敏感拦截不占堆槽且不计入 `skipped`。
-- **`ffgrep` 流式解码与资源护栏**：`pattern` 与 `path` 双必填，目录模式支持 `include`、`exclude` 与 `modifiedWithinHours`（单文件上限 `10 MiB`，超限独立计入 `skippedLargeFiles`），单文件模式解除 `10 MiB` 限制改为 `256 KiB` 持久化解码器流式扫描。依次支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030（不支持无 BOM UTF-16），按解码后 NUL 整文件撤销二进制，单行上限 `8 KiB`（归入 `line_limit`），总读取上限 `256 MiB`，30 秒返回期限内保留已提交高分/命中结果。两工具注入 `elapsedMs` 后按整条 `matches` 原子裁剪 `50 KiB`，并注册 `output_schema` 填充 `structured_content`。
+- **`fffind` 全电脑双模检索**：`path: "*"` 自动枚举并并发扫描本机可见且可访问的固定盘与可移动盘（独立有界卷探测，按卷去重并抑制介质弹窗，跳过光驱与网络盘记入 `skippedRoots`）。`pattern` 支持完整精确名、通配符与多词模糊匹配，可省略并配合 `kind`、`ext`、`maxDepth`、`modifiedWithinHours`、`minSizeMiB`/`maxSizeMiB`、`sortBy` 与 `timeoutSec`（默认 30 秒，范围 1 至 180 秒，多卷各自独立起算）筛选，取消 50 万条目上限。提权且启用 USN 的本地 NTFS 卷使用对象与名称边分离的内存索引加 USN V2 增量同步（先读 `U0` 再扫 `$MFT` 并重放 `[U0, U1)`，受 `CST_DISABLE_MFT=1` 统一禁用，并发冷建通过槽位队列排队，进程缓存总上限 `384 MiB` 并在预算不足时按需淘汰空闲 LRU 缓存卷，空闲 `180 s` 定时回收）；其余卷走按卷独立计时的双梯队并行 Win32 `FileIdBothDirectoryInfo` 遍历。仅对可能入榜候选执行搜索专用守卫单句柄核验，敏感拦截不占堆槽且不计入 `skipped`。
+- **`ffgrep` 流式解码与资源护栏**：`pattern` 与 `path` 双必填，目录模式支持 `include`、`exclude` 与 `modifiedWithinHours`（单文件上限 `10 MiB`，超限独立计入 `skippedLargeFiles`），单文件模式解除 `10 MiB` 限制改为 `256 KiB` 持久化解码器流式扫描。依次支持 UTF-16 LE/BE BOM、UTF-8 与 GB18030（不支持无 BOM UTF-16），按解码后 NUL 整文件撤销二进制，单行上限 `8 KiB`（归入 `line_limit`），总读取上限 `256 MiB`，支持 `timeoutSec`（默认 30 秒，范围 1 至 180 秒）并在超时时保留已提交命中结果。两工具注入 `elapsedMs` 后按整条 `matches` 原子裁剪 `50 KiB`，并注册 `output_schema` 填充 `structured_content`。
 
 ## 系统诊断工具
 
@@ -65,7 +65,7 @@
 
 1. **三工具分工**：`web_search` 执行 1–3 个关键词并发检索；`web_fetch` 执行 1–5 个网页链接并发正文抓取；`get_search_content` 对两者的会话内存缓存（上限 32 条 / 8 MiB / 单条 2 MiB / TTL 30 分钟）执行分页或关键词定位续读。
 2. **双提供商与凭据安全**：配置文件 `data/config/web-search.json`（v2，兼容读取 v1，上限 `64 KiB`）默认启用 `exa` 且开启托管免费 MCP 回退，保证便携 U 盘免配即用。配置 Exa 付费 Key 后使用官方 REST `/search`（支持 `fast` / `auto` / `deep` 模式，`lite` 自动剥离不支持参数）与 `/contents`。可选切换为 `deepseek` 独立 JSON REST 接口（`/v1/tools/search` 128 字符查询守卫、多域名 `(site:a OR site:b)` 组合算子与 `/v1/tools/fetch`），支持独立 Key 或官方 `https://api.deepseek.com` 下的 `reuseModelApiKey`。`baseUrl` 仅允许 HTTPS，变更来源禁止继承已保存密钥，清空密钥须显式传 `clearApiKey: true`。
-3. **并发、降级与编码安全**：多词与多链接受实例级并发信号量约束并保持输入顺序，支持等待阶段即时取消；单条失败记入对应条目 `error` 与顶层 `collectionErrors` 并标 `degraded: true`，全部失败返回 `isError: true`。抓取策略支持 `auto` / `provider` / `direct`，直连与云端抓取前均经本地 SSRF 策略与 DNS 解析预检，直连抓取拒绝二进制媒体类型并支持 UTF-8 与 GB18030 解码。
+3. **并发、超时与编码安全**：多词与多链接受实例级并发信号量约束并保持输入顺序，支持等待阶段即时取消；单次请求默认常规超时 30 秒（配置上限 180 秒）、`deep` 模式默认 60 秒（配置上限 180 秒）。单条失败记入对应条目 `error` 与顶层 `collectionErrors` 并标 `degraded: true`，全部失败返回 `isError: true`。抓取策略支持 `auto` / `provider` / `direct`，直连与云端抓取前均经本地 SSRF 策略与 DNS 解析预检，直连抓取拒绝二进制媒体类型并支持 UTF-8 与 GB18030 解码。
 
 ## 命令方案与交付
 
