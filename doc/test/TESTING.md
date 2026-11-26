@@ -109,7 +109,7 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 | S06–S07 | 三端独立主题与配置合并 | 共享配置（`data/config/settings.json`）、Web 设置（`data/config/web.json`）、桌面端设置（`data/config/desktop.json`）与阶段 10 终端设置（`data/config/tui.json`）互不覆盖。共享设置按字段合并 |
 | S08–S12 | 目录、凭据与思考强度 | `models.json` 与 `models-store.json` 更新后即时生效。任一端登录或退出单服务后全局广播同步。思考强度按模型支持档位保存 |
 | S13–S15 | 历史、`cwd` 与单写权 | 改名与续答跨端可见。历史会话沿用记录中的 `cwd` 执行 `read` 与 `@` 补全。会话被其他进程持有写权时返回 `409` |
-| S16–S21 | 隔离与共享资源 | 忽略工作目录 `AGENTS.md`、保留 `APPEND_SYSTEM.md`。17 工具白名单一致。损坏配置按类别提示且不暴露密钥。收件箱、扫描缓存与遥测互不干扰 |
+| S16–S21 | 隔离与共享资源 | 忽略工作目录 `AGENTS.md`、保留 `APPEND_SYSTEM.md`。14 工具白名单一致。损坏配置按类别提示且不暴露密钥。收件箱、扫描缓存与遥测互不干扰 |
 
 ### Web 端到端核心链路
 
@@ -120,7 +120,7 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 3. [用户体验量化 E2E（ux-e2e.md）](../web/test/ux-e2e.md)：通过 5 类浏览器注入探针在 6 种视口断点与极限数据夹具下量化检验几何对齐、动效连续性、输入法焦点与流式零抖动。
 4. [桌面端 UX 与交互性能 E2E（desktop/test/ux-e2e.md）](../desktop/test/ux-e2e.md)：定义交互性能和体验正确性检查，列出 Win11 上的自动化子集、CPU 与提交内存限流、WARP 降级及补测范围。
 5. [Windows 10 / 11 与中国大陆特制版兼容性测试（desktop/test/windows-compat.md）](../desktop/test/windows-compat.md)：列出 Windows 10/11、家庭中文版、神州网信政府版、LTSC 与精简镜像的兼容性风险、Win11 本地验证结果和真机验收清单。
-6. [17 个开放工具设计评估与三维度测试规范（diagnostics/test/tools-test-spec.md）](../diagnostics/test/tools-test-spec.md)：按兼容性、性能与字段语义正确性三个维度评估全部 17 个开放工具并定义 `T01–T54` 补充测试矩阵。
+6. [14 个开放工具评估与三维度测试规范（tools/test/tools-test-spec.md）](../tools/test/tools-test-spec.md)：按兼容性、性能与字段语义正确性三个维度评估全部 14 个开放工具并定义 `T01–T41` 补充测试矩阵。
 
 CI 自动化浏览器套件覆盖以下核心回归面：
 

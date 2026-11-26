@@ -6,7 +6,7 @@ CST Pilot 是计算机维护队（CST）的便携式现场诊断 Agent。维修�
 
 ## 诊断与检索需求
 
-诊断查询保持只读，不修改系统配置、服务状态或机主文件。会话固定开放 17 个白名单工具（10 个诊断与交付工具，叠加 `read`、`fffind`、`ffgrep` 与 4 个联网检索工具），禁用通用命令执行与文件写入工具。行为与接口见 [diagnostics/SPEC.md](diagnostics/SPEC.md) 与 [diagnostics/API.md](diagnostics/API.md)。
+诊断查询保持只读，不修改系统配置、服务状态或机主文件。会话固定开放 14 个白名单工具（文件存储 5、系统诊断 5、联网检索 3、方案交付 1），禁用通用命令执行与文件写入工具。行为与接口见 [tools/SPEC.md](tools/SPEC.md) 与 [tools/API.md](tools/API.md)。
 
 | 编号 | 需求 | 解决的问题 | 对应工具 |
 |---|---|---|---|
@@ -22,7 +22,7 @@ CST Pilot 是计算机维护队（CST）的便携式现场诊断 Agent。维修�
 
 ## 命令交付需求
 
-常规修复由队员手动执行。模型通过 `command_plan` 保存和修订方案，队员核对后由 `runbook_deliver` 导出至工具包产物目录，同时提供 `runbook` 单步生成纯文本清单。命令分档与写法由 [runbook SKILL](../app/skills/runbook/SKILL.md) 约束。
+常规修复由队员手动执行。模型通过单工具 `runbook` 创建或修订命令方案，队员在桌面端或 Web 端卡片核对后可一键导出 `.txt` 并用系统记事本打开，也可通过参数显式导出至工具包产物目录。命令分档与写法由 [runbook SKILL](../app/skills/runbook/SKILL.md) 约束。
 
 | 编号 | 规则 |
 |---|---|
@@ -39,7 +39,7 @@ CST Pilot 是计算机维护队（CST）的便携式现场诊断 Agent。维修�
 
 ## BitLocker 执行需求
 
-BitLocker 工具开放只读查询及受控的恢复密码解锁、完整解密能力。细则见 [diagnostics/SPEC.md](diagnostics/SPEC.md#bitlocker状态解锁与解密)。
+BitLocker 工具开放只读查询及受控的恢复密码解锁、完整解密能力。细则见 [tools/SPEC.md](tools/SPEC.md#bitlocker状态解锁与解密)。
 
 | 编号 | 规则 |
 |---|---|

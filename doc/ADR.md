@@ -121,3 +121,31 @@
 - **结论**：`PathGuard` 单次基线与单句柄核验，多硬链接实时复核。`fffind`/`ffgrep` 并行遍历、打分、字面预筛、逐行正则与 UTF-16/GB18030 解码。
 - **依据**：校验与打开同句柄防竞态，检索快 5–72×，兼容宽字符与中文日志且零落盘。
 - **放弃**：常驻索引与监听；Windows `mmap`。
+
+## ADR-019：全量工具注入 `elapsedMs`，`read` 改 JSON 并统一错误与降级
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（阶段 9.3 实施）
+- **结论**：`kit.rs` 外层为 14 个工具注入整数毫秒 `elapsedMs`，覆盖正常、报错与受保护键裁剪。`read` 薄封装返回 JSON，图片走 `[Text, Image]`。省略空错容器，全败 `isError`，部败 `degraded`。
+- **依据**：暴露慢盘与超时，消除双端假降级与 50 KiB 坏路径，不改上游 `pi-runtime`。
+- **放弃**：浮点 `elapsedSec`；`details` 复存图片 base64。
+
+## ADR-020：联网检索重设计为 Exa 与 DeepSeek 双提供商三工具体系
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（阶段 9.3 实施）
+- **结论**：保留 `web_search`、`web_fetch`、`get_search_content`，删除 `source_check`。默认 `exa`（免费 MCP 兜底，付费支持 `deep`），可选 `deepseek` 独立 Search/Fetch API，多请求并发与局部降级。
+- **依据**：消除旧检索重复与单点中断，补齐深度搜索、中文解码与服务端配置。
+- **放弃**：`source_check` 别名；绑定模型的内置搜索参数。
+
+## ADR-021：收敛为单工具 `runbook`，双端卡片支持一键导出文本
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（阶段 9.3 实施）
+- **结论**：合并 `command_plan`、`runbook_deliver`、`runbook` 为单工具 `runbook`，统一 `shell` 小写与 `序号-风险档-标题-v版本.txt` 路径。新增服务端导出接口，双端卡片一键导出并用记事本打开，同时保留模型参数导出。
+- **依据**：消除三工具割裂与 UUID 目录，核对后点击导出省去一轮模型推理。
+- **放弃**：保留双工具强绑二次推理；保留 `sequence_store`。
+
+## ADR-022：系统诊断改用原生 Win32/NT 接口与结构化事件渲染
+
+- **日期 / 状态**：`2026-11-26` · 已拍板（阶段 9.3 实施）
+- **结论**：`sys(proc/io)` 用 `NtQuerySystemInformation` 快照（WMI 兜底）与 PDH；`overview`/`startup`/`driver(core)` 迁 Win32/SCM/SetupAPI；`gpu` 双卡留核显 LHM；`eventlog` 改值渲染与本机带偏移时间。
+- **依据**：消除 WMI 冷启动阻塞、普通权限丢进程与 8 小时时区错位。
+- **放弃**：纯 `OpenProcess` 采 IO；压缩 1.2 秒采样窗。

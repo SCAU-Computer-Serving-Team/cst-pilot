@@ -18,7 +18,7 @@
 1. **移除 `WizTree` 并保留发布防线**：清理 Rust 工作区、Web 测试、`launcher.ps1`、`pack/` 与过渡扩展中的全部 `WizTree` 逻辑。`cst-updater` 与 `pack/release-checks.mjs` 保留对退役路径 `wiztree/`、`app/tools/wiztree/` 的发布拒收校验，以及旧版安装原位升级清退和失败回滚保障。
 2. **纯 Rust `$MFT` 整盘直读（`ntfs-ng = "=0.1.2"`）**：管理员权限下的本地 NTFS 根目录默认启用 `$MFT` 直读（设置 `CST_DISABLE_MFT=1` 可关闭）。通过自定义投影采集 `Summary` 校验完整性，遇损坏、未映射记录或超 `512 MiB` 工作集即拒绝发布并自动回退目录遍历。合法快照复用 `DirectoryIndex` 写入进程内 `VolumeIndex` 缓存（120 秒有效，上限 4 卷 / `128 MiB`，按卷序列号与挂载信息防换盘串用），暂不接入 USN Journal 以避免修改系统日志。
 3. **无条目上限的并行 Win32 目录遍历**：子目录、普通权限、非 NTFS 卷、UNC 路径与 `$MFT` 失败回退统一走 `FileIdBothDirectoryInfo` 并行遍历（不支持时回退 `FindFirstFileExW`）。生产路径取消人为条目数与 30 秒内层截断，统一受外层 215 秒超时与 `CancelSynchronousIo` 取消控制。全局最多 8 个工作线程（单次最多 6 个），在单次系统调用中同时取得逻辑大小、分配量、重解析标签与 `FileId`，完成跨目录确定性硬链接去重并跳过云占位目录与符号链接。
-4. **`disk` 原生存储 IOCTL 分层回退**：`space` 使用线程错误模式守卫、`GetDriveTypeW` 与远程卷 2 秒短超时隔离；`info` 优先调用变长 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（全量校验 extent）与 SetupAPI；`health` 在核验物理盘序列号后直读 NVMe Log `0x02` 与只读 ATA SMART，受限控制器回退单次批量 WMI `MSFT_StorageReliabilityCounter`。输出字段保持对齐 [API.md](../diagnostics/API.md)。
+4. **`disk` 原生存储 IOCTL 分层回退**：`space` 使用线程错误模式守卫、`GetDriveTypeW` 与远程卷 2 秒短超时隔离；`info` 优先调用变长 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（全量校验 extent）与 SetupAPI；`health` 在核验物理盘序列号后直读 NVMe Log `0x02` 与只读 ATA SMART，受限控制器回退单次批量 WMI `MSFT_StorageReliabilityCounter`。输出字段保持对齐 [API.md](../tools/API.md)。
 
 ## 三、实测数据与结论
 
