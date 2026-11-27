@@ -65,7 +65,7 @@
 
 ### 离线签名与发布工具链
 
-`crates/xtask` 提供四个发布子命令：`keygen` 离线生成 Ed25519 密钥对并拒绝覆盖已有私钥；`dist --require-update-config` 在无私钥构建环境校验并向双次编译注入更新源与公钥，将公钥前 16 位 SHA-256 指纹写入 `app/BUILD-INFO.json`，执行 `cst-updater.exe` 与 `cst-server.exe` 的 `--key-fingerprint` 自检并产出 `*.attestation.json` 构建证明；`sign-release --attestation` 在离线签名环境仅核对构建证明与待签产物摘要（不执行待签二进制）、计算含 `app/SHA256SUMS` 的精确 `unpackedSize`、执行双重签名并调用 `VerifiedPackage::stage_from_archive_bytes` 离线闭环自验；`publish-release` 仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取令牌，经回环通道流式上传 `multipart/form-data`（先 `manifest` 后 `archive`），并在激活后复验公开清单签名与归档 `HEAD`。
+`crates/xtask` 提供四个发布子命令：`keygen` 离线生成 Ed25519 密钥对并拒绝覆盖已有私钥；`dist --require-update-config` 在无私钥构建环境校验并向双次编译注入更新源与公钥，将公钥前 16 位 SHA-256 指纹写入 `app/BUILD-INFO.json`，执行 `cst-updater.exe` 与 `cst-server.exe` 的 `--key-fingerprint` 自检，并用独立构建机密钥 `CST_BUILD_ATTESTATION_PRIVATE_KEY_FILE` 签发含 40 位提交哈希与全量产物摘要的 `*.attestation.json`；`sign-release --attestation --expected-commit` 在离线签名环境先以 `--attestation-public-key`（或 `CST_BUILD_ATTESTATION_PUBLIC_KEY`）验签构建证明并核对获准提交与待签产物摘要（不执行待签二进制）、计算含 `app/SHA256SUMS` 的精确 `unpackedSize`、执行双重签名并调用 `VerifiedPackage::stage_from_archive_bytes` 离线闭环自验；`publish-release` 仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取令牌，经回环通道流式上传 `multipart/form-data`（先 `manifest` 后 `archive`），并在激活后复验公开清单签名与归档 `HEAD`。
 
 ## 随包外部组件与过渡期装配
 

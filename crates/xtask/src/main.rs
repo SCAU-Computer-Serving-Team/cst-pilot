@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--attestation-public-key <base64>] [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -160,6 +160,15 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
     let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
     validate_dist_update_build_flags(update_cfg.is_some(), args.skip_cargo_build)?;
+    let attestation_key_file = if let Some(cfg) = &update_cfg
+        && args.make_zip
+    {
+        Some(release::resolve_build_attestation_key_file(
+            &cfg.public_key_fingerprint,
+        )?)
+    } else {
+        None
+    };
     let root = repo_root()?;
     let target_subdir = if args.profile == "dist" {
         "dist"
@@ -298,13 +307,21 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     )
     .map_err(|e| format!("无法写入 VERSION：{e}"))?;
 
-    let git_commit = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+    let git_commit_full = Command::new("git")
+        .args(["rev-parse", "HEAD"])
         .current_dir(&root)
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+    let git_commit = git_commit_full
+        .as_deref()
+        .map(|s| s[..7].to_owned())
         .unwrap_or_else(|| "unknown".to_owned());
     let built_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     let mut build_info = json!({
@@ -434,7 +451,10 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip_bytes.len() as f64 / (1024.0 * 1024.0),
             zip_hash
         );
-        if let Some(cfg) = &update_cfg {
+        if let (Some(cfg), Some(att_key_file)) = (&update_cfg, &attestation_key_file) {
+            let full_commit = git_commit_full
+                .clone()
+                .ok_or("无法获取完整 40 位 Git HEAD 提交哈希以签发构建证明。")?;
             let attestation_path = args.out_dir.join(format!(
                 "cst-pilot-{}-windows-x64.attestation.json",
                 args.version
@@ -453,7 +473,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 version: args.version.clone(),
                 platform: "windows-x86_64".to_owned(),
                 built_at: built_at.clone(),
-                git_commit: git_commit.clone(),
+                git_commit: full_commit,
                 update_enabled: true,
                 update_public_key_fingerprint: cfg.public_key_fingerprint.clone(),
                 verified_key_probe: true,
@@ -465,9 +485,14 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 updater_exe_sha256: updater_hash,
                 server_exe_sha256: server_hash,
             };
-            release::write_build_attestation(&attestation_path, &attestation)?;
+            let att_pub_fp = release::write_signed_build_attestation(
+                &attestation_path,
+                &attestation,
+                att_key_file,
+                &cfg.public_key_fingerprint,
+            )?;
             println!(
-                "[xtask] Build attestation ready: {}",
+                "[xtask] Signed build attestation ready: {} (issuerFingerprint={att_pub_fp})",
                 attestation_path.display()
             );
         }

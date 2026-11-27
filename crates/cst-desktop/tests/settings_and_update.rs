@@ -2335,6 +2335,15 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
     };
     let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
     backend.rt().block_on(handle.refresh_globals()).unwrap();
+    assert_eq!(
+        handle
+            .snapshot()
+            .update_state
+            .as_ref()
+            .map(|u| u.status.phase),
+        Some(cst_client::UpdatePhaseDto::Available),
+        "snapshot must already be Available before opening the window"
+    );
 
     let (win_handle, shell) = cx.update(|cx| {
         gpui_kit::init(cx);
@@ -2342,22 +2351,27 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
         open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
     });
 
-    cx.wait_for(win_handle, Duration::from_secs(2), |_, cx| {
-        shell
-            .read(cx)
-            .client_snapshot()
-            .update_state
-            .as_ref()
-            .is_some_and(|u| u.status.phase == cst_client::UpdatePhaseDto::Available)
-    })
-    .await;
-
+    // Inspect the very first rendered frame produced on window open (before any extra render_frame
+    // or wait_for) to guarantee cold start never flashes an auto-modal on Home.
     cx.update_window(win_handle, |_, window, cx| {
-        window.render_frame(cx);
         assert_eq!(shell.read(cx).route(), ShellRoute::Home);
+        assert_eq!(
+            shell
+                .read(cx)
+                .client_snapshot()
+                .update_state
+                .as_ref()
+                .map(|u| u.status.phase),
+            Some(cst_client::UpdatePhaseDto::Available),
+        );
         assert!(
             window.try_find("update-available-dialog-kom7j").is_none(),
-            "cold start on Home must stay silent when update is Available"
+            "first frame on cold start must stay silent when update is Available"
+        );
+        window.render_frame(cx);
+        assert!(
+            window.try_find("update-available-dialog-kom7j").is_none(),
+            "subsequent frame on Home must stay silent when update is Available"
         );
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
         let sv_ent = shell.read(cx).settings_view().clone();

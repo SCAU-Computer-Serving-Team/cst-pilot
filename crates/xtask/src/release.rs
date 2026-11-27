@@ -15,7 +15,7 @@ use cst_updater::manifest::{
 };
 #[cfg(windows)]
 use cst_updater::verify::VerifiedPackage;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
@@ -29,7 +29,10 @@ pub const DEFAULT_ADMIN_URL: &str = "http://127.0.0.1:18787/v1/admin/releases";
 pub const ENV_MANIFEST_URL: &str = "CST_UPDATE_MANIFEST_URL";
 pub const ENV_PUBLIC_KEY: &str = "CST_UPDATE_PUBLIC_KEY";
 pub const ENV_PRIVATE_KEY_FILE: &str = "CST_RELEASE_PRIVATE_KEY_FILE";
+pub const ENV_BUILD_ATTESTATION_PRIVATE_KEY_FILE: &str = "CST_BUILD_ATTESTATION_PRIVATE_KEY_FILE";
+pub const ENV_BUILD_ATTESTATION_PUBLIC_KEY: &str = "CST_BUILD_ATTESTATION_PUBLIC_KEY";
 pub const ENV_ADMIN_TOKEN: &str = "CST_RELEASE_ADMIN_TOKEN";
+const ATTESTATION_DOMAIN: &[u8] = b"cst-pilot-build-attestation-v1\n";
 const MAX_SERVER_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_SHA256SUMS_BYTES: u64 = 6 * 1024 * 1024;
 const MAX_ADMIN_RESPONSE_BYTES: usize = 64 * 1024;
@@ -66,22 +69,102 @@ pub struct BuildAttestation {
     pub server_exe_sha256: String,
 }
 
-pub fn write_build_attestation(path: &Path, attestation: &BuildAttestation) -> Result<(), String> {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SignedBuildAttestation {
+    pub payload: String,
+    pub signature: String,
+}
+
+fn is_valid_git_commit_sha(commit: &str) -> bool {
+    commit.len() == 40
+        && commit
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+pub fn resolve_build_attestation_key_file(release_pub_fp: &str) -> Result<PathBuf, String> {
+    let key_path = env::var(ENV_BUILD_ATTESTATION_PRIVATE_KEY_FILE)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            format!(
+                "启用在线更新打包必须设置 {ENV_BUILD_ATTESTATION_PRIVATE_KEY_FILE} 以签发可验证的构建证明（与离线发布私钥分离）。"
+            )
+        })?;
+    let (_, att_release_key) = load_signing_key(&key_path)?;
+    if att_release_key.fingerprint() == release_pub_fp {
+        return Err(
+            "构建证明私钥不能与在线更新发布私钥相同，请为构建机单独生成独立密钥对。".into(),
+        );
+    }
+    Ok(key_path)
+}
+
+pub fn write_signed_build_attestation(
+    path: &Path,
+    attestation: &BuildAttestation,
+    attestation_private_key_file: &Path,
+    release_pub_fp: &str,
+) -> Result<String, String> {
+    if !is_valid_git_commit_sha(&attestation.git_commit) {
+        return Err("构建证明 gitCommit 必须为 40 位小写十六进制提交哈希。".into());
+    }
+    let (att_signing_key, att_pub_key) = load_signing_key(attestation_private_key_file)?;
+    let att_fp = att_pub_key.fingerprint();
+    if att_fp == release_pub_fp {
+        return Err("构建证明签发密钥不能与在线更新发布密钥相同，请使用独立构建机密钥。".into());
+    }
+    let payload =
+        serde_json::to_string(attestation).map_err(|_| "构建证明紧凑序列化失败。".to_owned())?;
+    let signature = sign_domain(&att_signing_key, ATTESTATION_DOMAIN, payload.as_bytes());
+    let envelope = SignedBuildAttestation { payload, signature };
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent)
             .map_err(|e| format!("无法创建构建证明目录 {}：{e}", parent.display()))?;
     }
-    let mut bytes =
-        serde_json::to_vec_pretty(attestation).map_err(|_| "构建证明序列化失败。".to_owned())?;
+    let mut bytes = serde_json::to_vec_pretty(&envelope)
+        .map_err(|_| "已签名构建证明序列化失败。".to_owned())?;
     bytes.push(b'\n');
-    fs::write(path, bytes).map_err(|e| format!("无法写入构建证明 {}：{e}", path.display()))
+    fs::write(path, bytes).map_err(|e| format!("无法写入构建证明 {}：{e}", path.display()))?;
+    Ok(att_fp)
 }
 
-fn read_build_attestation(path: &Path) -> Result<BuildAttestation, String> {
+fn read_and_verify_build_attestation(
+    path: &Path,
+    issuer_public_key_b64: &str,
+    release_pub_fp: &str,
+) -> Result<BuildAttestation, String> {
+    let (_, issuer_bytes, issuer_fp) = parse_canonical_public_key(issuer_public_key_b64)
+        .map_err(|e| format!("构建证明签发公钥无效：{e}"))?;
+    if issuer_fp == release_pub_fp {
+        return Err("构建证明签发公钥不能与发布签名公钥相同，请使用独立构建机签发公钥。".into());
+    }
+    let verifying_key =
+        VerifyingKey::from_bytes(&issuer_bytes).map_err(|_| "构建证明签发公钥无效。".to_owned())?;
     let bytes = fs::read(path).map_err(|e| format!("无法读取构建证明 {}：{e}", path.display()))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("构建证明 JSON 格式无效：{e}"))
+    let envelope: SignedBuildAttestation = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("构建证明必须为已签名信封 JSON：{e}"))?;
+    if envelope.signature.len() > 128 {
+        return Err("构建证明签名长度无效。".into());
+    }
+    let sig_bytes = STANDARD
+        .decode(&envelope.signature)
+        .map_err(|_| "构建证明签名 Base64 解码失败。".to_owned())?;
+    let signature =
+        Signature::from_slice(&sig_bytes).map_err(|_| "构建证明签名格式无效。".to_owned())?;
+    let mut msg = Vec::with_capacity(ATTESTATION_DOMAIN.len() + envelope.payload.len());
+    msg.extend_from_slice(ATTESTATION_DOMAIN);
+    msg.extend_from_slice(envelope.payload.as_bytes());
+    verifying_key
+        .verify_strict(&msg, &signature)
+        .map_err(|_| "构建证明签发者 Ed25519 验签失败，拒绝信任该构建记录。".to_owned())?;
+    serde_json::from_str(&envelope.payload)
+        .map_err(|e| format!("构建证明 payload JSON 格式无效：{e}"))
 }
 
 pub fn parse_canonical_public_key(raw_b64: &str) -> Result<(ReleaseKey, [u8; 32], String), String> {
@@ -305,6 +388,8 @@ pub struct SignReleaseArgs {
     pub dist_dir: PathBuf,
     pub zip_path: PathBuf,
     pub attestation_path: PathBuf,
+    pub attestation_public_key_b64: String,
+    pub expected_commit: String,
     pub version: Option<String>,
     pub min_upgradable: String,
     pub base_url: String,
@@ -320,6 +405,8 @@ fn parse_sign_release_args(
     let mut dist_dir: Option<PathBuf> = None;
     let mut zip_path: Option<PathBuf> = None;
     let mut attestation_path: Option<PathBuf> = None;
+    let mut attestation_public_key_b64: Option<String> = None;
+    let mut expected_commit: Option<String> = None;
     let mut version: Option<String> = None;
     let mut min_upgradable: Option<String> = None;
     let mut base_url = DEFAULT_PUBLIC_BASE_URL.to_owned();
@@ -343,8 +430,20 @@ fn parse_sign_release_args(
             "--attestation" => {
                 attestation_path = Some(PathBuf::from(
                     args.next()
-                        .ok_or("--attestation 需要 xtask dist 产出的构建证明文件路径。")?,
+                        .ok_or("--attestation 需要 xtask dist 签发的构建证明文件路径。")?,
                 ));
+            }
+            "--attestation-public-key" => {
+                attestation_public_key_b64 = Some(
+                    args.next()
+                        .ok_or("--attestation-public-key 需要构建机签发公钥（标准 Base64）。")?,
+                );
+            }
+            "--expected-commit" => {
+                expected_commit = Some(
+                    args.next()
+                        .ok_or("--expected-commit 需要获准发布的完整 40 位 Git 提交哈希。")?,
+                );
             }
             "--version" => {
                 version = Some(args.next().ok_or("--version 需要版本号。")?);
@@ -383,7 +482,26 @@ fn parse_sign_release_args(
     let dist_dir = dist_dir.ok_or("sign-release 必须指定 --dist-dir <dir>。")?;
     let zip_path = zip_path.ok_or("sign-release 必须指定 --zip <path>。")?;
     let attestation_path = attestation_path
-        .ok_or("sign-release 必须通过 --attestation <path> 指定来自无私钥构建机的构建证明文件。")?;
+        .ok_or("sign-release 必须通过 --attestation <path> 指定已签名的构建证明文件。")?;
+    let attestation_public_key_b64 = match attestation_public_key_b64 {
+        Some(v) => v,
+        None => env::var(ENV_BUILD_ATTESTATION_PUBLIC_KEY)
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "必须通过 --attestation-public-key 或环境变量 {ENV_BUILD_ATTESTATION_PUBLIC_KEY} 指定可信构建机签发公钥。"
+                )
+            })?,
+    };
+    let expected_commit = expected_commit
+        .ok_or("sign-release 必须通过 --expected-commit <40-hex> 指定获准发布的 Git 提交哈希。")?
+        .trim()
+        .to_ascii_lowercase();
+    if !is_valid_git_commit_sha(&expected_commit) {
+        return Err("--expected-commit 必须为完整 40 位小写十六进制 Git 提交哈希。".into());
+    }
     let min_upgradable =
         min_upgradable.ok_or("sign-release 必须指定 --min-upgradable <vX.Y.Z>。")?;
     let out_path = out_path.ok_or("sign-release 必须指定 --out <manifest.signed.json>。")?;
@@ -408,6 +526,8 @@ fn parse_sign_release_args(
         dist_dir,
         zip_path,
         attestation_path,
+        attestation_public_key_b64,
+        expected_commit,
         version,
         min_upgradable,
         base_url,
@@ -467,7 +587,19 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         return Err("--base-url 不允许包含查询参数或片段。".into());
     }
 
-    let attestation = read_build_attestation(&args.attestation_path)?;
+    let expected_commit = args.expected_commit.trim().to_ascii_lowercase();
+    if !is_valid_git_commit_sha(&expected_commit) {
+        return Err("--expected-commit 必须为完整 40 位小写十六进制 Git 提交哈希。".into());
+    }
+
+    let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
+    let signing_pub_fp = release_key.fingerprint();
+
+    let attestation = read_and_verify_build_attestation(
+        &args.attestation_path,
+        &args.attestation_public_key_b64,
+        &signing_pub_fp,
+    )?;
     if attestation.schema_version != 1 || attestation.platform != "windows-x86_64" {
         return Err("构建证明 schemaVersion 或 platform 不受支持。".into());
     }
@@ -483,9 +615,14 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
             attestation.version
         ));
     }
-
-    let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
-    let signing_pub_fp = release_key.fingerprint();
+    if !is_valid_git_commit_sha(&attestation.git_commit)
+        || attestation.git_commit != expected_commit
+    {
+        return Err(format!(
+            "构建证明提交哈希（{}）与获准发布提交（{expected_commit}）不一致，拒绝签名。",
+            attestation.git_commit
+        ));
+    }
     if attestation.update_public_key_fingerprint != signing_pub_fp {
         return Err(format!(
             "构建证明公钥指纹（{}）与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。",
@@ -1158,10 +1295,14 @@ mod tests {
         buf
     }
 
+    const TEST_COMMIT_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
     fn build_synthetic_dist(
         root: &Path,
         version: &str,
         pub_fp: &str,
+        att_key_file: &Path,
+        commit_sha: &str,
         build_info_json: Option<&str>,
     ) -> (PathBuf, PathBuf, PathBuf, u64) {
         let dist_dir = root.join("cst-pilot");
@@ -1247,7 +1388,7 @@ mod tests {
             version: version.to_owned(),
             platform: "windows-x86_64".to_owned(),
             built_at: built_at.to_owned(),
-            git_commit: "deadbeef".to_owned(),
+            git_commit: commit_sha.to_owned(),
             update_enabled: true,
             update_public_key_fingerprint: pub_fp.to_owned(),
             verified_key_probe: true,
@@ -1259,7 +1400,8 @@ mod tests {
             updater_exe_sha256: format!("{:x}", Sha256::digest(&updater_bin)),
             server_exe_sha256: format!("{:x}", Sha256::digest(&server_bin)),
         };
-        write_build_attestation(&attestation_path, &attestation).unwrap();
+        write_signed_build_attestation(&attestation_path, &attestation, att_key_file, pub_fp)
+            .unwrap();
 
         (dist_dir, zip_path, attestation_path, unpacked)
     }
@@ -1282,14 +1424,18 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let att_key_file = dir.join("builder.key");
+        let (att_pub_b64, _) = generate_keypair_file(&att_key_file).unwrap();
         let (dist_dir, zip_path, attestation_path, expected_unpacked) =
-            build_synthetic_dist(&dir, "v0.9.8", &fp, None);
+            build_synthetic_dist(&dir, "v0.9.8", &fp, &att_key_file, TEST_COMMIT_SHA, None);
         let out_manifest = dir.join("manifest.signed.json");
 
         let summary = sign_release(&SignReleaseArgs {
             dist_dir,
             zip_path,
             attestation_path,
+            attestation_public_key_b64: att_pub_b64,
+            expected_commit: TEST_COMMIT_SHA.into(),
             version: Some("v0.9.8".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
@@ -1312,11 +1458,15 @@ mod tests {
     }
 
     #[test]
-    fn sign_release_rejects_unverified_or_tampered_attestation() {
+    fn sign_release_rejects_untrusted_issuer_wrong_commit_or_tampered_attestation() {
         let dir = env::temp_dir().join(format!("xtask-sign-bind-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
-        let (_, fp) = generate_keypair_file(&key_file).unwrap();
+        let (rel_pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let att_key_file = dir.join("builder.key");
+        let (att_pub_b64, _) = generate_keypair_file(&att_key_file).unwrap();
+        let rogue_key_file = dir.join("rogue.key");
+        let (rogue_pub_b64, _) = generate_keypair_file(&rogue_key_file).unwrap();
         let out_manifest = dir.join("manifest.signed.json");
 
         // 1. Missing updatePublicKeyFingerprint in BUILD-INFO.json must fail.
@@ -1324,6 +1474,8 @@ mod tests {
             &dir,
             "v0.9.8",
             &fp,
+            &att_key_file,
+            TEST_COMMIT_SHA,
             Some(
                 "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true}\n",
             ),
@@ -1332,6 +1484,8 @@ mod tests {
             dist_dir,
             zip_path,
             attestation_path,
+            attestation_public_key_b64: att_pub_b64.clone(),
+            expected_commit: TEST_COMMIT_SHA.into(),
             version: Some("v0.9.8".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
@@ -1344,16 +1498,15 @@ mod tests {
         .expect("missing fingerprint must fail");
         assert!(err.contains("updatePublicKeyFingerprint"));
 
-        // 2. Attestation with verifiedKeyProbe=false must fail.
+        // 2. Attestation signed by an untrusted issuer key must fail.
         let (dist_dir, zip_path, attestation_path, _) =
-            build_synthetic_dist(&dir, "v0.9.8", &fp, None);
-        let mut unverified = read_build_attestation(&attestation_path).unwrap();
-        unverified.verified_key_probe = false;
-        write_build_attestation(&attestation_path, &unverified).unwrap();
+            build_synthetic_dist(&dir, "v0.9.8", &fp, &rogue_key_file, TEST_COMMIT_SHA, None);
         let err = sign_release(&SignReleaseArgs {
             dist_dir: dist_dir.clone(),
             zip_path: zip_path.clone(),
             attestation_path: attestation_path.clone(),
+            attestation_public_key_b64: att_pub_b64.clone(),
+            expected_commit: TEST_COMMIT_SHA.into(),
             version: Some("v0.9.8".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
@@ -1363,18 +1516,84 @@ mod tests {
             private_key_file: key_file.clone(),
         })
         .err()
-        .expect("unverified attestation must fail");
-        assert!(err.contains("verifiedKeyProbe"));
+        .expect("rogue issuer attestation must fail");
+        assert!(err.contains("验签失败"));
 
-        // 3. Substituting app/cst-updater.exe after build (mismatching trusted attestation digest) must fail.
-        let mut tampered_att = read_build_attestation(&attestation_path).unwrap();
-        tampered_att.verified_key_probe = true;
+        // 3. Unsigned raw JSON attestation (without SignedBuildAttestation envelope) must fail.
+        let verified_att =
+            read_and_verify_build_attestation(&attestation_path, &rogue_pub_b64, &fp).unwrap();
+        let raw_path = dir.join("raw-unsigned.attestation.json");
+        fs::write(&raw_path, serde_json::to_vec(&verified_att).unwrap()).unwrap();
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir: dist_dir.clone(),
+            zip_path: zip_path.clone(),
+            attestation_path: raw_path,
+            attestation_public_key_b64: att_pub_b64.clone(),
+            expected_commit: TEST_COMMIT_SHA.into(),
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
+        .err()
+        .expect("unsigned JSON attestation must fail");
+        assert!(err.contains("已签名信封"));
+
+        // 4. Reusing the release public key as attestation issuer key must fail (key separation).
+        let (dist_dir, zip_path, attestation_path, _) =
+            build_synthetic_dist(&dir, "v0.9.8", &fp, &att_key_file, TEST_COMMIT_SHA, None);
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir: dist_dir.clone(),
+            zip_path: zip_path.clone(),
+            attestation_path: attestation_path.clone(),
+            attestation_public_key_b64: rel_pub_b64,
+            expected_commit: TEST_COMMIT_SHA.into(),
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
+        .err()
+        .expect("reusing release key as issuer must fail");
+        assert!(err.contains("不能与发布签名公钥相同"));
+
+        // 5. Approved commit mismatch must fail.
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir: dist_dir.clone(),
+            zip_path: zip_path.clone(),
+            attestation_path: attestation_path.clone(),
+            attestation_public_key_b64: att_pub_b64.clone(),
+            expected_commit: "f".repeat(40),
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
+        .err()
+        .expect("wrong expected commit must fail");
+        assert!(err.contains("提交哈希"));
+
+        // 6. Substituting app/cst-updater.exe after signed attestation must fail.
+        let mut tampered_att =
+            read_and_verify_build_attestation(&attestation_path, &att_pub_b64, &fp).unwrap();
         tampered_att.updater_exe_sha256 = "0".repeat(64);
-        write_build_attestation(&attestation_path, &tampered_att).unwrap();
+        write_signed_build_attestation(&attestation_path, &tampered_att, &att_key_file, &fp)
+            .unwrap();
         let err = sign_release(&SignReleaseArgs {
             dist_dir,
             zip_path,
             attestation_path,
+            attestation_public_key_b64: att_pub_b64,
+            expected_commit: TEST_COMMIT_SHA.into(),
             version: Some("v0.9.8".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
@@ -1430,13 +1649,17 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let att_key_file = dir.join("builder.key");
+        let (att_pub_b64, _) = generate_keypair_file(&att_key_file).unwrap();
         let (dist_dir, zip_path, attestation_path, _) =
-            build_synthetic_dist(&dir, "v0.9.9", &fp, None);
+            build_synthetic_dist(&dir, "v0.9.9", &fp, &att_key_file, TEST_COMMIT_SHA, None);
         let out_manifest = dir.join("manifest.signed.json");
         let summary = sign_release(&SignReleaseArgs {
             dist_dir,
             zip_path: zip_path.clone(),
             attestation_path,
+            attestation_public_key_b64: att_pub_b64,
+            expected_commit: TEST_COMMIT_SHA.into(),
             version: Some("v0.9.9".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
