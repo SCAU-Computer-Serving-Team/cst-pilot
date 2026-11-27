@@ -190,6 +190,7 @@ pub struct AppShell {
     pending_return_session_id: Option<Option<String>>,
     startup_missing_key_checked: bool,
     update_dialog: UpdateDialogState,
+    update_dialog_render_count: std::cell::Cell<usize>,
     branch_summarizing_sessions: BTreeSet<String>,
     session_subview_prior_focus: Option<FocusHandle>,
     sidebar_collapsed: bool,
@@ -432,6 +433,7 @@ impl AppShell {
             pending_return_session_id: None,
             startup_missing_key_checked: false,
             update_dialog: UpdateDialogState::default(),
+            update_dialog_render_count: std::cell::Cell::new(0),
             branch_summarizing_sessions: BTreeSet::new(),
             session_subview_prior_focus: None,
             sidebar_collapsed,
@@ -579,6 +581,10 @@ impl AppShell {
 
     pub fn client_snapshot(&self) -> &std::sync::Arc<ClientSnapshot> {
         &self.snapshot
+    }
+
+    pub fn update_dialog_render_count(&self) -> usize {
+        self.update_dialog_render_count.get()
     }
 
     pub fn set_route(&mut self, route: ShellRoute, cx: &mut Context<Self>) {
@@ -4772,6 +4778,8 @@ impl Render for AppShell {
             cx,
         );
         if update_dialog_open {
+            self.update_dialog_render_count
+                .set(self.update_dialog_render_count.get() + 1);
             let ent_later = entity.clone();
             let ent_prep = entity.clone();
             let ent_canc = entity.clone();

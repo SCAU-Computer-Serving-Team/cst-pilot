@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--attestation-public-key <base64>] [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -146,30 +146,68 @@ fn repo_root() -> Result<PathBuf, String> {
 fn validate_dist_update_build_flags(
     has_update_config: bool,
     skip_cargo_build: bool,
+    skip_web_build: bool,
 ) -> Result<(), String> {
-    if has_update_config && skip_cargo_build {
+    if has_update_config && (skip_cargo_build || skip_web_build) {
         return Err(
-            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），不能与 --skip-cargo-build 同时使用，必须重新编译全部二进制以绑定内嵌公钥。"
+            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），禁止使用 --skip-cargo-build 或 --skip-web-build，必须从干净源码全量重新构建。"
                 .into(),
         );
     }
     Ok(())
 }
 
+fn verify_clean_git_head(root: &Path) -> Result<String, String> {
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法执行 git status 检查干净工作树：{e}"))?;
+    if !status.status.success() {
+        return Err("git status 执行失败，无法验证发布构建源码来源。".into());
+    }
+    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Err(
+            "启用在线更新打包要求 Git 工作树完全干净（无未提交或未跟踪文件），拒绝打包。".into(),
+        );
+    }
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法执行 git rev-parse HEAD：{e}"))?;
+    if !head.status.success() {
+        return Err("无法读取完整 40 位 Git HEAD 提交哈希。".into());
+    }
+    let sha = String::from_utf8_lossy(&head.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if sha.len() != 40
+        || !sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("Git HEAD 不是有效的 40 位小写十六进制提交哈希。".into());
+    }
+    Ok(sha)
+}
+
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
     let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
-    validate_dist_update_build_flags(update_cfg.is_some(), args.skip_cargo_build)?;
-    let attestation_key_file = if let Some(cfg) = &update_cfg
-        && args.make_zip
-    {
-        Some(release::resolve_build_attestation_key_file(
-            &cfg.public_key_fingerprint,
-        )?)
+    validate_dist_update_build_flags(
+        update_cfg.is_some(),
+        args.skip_cargo_build,
+        args.skip_web_build,
+    )?;
+    let root = repo_root()?;
+    // Online-update builds never hold any private key; instead they lock to an unmodified Git
+    // commit before and after compilation so the resulting build attestation binds clean source.
+    let pre_build_clean_head = if update_cfg.is_some() {
+        Some(verify_clean_git_head(&root)?)
     } else {
         None
     };
-    let root = repo_root()?;
     let target_subdir = if args.profile == "dist" {
         "dist"
     } else {
@@ -451,10 +489,16 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip_bytes.len() as f64 / (1024.0 * 1024.0),
             zip_hash
         );
-        if let (Some(cfg), Some(att_key_file)) = (&update_cfg, &attestation_key_file) {
-            let full_commit = git_commit_full
-                .clone()
-                .ok_or("无法获取完整 40 位 Git HEAD 提交哈希以签发构建证明。")?;
+        if let Some(cfg) = &update_cfg {
+            let expected_head = pre_build_clean_head
+                .as_deref()
+                .ok_or("缺少构建前干净工作树 HEAD 记录。")?;
+            let post_build_head = verify_clean_git_head(&root)?;
+            if post_build_head != expected_head {
+                return Err(format!(
+                    "构建过程中 Git HEAD 发生变化（{expected_head} -> {post_build_head}），拒绝产出构建证明。"
+                ));
+            }
             let attestation_path = args.out_dir.join(format!(
                 "cst-pilot-{}-windows-x64.attestation.json",
                 args.version
@@ -473,7 +517,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 version: args.version.clone(),
                 platform: "windows-x86_64".to_owned(),
                 built_at: built_at.clone(),
-                git_commit: full_commit,
+                git_commit: post_build_head.clone(),
                 update_enabled: true,
                 update_public_key_fingerprint: cfg.public_key_fingerprint.clone(),
                 verified_key_probe: true,
@@ -485,14 +529,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 updater_exe_sha256: updater_hash,
                 server_exe_sha256: server_hash,
             };
-            let att_pub_fp = release::write_signed_build_attestation(
-                &attestation_path,
-                &attestation,
-                att_key_file,
-                &cfg.public_key_fingerprint,
-            )?;
+            let att_sha256 = release::write_build_attestation(&attestation_path, &attestation)?;
             println!(
-                "[xtask] Signed build attestation ready: {} (issuerFingerprint={att_pub_fp})",
+                "[xtask] Build attestation ready: {} (sha256={att_sha256}, commit={post_build_head})",
                 attestation_path.display()
             );
         }
@@ -753,10 +792,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dist_rejects_skip_cargo_build_whenever_update_config_is_present() {
-        assert!(validate_dist_update_build_flags(true, true).is_err());
-        assert!(validate_dist_update_build_flags(true, false).is_ok());
-        assert!(validate_dist_update_build_flags(false, true).is_ok());
-        assert!(validate_dist_update_build_flags(false, false).is_ok());
+    fn dist_rejects_skip_build_flags_whenever_update_config_is_present() {
+        assert!(validate_dist_update_build_flags(true, true, false).is_err());
+        assert!(validate_dist_update_build_flags(true, false, true).is_err());
+        assert!(validate_dist_update_build_flags(true, true, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false, false).is_ok());
+        assert!(validate_dist_update_build_flags(false, true, true).is_ok());
+        assert!(validate_dist_update_build_flags(false, false, false).is_ok());
     }
 }

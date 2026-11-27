@@ -2351,8 +2351,8 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
         open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
     });
 
-    // Inspect the very first rendered frame produced on window open (before any extra render_frame
-    // or wait_for) to guarantee cold start never flashes an auto-modal on Home.
+    // Inspect both the cumulative render counter (proving neither frame 1 nor any intermediate
+    // re-render during window open ever mounted the update dialog) and the current DOM tree.
     cx.update_window(win_handle, |_, window, cx| {
         assert_eq!(shell.read(cx).route(), ShellRoute::Home);
         assert_eq!(
@@ -2364,11 +2364,17 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
                 .map(|u| u.status.phase),
             Some(cst_client::UpdatePhaseDto::Available),
         );
+        assert_eq!(
+            shell.read(cx).update_dialog_render_count(),
+            0,
+            "update dialog must never render on frame 1 or any intermediate frame during cold start"
+        );
         assert!(
             window.try_find("update-available-dialog-kom7j").is_none(),
             "first frame on cold start must stay silent when update is Available"
         );
         window.render_frame(cx);
+        assert_eq!(shell.read(cx).update_dialog_render_count(), 0);
         assert!(
             window.try_find("update-available-dialog-kom7j").is_none(),
             "subsequent frame on Home must stay silent when update is Available"
@@ -2387,4 +2393,10 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
         window.try_find("update-available-dialog-kom7j").is_some()
     })
     .await;
+    cx.update(|cx| {
+        assert!(
+            shell.read(cx).update_dialog_render_count() > 0,
+            "manual trigger via Settings must render the update dialog"
+        );
+    });
 }
