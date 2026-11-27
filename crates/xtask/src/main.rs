@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -147,19 +147,39 @@ fn validate_dist_update_build_flags(
     has_update_config: bool,
     skip_cargo_build: bool,
     skip_web_build: bool,
+    make_zip: bool,
 ) -> Result<(), String> {
-    if has_update_config && (skip_cargo_build || skip_web_build) {
+    if has_update_config && (skip_cargo_build || skip_web_build || !make_zip) {
         return Err(
-            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），禁止使用 --skip-cargo-build 或 --skip-web-build，必须从干净源码全量重新构建。"
+            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），禁止使用 --skip-cargo-build、--skip-web-build 或 --no-zip，必须从干净源码全量构建并产出 ZIP 与构建证明。"
                 .into(),
         );
     }
     Ok(())
 }
 
+fn check_build_env_secret_vars(
+    has_private_key_var: bool,
+    has_admin_token_var: bool,
+) -> Result<(), String> {
+    if has_private_key_var || has_admin_token_var {
+        return Err(format!(
+            "构建环境禁止存在 {} 或 {}，请将在线构建与离线签名/发布环境严格隔离。",
+            release::ENV_PRIVATE_KEY_FILE,
+            release::ENV_ADMIN_TOKEN
+        ));
+    }
+    Ok(())
+}
+
+fn strip_release_secrets(cmd: &mut Command) -> &mut Command {
+    cmd.env_remove(release::ENV_PRIVATE_KEY_FILE)
+        .env_remove(release::ENV_ADMIN_TOKEN)
+}
+
 fn verify_clean_git_head(root: &Path) -> Result<String, String> {
     let status = Command::new("git")
-        .args(["status", "--porcelain"])
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
         .current_dir(root)
         .output()
         .map_err(|e| format!("无法执行 git status 检查干净工作树：{e}"))?;
@@ -194,11 +214,16 @@ fn verify_clean_git_head(root: &Path) -> Result<String, String> {
 
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
+    check_build_env_secret_vars(
+        env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some(),
+        env::var_os(release::ENV_ADMIN_TOKEN).is_some(),
+    )?;
     let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
     validate_dist_update_build_flags(
         update_cfg.is_some(),
         args.skip_cargo_build,
         args.skip_web_build,
+        args.make_zip,
     )?;
     let root = repo_root()?;
     // Online-update builds never hold any private key; instead they lock to an unmodified Git
@@ -218,7 +243,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     if !args.skip_web_build {
         println!("[xtask] Building Web frontend...");
         let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
-        let status = Command::new(npm)
+        let mut npm_cmd = Command::new(npm);
+        strip_release_secrets(&mut npm_cmd);
+        let status = npm_cmd
             .args(["run", "build", "--prefix", "src/web/frontend"])
             .current_dir(&root)
             .status()
@@ -249,6 +276,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             None
         };
         let mut cmd1 = Command::new(&cargo);
+        strip_release_secrets(&mut cmd1);
         cmd1.args([
             "build",
             "--profile",
@@ -276,6 +304,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         }
 
         let mut cmd2 = Command::new(&cargo);
+        strip_release_secrets(&mut cmd2);
         cmd2.args([
             "build",
             "--profile",
@@ -552,7 +581,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
 
 fn cargo_target_dir(root: &Path) -> Result<PathBuf, String> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(cargo)
+    let mut cmd = Command::new(cargo);
+    strip_release_secrets(&mut cmd);
+    let output = cmd
         .args(["metadata", "--no-deps", "--format-version", "1", "--locked"])
         .current_dir(root)
         .output()
@@ -792,12 +823,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dist_rejects_skip_build_flags_whenever_update_config_is_present() {
-        assert!(validate_dist_update_build_flags(true, true, false).is_err());
-        assert!(validate_dist_update_build_flags(true, false, true).is_err());
-        assert!(validate_dist_update_build_flags(true, true, true).is_err());
-        assert!(validate_dist_update_build_flags(true, false, false).is_ok());
-        assert!(validate_dist_update_build_flags(false, true, true).is_ok());
-        assert!(validate_dist_update_build_flags(false, false, false).is_ok());
+    fn dist_rejects_skip_build_or_no_zip_whenever_update_config_is_present() {
+        assert!(validate_dist_update_build_flags(true, true, false, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false, true, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false, false, false).is_err());
+        assert!(validate_dist_update_build_flags(true, false, false, true).is_ok());
+        assert!(validate_dist_update_build_flags(false, true, true, false).is_ok());
+        assert!(validate_dist_update_build_flags(false, false, false, true).is_ok());
+    }
+
+    #[test]
+    fn dist_rejects_release_secrets_in_build_env() {
+        assert!(check_build_env_secret_vars(true, false).is_err());
+        assert!(check_build_env_secret_vars(false, true).is_err());
+        assert!(check_build_env_secret_vars(true, true).is_err());
+        assert!(check_build_env_secret_vars(false, false).is_ok());
     }
 }
