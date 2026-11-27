@@ -403,14 +403,14 @@ fn pin(path: &Path) -> Result<File, String> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        // O_DIRECTORY (0o0200000) | O_NOFOLLOW (0o0400000) | O_NONBLOCK (0o0004000)
-        options.custom_flags(0o0200_000 | 0o0400_000 | 0o0004_000);
+        // O_DIRECTORY (0o200_000) | O_NOFOLLOW (0o400_000) | O_NONBLOCK (0o004_000)
+        options.custom_flags(0o200_000 | 0o400_000 | 0o004_000);
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        // O_DIRECTORY (0o0040000) | O_NOFOLLOW (0o0100000) | O_NONBLOCK (0o0004000)
-        options.custom_flags(0o0040_000 | 0o0100_000 | 0o0004_000);
+        // O_DIRECTORY (0o040_000) | O_NOFOLLOW (0o100_000) | 0o004_000
+        options.custom_flags(0o040_000 | 0o100_000 | 0o004_000);
     }
     let file = options
         .open(path)
@@ -571,13 +571,13 @@ pub fn open_read_in_pinned_dir(
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        // O_NOFOLLOW (0o0400000) | O_NONBLOCK (0o0004000) prevents symlink-follow & FIFO hang!
-        opts.custom_flags(0o0400_000 | 0o0004_000);
+        // O_NOFOLLOW (0o400_000) | O_NONBLOCK (0o004_000) prevents symlink-follow & FIFO hang!
+        opts.custom_flags(0o400_000 | 0o004_000);
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.custom_flags(0o0100_000 | 0o0004_000);
+        opts.custom_flags(0o100_000 | 0o004_000);
     }
     let file = opts
         .open(&step_path)
