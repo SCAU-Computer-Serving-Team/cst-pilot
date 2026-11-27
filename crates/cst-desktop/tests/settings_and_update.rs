@@ -2313,3 +2313,64 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         assert_eq!(shell.read(cx).route(), initial_route);
     });
 }
+
+#[gpui_kit::test]
+async fn cold_start_available_update_stays_silent_without_auto_modal(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = Step6MockBackend::start();
+    // Cold start: backend already reports `Available` before the window and shell are created.
+    backend.state.lock().unwrap().update_phase = "available".into();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, cx| {
+        shell
+            .read(cx)
+            .client_snapshot()
+            .update_state
+            .as_ref()
+            .is_some_and(|u| u.status.phase == cst_client::UpdatePhaseDto::Available)
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
+        assert!(
+            window.try_find("update-available-dialog-kom7j").is_none(),
+            "cold start on Home must stay silent when update is Available"
+        );
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        let sv_ent = shell.read(cx).settings_view().clone();
+        sv_ent.update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::General, cx);
+        });
+        window.render_frame(cx);
+        window.click("settings-update-action-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("update-available-dialog-kom7j").is_some()
+    })
+    .await;
+}

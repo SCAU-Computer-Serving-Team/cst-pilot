@@ -8,10 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::Bytes;
-use chrono::{SecondsFormat, Utc};
-use cst_updater::layout::{BUILD_INFO_PATH, SHA256SUMS_PATH};
-#[cfg(windows)]
-use cst_updater::layout::{SERVER_EXE_PATH, UPDATER_EXE_PATH};
+use cst_updater::layout::{BUILD_INFO_PATH, SERVER_EXE_PATH, SHA256SUMS_PATH, UPDATER_EXE_PATH};
 use cst_updater::manifest::{
     Archive, MANIFEST_DOMAIN, ReleaseKey, ReleaseManifest, SUMS_DOMAIN, SignedManifest,
     validate_release_url,
@@ -19,6 +16,7 @@ use cst_updater::manifest::{
 #[cfg(windows)]
 use cst_updater::verify::VerifiedPackage;
 use ed25519_dalek::{Signer, SigningKey};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
@@ -42,6 +40,48 @@ pub struct UpdateBuildConfig {
     pub manifest_url: String,
     pub public_key_b64: String,
     pub public_key_fingerprint: String,
+}
+
+/// Trusted build provenance emitted by `xtask dist` on the keyless build host after compiling
+/// and executing `cst-updater.exe --key-fingerprint` + `cst-server.exe --key-fingerprint`.
+/// Consumed offline by `xtask sign-release` without executing any untrusted binary under the
+/// signing account.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BuildAttestation {
+    pub schema_version: u32,
+    pub version: String,
+    pub platform: String,
+    pub built_at: String,
+    pub git_commit: String,
+    pub update_enabled: bool,
+    pub update_public_key_fingerprint: String,
+    pub verified_key_probe: bool,
+    pub archive_filename: String,
+    pub archive_size: u64,
+    pub archive_sha256: String,
+    pub unpacked_size: u64,
+    pub sha256_sums_sha256: String,
+    pub updater_exe_sha256: String,
+    pub server_exe_sha256: String,
+}
+
+pub fn write_build_attestation(path: &Path, attestation: &BuildAttestation) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("无法创建构建证明目录 {}：{e}", parent.display()))?;
+    }
+    let mut bytes =
+        serde_json::to_vec_pretty(attestation).map_err(|_| "构建证明序列化失败。".to_owned())?;
+    bytes.push(b'\n');
+    fs::write(path, bytes).map_err(|e| format!("无法写入构建证明 {}：{e}", path.display()))
+}
+
+fn read_build_attestation(path: &Path) -> Result<BuildAttestation, String> {
+    let bytes = fs::read(path).map_err(|e| format!("无法读取构建证明 {}：{e}", path.display()))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("构建证明 JSON 格式无效：{e}"))
 }
 
 pub fn parse_canonical_public_key(raw_b64: &str) -> Result<(ReleaseKey, [u8; 32], String), String> {
@@ -264,6 +304,7 @@ fn load_signing_key(path: &Path) -> Result<(SigningKey, ReleaseKey), String> {
 pub struct SignReleaseArgs {
     pub dist_dir: PathBuf,
     pub zip_path: PathBuf,
+    pub attestation_path: PathBuf,
     pub version: Option<String>,
     pub min_upgradable: String,
     pub base_url: String,
@@ -278,6 +319,7 @@ fn parse_sign_release_args(
 ) -> Result<SignReleaseArgs, String> {
     let mut dist_dir: Option<PathBuf> = None;
     let mut zip_path: Option<PathBuf> = None;
+    let mut attestation_path: Option<PathBuf> = None;
     let mut version: Option<String> = None;
     let mut min_upgradable: Option<String> = None;
     let mut base_url = DEFAULT_PUBLIC_BASE_URL.to_owned();
@@ -296,6 +338,12 @@ fn parse_sign_release_args(
             "--zip" => {
                 zip_path = Some(PathBuf::from(
                     args.next().ok_or("--zip 需要发行 ZIP 路径。")?,
+                ));
+            }
+            "--attestation" => {
+                attestation_path = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--attestation 需要 xtask dist 产出的构建证明文件路径。")?,
                 ));
             }
             "--version" => {
@@ -334,6 +382,8 @@ fn parse_sign_release_args(
 
     let dist_dir = dist_dir.ok_or("sign-release 必须指定 --dist-dir <dir>。")?;
     let zip_path = zip_path.ok_or("sign-release 必须指定 --zip <path>。")?;
+    let attestation_path = attestation_path
+        .ok_or("sign-release 必须通过 --attestation <path> 指定来自无私钥构建机的构建证明文件。")?;
     let min_upgradable =
         min_upgradable.ok_or("sign-release 必须指定 --min-upgradable <vX.Y.Z>。")?;
     let out_path = out_path.ok_or("sign-release 必须指定 --out <manifest.signed.json>。")?;
@@ -357,6 +407,7 @@ fn parse_sign_release_args(
     Ok(SignReleaseArgs {
         dist_dir,
         zip_path,
+        attestation_path,
         version,
         min_upgradable,
         base_url,
@@ -387,17 +438,10 @@ pub struct SignReleaseSummary {
     pub archive_sha256: String,
 }
 
+/// Offline release signing: strictly verifies pure cryptographic digests against the trusted
+/// build attestation produced by `xtask dist` on the keyless build host. Never executes any
+/// binary from `--dist-dir` under the signing account.
 pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String> {
-    sign_release_with_binary_probe(args, verify_binaries_key_fingerprint)
-}
-
-fn sign_release_with_binary_probe<F>(
-    args: &SignReleaseArgs,
-    probe_binaries: F,
-) -> Result<SignReleaseSummary, String>
-where
-    F: FnOnce(&Path, &str) -> Result<(), String>,
-{
     let version = match &args.version {
         Some(v) => v.clone(),
         None => cst_updater::layout::read_version(&args.dist_dir)?,
@@ -412,8 +456,9 @@ where
     }
     if same_existing_file(&args.out_path, &args.private_key_file)
         || same_existing_file(&args.out_path, &args.zip_path)
+        || same_existing_file(&args.out_path, &args.attestation_path)
     {
-        return Err("--out 输出路径不能指向私钥文件或发行 ZIP 文件。".into());
+        return Err("--out 输出路径不能指向私钥文件、发行 ZIP 或构建证明文件。".into());
     }
 
     let base_url = args.base_url.trim().trim_end_matches('/');
@@ -422,14 +467,67 @@ where
         return Err("--base-url 不允许包含查询参数或片段。".into());
     }
 
+    let attestation = read_build_attestation(&args.attestation_path)?;
+    if attestation.schema_version != 1 || attestation.platform != "windows-x86_64" {
+        return Err("构建证明 schemaVersion 或 platform 不受支持。".into());
+    }
+    if !attestation.update_enabled || !attestation.verified_key_probe {
+        return Err(
+            "构建证明未通过无私钥构建环境的双程序公钥自检（updateEnabled / verifiedKeyProbe 必须为 true），拒绝签名。"
+                .into(),
+        );
+    }
+    if attestation.version != version {
+        return Err(format!(
+            "构建证明版本（{}）与待签版本（{version}）不一致，拒绝签名。",
+            attestation.version
+        ));
+    }
+
     let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
     let signing_pub_fp = release_key.fingerprint();
+    if attestation.update_public_key_fingerprint != signing_pub_fp {
+        return Err(format!(
+            "构建证明公钥指纹（{}）与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。",
+            attestation.update_public_key_fingerprint
+        ));
+    }
+
     cst_updater::verify::verify_clean_dist_tree(&args.dist_dir, &version)?;
 
     let sums_bytes = fs::read(args.dist_dir.join(SHA256SUMS_PATH))
         .map_err(|e| format!("无法读取 {SHA256SUMS_PATH}：{e}"))?;
+    let actual_sums_sha256 = format!("{:x}", Sha256::digest(&sums_bytes));
+    if actual_sums_sha256 != attestation.sha256_sums_sha256 {
+        return Err("待签发行树 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into());
+    }
     let sha256_sums = String::from_utf8(sums_bytes)
         .map_err(|_| format!("{SHA256SUMS_PATH} 必须为 UTF-8 编码。"))?;
+
+    let actual_updater_sha256 = format!(
+        "{:x}",
+        Sha256::digest(
+            fs::read(args.dist_dir.join(UPDATER_EXE_PATH))
+                .map_err(|e| format!("无法读取 {UPDATER_EXE_PATH}：{e}"))?
+        )
+    );
+    if actual_updater_sha256 != attestation.updater_exe_sha256 {
+        return Err(format!(
+            "待签 {UPDATER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
+    }
+    let actual_server_sha256 = format!(
+        "{:x}",
+        Sha256::digest(
+            fs::read(args.dist_dir.join(SERVER_EXE_PATH))
+                .map_err(|e| format!("无法读取 {SERVER_EXE_PATH}：{e}"))?
+        )
+    );
+    if actual_server_sha256 != attestation.server_exe_sha256 {
+        return Err(format!(
+            "待签 {SERVER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
+    }
 
     let build_info_bytes = fs::read(args.dist_dir.join(BUILD_INFO_PATH))
         .map_err(|e| format!("无法读取 {BUILD_INFO_PATH}：{e}"))?;
@@ -459,14 +557,16 @@ where
             "签名私钥对应公钥指纹（{signing_pub_fp}）与构建内嵌公钥指纹（{built_fp}）不一致，拒绝签名。"
         ));
     }
-    probe_binaries(&args.dist_dir, &signing_pub_fp)?;
     let built_at = build_info
         .get("builtAt")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
-        .unwrap_or_else(|| Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
+        .ok_or("BUILD-INFO.json 缺少 builtAt 时间戳。")?;
     chrono::DateTime::parse_from_rfc3339(&built_at)
         .map_err(|_| "BUILD-INFO.json 中的 builtAt 不是有效的 RFC 3339 时间戳。")?;
+    if built_at != attestation.built_at {
+        return Err("BUILD-INFO.json 中的 builtAt 与构建证明不一致，拒绝签名。".into());
+    }
 
     let release_notes = if let Some(ref notes_path) = args.notes_file {
         fs::read_to_string(notes_path)
@@ -494,6 +594,13 @@ where
 
     let unpacked_size = inspect_zip_unpacked_size(&zip_bytes, &sha256_sums)?;
     let archive_filename = format!("cst-pilot-{version}-windows-x64.zip");
+    if attestation.archive_filename != archive_filename
+        || attestation.archive_size != archive_size
+        || attestation.archive_sha256 != archive_sha256
+        || attestation.unpacked_size != unpacked_size
+    {
+        return Err("发行 ZIP 的文件名、体积或 SHA-256 与构建证明不一致，拒绝签名。".into());
+    }
     let archive_url = format!("{base_url}/files/{version}/{archive_filename}");
     validate_release_url(&archive_url)?;
 
@@ -1054,29 +1161,23 @@ mod tests {
     fn build_synthetic_dist(
         root: &Path,
         version: &str,
-        embedded_pub_b64: Option<&str>,
+        pub_fp: &str,
         build_info_json: Option<&str>,
-    ) -> (PathBuf, PathBuf, u64) {
+    ) -> (PathBuf, PathBuf, PathBuf, u64) {
         let dist_dir = root.join("cst-pilot");
         let _ = fs::remove_dir_all(&dist_dir);
-        let mut server_bin = b"synthetic server ".to_vec();
-        let mut updater_bin = b"synthetic updater ".to_vec();
-        if let Some(pub_b64) = embedded_pub_b64 {
-            server_bin.extend_from_slice(pub_b64.as_bytes());
-            updater_bin.extend_from_slice(pub_b64.as_bytes());
-        }
+        let built_at = "2026-11-26T12:00:00Z";
         let build_info = build_info_json.map(str::to_owned).unwrap_or_else(|| {
-            let fp = embedded_pub_b64
-                .and_then(|b| parse_canonical_public_key(b).ok().map(|(_, _, fp)| fp))
-                .unwrap_or_default();
             format!(
-                "{{\"version\":\"{version}\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{fp}\"}}\n"
+                "{{\"version\":\"{version}\",\"builtAt\":\"{built_at}\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{pub_fp}\"}}\n"
             )
         });
+        let server_bin = b"synthetic server".to_vec();
+        let updater_bin = b"synthetic updater".to_vec();
         let mut files = BTreeMap::from([
             ("cst-pilot.exe".to_owned(), b"synthetic main".to_vec()),
-            ("app/cst-server.exe".into(), server_bin),
-            ("app/cst-updater.exe".into(), updater_bin),
+            ("app/cst-server.exe".into(), server_bin.clone()),
+            ("app/cst-updater.exe".into(), updater_bin.clone()),
             (
                 "VERSION".into(),
                 format!("cst-pilot {version}\n").into_bytes(),
@@ -1122,7 +1223,8 @@ mod tests {
         }
         fs::write(dist_dir.join(SHA256SUMS_PATH), sums.as_bytes()).unwrap();
 
-        let zip_path = root.join(format!("cst-pilot-{version}-windows-x64.zip"));
+        let archive_filename = format!("cst-pilot-{version}-windows-x64.zip");
+        let zip_path = root.join(&archive_filename);
         let mut zip = ZipWriter::new(File::create(&zip_path).unwrap());
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let mut unpacked = 0u64;
@@ -1137,7 +1239,29 @@ mod tests {
         unpacked += sums.len() as u64;
         zip.finish().unwrap();
 
-        (dist_dir, zip_path, unpacked)
+        let zip_bytes = fs::read(&zip_path).unwrap();
+        let attestation_path =
+            root.join(format!("cst-pilot-{version}-windows-x64.attestation.json"));
+        let attestation = BuildAttestation {
+            schema_version: 1,
+            version: version.to_owned(),
+            platform: "windows-x86_64".to_owned(),
+            built_at: built_at.to_owned(),
+            git_commit: "deadbeef".to_owned(),
+            update_enabled: true,
+            update_public_key_fingerprint: pub_fp.to_owned(),
+            verified_key_probe: true,
+            archive_filename,
+            archive_size: zip_bytes.len() as u64,
+            archive_sha256: format!("{:x}", Sha256::digest(&zip_bytes)),
+            unpacked_size: unpacked,
+            sha256_sums_sha256: format!("{:x}", Sha256::digest(sums.as_bytes())),
+            updater_exe_sha256: format!("{:x}", Sha256::digest(&updater_bin)),
+            server_exe_sha256: format!("{:x}", Sha256::digest(&server_bin)),
+        };
+        write_build_attestation(&attestation_path, &attestation).unwrap();
+
+        (dist_dir, zip_path, attestation_path, unpacked)
     }
 
     #[test]
@@ -1158,31 +1282,24 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
-        let (dist_dir, zip_path, expected_unpacked) =
-            build_synthetic_dist(&dir, "v0.9.8", Some(&pub_b64), None);
+        let (dist_dir, zip_path, attestation_path, expected_unpacked) =
+            build_synthetic_dist(&dir, "v0.9.8", &fp, None);
         let out_manifest = dir.join("manifest.signed.json");
 
-        let mut probed_fp = String::new();
-        let summary = sign_release_with_binary_probe(
-            &SignReleaseArgs {
-                dist_dir,
-                zip_path,
-                version: Some("v0.9.8".into()),
-                min_upgradable: "v0.9.0".into(),
-                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-                notes_file: None,
-                notes_inline: Some("test notes".into()),
-                out_path: out_manifest.clone(),
-                private_key_file: key_file,
-            },
-            |_, expected| {
-                probed_fp = expected.to_owned();
-                Ok(())
-            },
-        )
+        let summary = sign_release(&SignReleaseArgs {
+            dist_dir,
+            zip_path,
+            attestation_path,
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: Some("test notes".into()),
+            out_path: out_manifest.clone(),
+            private_key_file: key_file,
+        })
         .unwrap();
 
-        assert_eq!(probed_fp, fp);
         assert_eq!(summary.unpacked_size, expected_unpacked);
         assert_eq!(
             summary.archive_url,
@@ -1195,50 +1312,69 @@ mod tests {
     }
 
     #[test]
-    fn sign_release_rejects_missing_metadata_and_fake_binaries() {
+    fn sign_release_rejects_unverified_or_tampered_attestation() {
         let dir = env::temp_dir().join(format!("xtask-sign-bind-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
-        let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let (_, fp) = generate_keypair_file(&key_file).unwrap();
         let out_manifest = dir.join("manifest.signed.json");
 
         // 1. Missing updatePublicKeyFingerprint in BUILD-INFO.json must fail.
-        let (dist_dir, zip_path, _) = build_synthetic_dist(
+        let (dist_dir, zip_path, attestation_path, _) = build_synthetic_dist(
             &dir,
             "v0.9.8",
-            Some(&pub_b64),
+            &fp,
             Some(
                 "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true}\n",
             ),
         );
-        let err = sign_release_with_binary_probe(
-            &SignReleaseArgs {
-                dist_dir,
-                zip_path,
-                version: Some("v0.9.8".into()),
-                min_upgradable: "v0.9.0".into(),
-                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-                notes_file: None,
-                notes_inline: None,
-                out_path: out_manifest.clone(),
-                private_key_file: key_file.clone(),
-            },
-            |_, _| Ok(()),
-        )
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir,
+            zip_path,
+            attestation_path,
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
         .err()
         .expect("missing fingerprint must fail");
         assert!(err.contains("updatePublicKeyFingerprint"));
 
-        // 2. Real `sign_release` MUST reject fake EXE files even when both BUILD-INFO.json
-        // and the raw file bytes contain the matching public key string.
-        let matching_info = format!(
-            "{{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{fp}\"}}\n"
-        );
-        let (dist_dir, zip_path, _) =
-            build_synthetic_dist(&dir, "v0.9.8", Some(&pub_b64), Some(&matching_info));
+        // 2. Attestation with verifiedKeyProbe=false must fail.
+        let (dist_dir, zip_path, attestation_path, _) =
+            build_synthetic_dist(&dir, "v0.9.8", &fp, None);
+        let mut unverified = read_build_attestation(&attestation_path).unwrap();
+        unverified.verified_key_probe = false;
+        write_build_attestation(&attestation_path, &unverified).unwrap();
+        let err = sign_release(&SignReleaseArgs {
+            dist_dir: dist_dir.clone(),
+            zip_path: zip_path.clone(),
+            attestation_path: attestation_path.clone(),
+            version: Some("v0.9.8".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: None,
+            out_path: out_manifest.clone(),
+            private_key_file: key_file.clone(),
+        })
+        .err()
+        .expect("unverified attestation must fail");
+        assert!(err.contains("verifiedKeyProbe"));
+
+        // 3. Substituting app/cst-updater.exe after build (mismatching trusted attestation digest) must fail.
+        let mut tampered_att = read_build_attestation(&attestation_path).unwrap();
+        tampered_att.verified_key_probe = true;
+        tampered_att.updater_exe_sha256 = "0".repeat(64);
+        write_build_attestation(&attestation_path, &tampered_att).unwrap();
         let err = sign_release(&SignReleaseArgs {
             dist_dir,
             zip_path,
+            attestation_path,
             version: Some("v0.9.8".into()),
             min_upgradable: "v0.9.0".into(),
             base_url: DEFAULT_PUBLIC_BASE_URL.into(),
@@ -1248,11 +1384,8 @@ mod tests {
             private_key_file: key_file,
         })
         .err()
-        .expect("fake binaries with stuffed public key string must fail real binary probe");
-        assert!(
-            err.contains("--key-fingerprint") || err.contains("公钥自检失败"),
-            "unexpected error: {err}"
-        );
+        .expect("tampered updater digest must fail");
+        assert!(err.contains(UPDATER_EXE_PATH));
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1296,23 +1429,22 @@ mod tests {
         let dir = env::temp_dir().join(format!("xtask-publish-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
-        let (pub_b64, _) = generate_keypair_file(&key_file).unwrap();
-        let (dist_dir, zip_path, _) = build_synthetic_dist(&dir, "v0.9.9", Some(&pub_b64), None);
+        let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
+        let (dist_dir, zip_path, attestation_path, _) =
+            build_synthetic_dist(&dir, "v0.9.9", &fp, None);
         let out_manifest = dir.join("manifest.signed.json");
-        let summary = sign_release_with_binary_probe(
-            &SignReleaseArgs {
-                dist_dir,
-                zip_path: zip_path.clone(),
-                version: Some("v0.9.9".into()),
-                min_upgradable: "v0.9.0".into(),
-                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-                notes_file: None,
-                notes_inline: Some("publish test".into()),
-                out_path: out_manifest.clone(),
-                private_key_file: key_file,
-            },
-            |_, _| Ok(()),
-        )
+        let summary = sign_release(&SignReleaseArgs {
+            dist_dir,
+            zip_path: zip_path.clone(),
+            attestation_path,
+            version: Some("v0.9.9".into()),
+            min_upgradable: "v0.9.0".into(),
+            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+            notes_file: None,
+            notes_inline: Some("publish test".into()),
+            out_path: out_manifest.clone(),
+            private_key_file: key_file,
+        })
         .unwrap();
         let manifest_bytes = fs::read(&out_manifest).unwrap();
         let archive_size = summary.archive_size;

@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --attestation <path> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -306,10 +306,11 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_else(|| "unknown".to_owned());
+    let built_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     let mut build_info = json!({
         "version": args.version,
         "gitCommit": git_commit,
-        "builtAt": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        "builtAt": built_at,
         "profile": args.profile,
         "platform": "windows-x86_64",
         "embedWeb": true,
@@ -433,6 +434,43 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip_bytes.len() as f64 / (1024.0 * 1024.0),
             zip_hash
         );
+        if let Some(cfg) = &update_cfg {
+            let attestation_path = args.out_dir.join(format!(
+                "cst-pilot-{}-windows-x64.attestation.json",
+                args.version
+            ));
+            let sums_hash = format!("{:x}", Sha256::digest(sums_text.as_bytes()));
+            let updater_hash = sums
+                .get(UPDATER_EXE_PATH)
+                .cloned()
+                .ok_or_else(|| format!("SHA256SUMS 缺少 {UPDATER_EXE_PATH}。"))?;
+            let server_hash = sums
+                .get(SERVER_EXE_PATH)
+                .cloned()
+                .ok_or_else(|| format!("SHA256SUMS 缺少 {SERVER_EXE_PATH}。"))?;
+            let attestation = release::BuildAttestation {
+                schema_version: 1,
+                version: args.version.clone(),
+                platform: "windows-x86_64".to_owned(),
+                built_at: built_at.clone(),
+                git_commit: git_commit.clone(),
+                update_enabled: true,
+                update_public_key_fingerprint: cfg.public_key_fingerprint.clone(),
+                verified_key_probe: true,
+                archive_filename: zip_name,
+                archive_size: zip_bytes.len() as u64,
+                archive_sha256: zip_hash,
+                unpacked_size: total_bytes,
+                sha256_sums_sha256: sums_hash,
+                updater_exe_sha256: updater_hash,
+                server_exe_sha256: server_hash,
+            };
+            release::write_build_attestation(&attestation_path, &attestation)?;
+            println!(
+                "[xtask] Build attestation ready: {}",
+                attestation_path.display()
+            );
+        }
     } else if !args.skip_smoke {
         let temp = SmokeDir::new()?;
         copy_dir_filtered(&kit_dir, &temp.0, |_| true)?;
