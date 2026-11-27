@@ -165,10 +165,10 @@ pub fn verify_binaries_key_fingerprint(dist_dir: &Path, expected_fp: &str) -> Re
     #[cfg(not(windows))]
     {
         let _ = (dist_dir, expected_fp);
-        return Err(
+        Err(
             "校验 windows-x86_64 发行二进制内嵌公钥必须在 Windows 环境运行 app/cst-updater.exe 与 app/cst-server.exe --key-fingerprint。"
                 .into(),
-        );
+        )
     }
     #[cfg(windows)]
     {
