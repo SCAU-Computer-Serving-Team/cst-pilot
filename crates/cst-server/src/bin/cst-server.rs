@@ -10,6 +10,13 @@ use cst_kit::update::service::UpdateOptions;
 use cst_kit::{Kit, KitHost};
 use cst_server::{RunningServer, ServerConfig};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfflineCliMode {
+    Inherit,
+    ForceOffline,
+    ForceOnline,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct CliArgs {
     health_check: bool,
@@ -17,7 +24,7 @@ struct CliArgs {
     standalone_web: bool,
     open_browser: bool,
     sanitize_env: bool,
-    offline: bool,
+    offline_mode: OfflineCliMode,
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
@@ -37,7 +44,8 @@ where
     let mut standalone_web = false;
     let mut open_browser = false;
     let mut sanitize_env = false;
-    let mut offline = false;
+    let mut force_offline = false;
+    let mut force_online = false;
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
@@ -51,7 +59,8 @@ where
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
             "--sanitize-env" => sanitize_env = true,
-            "--offline" => offline = true,
+            "--offline" => force_offline = true,
+            "--online" => force_online = true,
             "--port" => {
                 let val = iter.next().ok_or("`--port` 缺少端口号参数")?;
                 port = Some(val.parse::<u16>().map_err(|_| "`--port` 端口号格式无效")?);
@@ -72,9 +81,17 @@ where
         }
     }
 
+    if force_offline && force_online {
+        return Err("`--offline` 与 `--online` 不能同时指定".to_owned());
+    }
     if open_browser && !standalone_web {
         return Err("`--open-browser` 需配合 `--standalone-web` 使用".to_owned());
     }
+    let offline_mode = match (force_offline, force_online) {
+        (true, false) => OfflineCliMode::ForceOffline,
+        (false, true) => OfflineCliMode::ForceOnline,
+        _ => OfflineCliMode::Inherit,
+    };
 
     Ok(CliArgs {
         health_check,
@@ -82,7 +99,7 @@ where
         standalone_web,
         open_browser,
         sanitize_env,
-        offline,
+        offline_mode,
         port,
         kit_root,
         cwd,
@@ -112,7 +129,7 @@ fn resolve_default_kit_root() -> Result<PathBuf, String> {
 /// (before spawning any Tokio worker threads), matching `cst_client::apply_portable_sanitized_env`.
 fn sanitize_current_process_env(
     kit_root: &std::path::Path,
-    force_offline: bool,
+    offline_mode: OfflineCliMode,
 ) -> Result<(), String> {
     let canonical = kit_root
         .canonicalize()
@@ -160,7 +177,11 @@ fn sanitize_current_process_env(
         "PROCESSOR_ARCHITECTURE",
     ];
 
-    let caller_offline = force_offline || cst_os::is_offline_env_enabled();
+    let caller_offline = match offline_mode {
+        OfflineCliMode::ForceOffline => true,
+        OfflineCliMode::ForceOnline => false,
+        OfflineCliMode::Inherit => cst_os::is_offline_env_enabled(),
+    };
     let existing_keys: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     // SAFETY: Called strictly at single-threaded `fn main()` entry before building the Tokio runtime.
     unsafe {
@@ -236,15 +257,27 @@ fn main() -> ExitCode {
     };
 
     if args.sanitize_env {
-        if let Err(msg) = sanitize_current_process_env(&kit_root, args.offline) {
+        if let Err(msg) = sanitize_current_process_env(&kit_root, args.offline_mode) {
             let _ = writeln!(std::io::stderr(), "{msg}");
             let _ = std::io::stderr().flush();
             return ExitCode::FAILURE;
         }
-    } else if args.offline {
-        // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
-        unsafe {
-            std::env::set_var("CST_OFFLINE", "1");
+    } else {
+        match args.offline_mode {
+            OfflineCliMode::ForceOffline => {
+                // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
+                unsafe {
+                    std::env::set_var("CST_OFFLINE", "1");
+                }
+            }
+            OfflineCliMode::ForceOnline => {
+                // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
+                unsafe {
+                    std::env::remove_var("CST_OFFLINE");
+                    std::env::remove_var("PI_OFFLINE");
+                }
+            }
+            OfflineCliMode::Inherit => {}
         }
     }
 
@@ -409,5 +442,16 @@ mod tests {
         let parsed =
             parse_args_from(["--key-fingerprint"].into_iter().map(str::to_owned)).expect("valid");
         assert!(parsed.key_fingerprint);
+    }
+
+    #[test]
+    fn parse_offline_and_online_flags_reject_conflict() {
+        let off = parse_args_from(["--offline"].into_iter().map(str::to_owned)).expect("offline");
+        assert_eq!(off.offline_mode, super::OfflineCliMode::ForceOffline);
+
+        let on = parse_args_from(["--online"].into_iter().map(str::to_owned)).expect("online");
+        assert_eq!(on.offline_mode, super::OfflineCliMode::ForceOnline);
+
+        assert!(parse_args_from(["--offline", "--online"].into_iter().map(str::to_owned)).is_err());
     }
 }

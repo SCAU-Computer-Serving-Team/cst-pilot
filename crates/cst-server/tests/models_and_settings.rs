@@ -856,10 +856,66 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             )
             .await
             .unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
             assert_eq!(
                 compiled_host.updates().status().phase,
                 cst_kit::update::service::Phase::Idle
             );
+        }
+
+        // Verify isolated child `cst-server` processes honor `--offline`, `CST_OFFLINE=1`,
+        // `PI_OFFLINE=1`, and `--standalone-web` end-to-end without background network requests.
+        let server_exe = env!("CARGO_BIN_EXE_cst-server");
+        for (extra_args, cst_off, pi_off, expected_phase) in [
+            (&["--offline"][..], "0", "0", "idle"),
+            (&[][..], "1", "0", "idle"),
+            (&[][..], "0", "1", "idle"),
+            (&["--standalone-web"][..], "0", "0", "unavailable"),
+        ] {
+            let child_kit = TestKitDir::new();
+            fs::write(child_kit.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
+            let tmp_sub = child_kit.0.join(".state/tmp");
+            fs::create_dir_all(&tmp_sub).unwrap();
+            let mut cmd = std::process::Command::new(server_exe);
+            cmd.args(["--kit-root"])
+                .arg(&child_kit.0)
+                .args(["--port", "0"])
+                .args(extra_args)
+                .env("CST_OFFLINE", cst_off)
+                .env("PI_OFFLINE", pi_off)
+                .env("CST_ALLOW_UNELEVATED", "1")
+                .env("TEMP", &tmp_sub)
+                .env("TMP", &tmp_sub)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let mut child = cmd.spawn().unwrap();
+            let disc_path = child_kit.0.join(".state/server.json");
+            let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while !disc_path.is_file() && std::time::Instant::now() < wait_deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            }
+            assert!(
+                disc_path.is_file(),
+                "cst-server child must publish server.json"
+            );
+            let disc: Value = serde_json::from_slice(&fs::read(&disc_path).unwrap()).unwrap();
+            let port = disc["port"].as_u64().unwrap();
+            let app_tok = disc["token"].as_str().unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let st: Value = client
+                .get(format!("http://127.0.0.1:{port}/api/app/update/status"))
+                .header("Host", format!("127.0.0.1:{port}"))
+                .header("X-CST-Client", "app")
+                .header("Authorization", format!("Bearer {app_tok}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(st["status"]["phase"], expected_phase);
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 

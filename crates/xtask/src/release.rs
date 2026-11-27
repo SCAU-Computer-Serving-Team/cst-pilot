@@ -133,7 +133,7 @@ fn read_and_verify_build_attestation(
     if !is_lower_hex_len(&expected, 64) {
         return Err("--expected-attestation-sha256 必须为 64 位小写十六进制 SHA-256 摘要。".into());
     }
-    let bytes = fs::read(path).map_err(|e| format!("无法读取构建证明 {}：{e}", path.display()))?;
+    let bytes = read_bounded_regular_file(path, 256 * 1024, "构建证明")?;
     let actual = format!("{:x}", Sha256::digest(&bytes));
     if actual != expected {
         return Err(format!(
@@ -211,12 +211,13 @@ pub fn verify_binaries_key_fingerprint(dist_dir: &Path, expected_fp: &str) -> Re
 }
 
 /// Verifies that a `--channel disabled` build genuinely compiled out online update capability in
-/// both `app/cst-updater.exe` and `app/cst-server.exe` (`--key-fingerprint` must exit non-zero).
+/// both `app/cst-updater.exe` and `app/cst-server.exe` (both statically in `.rdata` and via
+/// `--key-fingerprint` probe on Windows).
 pub fn verify_binaries_update_disabled(dist_dir: &Path) -> Result<(), String> {
-    #[cfg(not(windows))]
-    {
-        let _ = dist_dir;
-        Ok(())
+    let disabled_marker = format_update_root_marker("disabled", "disabled");
+    for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
+        let bytes = read_bounded_regular_file(&dist_dir.join(rel), MAX_SERVER_ARCHIVE_BYTES, rel)?;
+        verify_pe64_rdata_single_root_marker(&bytes, &disabled_marker, rel, "disabled")?;
     }
     #[cfg(windows)]
     {
@@ -231,9 +232,16 @@ pub fn verify_binaries_update_disabled(dist_dir: &Path) -> Result<(), String> {
                     "{rel} 在禁用在线更新构建下仍返回了升级公钥指纹，拒绝继续。"
                 ));
             }
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.contains("未启用在线更新") {
+                return Err(format!(
+                    "{rel} --key-fingerprint 未返回预期的禁用诊断信息：{}",
+                    stderr.trim()
+                ));
+            }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -258,10 +266,78 @@ fn isolated_probe_command(dist_dir: &Path, rel: &str) -> Command {
     cmd
 }
 
-/// Pure-Rust static PE32+ (`x86_64`) header & `IMAGE_SUBSYSTEM_WINDOWS_GUI == 2` verification.
-/// Never executes any instruction from the inspected binary.
-pub fn verify_pe64_windows_gui_binary(bytes: &[u8], label: &str) -> Result<(), String> {
-    if bytes.len() < 0x100 || &bytes[0..2] != b"MZ" {
+const CANONICAL_TELEMETRY_JSON: &[u8] = include_bytes!("../../../app/defaults/telemetry.json");
+const CANONICAL_WEB_SEARCH_JSON: &[u8] = include_bytes!("../../../app/defaults/web-search.json");
+
+/// Verifies clean-tree rules specific to official release assembly (`telemetry.json` and
+/// `web-search.json` match canonical repository defaults, and `ntfs-ng-LICENSE.txt` is bundled).
+pub fn verify_canonical_release_defaults(kit_dir: &Path) -> Result<(), String> {
+    for (rel, expected_raw) in [
+        ("app/defaults/telemetry.json", CANONICAL_TELEMETRY_JSON),
+        ("app/defaults/web-search.json", CANONICAL_WEB_SEARCH_JSON),
+    ] {
+        let actual_raw = read_bounded_regular_file(&kit_dir.join(rel), 64 * 1024, rel)?;
+        let actual_val: serde_json::Value = serde_json::from_slice(&actual_raw)
+            .map_err(|_| format!("{rel} 不是有效的标准 JSON。"))?;
+        let expected_val: serde_json::Value = serde_json::from_slice(expected_raw)
+            .expect("canonical repo default JSON must be valid");
+        if actual_val != expected_val {
+            return Err(format!(
+                "{rel} 与仓库标准预置配置不一致，禁止带入构建机本机配置。"
+            ));
+        }
+    }
+    let ntfs_lic = kit_dir.join("app/licenses/ntfs-ng-LICENSE.txt");
+    let lic_bytes =
+        read_bounded_regular_file(&ntfs_lic, 256 * 1024, "app/licenses/ntfs-ng-LICENSE.txt")?;
+    if lic_bytes.is_empty() {
+        return Err("缺少非空的 app/licenses/ntfs-ng-LICENSE.txt。".into());
+    }
+    Ok(())
+}
+
+pub fn read_bounded_regular_file(
+    path: &Path,
+    max_bytes: u64,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|e| format!("无法读取 {label}（{}）：{e}", path.display()))?;
+    if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() {
+        return Err(format!(
+            "{label} 路径不能是符号链接、重解析点或目录：{}",
+            path.display()
+        ));
+    }
+    if meta.len() == 0 || meta.len() > max_bytes {
+        return Err(format!(
+            "{label} 体积（{} 字节）无效或超出上限（{max_bytes} 字节）。",
+            meta.len()
+        ));
+    }
+    let mut file =
+        fs::File::open(path).map_err(|e| format!("无法打开 {label}（{}）：{e}", path.display()))?;
+    let mut buf = Vec::with_capacity(meta.len() as usize);
+    (&mut file)
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取 {label} 失败：{e}"))?;
+    if buf.is_empty() || buf.len() as u64 > max_bytes {
+        return Err(format!(
+            "{label} 实际读取体积超出上限（{max_bytes} 字节）。"
+        ));
+    }
+    Ok(buf)
+}
+
+/// Pure-Rust static PE32+ (`x86_64`) header, section table, executable entry point, and
+/// `IMAGE_SUBSYSTEM_WINDOWS_GUI == 2` verification, returning raw file byte ranges `(start, end)`
+/// of read-only initialized data sections (e.g. `.rdata`). Never executes any instruction.
+pub fn verify_pe64_windows_gui_sections(
+    bytes: &[u8],
+    label: &str,
+) -> Result<Vec<(usize, usize)>, String> {
+    if bytes.len() < 0x180 || &bytes[0..2] != b"MZ" {
         return Err(format!("{label} 不是有效的 Windows PE 可执行文件。"));
     }
     let pe_offset =
@@ -272,7 +348,7 @@ pub fn verify_pe64_windows_gui_binary(bytes: &[u8], label: &str) -> Result<(), S
     let Some(opt_offset) = coff_offset.checked_add(20) else {
         return Err(format!("{label} COFF 头偏移溢出。"));
     };
-    if opt_offset.saturating_add(70) > bytes.len() || &bytes[pe_offset..coff_offset] != b"PE\0\0" {
+    if opt_offset.saturating_add(112) > bytes.len() || &bytes[pe_offset..coff_offset] != b"PE\0\0" {
         return Err(format!("{label} 缺少有效的 PE 签名头。"));
     }
     let machine = u16::from_le_bytes([bytes[coff_offset], bytes[coff_offset + 1]]);
@@ -281,15 +357,45 @@ pub fn verify_pe64_windows_gui_binary(bytes: &[u8], label: &str) -> Result<(), S
             "{label} 目标架构不是 x86_64（Machine=0x{machine:04x}）。"
         ));
     }
+    let num_sections =
+        u16::from_le_bytes([bytes[coff_offset + 2], bytes[coff_offset + 3]]) as usize;
+    if !(1..=96).contains(&num_sections) {
+        return Err(format!("{label} PE 节数量异常（{num_sections}）。"));
+    }
     let opt_size = u16::from_le_bytes([bytes[coff_offset + 16], bytes[coff_offset + 17]]) as usize;
-    if opt_size < 96 || opt_offset.saturating_add(opt_size) > bytes.len() {
+    if !(112..=4096).contains(&opt_size) {
         return Err(format!("{label} OptionalHeader 长度无效。"));
     }
+    let characteristics = u16::from_le_bytes([bytes[coff_offset + 18], bytes[coff_offset + 19]]);
+    if (characteristics & 0x0002) == 0 || (characteristics & 0x2000) != 0 {
+        return Err(format!(
+            "{label} PE Characteristics 无效（必须为可执行 EXE 而非 DLL）。"
+        ));
+    }
+    let sec_table_offset = opt_offset
+        .checked_add(opt_size)
+        .ok_or_else(|| format!("{label} 节表偏移溢出。"))?;
+    let sec_table_end = sec_table_offset
+        .checked_add(num_sections.saturating_mul(40))
+        .ok_or_else(|| format!("{label} 节表长度溢出。"))?;
+    if sec_table_end > bytes.len() {
+        return Err(format!("{label} PE 节表越界。"));
+    }
+
     let magic = u16::from_le_bytes([bytes[opt_offset], bytes[opt_offset + 1]]);
     if magic != 0x020b {
         return Err(format!(
             "{label} 不是 64 位 PE32+ 可执行文件（Magic=0x{magic:04x}）。"
         ));
+    }
+    let entry_rva = u32::from_le_bytes([
+        bytes[opt_offset + 16],
+        bytes[opt_offset + 17],
+        bytes[opt_offset + 18],
+        bytes[opt_offset + 19],
+    ]);
+    if entry_rva == 0 {
+        return Err(format!("{label} PE 缺少有效入口点 AddressOfEntryPoint。"));
     }
     let subsystem = u16::from_le_bytes([bytes[opt_offset + 68], bytes[opt_offset + 69]]);
     if subsystem != 2 {
@@ -297,20 +403,72 @@ pub fn verify_pe64_windows_gui_binary(bytes: &[u8], label: &str) -> Result<(), S
             "{label} PE Subsystem 必须为 2（WINDOWS_GUI），实际为 {subsystem}。"
         ));
     }
-    Ok(())
+
+    let mut entry_in_exec_section = false;
+    let mut rodata_ranges = Vec::new();
+    for idx in 0..num_sections {
+        let sh = &bytes[sec_table_offset + idx * 40..sec_table_offset + (idx + 1) * 40];
+        let virt_size = u32::from_le_bytes([sh[8], sh[9], sh[10], sh[11]]);
+        let virt_addr = u32::from_le_bytes([sh[12], sh[13], sh[14], sh[15]]);
+        let raw_size = u32::from_le_bytes([sh[16], sh[17], sh[18], sh[19]]) as usize;
+        let raw_ptr = u32::from_le_bytes([sh[20], sh[21], sh[22], sh[23]]) as usize;
+        let sec_chars = u32::from_le_bytes([sh[36], sh[37], sh[38], sh[39]]);
+
+        if raw_size > 0 {
+            let Some(raw_end) = raw_ptr.checked_add(raw_size) else {
+                return Err(format!("{label} PE 节原始数据偏移溢出。"));
+            };
+            if raw_ptr < sec_table_end || raw_end > bytes.len() {
+                return Err(format!("{label} PE 节原始数据范围越界。"));
+            }
+            // Read-only, non-writable, non-executable initialized data section (e.g. `.rdata`).
+            const IMAGE_SCN_CNT_INITIALIZED_DATA: u32 = 0x0000_0040;
+            const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
+            const IMAGE_SCN_MEM_READ: u32 = 0x4000_0000;
+            const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
+            if (sec_chars & IMAGE_SCN_MEM_READ) != 0
+                && (sec_chars & IMAGE_SCN_MEM_WRITE) == 0
+                && (sec_chars & IMAGE_SCN_MEM_EXECUTE) == 0
+                && (sec_chars & IMAGE_SCN_CNT_INITIALIZED_DATA) != 0
+            {
+                rodata_ranges.push((raw_ptr, raw_end));
+            }
+        }
+        let span = virt_size.max(raw_size as u32);
+        if (sec_chars & 0x2000_0000) != 0
+            && span > 0
+            && entry_rva >= virt_addr
+            && virt_addr
+                .checked_add(span)
+                .is_some_and(|end| entry_rva < end)
+        {
+            entry_in_exec_section = true;
+        }
+    }
+    if !entry_in_exec_section {
+        return Err(format!(
+            "{label} AddressOfEntryPoint（0x{entry_rva:x}）未落在可执行代码节内。"
+        ));
+    }
+    Ok(rodata_ranges)
 }
 
-fn verify_exact_single_root_marker(
+pub fn verify_pe64_windows_gui_binary(bytes: &[u8], label: &str) -> Result<(), String> {
+    verify_pe64_windows_gui_sections(bytes, label).map(|_| ())
+}
+
+fn verify_pe64_rdata_single_root_marker(
     bytes: &[u8],
     marker: &[u8],
     rel: &str,
     expected_manifest_url: &str,
 ) -> Result<(), String> {
+    let rodata_ranges = verify_pe64_windows_gui_sections(bytes, rel)?;
     let prefix = UPDATE_ROOT_MARKER_PREFIX;
     if bytes.len() < marker.len() {
         return Err(format!("{rel} 体积过小，缺少编译期信任根标记。"));
     }
-    let mut matched = 0usize;
+    let mut matched_offsets = Vec::new();
     let mut pos = 0usize;
     while pos + prefix.len() <= bytes.len() {
         if &bytes[pos..pos + prefix.len()] == prefix {
@@ -319,23 +477,31 @@ fn verify_exact_single_root_marker(
                     "{rel} 包含不匹配的编译期更新源或公钥静态标记（期望通道 {expected_manifest_url}），拒绝继续。"
                 ));
             }
-            matched += 1;
-            pos += marker.len();
-        } else {
-            pos += 1;
+            matched_offsets.push(pos);
         }
+        pos += 1;
     }
-    if matched == 0 {
+    if matched_offsets.len() != 1 {
         return Err(format!(
-            "{rel} 未包含匹配的编译期更新源与公钥静态标记（期望通道 {expected_manifest_url}），拒绝继续。"
+            "{rel} 编译期更新源静态标记数量异常（期望唯一 1 处，实际 {} 处；期望通道 {expected_manifest_url}），拒绝继续。",
+            matched_offsets.len()
+        ));
+    }
+    let off = matched_offsets[0];
+    let end = off + marker.len();
+    if !rodata_ranges
+        .iter()
+        .any(|&(sec_start, sec_end)| off >= sec_start && end <= sec_end)
+    {
+        return Err(format!(
+            "{rel} 编译期更新源静态标记未位于 PE 只读数据节（.rdata）内，拒绝继续。"
         ));
     }
     Ok(())
 }
 
-/// Pure-Rust static verification that both `app/cst-updater.exe` and `app/cst-server.exe` embed
-/// the exact `\n`-delimited `CST_UPDATE_ROOT_V1` block for `(expected_manifest_url, expected_public_key_b64)`,
-/// with zero conflicting `CST_UPDATE_ROOT_V1` blocks.
+/// Pure-Rust static verification that both `app/cst-updater.exe` and `app/cst-server.exe` are
+/// valid PE32+ GUI executables embedding a single exact `CST_UPDATE_ROOT_V1` block inside `.rdata`.
 pub fn verify_static_binary_update_root(
     dist_dir: &Path,
     expected_manifest_url: &str,
@@ -343,8 +509,8 @@ pub fn verify_static_binary_update_root(
 ) -> Result<(), String> {
     let marker = format_update_root_marker(expected_manifest_url, expected_public_key_b64);
     for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
-        let bytes = fs::read(dist_dir.join(rel)).map_err(|e| format!("无法读取 {rel}：{e}"))?;
-        verify_exact_single_root_marker(&bytes, &marker, rel, expected_manifest_url)?;
+        let bytes = read_bounded_regular_file(&dist_dir.join(rel), MAX_SERVER_ARCHIVE_BYTES, rel)?;
+        verify_pe64_rdata_single_root_marker(&bytes, &marker, rel, expected_manifest_url)?;
     }
     Ok(())
 }
@@ -738,52 +904,20 @@ pub struct SignReleaseSummary {
     pub archive_size: u64,
     pub unpacked_size: u64,
     pub archive_sha256: String,
+    pub manifest_bytes: Vec<u8>,
 }
 
 /// Offline release signing: strictly verifies pure cryptographic digests against the trusted
-/// build attestation produced by `xtask dist` on the keyless build host. Never executes any
-/// binary from `--dist-dir` or `--zip` under the signing account.
+/// build attestation produced by `xtask dist` on the keyless build host BEFORE unpacking any
+/// archive bytes. Never executes any binary from `--dist-dir` or `--zip` under the signing account.
 pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String> {
-    let extracted_holder;
-    let dist_dir: &Path = match &args.dist_dir {
-        Some(dir) => dir.as_path(),
-        None => {
-            extracted_holder = TempWorkDir::create("cst-sign-extract")?;
-            let kit_dir = extracted_holder.path().join("cst-pilot");
-            fs::create_dir_all(&kit_dir)
-                .map_err(|e| format!("无法创建临时解包目录 {}：{e}", kit_dir.display()))?;
-            cst_updater::verify::extract_clean_dist_archive(
-                &args.zip_path,
-                &kit_dir,
-                cst_updater::manifest::MAX_UNPACKED_BYTES,
-            )?;
-            extracted_holder.path()
+    if let Some(ref explicit_ver) = args.version {
+        if explicit_ver.contains('+') {
+            return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
         }
-    };
-    let resolved_dist_dir = if args.dist_dir.is_some() {
-        dist_dir.to_path_buf()
-    } else {
-        dist_dir.join("cst-pilot")
-    };
-
-    let version = match &args.version {
-        Some(v) => v.clone(),
-        None => cst_updater::layout::read_version(&resolved_dist_dir)?,
-    };
-    if version.contains('+') {
-        return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
+        cst_updater::manifest::version(explicit_ver)?;
     }
-    let parsed_ver = cst_updater::manifest::version(&version)?;
     let parsed_min = cst_updater::manifest::version(&args.min_upgradable)?;
-    if parsed_min > parsed_ver {
-        return Err("min-upgradable 版本不能高于目标版本。".into());
-    }
-    if same_existing_file(&args.out_path, &args.private_key_file)
-        || same_existing_file(&args.out_path, &args.zip_path)
-        || same_existing_file(&args.out_path, &args.attestation_path)
-    {
-        return Err("--out 输出路径不能指向私钥文件、发行 ZIP 或构建证明文件。".into());
-    }
 
     let base_url = args.base_url.trim().trim_end_matches('/');
     let parsed_base = validate_release_url(base_url)?;
@@ -796,6 +930,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         return Err("--expected-commit 必须为完整 40 位小写十六进制 Git 提交哈希。".into());
     }
 
+    // 1. Authenticate build attestation & commit BEFORE reading or unpacking any archive!
     let attestation = read_and_verify_build_attestation(
         &args.attestation_path,
         &args.expected_attestation_sha256,
@@ -809,9 +944,18 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
                 .into(),
         );
     }
-    if attestation.version != version {
+    if attestation.version.contains('+') {
+        return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
+    }
+    let parsed_att_ver = cst_updater::manifest::version(&attestation.version)?;
+    if parsed_min > parsed_att_ver {
+        return Err("min-upgradable 版本不能高于目标版本。".into());
+    }
+    if let Some(ref explicit_ver) = args.version
+        && *explicit_ver != attestation.version
+    {
         return Err(format!(
-            "构建证明版本（{}）与待签版本（{version}）不一致，拒绝签名。",
+            "构建证明版本（{}）与待签版本（{explicit_ver}）不一致，拒绝签名。",
             attestation.version
         ));
     }
@@ -834,7 +978,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         ));
     }
 
-    let (signing_key, release_key, _) = load_signing_key(&args.private_key_file)?;
+    let (signing_key, release_key, signing_pub_b64) = load_signing_key(&args.private_key_file)?;
     let signing_pub_fp = release_key.fingerprint();
     if attestation.update_public_key_fingerprint != signing_pub_fp {
         return Err(format!(
@@ -843,23 +987,122 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         ));
     }
 
-    cst_updater::verify::verify_clean_dist_tree(&resolved_dist_dir, &version)?;
+    // 2. Read bounded immutable ZIP snapshot and verify archive size + SHA-256 BEFORE unpacking!
+    let zip_bytes =
+        read_bounded_regular_file(&args.zip_path, MAX_SERVER_ARCHIVE_BYTES, "发行 ZIP")?;
+    let archive_size = zip_bytes.len() as u64;
+    let archive_sha256 = format!("{:x}", Sha256::digest(&zip_bytes));
+    let version = attestation.version.clone();
+    let expected_archive_filename = format!("cst-pilot-{version}-windows-x64.zip");
+    if attestation.archive_filename != expected_archive_filename
+        || attestation.archive_size != archive_size
+        || attestation.archive_sha256 != archive_sha256
+    {
+        return Err("发行 ZIP 的文件名、体积或 SHA-256 与构建证明不一致，拒绝解包或签名。".into());
+    }
 
-    let sums_bytes = fs::read(resolved_dist_dir.join(SHA256SUMS_PATH))
-        .map_err(|e| format!("无法读取 {SHA256SUMS_PATH}：{e}"))?;
+    // 3. Extract from the verified immutable ZIP snapshot (and cross-check `--dist-dir` if provided).
+    let extracted_holder = TempWorkDir::create("cst-sign-extract")?;
+    let snapshot_zip = extracted_holder.path().join(&expected_archive_filename);
+    fs::write(&snapshot_zip, &zip_bytes).map_err(|e| format!("无法写入隔离验签归档副本：{e}"))?;
+    let extracted_kit = extracted_holder.path().join("cst-pilot");
+    fs::create_dir_all(&extracted_kit)
+        .map_err(|e| format!("无法创建临时解包目录 {}：{e}", extracted_kit.display()))?;
+    cst_updater::verify::extract_clean_dist_archive(
+        &snapshot_zip,
+        &extracted_kit,
+        cst_updater::manifest::MAX_UNPACKED_BYTES,
+    )?;
+
+    if let Some(ref explicit_dist) = args.dist_dir {
+        validate_output_path_not_aliasing(
+            &args.out_path,
+            Some(explicit_dist),
+            &[
+                &args.private_key_file,
+                &args.zip_path,
+                &args.attestation_path,
+            ],
+        )?;
+        cst_updater::verify::verify_clean_dist_tree(explicit_dist, &version)?;
+        let dir_sums = read_bounded_regular_file(
+            &explicit_dist.join(SHA256SUMS_PATH),
+            MAX_SHA256SUMS_BYTES,
+            SHA256SUMS_PATH,
+        )?;
+        let dir_sums_sha = format!("{:x}", Sha256::digest(&dir_sums));
+        if dir_sums_sha != attestation.sha256_sums_sha256 {
+            return Err(
+                "待签 --dist-dir 的 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into(),
+            );
+        }
+        let dir_upd_sha = format!(
+            "{:x}",
+            Sha256::digest(read_bounded_regular_file(
+                &explicit_dist.join(UPDATER_EXE_PATH),
+                MAX_SERVER_ARCHIVE_BYTES,
+                UPDATER_EXE_PATH,
+            )?)
+        );
+        if dir_upd_sha != attestation.updater_exe_sha256 {
+            return Err(format!(
+                "待签 {UPDATER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+            ));
+        }
+        let dir_srv_sha = format!(
+            "{:x}",
+            Sha256::digest(read_bounded_regular_file(
+                &explicit_dist.join(SERVER_EXE_PATH),
+                MAX_SERVER_ARCHIVE_BYTES,
+                SERVER_EXE_PATH,
+            )?)
+        );
+        if dir_srv_sha != attestation.server_exe_sha256 {
+            return Err(format!(
+                "待签 {SERVER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+            ));
+        }
+    } else {
+        validate_output_path_not_aliasing(
+            &args.out_path,
+            None,
+            &[
+                &args.private_key_file,
+                &args.zip_path,
+                &args.attestation_path,
+            ],
+        )?;
+    }
+
+    cst_updater::verify::verify_clean_dist_tree(&extracted_kit, &version)?;
+    verify_canonical_release_defaults(&extracted_kit)?;
+
+    for rel in ["cst-pilot.exe", SERVER_EXE_PATH, UPDATER_EXE_PATH] {
+        let bin_bytes =
+            read_bounded_regular_file(&extracted_kit.join(rel), MAX_SERVER_ARCHIVE_BYTES, rel)?;
+        verify_pe64_windows_gui_binary(&bin_bytes, rel)?;
+    }
+    verify_static_binary_update_root(&extracted_kit, &attestation.manifest_url, &signing_pub_b64)?;
+
+    let sums_bytes = read_bounded_regular_file(
+        &extracted_kit.join(SHA256SUMS_PATH),
+        MAX_SHA256SUMS_BYTES,
+        SHA256SUMS_PATH,
+    )?;
     let actual_sums_sha256 = format!("{:x}", Sha256::digest(&sums_bytes));
     if actual_sums_sha256 != attestation.sha256_sums_sha256 {
-        return Err("待签发行树 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into());
+        return Err("待签发行包 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into());
     }
     let sha256_sums = String::from_utf8(sums_bytes)
         .map_err(|_| format!("{SHA256SUMS_PATH} 必须为 UTF-8 编码。"))?;
 
     let actual_updater_sha256 = format!(
         "{:x}",
-        Sha256::digest(
-            fs::read(resolved_dist_dir.join(UPDATER_EXE_PATH))
-                .map_err(|e| format!("无法读取 {UPDATER_EXE_PATH}：{e}"))?
-        )
+        Sha256::digest(read_bounded_regular_file(
+            &extracted_kit.join(UPDATER_EXE_PATH),
+            MAX_SERVER_ARCHIVE_BYTES,
+            UPDATER_EXE_PATH,
+        )?)
     );
     if actual_updater_sha256 != attestation.updater_exe_sha256 {
         return Err(format!(
@@ -868,10 +1111,11 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     }
     let actual_server_sha256 = format!(
         "{:x}",
-        Sha256::digest(
-            fs::read(resolved_dist_dir.join(SERVER_EXE_PATH))
-                .map_err(|e| format!("无法读取 {SERVER_EXE_PATH}：{e}"))?
-        )
+        Sha256::digest(read_bounded_regular_file(
+            &extracted_kit.join(SERVER_EXE_PATH),
+            MAX_SERVER_ARCHIVE_BYTES,
+            SERVER_EXE_PATH,
+        )?)
     );
     if actual_server_sha256 != attestation.server_exe_sha256 {
         return Err(format!(
@@ -879,24 +1123,18 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         ));
     }
 
-    let build_info = read_and_validate_build_info(&resolved_dist_dir, &version, &signing_pub_fp)?;
+    let build_info = read_and_validate_build_info(&extracted_kit, &version, &signing_pub_fp)?;
     if build_info.built_at != attestation.built_at {
         return Err("BUILD-INFO.json 中的 builtAt 与构建证明不一致，拒绝签名。".into());
     }
 
     let release_notes = read_bounded_release_notes(&args.notes_file, &args.notes_inline)?;
-    let (zip_bytes, archive_size, archive_sha256, unpacked_size) =
-        read_and_inspect_zip(&args.zip_path, &sha256_sums)?;
-    let archive_filename = format!("cst-pilot-{version}-windows-x64.zip");
-    if attestation.archive_filename != archive_filename
-        || attestation.archive_size != archive_size
-        || attestation.archive_sha256 != archive_sha256
-        || attestation.unpacked_size != unpacked_size
-    {
-        return Err("发行 ZIP 的文件名、体积或 SHA-256 与构建证明不一致，拒绝签名。".into());
+    let unpacked_size = inspect_zip_unpacked_size(&zip_bytes, &sha256_sums)?;
+    if attestation.unpacked_size != unpacked_size {
+        return Err("发行 ZIP 解压体积与构建证明不一致，拒绝签名。".into());
     }
 
-    emit_signed_manifest(
+    let summary = emit_signed_manifest(
         &signing_key,
         &release_key,
         &version,
@@ -909,8 +1147,9 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         archive_size,
         unpacked_size,
         archive_sha256,
-        &args.out_path,
-    )
+        Some(&args.out_path),
+    )?;
+    Ok(summary)
 }
 
 struct ValidatedBuildInfo {
@@ -936,9 +1175,16 @@ fn read_and_validate_build_info(
     if build_info
         .get("platform")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|p| p != "windows-x86_64")
+        != Some("windows-x86_64")
     {
-        return Err("BUILD-INFO.json 中的 platform 必须为 windows-x86_64。".into());
+        return Err("BUILD-INFO.json 缺少或包含无效的 platform（必须为 windows-x86_64）。".into());
+    }
+    if build_info
+        .get("embedWeb")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return Err("BUILD-INFO.json 缺少 embedWeb=true。".into());
     }
     if build_info
         .get("updateEnabled")
@@ -979,37 +1225,37 @@ fn read_bounded_release_notes(
     notes_file: &Option<PathBuf>,
     notes_inline: &Option<String>,
 ) -> Result<String, String> {
+    const MAX_NOTES_BYTES: u64 = 16 * 1024;
     let release_notes = if let Some(notes_path) = notes_file {
-        fs::read_to_string(notes_path)
-            .map_err(|e| format!("无法读取更新说明 {}：{e}", notes_path.display()))?
+        let meta = fs::symlink_metadata(notes_path)
+            .map_err(|e| format!("无法读取更新说明 {}：{e}", notes_path.display()))?;
+        if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() {
+            return Err(format!(
+                "更新说明路径不能是符号链接、重解析点或目录：{}",
+                notes_path.display()
+            ));
+        }
+        if meta.len() > MAX_NOTES_BYTES {
+            return Err("更新说明超过 16 KiB 上限。".into());
+        }
+        let mut f = fs::File::open(notes_path)
+            .map_err(|e| format!("无法打开更新说明 {}：{e}", notes_path.display()))?;
+        let mut buf = Vec::with_capacity(meta.len() as usize);
+        (&mut f)
+            .take(MAX_NOTES_BYTES + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("读取更新说明失败：{e}"))?;
+        if buf.len() as u64 > MAX_NOTES_BYTES {
+            return Err("更新说明超过 16 KiB 上限。".into());
+        }
+        String::from_utf8(buf).map_err(|_| "更新说明必须为 UTF-8 编码。".to_owned())?
     } else {
         notes_inline.clone().unwrap_or_default()
     };
-    if release_notes.len() > 16 * 1024 {
+    if release_notes.len() as u64 > MAX_NOTES_BYTES {
         return Err("更新说明超过 16 KiB 上限。".into());
     }
     Ok(release_notes)
-}
-
-fn read_and_inspect_zip(
-    zip_path: &Path,
-    expected_sums: &str,
-) -> Result<(Vec<u8>, u64, String, u64), String> {
-    let zip_meta = fs::metadata(zip_path)
-        .map_err(|e| format!("无法读取发行 ZIP {}：{e}", zip_path.display()))?;
-    if zip_meta.len() == 0 || zip_meta.len() > MAX_SERVER_ARCHIVE_BYTES {
-        return Err(format!(
-            "发行 ZIP 体积（{} 字节）超出服务端默认上限（{} 字节）。",
-            zip_meta.len(),
-            MAX_SERVER_ARCHIVE_BYTES
-        ));
-    }
-    let zip_bytes =
-        fs::read(zip_path).map_err(|e| format!("无法读取发行 ZIP {}：{e}", zip_path.display()))?;
-    let archive_size = zip_bytes.len() as u64;
-    let archive_sha256 = format!("{:x}", Sha256::digest(&zip_bytes));
-    let unpacked_size = inspect_zip_unpacked_size(&zip_bytes, expected_sums)?;
-    Ok((zip_bytes, archive_size, archive_sha256, unpacked_size))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1026,7 +1272,7 @@ fn emit_signed_manifest(
     archive_size: u64,
     unpacked_size: u64,
     archive_sha256: String,
-    out_path: &Path,
+    out_path: Option<&Path>,
 ) -> Result<SignReleaseSummary, String> {
     let archive_filename = format!("cst-pilot-{version}-windows-x64.zip");
     let archive_url = format!("{base_url}/files/{version}/{archive_filename}");
@@ -1061,14 +1307,9 @@ fn emit_signed_manifest(
     let verified = release_key.verify(&envelope_bytes)?;
     verify_staged_offline(&verified, zip_bytes)?;
 
-    if let Some(parent) = out_path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建清单输出目录 {}：{e}", parent.display()))?;
+    if let Some(out) = out_path {
+        write_manifest_file_atomic(out, &envelope_bytes)?;
     }
-    fs::write(out_path, &envelope_bytes)
-        .map_err(|e| format!("无法写入签名清单 {}：{e}", out_path.display()))?;
 
     Ok(SignReleaseSummary {
         version: version.to_owned(),
@@ -1076,6 +1317,86 @@ fn emit_signed_manifest(
         archive_size,
         unpacked_size,
         archive_sha256,
+        manifest_bytes: envelope_bytes,
+    })
+}
+
+fn validate_output_path_not_aliasing(
+    out_path: &Path,
+    disallowed_dir: Option<&Path>,
+    protected_files: &[&Path],
+) -> Result<(), String> {
+    if let Ok(meta) = fs::symlink_metadata(out_path) {
+        if cst_os::is_reparse_or_symlink(&meta) || meta.is_dir() {
+            return Err(format!(
+                "清单输出路径不能是符号链接、重解析点或目录：{}",
+                out_path.display()
+            ));
+        }
+        if let Ok(opened) = fs::File::open(out_path)
+            && cst_os::link_count(&opened).is_ok_and(|links| links > 1)
+        {
+            return Err(format!(
+                "清单输出路径存在硬链接别名，拒绝覆盖：{}",
+                out_path.display()
+            ));
+        }
+    }
+    for protected in protected_files {
+        if same_existing_file(out_path, protected) {
+            return Err("清单输出路径不能指向私钥文件、发行包或构建证明文件。".into());
+        }
+    }
+    if let Some(dir) = disallowed_dir
+        && let Ok(canon_dir) = fs::canonicalize(dir)
+    {
+        let parent = match out_path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        if let Ok(canon_parent) = fs::canonicalize(parent)
+            && canon_parent.starts_with(&canon_dir)
+        {
+            return Err(format!(
+                "清单输出路径禁止写入发行树目录内部：{}",
+                out_path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn write_manifest_file_atomic(out_path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = match out_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("无法创建清单输出目录 {}：{e}", parent.display()))?;
+    let parent_meta = fs::symlink_metadata(parent)
+        .map_err(|e| format!("无法检查清单输出目录 {}：{e}", parent.display()))?;
+    if cst_os::is_reparse_or_symlink(&parent_meta) {
+        return Err(format!(
+            "清单输出目录不能为符号链接或重解析点：{}",
+            parent.display()
+        ));
+    }
+    let tmp_path = parent.join(format!(".manifest-{}.tmp", Uuid::new_v4().simple()));
+    let mut tmp = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| format!("无法创建清单临时文件 {}：{e}", tmp_path.display()))?;
+    tmp.write_all(bytes)
+        .and_then(|_| tmp.sync_all())
+        .map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("写入签名清单失败：{e}")
+        })?;
+    drop(tmp);
+    fs::rename(&tmp_path, out_path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        format!("原子落盘签名清单失败 {}：{e}", out_path.display())
     })
 }
 
@@ -1087,13 +1408,7 @@ fn sign_domain(signing_key: &SigningKey, domain: &[u8], data: &[u8]) -> String {
 }
 
 fn same_existing_file(a: &Path, b: &Path) -> bool {
-    if a == b {
-        return true;
-    }
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(ca), Ok(cb)) => ca == cb,
-        _ => false,
-    }
+    a == b || cst_os::is_same_existing_file(a, b)
 }
 
 fn inspect_zip_unpacked_size(zip_bytes: &[u8], expected_sums: &str) -> Result<u64, String> {
@@ -1296,47 +1611,94 @@ pub async fn publish_release(
     args: &PublishReleaseArgs,
     admin_token: &Zeroizing<String>,
 ) -> Result<(), String> {
+    let manifest_bytes = read_bounded_regular_file(
+        &args.manifest_path,
+        MAX_PUBLIC_MANIFEST_BYTES as u64,
+        "签名清单",
+    )?;
+    let zip_bytes =
+        read_bounded_regular_file(&args.zip_path, MAX_SERVER_ARCHIVE_BYTES, "发行 ZIP")?;
     let (release_key, _, _) = parse_canonical_public_key(&args.public_key_b64)?;
-    let manifest_bytes = fs::read(&args.manifest_path)
-        .map_err(|e| format!("无法读取签名清单 {}：{e}", args.manifest_path.display()))?;
     let verified = release_key.verify(&manifest_bytes)?;
-    let archive_meta = fs::metadata(&args.zip_path)
-        .map_err(|e| format!("无法读取发行 ZIP {}：{e}", args.zip_path.display()))?;
-    if !archive_meta.is_file() {
-        return Err("指定的 --zip 不是普通文件。".into());
+    verify_staged_offline(&verified, &zip_bytes)?;
+    publish_verified_bundle(
+        &manifest_bytes,
+        &zip_bytes,
+        &args.channel,
+        args.activate,
+        UploadTarget::HttpUrl(&args.admin_url),
+        &args.public_base_url,
+        args.public_manifest_url.as_deref(),
+        args.public_archive_url.as_deref(),
+        &args.public_key_b64,
+        admin_token,
+    )
+    .await
+}
+
+enum UploadTarget<'a> {
+    HttpUrl(&'a str),
+    SshStdio { host: &'a str, remote_port: u16 },
+}
+
+fn verify_zip_binaries_match_channel(
+    zip_bytes: &[u8],
+    expected_channel_url: &str,
+    expected_public_key_b64: &str,
+) -> Result<(), String> {
+    let marker = format_update_root_marker(expected_channel_url, expected_public_key_b64);
+    let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
+        .map_err(|e| format!("发行 ZIP 格式无效：{e}"))?;
+    for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
+        let entry_name = format!("cst-pilot/{rel}");
+        let entry = archive
+            .by_name(&entry_name)
+            .map_err(|_| format!("发行 ZIP 缺少 {entry_name}。"))?;
+        if entry.size() > MAX_SERVER_ARCHIVE_BYTES {
+            return Err(format!("发行 ZIP 内 {entry_name} 体积超出限制。"));
+        }
+        let mut bin_bytes = Vec::with_capacity(entry.size() as usize);
+        entry
+            .take(MAX_SERVER_ARCHIVE_BYTES + 1)
+            .read_to_end(&mut bin_bytes)
+            .map_err(|e| format!("读取发行 ZIP 内 {entry_name} 失败：{e}"))?;
+        if bin_bytes.len() as u64 > MAX_SERVER_ARCHIVE_BYTES {
+            return Err(format!("发行 ZIP 内 {entry_name} 实际体积超出限制。"));
+        }
+        verify_pe64_rdata_single_root_marker(&bin_bytes, &marker, rel, expected_channel_url)?;
     }
-    if archive_meta.len() != verified.info().archive.size {
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn publish_verified_bundle(
+    manifest_bytes: &[u8],
+    zip_bytes: &[u8],
+    channel: &str,
+    activate: bool,
+    target: UploadTarget<'_>,
+    public_base_url: &str,
+    public_manifest_url: Option<&str>,
+    public_archive_url: Option<&str>,
+    public_key_b64: &str,
+    admin_token: &Zeroizing<String>,
+) -> Result<(), String> {
+    let (release_key, _, _) = parse_canonical_public_key(public_key_b64)?;
+    let verified = release_key.verify(manifest_bytes)?;
+    let actual_size = zip_bytes.len() as u64;
+    if actual_size != verified.info().archive.size {
         return Err(format!(
-            "本地 ZIP 体积（{}）与签名清单声明（{}）不一致。",
-            archive_meta.len(),
+            "待上传 ZIP 体积（{actual_size}）与签名清单声明（{}）不一致。",
             verified.info().archive.size
         ));
     }
-
-    let mut upload_url = Url::parse(&args.admin_url)
-        .map_err(|_| format!("无效的 --admin-url：{}", args.admin_url))?;
-    if !matches!(upload_url.scheme(), "http" | "https") {
-        return Err("--admin-url 仅允许 http 或 https。".into());
+    let actual_sha256 = format!("{:x}", Sha256::digest(zip_bytes));
+    if actual_sha256 != verified.info().archive.sha256 {
+        return Err("待上传 ZIP 的 SHA-256 与签名清单声明不一致，拒绝上传。".into());
     }
-    if upload_url.query().is_some() || upload_url.fragment().is_some() {
-        return Err(
-            "--admin-url 不能预先携带查询参数或片段，请通过 --channel 与 --no-activate 指定。"
-                .into(),
-        );
-    }
-    if upload_url.scheme() == "http" {
-        let is_loopback = matches!(
-            upload_url.host_str(),
-            Some("127.0.0.1" | "::1" | "localhost")
-        );
-        if !is_loopback {
-            return Err("非回环管理地址必须使用 https。".into());
-        }
-    }
-    upload_url
-        .query_pairs_mut()
-        .append_pair("channel", &args.channel)
-        .append_pair("activate", if args.activate { "true" } else { "false" });
+    let public_base = public_base_url.trim().trim_end_matches('/');
+    let expected_channel_url = expected_channel_manifest_url(public_base, channel)?;
+    verify_zip_binaries_match_channel(zip_bytes, &expected_channel_url, public_key_b64)?;
 
     let boundary = format!("cstpilot-{}", Uuid::new_v4().simple());
     let archive_filename = format!("cst-pilot-{}-windows-x64.zip", verified.info().version);
@@ -1346,7 +1708,7 @@ pub async fn publish_release(
         b"Content-Disposition: form-data; name=\"manifest\"; filename=\"manifest.signed.json\"\r\n",
     );
     prefix.extend_from_slice(b"Content-Type: application/json\r\n\r\n");
-    prefix.extend_from_slice(&manifest_bytes);
+    prefix.extend_from_slice(manifest_bytes);
     prefix.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
     prefix.extend_from_slice(
         format!(
@@ -1355,87 +1717,104 @@ pub async fn publish_release(
         .as_bytes(),
     );
     prefix.extend_from_slice(b"Content-Type: application/zip\r\n\r\n");
-    let suffix = Bytes::from(format!("\r\n--{boundary}--\r\n"));
-    let total_len = prefix.len() as u64 + archive_meta.len() + suffix.len() as u64;
-
-    let zip_file = tokio::fs::File::open(&args.zip_path)
-        .await
-        .map_err(|e| format!("无法打开归档文件流：{e}"))?;
-
-    enum StreamStage {
-        Prefix(Bytes, tokio::fs::File),
-        Archive(tokio::fs::File),
-        Done,
-    }
-    let body_stream = futures_util::stream::try_unfold(
-        StreamStage::Prefix(Bytes::from(prefix), zip_file),
-        move |stage| {
-            let suffix = suffix.clone();
-            async move {
-                match stage {
-                    StreamStage::Prefix(bytes, file) => {
-                        Ok::<_, std::io::Error>(Some((bytes, StreamStage::Archive(file))))
-                    }
-                    StreamStage::Archive(mut file) => {
-                        let mut buf = vec![0u8; 64 * 1024];
-                        let n = file.read(&mut buf).await?;
-                        if n == 0 {
-                            Ok(Some((suffix, StreamStage::Done)))
-                        } else {
-                            buf.truncate(n);
-                            Ok(Some((Bytes::from(buf), StreamStage::Archive(file))))
-                        }
-                    }
-                    StreamStage::Done => Ok(None),
-                }
-            }
-        },
-    );
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(|e| format!("无法初始化上传 HTTP 客户端：{e}"))?;
+    let suffix = format!("\r\n--{boundary}--\r\n").into_bytes();
+    let total_len = prefix.len() as u64 + actual_size + suffix.len() as u64;
 
     println!(
-        "[xtask] Uploading {} ({} bytes) to channel={} (activate={})...",
+        "[xtask] Uploading {} ({} bytes) to channel={channel} (activate={activate})...",
         verified.info().version,
-        archive_meta.len(),
-        args.channel,
-        args.activate
+        actual_size,
     );
-    let mut auth_val =
-        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", admin_token.as_str()))
-            .map_err(|_| "管理令牌包含非法 HTTP 头字符。".to_owned())?;
-    auth_val.set_sensitive(true);
-    let resp = client
-        .post(upload_url)
-        .header(reqwest::header::AUTHORIZATION, auth_val)
-        .header(
-            reqwest::header::CONTENT_TYPE,
-            format!("multipart/form-data; boundary={boundary}"),
-        )
-        .header(reqwest::header::CONTENT_LENGTH, total_len)
-        .body(reqwest::Body::wrap_stream(body_stream))
-        .send()
-        .await
-        .map_err(|e| format!("上传发布包失败：{e}"))?;
 
-    let status = resp.status();
-    let resp_bytes = read_bounded_response(resp, MAX_ADMIN_RESPONSE_BYTES)
-        .await
-        .map_err(|e| format!("读取发布响应失败：{e}"))?;
-    if status != reqwest::StatusCode::CREATED {
+    let (status_code, resp_bytes) = match target {
+        UploadTarget::HttpUrl(admin_url) => {
+            let mut upload_url =
+                Url::parse(admin_url).map_err(|_| format!("无效的 --admin-url：{admin_url}"))?;
+            if !matches!(upload_url.scheme(), "http" | "https") {
+                return Err("--admin-url 仅允许 http 或 https。".into());
+            }
+            if upload_url.query().is_some() || upload_url.fragment().is_some() {
+                return Err(
+                    "--admin-url 不能预先携带查询参数或片段，请通过 --channel 与 --no-activate 指定。"
+                        .into(),
+                );
+            }
+            if upload_url.scheme() == "http" {
+                let is_loopback = matches!(
+                    upload_url.host_str(),
+                    Some("127.0.0.1" | "::1" | "localhost")
+                );
+                if !is_loopback {
+                    return Err("非回环管理地址必须使用 https。".into());
+                }
+            }
+            upload_url
+                .query_pairs_mut()
+                .append_pair("channel", channel)
+                .append_pair("activate", if activate { "true" } else { "false" });
+
+            let mut full_body = Vec::with_capacity(total_len as usize);
+            full_body.extend_from_slice(&prefix);
+            full_body.extend_from_slice(zip_bytes);
+            full_body.extend_from_slice(&suffix);
+
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(Duration::from_secs(15))
+                .timeout(Duration::from_secs(600))
+                .build()
+                .map_err(|e| format!("无法初始化上传 HTTP 客户端：{e}"))?;
+
+            let mut auth_val =
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", admin_token.as_str()))
+                    .map_err(|_| "管理令牌包含非法 HTTP 头字符。".to_owned())?;
+            auth_val.set_sensitive(true);
+            let resp = client
+                .post(upload_url)
+                .header(reqwest::header::AUTHORIZATION, auth_val)
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .header(reqwest::header::CONTENT_LENGTH, total_len)
+                .body(Bytes::from(full_body))
+                .send()
+                .await
+                .map_err(|e| format!("上传发布包失败：{e}"))?;
+            let code = resp.status().as_u16();
+            let body = read_bounded_response(resp, MAX_ADMIN_RESPONSE_BYTES)
+                .await
+                .map_err(|e| format!("读取发布响应失败：{e}"))?;
+            (code, body)
+        }
+        UploadTarget::SshStdio { host, remote_port } => {
+            println!(
+                "[xtask] Streaming release over OpenSSH -W stdio channel to {host} (remote 127.0.0.1:{remote_port})..."
+            );
+            upload_multipart_over_ssh_stdio(
+                host,
+                remote_port,
+                channel,
+                activate,
+                admin_token,
+                &boundary,
+                &prefix,
+                zip_bytes,
+                &suffix,
+                total_len,
+            )
+            .await?
+        }
+    };
+
+    if status_code != 201 {
         let code = serde_json::from_slice::<serde_json::Value>(&resp_bytes)
             .ok()
             .and_then(|v| v.get("error")?.get("code")?.as_str().map(str::to_owned))
             .unwrap_or_else(|| "unknown".to_owned());
         return Err(format!(
-            "服务端拒绝发布（HTTP {}, error.code={code}）。",
-            status.as_u16()
+            "服务端拒绝发布（HTTP {status_code}, error.code={code}）。"
         ));
     }
     let ack: serde_json::Value =
@@ -1446,8 +1825,8 @@ pub async fn publish_release(
         .get("record")
         .and_then(|r| r.get("version"))
         .and_then(serde_json::Value::as_str);
-    if ack_channel != Some(args.channel.as_str())
-        || ack_activated != Some(args.activate)
+    if ack_channel != Some(channel)
+        || ack_activated != Some(activate)
         || ack_version != Some(verified.info().version.as_str())
     {
         return Err(format!(
@@ -1455,24 +1834,16 @@ pub async fn publish_release(
         ));
     }
     println!(
-        "[xtask] Upload accepted (201 Created): version={} channel={} activated={}",
+        "[xtask] Upload accepted (201 Created): version={} channel={channel} activated={activate}",
         verified.info().version,
-        args.channel,
-        args.activate
     );
 
-    if args.activate {
-        let public_base = args.public_base_url.trim().trim_end_matches('/');
-        let manifest_verify_url = args.public_manifest_url.clone().unwrap_or_else(|| {
-            if args.channel == "beta" {
-                format!("{public_base}/beta")
-            } else {
-                format!("{public_base}/latest")
-            }
-        });
-        let archive_verify_url = args
-            .public_archive_url
-            .clone()
+    if activate {
+        let manifest_verify_url = public_manifest_url
+            .map(str::to_owned)
+            .unwrap_or_else(|| expected_channel_url.clone());
+        let archive_verify_url = public_archive_url
+            .map(str::to_owned)
             .unwrap_or_else(|| verified.info().archive.url.clone());
 
         let verify_client = reqwest::Client::builder()
@@ -1501,7 +1872,7 @@ pub async fn publish_release(
             .verify(&remote_manifest)
             .map_err(|e| format!("发布后公开清单验签失败：{e}"))?;
         if remote_verified.info().version != verified.info().version
-            || remote_manifest.as_slice() != manifest_bytes.as_slice()
+            || remote_manifest.as_slice() != manifest_bytes
         {
             return Err("发布后公开清单内容或版本与本地签名清单不一致。".into());
         }
@@ -1551,7 +1922,7 @@ pub struct ReleaseCommandArgs {
     pub attestation_path: Option<PathBuf>,
     pub expected_attestation_sha256: Option<String>,
     pub expected_commit: Option<String>,
-    pub unattested_package: bool,
+    pub expected_archive_sha256: Option<String>,
     pub notes_file: Option<PathBuf>,
     pub notes_inline: Option<String>,
     pub private_key_file: PathBuf,
@@ -1607,96 +1978,37 @@ fn resolve_trusted_ssh_binary() -> Result<PathBuf, String> {
     }
 }
 
-struct ScopedSshTunnel {
-    cancel: CancellationToken,
-    worker: Option<tokio::task::JoinHandle<()>>,
-    local_port: u16,
-}
-
-impl ScopedSshTunnel {
-    /// Binds an in-process `127.0.0.1:0` listener held continuously by `xtask` (eliminating any
-    /// local port-stealing TOCTOU window that could intercept `Authorization: Bearer`) and pipes
-    /// accepted loopback streams directly over `ssh -W 127.0.0.1:<remote_port> -- <host>` stdio.
-    async fn open(ssh_host: &str, remote_port: u16) -> Result<Self, String> {
-        let host = validate_ssh_host(ssh_host)?;
-        if remote_port == 0 {
-            return Err("--ssh-remote-port 不能为 0。".into());
-        }
-        let ssh_bin = resolve_trusted_ssh_binary()?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| format!("无法绑定本机回环隧道监听端口：{e}"))?;
-        let local_port = listener
-            .local_addr()
-            .map_err(|e| format!("无法读取本机回环隧道端口：{e}"))?
-            .port();
-        let target_spec = format!("127.0.0.1:{remote_port}");
-        let cancel = CancellationToken::new();
-        let worker_cancel = cancel.clone();
-
-        let worker = tokio::spawn(async move {
-            loop {
-                let accepted = tokio::select! {
-                    biased;
-                    _ = worker_cancel.cancelled() => break,
-                    res = listener.accept() => res,
-                };
-                let Ok((tcp_stream, _)) = accepted else {
-                    break;
-                };
-                let ssh_bin = ssh_bin.clone();
-                let host = host.clone();
-                let target_spec = target_spec.clone();
-                let conn_cancel = worker_cancel.clone();
-                tokio::spawn(async move {
-                    bridge_tcp_over_ssh_stdio(
-                        tcp_stream,
-                        &ssh_bin,
-                        &host,
-                        &target_spec,
-                        conn_cancel,
-                    )
-                    .await;
-                });
-            }
-        });
-
-        Ok(Self {
-            cancel,
-            worker: Some(worker),
-            local_port,
-        })
+/// Streams a single HTTP/1.1 `POST /v1/admin/releases` multipart request directly over an
+/// anonymous OS pipe to `ssh -W 127.0.0.1:<remote_port> -- <host>` without binding ANY local
+/// TCP port on `127.0.0.1` (eliminating all local port-sharing / token-interception vectors).
+#[allow(clippy::too_many_arguments)]
+async fn upload_multipart_over_ssh_stdio(
+    ssh_host: &str,
+    remote_port: u16,
+    channel: &str,
+    activate: bool,
+    admin_token: &Zeroizing<String>,
+    boundary: &str,
+    prefix: &[u8],
+    zip_bytes: &[u8],
+    suffix: &[u8],
+    total_len: u64,
+) -> Result<(u16, Vec<u8>), String> {
+    let host = validate_ssh_host(ssh_host)?;
+    if remote_port == 0 {
+        return Err("--ssh-remote-port 不能为 0。".into());
     }
-
-    fn admin_url(&self) -> String {
-        format!("http://127.0.0.1:{}/v1/admin/releases", self.local_port)
+    if admin_token
+        .as_bytes()
+        .iter()
+        .any(|b| !(0x21..0x7f).contains(b))
+    {
+        return Err("管理令牌包含非法 HTTP 头字符。".into());
     }
+    let ssh_bin = resolve_trusted_ssh_binary()?;
+    let target_spec = format!("127.0.0.1:{remote_port}");
 
-    async fn close(mut self) {
-        self.cancel.cancel();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.await;
-        }
-    }
-}
-
-impl Drop for ScopedSshTunnel {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-        if let Some(worker) = &self.worker {
-            worker.abort();
-        }
-    }
-}
-
-async fn bridge_tcp_over_ssh_stdio(
-    tcp_stream: tokio::net::TcpStream,
-    ssh_bin: &Path,
-    host: &str,
-    target_spec: &str,
-    cancel: CancellationToken,
-) {
-    let mut cmd = tokio::process::Command::new(ssh_bin);
+    let mut cmd = tokio::process::Command::new(&ssh_bin);
     cmd.env_remove(ENV_PRIVATE_KEY_FILE)
         .env_remove(ENV_ADMIN_TOKEN)
         .kill_on_drop(true)
@@ -1715,9 +2027,9 @@ async fn bridge_tcp_over_ssh_stdio(
             "-o",
             "ServerAliveCountMax=3",
             "-W",
-            target_spec,
+            &target_spec,
             "--",
-            host,
+            &host,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1727,98 +2039,170 @@ async fn bridge_tcp_over_ssh_stdio(
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            let mut stream = tcp_stream;
-            write_tunnel_502(&mut stream, &format!("启动系统 SSH 进程失败：{e}")).await;
-            return;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("无法启动系统 OpenSSH 进程：{e}"))?;
+    let mut child_stdin = child
+        .stdin
+        .take()
+        .ok_or("无法获取 OpenSSH 标准输入句柄。")?;
+    let mut child_stdout = child
+        .stdout
+        .take()
+        .ok_or("无法获取 OpenSSH 标准输出句柄。")?;
+    let mut child_stderr = child
+        .stderr
+        .take()
+        .ok_or("无法获取 OpenSSH 标准错误句柄。")?;
+
+    let req_header = Zeroizing::new(format!(
+        "POST /v1/admin/releases?channel={channel}&activate={} HTTP/1.1\r\nHost: 127.0.0.1:{remote_port}\r\nAuthorization: Bearer {}\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {total_len}\r\nConnection: close\r\n\r\n",
+        if activate { "true" } else { "false" },
+        admin_token.as_str()
+    ));
+
+    let write_req = async move {
+        child_stdin.write_all(req_header.as_bytes()).await?;
+        child_stdin.write_all(prefix).await?;
+        for chunk in zip_bytes.chunks(64 * 1024) {
+            child_stdin.write_all(chunk).await?;
         }
+        child_stdin.write_all(suffix).await?;
+        child_stdin.flush().await?;
+        child_stdin.shutdown().await?;
+        drop(child_stdin);
+        Ok::<(), std::io::Error>(())
     };
 
-    let Some(mut child_stdin) = child.stdin.take() else {
-        return;
-    };
-    let Some(mut child_stdout) = child.stdout.take() else {
-        return;
-    };
-    let child_stderr = child.stderr.take();
-    let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
-
-    let to_remote = async {
-        let _ = tokio::io::copy(&mut tcp_read, &mut child_stdin).await;
-        let _ = child_stdin.shutdown().await;
+    let read_resp = async move {
+        let mut out = Vec::new();
+        (&mut child_stdout)
+            .take((MAX_ADMIN_RESPONSE_BYTES + 16 * 1024) as u64)
+            .read_to_end(&mut out)
+            .await?;
+        Ok::<Vec<u8>, std::io::Error>(out)
     };
 
-    let mut received_from_remote = 0u64;
-    let from_remote = async {
-        let mut buf = [0u8; 32 * 1024];
-        while let Ok(n) = child_stdout.read(&mut buf).await {
-            if n == 0 {
-                break;
-            }
-            received_from_remote = received_from_remote.saturating_add(n as u64);
-            if tcp_write.write_all(&buf[..n]).await.is_err() {
-                break;
-            }
-        }
+    let read_err = async move {
+        let mut err = Vec::new();
+        let _ = (&mut child_stderr).take(4096).read_to_end(&mut err).await;
+        err
     };
 
-    tokio::select! {
-        _ = cancel.cancelled() => {
+    let io_outcome = tokio::time::timeout(Duration::from_secs(600), async {
+        tokio::join!(write_req, read_resp, read_err)
+    })
+    .await;
+
+    let (write_res, resp_res, stderr_bytes) = match io_outcome {
+        Ok(tuple) => tuple,
+        Err(_) => {
             let _ = child.kill().await;
-            return;
+            let _ = child.wait().await;
+            return Err("经 OpenSSH -W 上传发布包超时（600 秒）。".into());
         }
-        _ = async { tokio::join!(to_remote, from_remote) } => {}
-    }
+    };
 
-    if received_from_remote == 0 {
-        let mut err_buf = Vec::new();
-        if let Some(stderr) = child_stderr {
-            let _ = stderr.take(4096).read_to_end(&mut err_buf).await;
-        }
-        let status = child.wait().await.ok();
-        let detail = String::from_utf8_lossy(&err_buf).trim().to_owned();
-        let msg = match (status, detail.is_empty()) {
-            (Some(s), false) => format!("SSH 隧道转发失败（{s}）：{detail}"),
-            (Some(s), true) => format!("SSH 隧道转发失败（{s}）。"),
-            (None, false) => format!("SSH 隧道转发失败：{detail}"),
-            (None, true) => "SSH 隧道未返回响应。".into(),
-        };
-        let body = serde_json::json!({
-            "error": {
-                "code": "ssh_tunnel_failed",
-                "message": msg,
-            }
-        })
-        .to_string();
-        let hdr = format!(
-            "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let _ = tcp_write.write_all(hdr.as_bytes()).await;
-        let _ = tcp_write.write_all(body.as_bytes()).await;
-    } else {
+    let exit_status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+        .await
+        .ok()
+        .and_then(Result::ok);
+    if exit_status.is_none() {
+        let _ = child.kill().await;
         let _ = child.wait().await;
     }
-    let _ = tcp_write.shutdown().await;
+
+    let stderr_text = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
+    let raw_resp = resp_res.map_err(|e| format!("读取 OpenSSH 响应流失败：{e}"))?;
+    if raw_resp.is_empty() {
+        let write_note = write_res
+            .err()
+            .map(|e| format!("写入流中断：{e}"))
+            .unwrap_or_default();
+        return Err(format!(
+            "OpenSSH -W 通道未返回 HTTP 响应（status={exit_status:?} {write_note}）：{stderr_text}"
+        ));
+    }
+    parse_raw_http1_response(&raw_resp, MAX_ADMIN_RESPONSE_BYTES)
 }
 
-async fn write_tunnel_502(stream: &mut tokio::net::TcpStream, msg: &str) {
-    let body = serde_json::json!({
-        "error": {
-            "code": "ssh_tunnel_failed",
-            "message": msg,
+fn parse_raw_http1_response(raw: &[u8], max_body: usize) -> Result<(u16, Vec<u8>), String> {
+    let Some(hdr_end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Err("远端管理接口返回的 HTTP 响应头不完整。".into());
+    };
+    let hdr_str = std::str::from_utf8(&raw[..hdr_end])
+        .map_err(|_| "远端管理接口 HTTP 响应头不是有效 UTF-8。".to_owned())?;
+    let mut lines = hdr_str.lines();
+    let status_line = lines.next().ok_or("缺少 HTTP 状态行。")?;
+    let code_str = status_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or("HTTP 状态行格式无效。")?;
+    let code = code_str
+        .parse::<u16>()
+        .map_err(|_| "HTTP 状态码格式无效。".to_owned())?;
+    let mut content_len: Option<usize> = None;
+    let mut is_chunked = false;
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                content_len = Some(
+                    v.trim()
+                        .parse::<usize>()
+                        .map_err(|_| "HTTP Content-Length 无效。".to_owned())?,
+                );
+            } else if k.trim().eq_ignore_ascii_case("transfer-encoding")
+                && v.to_ascii_lowercase().contains("chunked")
+            {
+                is_chunked = true;
+            }
         }
-    })
-    .to_string();
-    let hdr = format!(
-        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    let _ = stream.write_all(hdr.as_bytes()).await;
-    let _ = stream.write_all(body.as_bytes()).await;
-    let _ = stream.shutdown().await;
+    }
+    let body_slice = &raw[hdr_end + 4..];
+    let body = if is_chunked {
+        decode_chunked_body(body_slice, max_body)?
+    } else if let Some(cl) = content_len {
+        if cl > max_body || body_slice.len() < cl {
+            return Err("远端 HTTP 响应体长度异常或超出限制。".into());
+        }
+        body_slice[..cl].to_vec()
+    } else {
+        if body_slice.len() > max_body {
+            return Err("远端 HTTP 响应体超出大小限制。".into());
+        }
+        body_slice.to_vec()
+    };
+    Ok((code, body))
+}
+
+fn decode_chunked_body(mut input: &[u8], max_body: usize) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    loop {
+        let Some(crlf) = input.windows(2).position(|w| w == b"\r\n") else {
+            return Err("Chunked 响应格式无效。".into());
+        };
+        let len_hex = std::str::from_utf8(&input[..crlf])
+            .map_err(|_| "Chunked 长度头编码无效。".to_owned())?
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        let chunk_len =
+            usize::from_str_radix(len_hex, 16).map_err(|_| "Chunked 长度值无效。".to_owned())?;
+        input = &input[crlf + 2..];
+        if chunk_len == 0 {
+            break;
+        }
+        if out.len().saturating_add(chunk_len) > max_body || input.len() < chunk_len + 2 {
+            return Err("Chunked 响应体超出限制或被截断。".into());
+        }
+        out.extend_from_slice(&input[..chunk_len]);
+        if &input[chunk_len..chunk_len + 2] != b"\r\n" {
+            return Err("Chunked 数据块缺少结尾 CRLF。".into());
+        }
+        input = &input[chunk_len + 2..];
+    }
+    Ok(out)
 }
 
 pub fn parse_release_command_args(
@@ -1831,7 +2215,7 @@ pub fn parse_release_command_args(
     let mut attestation_path: Option<PathBuf> = None;
     let mut expected_attestation_sha256: Option<String> = None;
     let mut expected_commit: Option<String> = None;
-    let mut unattested_package = false;
+    let mut expected_archive_sha256: Option<String> = None;
     let mut notes_file: Option<PathBuf> = None;
     let mut notes_inline: Option<String> = None;
     let mut private_key_file: Option<PathBuf> = None;
@@ -1881,7 +2265,18 @@ pub fn parse_release_command_args(
                         .ok_or("--expected-commit 需要完整 40 位 Git 提交哈希。")?,
                 );
             }
-            "--unattested-package" => unattested_package = true,
+            "--expected-archive-sha256" => {
+                expected_archive_sha256 =
+                    Some(args.next().ok_or(
+                        "--expected-archive-sha256 需要待发归档的 64 位小写 SHA-256 摘要。",
+                    )?);
+            }
+            "--unattested-package" => {
+                return Err(
+                    "无摘要绑定的 --unattested-package 已停用；发布外部独立发行包请传入经核准的 --expected-archive-sha256 <64-hex>。"
+                        .into(),
+                );
+            }
             "--notes-file" => {
                 notes_file = Some(PathBuf::from(
                     args.next().ok_or("--notes-file 需要更新说明文件路径。")?,
@@ -1949,9 +2344,16 @@ pub fn parse_release_command_args(
             "不支持的 --channel：{channel}（仅允许 stable 或 beta）。"
         ));
     }
+    if let Some(ref v) = version {
+        if v.contains('+') {
+            return Err("发布版本号不能包含 + 构建元数据。".into());
+        }
+        cst_updater::manifest::version(v)?;
+    }
     let package_path =
         package_path.ok_or("release 必须通过 --package <zip-or-dir> 指定待发行的包或目录。")?;
     let min_upgradable = min_upgradable.ok_or("release 必须指定 --min-upgradable <vX.Y.Z>。")?;
+    cst_updater::manifest::version(&min_upgradable)?;
     if notes_file.is_some() && notes_inline.is_some() {
         return Err("--notes-file 与 --notes 不能同时指定。".into());
     }
@@ -1961,19 +2363,24 @@ pub fn parse_release_command_args(
     if ssh_remote_port.is_some() && ssh_host.is_none() {
         return Err("--ssh-remote-port 需配合 --ssh-host 使用。".into());
     }
-    if unattested_package
-        && (attestation_path.is_some()
+    if let Some(ref sha) = expected_archive_sha256 {
+        let normalized = sha.trim().to_ascii_lowercase();
+        if !is_lower_hex_len(&normalized, 64) {
+            return Err("--expected-archive-sha256 必须为 64 位小写十六进制 SHA-256 摘要。".into());
+        }
+        expected_archive_sha256 = Some(normalized);
+        if attestation_path.is_some()
             || expected_attestation_sha256.is_some()
-            || expected_commit.is_some())
-    {
+            || expected_commit.is_some()
+        {
+            return Err(
+                "--expected-archive-sha256 不能与 --attestation / --expected-attestation-sha256 / --expected-commit 同时指定。"
+                    .into(),
+            );
+        }
+    } else if expected_attestation_sha256.is_none() || expected_commit.is_none() {
         return Err(
-            "--unattested-package 不能与 --attestation / --expected-attestation-sha256 / --expected-commit 同时指定。"
-                .into(),
-        );
-    }
-    if !unattested_package && (expected_attestation_sha256.is_none() || expected_commit.is_none()) {
-        return Err(
-            "默认构建证明模式必须同时指定 --expected-attestation-sha256 <64-hex> 与 --expected-commit <40-hex>（若发布外部独立包，请显式传入 --unattested-package）。"
+            "必须指定可信构建证明（--expected-attestation-sha256 <64-hex> 与 --expected-commit <40-hex>）或经带外核准的归档摘要（--expected-archive-sha256 <64-hex>）。"
                 .into(),
         );
     }
@@ -1987,7 +2394,7 @@ pub fn parse_release_command_args(
         attestation_path,
         expected_attestation_sha256,
         expected_commit,
-        unattested_package,
+        expected_archive_sha256,
         notes_file,
         notes_inline,
         private_key_file,
@@ -2017,18 +2424,53 @@ pub fn run_release(raw_args: impl Iterator<Item = String>) -> Result<(), String>
     rt.block_on(execute_release(&args, admin_token.as_ref()))
 }
 
-struct PreparedPackageInput {
-    kit_dir: PathBuf,
-    zip_path: PathBuf,
-    version: String,
-    discovered_attestation: Option<PathBuf>,
+struct ResolvedArchiveInput {
+    zip_bytes: Vec<u8>,
+    snapshot_zip_path: PathBuf,
+    source_zip_path: Option<PathBuf>,
+    source_kit_dir: Option<PathBuf>,
+    sibling_search_dir: Option<PathBuf>,
+    inferred_version: Option<String>,
 }
 
-fn prepare_package_input(
+fn is_regular_non_symlink_file(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if cst_os::is_reparse_or_symlink(&meta) {
+                return Err(format!(
+                    "发现不安全的符号链接或重解析点路径：{}",
+                    path.display()
+                ));
+            }
+            Ok(meta.is_file())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("无法读取路径元数据 {}：{e}", path.display())),
+    }
+}
+
+fn parse_canonical_zip_version(file_name: &str) -> Option<&str> {
+    file_name
+        .strip_prefix("cst-pilot-")
+        .and_then(|s| s.strip_suffix("-windows-x64.zip"))
+        .filter(|ver| !ver.contains('+') && cst_updater::manifest::version(ver).is_ok())
+}
+
+/// Captures an immutable bounded in-memory ZIP snapshot (`<= 256 MiB`) without unpacking any
+/// archive entry yet, rejecting symlinks/reparse points on all inspected paths.
+fn resolve_immutable_archive_input(
     package_path: &Path,
     explicit_version: Option<&str>,
+    disallow_synthesizing_zip: bool,
     work_dir: &Path,
-) -> Result<PreparedPackageInput, String> {
+) -> Result<ResolvedArchiveInput, String> {
+    if let Some(ver) = explicit_version {
+        if ver.contains('+') {
+            return Err("发布版本号不能包含 + 构建元数据。".into());
+        }
+        cst_updater::manifest::version(ver)?;
+    }
+
     let meta = fs::symlink_metadata(package_path)
         .map_err(|e| format!("无法读取 --package 路径 {}：{e}", package_path.display()))?;
     if cst_os::is_reparse_or_symlink(&meta) {
@@ -2039,53 +2481,46 @@ fn prepare_package_input(
     }
 
     if meta.is_file() {
-        let extracted_kit = work_dir.join("extracted-kit");
-        fs::create_dir_all(&extracted_kit)
-            .map_err(|e| format!("无法创建解包目录 {}：{e}", extracted_kit.display()))?;
-        cst_updater::verify::extract_clean_dist_archive(
-            package_path,
-            &extracted_kit,
-            cst_updater::manifest::MAX_UNPACKED_BYTES,
-        )?;
-        let disk_version = cst_updater::layout::read_version(&extracted_kit)?;
-        if let Some(exp) = explicit_version
-            && exp != disk_version
-        {
-            return Err(format!(
-                "--version（{exp}）与包内 VERSION（{disk_version}）不一致。"
-            ));
-        }
-        let canonical_name = format!("cst-pilot-{disk_version}-windows-x64.zip");
-        let zip_path = if package_path
+        let zip_bytes =
+            read_bounded_regular_file(package_path, MAX_SERVER_ARCHIVE_BYTES, "发行 ZIP")?;
+        let inferred_version = package_path
             .file_name()
             .and_then(|n| n.to_str())
-            .is_some_and(|n| n == canonical_name)
+            .and_then(parse_canonical_zip_version)
+            .map(str::to_owned);
+        if let (Some(exp), Some(inf)) = (explicit_version, inferred_version.as_deref())
+            && exp != inf
         {
-            package_path.to_path_buf()
-        } else {
-            let normalized = work_dir.join(&canonical_name);
-            fs::copy(package_path, &normalized)
-                .map_err(|e| format!("无法准备规范命名归档 {}：{e}", normalized.display()))?;
-            normalized
-        };
-        let sibling_att = package_path.parent().and_then(|parent| {
-            let candidate = parent.join(format!(
-                "cst-pilot-{disk_version}-windows-x64.attestation.json"
+            return Err(format!(
+                "--version（{exp}）与发行 ZIP 文件名版本（{inf}）不一致。"
             ));
-            candidate.is_file().then_some(candidate)
-        });
-        return Ok(PreparedPackageInput {
-            kit_dir: extracted_kit,
-            zip_path,
-            version: disk_version,
-            discovered_attestation: sibling_att,
+        }
+        let snapshot_name = inferred_version
+            .as_deref()
+            .or(explicit_version)
+            .map(|v| format!("cst-pilot-{v}-windows-x64.zip"))
+            .unwrap_or_else(|| "snapshot-input.zip".to_owned());
+        let snapshot_zip_path = work_dir.join(snapshot_name);
+        fs::write(&snapshot_zip_path, &zip_bytes)
+            .map_err(|e| format!("无法写入隔离归档快照 {}：{e}", snapshot_zip_path.display()))?;
+        return Ok(ResolvedArchiveInput {
+            zip_bytes,
+            snapshot_zip_path,
+            source_zip_path: Some(package_path.to_path_buf()),
+            source_kit_dir: None,
+            sibling_search_dir: package_path.parent().map(Path::to_path_buf),
+            inferred_version,
         });
     }
 
     if meta.is_dir() {
-        // Subcase A: `--package` is an unpacked `cst-pilot` release tree directory (`VERSION` + `cst-pilot.exe`).
-        if package_path.join("VERSION").is_file() && package_path.join("cst-pilot.exe").is_file() {
+        let has_version = is_regular_non_symlink_file(&package_path.join("VERSION"))?;
+        let has_main_exe = is_regular_non_symlink_file(&package_path.join("cst-pilot.exe"))?;
+        if has_version && has_main_exe {
             let disk_version = cst_updater::layout::read_version(package_path)?;
+            if disk_version.contains('+') {
+                return Err("发布版本号不能包含 + 构建元数据。".into());
+            }
             if let Some(exp) = explicit_version
                 && exp != disk_version
             {
@@ -2093,38 +2528,94 @@ fn prepare_package_input(
                     "--version（{exp}）与目录内 VERSION（{disk_version}）不一致。"
                 ));
             }
-            cst_updater::verify::verify_clean_dist_tree(package_path, &disk_version)?;
-            let sums = cst_updater::verify::scan_clean_dist_tree(package_path, &disk_version)?;
             let canonical_name = format!("cst-pilot-{disk_version}-windows-x64.zip");
-            let sibling_zip = package_path.parent().and_then(|p| {
-                let z = p.join(&canonical_name);
-                z.is_file().then_some(z)
-            });
-            let zip_path = match sibling_zip {
-                Some(z) => z,
-                None => {
-                    let generated = work_dir.join(&canonical_name);
-                    super::write_release_zip(package_path, &generated, &sums)?;
-                    generated
+            let sibling_zip = if let Some(parent) = package_path.parent() {
+                let candidate = parent.join(&canonical_name);
+                if is_regular_non_symlink_file(&candidate)? {
+                    Some(candidate)
+                } else {
+                    None
                 }
+            } else {
+                None
             };
-            let sibling_att = package_path.parent().and_then(|parent| {
-                let candidate = parent.join(format!(
-                    "cst-pilot-{disk_version}-windows-x64.attestation.json"
-                ));
-                candidate.is_file().then_some(candidate)
-            });
-            return Ok(PreparedPackageInput {
-                kit_dir: package_path.to_path_buf(),
-                zip_path,
-                version: disk_version,
-                discovered_attestation: sibling_att,
+            let snapshot_zip_path = work_dir.join(&canonical_name);
+            let (zip_bytes, source_zip_path) = if let Some(existing_zip) = sibling_zip {
+                let bytes = read_bounded_regular_file(
+                    &existing_zip,
+                    MAX_SERVER_ARCHIVE_BYTES,
+                    "同级发行 ZIP",
+                )?;
+                fs::write(&snapshot_zip_path, &bytes).map_err(|e| {
+                    format!("无法写入隔离归档快照 {}：{e}", snapshot_zip_path.display())
+                })?;
+                (bytes, Some(existing_zip))
+            } else {
+                if disallow_synthesizing_zip {
+                    return Err(
+                        "使用 --expected-archive-sha256 时必须提供现成的发行 ZIP（或同级存在规范 ZIP），不能现场重新压缩未归档目录。"
+                            .into(),
+                    );
+                }
+                cst_updater::verify::verify_clean_dist_tree(package_path, &disk_version)?;
+                let sums = cst_updater::verify::scan_clean_dist_tree(package_path, &disk_version)?;
+                super::write_release_zip(package_path, &snapshot_zip_path, &sums)?;
+                let bytes = read_bounded_regular_file(
+                    &snapshot_zip_path,
+                    MAX_SERVER_ARCHIVE_BYTES,
+                    "生成的发行 ZIP",
+                )?;
+                (bytes, None)
+            };
+            return Ok(ResolvedArchiveInput {
+                zip_bytes,
+                snapshot_zip_path,
+                source_zip_path,
+                source_kit_dir: Some(package_path.to_path_buf()),
+                sibling_search_dir: package_path.parent().map(Path::to_path_buf),
+                inferred_version: Some(disk_version),
             });
         }
 
-        // Subcase B: `--package` is a `dist` output parent directory containing `cst-pilot-<ver>-windows-x64.zip`.
         let located_zip = locate_zip_in_dist_parent(package_path, explicit_version)?;
-        return prepare_package_input(&located_zip, explicit_version, work_dir);
+        let zip_bytes =
+            read_bounded_regular_file(&located_zip, MAX_SERVER_ARCHIVE_BYTES, "发行 ZIP")?;
+        let inferred_version = located_zip
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(parse_canonical_zip_version)
+            .map(str::to_owned);
+        let snapshot_name = located_zip
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("snapshot-input.zip");
+        let snapshot_zip_path = work_dir.join(snapshot_name);
+        fs::write(&snapshot_zip_path, &zip_bytes)
+            .map_err(|e| format!("无法写入隔离归档快照 {}：{e}", snapshot_zip_path.display()))?;
+        let sibling_kit = package_path.join("cst-pilot");
+        let source_kit_dir = match fs::symlink_metadata(&sibling_kit) {
+            Ok(m) => {
+                if cst_os::is_reparse_or_symlink(&m) {
+                    return Err(format!(
+                        "目录内 cst-pilot 子项禁止为符号链接或重解析点：{}",
+                        sibling_kit.display()
+                    ));
+                }
+                m.is_dir().then_some(sibling_kit)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(format!("无法检查目录 {}：{e}", sibling_kit.display()));
+            }
+        };
+        return Ok(ResolvedArchiveInput {
+            zip_bytes,
+            snapshot_zip_path,
+            source_zip_path: Some(located_zip),
+            source_kit_dir,
+            sibling_search_dir: Some(package_path.to_path_buf()),
+            inferred_version,
+        });
     }
 
     Err(format!(
@@ -2138,8 +2629,12 @@ fn locate_zip_in_dist_parent(
     explicit_version: Option<&str>,
 ) -> Result<PathBuf, String> {
     if let Some(ver) = explicit_version {
+        if ver.contains('+') {
+            return Err("发布版本号不能包含 + 构建元数据。".into());
+        }
+        cst_updater::manifest::version(ver)?;
         let exact = parent_dir.join(format!("cst-pilot-{ver}-windows-x64.zip"));
-        if exact.is_file() {
+        if is_regular_non_symlink_file(&exact)? {
             return Ok(exact);
         }
         return Err(format!(
@@ -2151,12 +2646,12 @@ fn locate_zip_in_dist_parent(
     let mut candidates = Vec::new();
     let entries = fs::read_dir(parent_dir)
         .map_err(|e| format!("无法读取目录 {}：{e}", parent_dir.display()))?;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("无法遍历目录 {}：{e}", parent_dir.display()))?;
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with("cst-pilot-")
-            && name.ends_with("-windows-x64.zip")
-            && path.is_file()
+            && parse_canonical_zip_version(name).is_some()
+            && is_regular_non_symlink_file(&path)?
         {
             candidates.push(path);
         }
@@ -2174,55 +2669,121 @@ fn locate_zip_in_dist_parent(
     }
 }
 
+fn discover_non_symlink_attestation(
+    search_dir: Option<&Path>,
+    version_hint: Option<&str>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(dir) = search_dir else {
+        return Ok(None);
+    };
+    if let Some(ver) = version_hint {
+        let candidate = dir.join(format!("cst-pilot-{ver}-windows-x64.attestation.json"));
+        return if is_regular_non_symlink_file(&candidate)? {
+            Ok(Some(candidate))
+        } else {
+            Ok(None)
+        };
+    }
+    let mut matches = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(None);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("cst-pilot-")
+            && name.ends_with("-windows-x64.attestation.json")
+            && is_regular_non_symlink_file(&path)?
+        {
+            matches.push(path);
+        }
+    }
+    match matches.len() {
+        1 => Ok(Some(matches.remove(0))),
+        0 => Ok(None),
+        _ => Err(format!(
+            "目录 {} 下存在多份构建证明文件，请显式传入 --attestation 或 --version。",
+            dir.display()
+        )),
+    }
+}
+
 pub async fn execute_release(
     args: &ReleaseCommandArgs,
     admin_token: Option<&Zeroizing<String>>,
 ) -> Result<(), String> {
-    let work_dir = TempWorkDir::create("cst-release-run")?;
-    let prepared =
-        prepare_package_input(&args.package_path, args.version.as_deref(), work_dir.path())?;
     let base_url = args.public_base_url.trim().trim_end_matches('/');
-    let expected_channel_url = expected_channel_manifest_url(base_url, &args.channel)?;
-
-    let out_manifest = args
-        .out_manifest
-        .clone()
-        .unwrap_or_else(|| work_dir.path().join("manifest.signed.json"));
-    if same_existing_file(&out_manifest, &args.package_path)
-        || same_existing_file(&out_manifest, &prepared.zip_path)
-        || same_existing_file(&out_manifest, &args.private_key_file)
-    {
-        return Err("--out-manifest 输出路径不能覆盖输入发行包或私钥文件。".into());
+    let parsed_base = validate_release_url(base_url)?;
+    if parsed_base.query().is_some() || parsed_base.fragment().is_some() {
+        return Err("--public-base-url 不允许包含查询参数或片段。".into());
     }
-
+    let expected_channel_url = expected_channel_manifest_url(base_url, &args.channel)?;
     let (_, _, signing_pub_b64) = load_signing_key(&args.private_key_file)?;
 
-    let summary = if args.unattested_package {
-        sign_unattested_package(
-            &prepared.kit_dir,
-            &prepared.zip_path,
-            &prepared.version,
+    let work_dir = TempWorkDir::create("cst-release-run")?;
+    let resolved = resolve_immutable_archive_input(
+        &args.package_path,
+        args.version.as_deref(),
+        args.expected_archive_sha256.is_some(),
+        work_dir.path(),
+    )?;
+
+    let mut protected_paths: Vec<&Path> = vec![&args.private_key_file, &args.package_path];
+    if let Some(ref src_zip) = resolved.source_zip_path {
+        protected_paths.push(src_zip.as_path());
+    }
+    if let Some(ref att_p) = args.attestation_path {
+        protected_paths.push(att_p.as_path());
+    }
+    let disallowed_out_dir = if args.package_path.is_dir() {
+        Some(args.package_path.as_path())
+    } else {
+        resolved.source_kit_dir.as_deref()
+    };
+    if let Some(ref explicit_out) = args.out_manifest {
+        validate_output_path_not_aliasing(explicit_out, disallowed_out_dir, &protected_paths)?;
+    }
+
+    let summary = if let Some(ref expected_zip_sha256) = args.expected_archive_sha256 {
+        // Digest-pinned external package mode: verify archive SHA-256 BEFORE unpacking a single byte!
+        sign_digest_pinned_package(
+            &resolved.zip_bytes,
+            &resolved.snapshot_zip_path,
+            resolved.source_kit_dir.as_deref(),
+            args.version
+                .as_deref()
+                .or(resolved.inferred_version.as_deref()),
+            expected_zip_sha256,
             &args.min_upgradable,
             base_url,
             &expected_channel_url,
             &args.notes_file,
             &args.notes_inline,
-            &out_manifest,
+            args.out_manifest.as_deref(),
             &args.private_key_file,
+            work_dir.path(),
         )?
     } else {
-        let attestation_path = args
-            .attestation_path
-            .clone()
-            .or(prepared.discovered_attestation)
+        // Attested keyless-build mode: authenticate attestation + channel + archive SHA-256 BEFORE unpacking!
+        let version_hint = args
+            .version
+            .as_deref()
+            .or(resolved.inferred_version.as_deref());
+        let attestation_path = match args.attestation_path {
+            Some(ref p) => p.clone(),
+            None => discover_non_symlink_attestation(
+                resolved.sibling_search_dir.as_deref(),
+                version_hint,
+            )?
             .ok_or_else(|| {
-                format!(
-                    "未找到构建证明文件 cst-pilot-{}-windows-x64.attestation.json（请传入 --attestation，或对独立外部包显式传入 --unattested-package）。",
-                    prepared.version
-                )
-            })?;
-        if same_existing_file(&out_manifest, &attestation_path) {
-            return Err("--out-manifest 输出路径不能覆盖构建证明文件。".into());
+                "未找到同级构建证明文件（请传入 --attestation，或对独立外部归档传入经核准的 --expected-archive-sha256 <64-hex>）。"
+                    .to_owned()
+            })?,
+        };
+        if let Some(ref explicit_out) = args.out_manifest
+            && same_existing_file(explicit_out, &attestation_path)
+        {
+            return Err("清单输出路径不能覆盖构建证明文件。".into());
         }
         let exp_att_sha = args
             .expected_attestation_sha256
@@ -2239,18 +2800,30 @@ pub async fn execute_release(
                 att.manifest_url, args.channel
             ));
         }
+        let internal_out = args
+            .out_manifest
+            .clone()
+            .unwrap_or_else(|| work_dir.path().join("manifest.signed.json"));
+        let canonical_snapshot = work_dir
+            .path()
+            .join(format!("cst-pilot-{}-windows-x64.zip", att.version));
+        if canonical_snapshot != resolved.snapshot_zip_path {
+            fs::copy(&resolved.snapshot_zip_path, &canonical_snapshot).map_err(|e| {
+                format!("无法准备规范快照归档 {}：{e}", canonical_snapshot.display())
+            })?;
+        }
         sign_release(&SignReleaseArgs {
-            dist_dir: Some(prepared.kit_dir),
-            zip_path: prepared.zip_path.clone(),
+            dist_dir: resolved.source_kit_dir.clone(),
+            zip_path: canonical_snapshot,
             attestation_path,
             expected_attestation_sha256: exp_att_sha,
             expected_commit: exp_commit,
-            version: Some(prepared.version),
+            version: args.version.clone(),
             min_upgradable: args.min_upgradable.clone(),
             base_url: base_url.to_owned(),
             notes_file: args.notes_file.clone(),
             notes_inline: args.notes_inline.clone(),
-            out_path: out_manifest.clone(),
+            out_path: internal_out,
             private_key_file: args.private_key_file.clone(),
         })?
     };
@@ -2265,118 +2838,158 @@ pub async fn execute_release(
     );
 
     if args.dry_run {
-        println!(
-            "[xtask] release --dry-run PASS: archive.url={} manifest={}",
-            summary.archive_url,
-            out_manifest.display()
-        );
+        if let Some(ref persisted_manifest) = args.out_manifest {
+            println!(
+                "[xtask] release --dry-run PASS: archive.url={} manifest={}",
+                summary.archive_url,
+                persisted_manifest.display()
+            );
+        } else {
+            println!(
+                "[xtask] release --dry-run PASS: archive.url={} (in-memory manifest verified)",
+                summary.archive_url
+            );
+        }
         return Ok(());
     }
 
     let token =
         admin_token.ok_or_else(|| format!("缺少管理发布令牌环境变量 {ENV_ADMIN_TOKEN}。"))?;
 
-    if let Some(ref ssh_host) = args.ssh_host {
-        println!(
-            "[xtask] Opening scoped SSH loopback tunnel to {ssh_host} (remote 127.0.0.1:{})...",
-            args.ssh_remote_port
-        );
-        let tunnel = ScopedSshTunnel::open(ssh_host, args.ssh_remote_port).await?;
-        let publish_args = PublishReleaseArgs {
-            manifest_path: out_manifest,
-            zip_path: prepared.zip_path,
-            channel: args.channel.clone(),
-            activate: args.activate,
-            admin_url: tunnel.admin_url(),
-            public_base_url: base_url.to_owned(),
-            public_manifest_url: args.public_manifest_url.clone(),
-            public_archive_url: args.public_archive_url.clone(),
-            public_key_b64: signing_pub_b64,
-        };
-        let res = publish_release(&publish_args, token).await;
-        tunnel.close().await;
-        res
+    let target = if let Some(ref ssh_host) = args.ssh_host {
+        UploadTarget::SshStdio {
+            host: ssh_host.as_str(),
+            remote_port: args.ssh_remote_port,
+        }
     } else {
-        let publish_args = PublishReleaseArgs {
-            manifest_path: out_manifest,
-            zip_path: prepared.zip_path,
-            channel: args.channel.clone(),
-            activate: args.activate,
-            admin_url: args
-                .admin_url
-                .clone()
-                .unwrap_or_else(|| DEFAULT_ADMIN_URL.to_owned()),
-            public_base_url: base_url.to_owned(),
-            public_manifest_url: args.public_manifest_url.clone(),
-            public_archive_url: args.public_archive_url.clone(),
-            public_key_b64: signing_pub_b64,
-        };
-        publish_release(&publish_args, token).await
-    }
+        UploadTarget::HttpUrl(args.admin_url.as_deref().unwrap_or(DEFAULT_ADMIN_URL))
+    };
+
+    publish_verified_bundle(
+        &summary.manifest_bytes,
+        &resolved.zip_bytes,
+        &args.channel,
+        args.activate,
+        target,
+        base_url,
+        args.public_manifest_url.as_deref(),
+        args.public_archive_url.as_deref(),
+        &signing_pub_b64,
+        token,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
-fn sign_unattested_package(
-    kit_dir: &Path,
-    zip_path: &Path,
-    version: &str,
+fn sign_digest_pinned_package(
+    zip_bytes: &[u8],
+    snapshot_zip_path: &Path,
+    source_kit_dir: Option<&Path>,
+    version_hint: Option<&str>,
+    expected_archive_sha256: &str,
     min_upgradable: &str,
     base_url: &str,
     expected_channel_url: &str,
     notes_file: &Option<PathBuf>,
     notes_inline: &Option<String>,
-    out_path: &Path,
+    out_path: Option<&Path>,
     private_key_file: &Path,
+    work_dir: &Path,
 ) -> Result<SignReleaseSummary, String> {
-    if version.contains('+') {
-        return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
+    let expected_sha = expected_archive_sha256.trim().to_ascii_lowercase();
+    if !is_lower_hex_len(&expected_sha, 64) {
+        return Err("--expected-archive-sha256 必须为 64 位小写十六进制 SHA-256 摘要。".into());
     }
-    let parsed_ver = cst_updater::manifest::version(version)?;
-    let parsed_min = cst_updater::manifest::version(min_upgradable)?;
-    if parsed_min > parsed_ver {
-        return Err("min-upgradable 版本不能高于目标版本。".into());
+    let archive_size = zip_bytes.len() as u64;
+    let actual_archive_sha256 = format!("{:x}", Sha256::digest(zip_bytes));
+    if actual_archive_sha256 != expected_sha {
+        return Err(format!(
+            "待发归档实际 SHA-256（{actual_archive_sha256}）与指定摘要（{expected_sha}）不一致，拒绝解包或签名。"
+        ));
     }
 
     let (signing_key, release_key, signing_pub_b64) = load_signing_key(private_key_file)?;
     let signing_pub_fp = release_key.fingerprint();
 
-    // 1. Clean release tree redlines + SFNT + credentials + SHA256SUMS match.
-    cst_updater::verify::verify_clean_dist_tree(kit_dir, version)?;
+    // Extract exclusively from the immutable verified snapshot into isolated `extracted-kit`.
+    let extracted_kit = work_dir.join("extracted-kit");
+    fs::create_dir_all(&extracted_kit)
+        .map_err(|e| format!("无法创建隔离解包目录 {}：{e}", extracted_kit.display()))?;
+    cst_updater::verify::extract_clean_dist_archive(
+        snapshot_zip_path,
+        &extracted_kit,
+        cst_updater::manifest::MAX_UNPACKED_BYTES,
+    )?;
 
-    // 2. Pure-Rust PE32+ x86_64 + WINDOWS_GUI (`Subsystem == 2`) check on all 3 binaries.
+    let version = cst_updater::layout::read_version(&extracted_kit)?;
+    if version.contains('+') {
+        return Err("发布版本号不能包含 + 构建元数据，需与服务端路由规则一致。".into());
+    }
+    if let Some(exp_ver) = version_hint
+        && exp_ver != version
+    {
+        return Err(format!(
+            "待发归档内 VERSION（{version}）与预期版本（{exp_ver}）不一致。"
+        ));
+    }
+    let parsed_ver = cst_updater::manifest::version(&version)?;
+    let parsed_min = cst_updater::manifest::version(min_upgradable)?;
+    if parsed_min > parsed_ver {
+        return Err("min-upgradable 版本不能高于目标版本。".into());
+    }
+
+    // 1. Clean release tree redlines + canonical defaults + SFNT + credentials + SHA256SUMS match on extracted snapshot.
+    cst_updater::verify::verify_clean_dist_tree(&extracted_kit, &version)?;
+    verify_canonical_release_defaults(&extracted_kit)?;
+
+    // 2. Pure-Rust PE32+ x86_64 + section table + entry point + WINDOWS_GUI (`Subsystem == 2`) check on all 3 binaries.
     for rel in ["cst-pilot.exe", SERVER_EXE_PATH, UPDATER_EXE_PATH] {
-        let bin_bytes = fs::read(kit_dir.join(rel)).map_err(|e| format!("无法读取 {rel}：{e}"))?;
+        let bin_bytes =
+            read_bounded_regular_file(&extracted_kit.join(rel), MAX_SERVER_ARCHIVE_BYTES, rel)?;
         verify_pe64_windows_gui_binary(&bin_bytes, rel)?;
     }
 
-    // 3. Strict `BUILD-INFO.json` validation.
-    let build_info = read_and_validate_build_info(kit_dir, version, &signing_pub_fp)?;
+    // 3. Strict `BUILD-INFO.json` validation (`platform`, `embedWeb`, `updateEnabled`, `updatePublicKeyFingerprint`, `builtAt`).
+    let build_info = read_and_validate_build_info(&extracted_kit, &version, &signing_pub_fp)?;
 
-    // 4. Static `.rdata` trust-root verification (channel URL + public key) without executing binaries.
-    verify_static_binary_update_root(kit_dir, expected_channel_url, &signing_pub_b64)?;
+    // 4. Static `.rdata` single-marker trust-root verification (channel URL + public key) without executing binaries.
+    verify_static_binary_update_root(&extracted_kit, expected_channel_url, &signing_pub_b64)?;
 
-    // 5. Sums + ZIP inspection + dual Ed25519 signature + offline `VerifiedPackage` staging.
-    let sums_bytes = fs::read(kit_dir.join(SHA256SUMS_PATH))
-        .map_err(|e| format!("无法读取 {SHA256SUMS_PATH}：{e}"))?;
+    // 5. Sums + cross-check optional source_kit_dir + dual Ed25519 signature + offline `VerifiedPackage` staging.
+    let sums_bytes = read_bounded_regular_file(
+        &extracted_kit.join(SHA256SUMS_PATH),
+        MAX_SHA256SUMS_BYTES,
+        SHA256SUMS_PATH,
+    )?;
+    if let Some(src_dir) = source_kit_dir {
+        cst_updater::verify::verify_clean_dist_tree(src_dir, &version)?;
+        let src_sums = read_bounded_regular_file(
+            &src_dir.join(SHA256SUMS_PATH),
+            MAX_SHA256SUMS_BYTES,
+            SHA256SUMS_PATH,
+        )?;
+        if src_sums != sums_bytes {
+            return Err("源发行目录的 app/SHA256SUMS 与同级发行 ZIP 内容不一致，拒绝签名。".into());
+        }
+    }
     let sha256_sums = String::from_utf8(sums_bytes)
         .map_err(|_| format!("{SHA256SUMS_PATH} 必须为 UTF-8 编码。"))?;
     let release_notes = read_bounded_release_notes(notes_file, notes_inline)?;
-    let (zip_bytes, archive_size, archive_sha256, unpacked_size) =
-        read_and_inspect_zip(zip_path, &sha256_sums)?;
+    let unpacked_size = inspect_zip_unpacked_size(zip_bytes, &sha256_sums)?;
 
     emit_signed_manifest(
         &signing_key,
         &release_key,
-        version,
+        &version,
         &build_info.built_at,
         min_upgradable,
         base_url,
         release_notes,
         sha256_sums,
-        &zip_bytes,
+        zip_bytes,
         archive_size,
         unpacked_size,
-        archive_sha256,
+        actual_archive_sha256,
         out_path,
     )
 }
@@ -2436,21 +3049,55 @@ mod tests {
         buf
     }
 
-    fn mock_pe64_gui_with_marker(subsystem: u16, marker: &[u8]) -> Vec<u8> {
+    fn mock_pe64_gui_with_marker(subsystem: u16, rdata_payload: &[u8]) -> Vec<u8> {
         let pe_offset = 0x80usize;
         let coff_offset = pe_offset + 4;
         let opt_offset = coff_offset + 20;
         let opt_size = 240usize;
-        let mut buf = vec![0u8; opt_offset + opt_size + 64 + marker.len()];
+        let num_sections = 2usize;
+        let sec_table_offset = opt_offset + opt_size;
+        let text_raw_ptr = 0x200usize;
+        let text_raw_size = 0x80usize;
+        let rdata_raw_ptr = text_raw_ptr + text_raw_size;
+        let rdata_raw_size = rdata_payload.len().max(64).div_ceil(16) * 16;
+        let mut buf = vec![0u8; rdata_raw_ptr + rdata_raw_size];
+
+        // DOS + PE signature
         buf[0..2].copy_from_slice(b"MZ");
         buf[0x3c..0x40].copy_from_slice(&(pe_offset as u32).to_le_bytes());
         buf[pe_offset..coff_offset].copy_from_slice(b"PE\0\0");
+
+        // COFF header: AMD64 (0x8664), 2 sections, Characteristics = EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE (0x0022)
         buf[coff_offset..coff_offset + 2].copy_from_slice(&0x8664u16.to_le_bytes());
+        buf[coff_offset + 2..coff_offset + 4].copy_from_slice(&(num_sections as u16).to_le_bytes());
         buf[coff_offset + 16..coff_offset + 18].copy_from_slice(&(opt_size as u16).to_le_bytes());
+        buf[coff_offset + 18..coff_offset + 20].copy_from_slice(&0x0022u16.to_le_bytes());
+
+        // OptionalHeader (PE32+): Magic = 0x020b, AddressOfEntryPoint = 0x1000 (.text), Subsystem
         buf[opt_offset..opt_offset + 2].copy_from_slice(&0x020bu16.to_le_bytes());
+        buf[opt_offset + 16..opt_offset + 20].copy_from_slice(&0x1000u32.to_le_bytes());
         buf[opt_offset + 68..opt_offset + 70].copy_from_slice(&subsystem.to_le_bytes());
-        let tail_pos = opt_offset + opt_size + 16;
-        buf[tail_pos..tail_pos + marker.len()].copy_from_slice(marker);
+
+        // Section 0: `.text` (CNT_CODE | MEM_EXECUTE | MEM_READ = 0x60000020)
+        let s0 = sec_table_offset;
+        buf[s0..s0 + 5].copy_from_slice(b".text");
+        buf[s0 + 8..s0 + 12].copy_from_slice(&(text_raw_size as u32).to_le_bytes());
+        buf[s0 + 12..s0 + 16].copy_from_slice(&0x1000u32.to_le_bytes());
+        buf[s0 + 16..s0 + 20].copy_from_slice(&(text_raw_size as u32).to_le_bytes());
+        buf[s0 + 20..s0 + 24].copy_from_slice(&(text_raw_ptr as u32).to_le_bytes());
+        buf[s0 + 36..s0 + 40].copy_from_slice(&0x6000_0020u32.to_le_bytes());
+        buf[text_raw_ptr] = 0xc3; // ret
+
+        // Section 1: `.rdata` (CNT_INITIALIZED_DATA | MEM_READ = 0x40000040, non-writable, non-executable)
+        let s1 = sec_table_offset + 40;
+        buf[s1..s1 + 6].copy_from_slice(b".rdata");
+        buf[s1 + 8..s1 + 12].copy_from_slice(&(rdata_raw_size as u32).to_le_bytes());
+        buf[s1 + 12..s1 + 16].copy_from_slice(&0x2000u32.to_le_bytes());
+        buf[s1 + 16..s1 + 20].copy_from_slice(&(rdata_raw_size as u32).to_le_bytes());
+        buf[s1 + 20..s1 + 24].copy_from_slice(&(rdata_raw_ptr as u32).to_le_bytes());
+        buf[s1 + 36..s1 + 40].copy_from_slice(&0x4000_0040u32.to_le_bytes());
+        buf[rdata_raw_ptr..rdata_raw_ptr + rdata_payload.len()].copy_from_slice(rdata_payload);
+
         buf
     }
 
@@ -2489,7 +3136,7 @@ mod tests {
             ("app/BUILD-INFO.json".into(), build_info.into_bytes()),
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-            ("app/licenses/mock.txt".into(), b"mock".to_vec()),
+            ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
             (
                 "app/fonts/SourceHanSansCN-VF.otf".into(),
                 mock_sfnt(b"OTTO"),
@@ -2512,8 +3159,14 @@ mod tests {
             ("app/telemetry/currency.json".into(), b"{}".to_vec()),
             ("app/defaults/settings.json".into(), b"{}".to_vec()),
             ("app/defaults/models-store.json".into(), b"{}".to_vec()),
-            ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
-            ("app/defaults/web-search.json".into(), b"{}".to_vec()),
+            (
+                "app/defaults/telemetry.json".into(),
+                CANONICAL_TELEMETRY_JSON.to_vec(),
+            ),
+            (
+                "app/defaults/web-search.json".into(),
+                CANONICAL_WEB_SEARCH_JSON.to_vec(),
+            ),
         ]);
         for skill in cst_updater::layout::REQUIRED_SKILL_NAMES {
             files.insert(format!("app/skills/{skill}/SKILL.md"), b"skill".to_vec());
@@ -2639,9 +3292,14 @@ mod tests {
         let beta_m = format_update_root_marker(OFFICIAL_BETA_MANIFEST_URL, OFFICIAL_PUBLIC_KEY_B64);
         let mut dual = stable_m.clone();
         dual.extend_from_slice(&beta_m);
+        let mut dup_same = stable_m.clone();
+        dup_same.extend_from_slice(&stable_m);
+        let stable_pe = mock_pe64_gui_with_marker(2, &stable_m);
+        let dual_pe = mock_pe64_gui_with_marker(2, &dual);
+        let dup_same_pe = mock_pe64_gui_with_marker(2, &dup_same);
         assert!(
-            verify_exact_single_root_marker(
-                &stable_m,
+            verify_pe64_rdata_single_root_marker(
+                &stable_pe,
                 &stable_m,
                 "test.exe",
                 OFFICIAL_MANIFEST_URL
@@ -2649,8 +3307,22 @@ mod tests {
             .is_ok()
         );
         assert!(
-            verify_exact_single_root_marker(&dual, &stable_m, "test.exe", OFFICIAL_MANIFEST_URL)
-                .is_err()
+            verify_pe64_rdata_single_root_marker(
+                &dual_pe,
+                &stable_m,
+                "test.exe",
+                OFFICIAL_MANIFEST_URL
+            )
+            .is_err()
+        );
+        assert!(
+            verify_pe64_rdata_single_root_marker(
+                &dup_same_pe,
+                &stable_m,
+                "test.exe",
+                OFFICIAL_MANIFEST_URL
+            )
+            .is_err()
         );
 
         assert_eq!(validate_ssh_host("cstoa").unwrap(), "cstoa");
@@ -2754,7 +3426,7 @@ mod tests {
             &fp,
             TEST_COMMIT_SHA,
             Some(
-                "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true}\n",
+                "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"platform\":\"windows-x86_64\",\"embedWeb\":true,\"updateEnabled\":true}\n",
             ),
         );
         let err = sign_release(&SignReleaseArgs {
@@ -2898,13 +3570,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_release_supports_attested_bundle_unattested_package_and_channel_guard() {
+    async fn execute_release_supports_attested_bundle_digest_pinned_package_and_channel_guard() {
         let dir = env::temp_dir().join(format!("xtask-exec-release-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
         let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
         let (dist_dir, zip_path, _att_path, att_sha256, _) =
             build_synthetic_dist(&dir, "v0.9.9", &pub_b64, &fp, TEST_COMMIT_SHA, None);
+        let zip_sha256 = format!("{:x}", Sha256::digest(fs::read(&zip_path).unwrap()));
 
         // 1. Cross-channel guard: pushing a `stable`-marked package to `beta` must fail in both modes!
         let cross_err = execute_release(
@@ -2916,7 +3589,7 @@ mod tests {
                 attestation_path: None,
                 expected_attestation_sha256: Some(att_sha256.clone()),
                 expected_commit: Some(TEST_COMMIT_SHA.into()),
-                unattested_package: false,
+                expected_archive_sha256: None,
                 notes_file: None,
                 notes_inline: None,
                 private_key_file: key_file.clone(),
@@ -2936,7 +3609,7 @@ mod tests {
         .expect_err("pushing stable-attested package to beta must fail");
         assert!(cross_err.contains("通道"));
 
-        let cross_unattested_err = execute_release(
+        let cross_pinned_err = execute_release(
             &ReleaseCommandArgs {
                 package_path: zip_path.clone(),
                 min_upgradable: "v0.9.0".into(),
@@ -2945,7 +3618,7 @@ mod tests {
                 attestation_path: None,
                 expected_attestation_sha256: None,
                 expected_commit: None,
-                unattested_package: true,
+                expected_archive_sha256: Some(zip_sha256.clone()),
                 notes_file: None,
                 notes_inline: None,
                 private_key_file: key_file.clone(),
@@ -2962,26 +3635,24 @@ mod tests {
             None,
         )
         .await
-        .expect_err("pushing stable binary to beta in unattested mode must fail static root check");
-        assert!(cross_unattested_err.contains("静态标记"));
+        .expect_err(
+            "pushing stable binary to beta in digest-pinned mode must fail static root check",
+        );
+        assert!(cross_pinned_err.contains("静态标记"));
 
-        // 2. Unpacked kit directory dry-run in `--unattested-package` mode (auto-zips & verifies PE64 + root marker).
-        let standalone_root = dir.join("standalone-unpacked");
-        fs::create_dir_all(&standalone_root).unwrap();
-        let copy_kit = standalone_root.join("cst-pilot");
-        crate::copy_dir_filtered(&dist_dir, &copy_kit, |_| true).unwrap();
+        // 2. Digest-pinned single ZIP dry-run (`--expected-archive-sha256`) verifies SHA-256 + PE64 + .rdata marker.
         execute_release(
             &ReleaseCommandArgs {
-                package_path: copy_kit,
+                package_path: zip_path.clone(),
                 min_upgradable: "v0.9.0".into(),
                 channel: "stable".into(),
                 version: None,
                 attestation_path: None,
                 expected_attestation_sha256: None,
                 expected_commit: None,
-                unattested_package: true,
+                expected_archive_sha256: Some(zip_sha256),
                 notes_file: None,
-                notes_inline: Some("standalone dir dry run".into()),
+                notes_inline: Some("standalone zip dry run".into()),
                 private_key_file: key_file.clone(),
                 out_manifest: None,
                 ssh_host: None,
@@ -2996,7 +3667,8 @@ mod tests {
             None,
         )
         .await
-        .expect("standalone unpacked kit directory dry-run must succeed");
+        .expect("digest-pinned single ZIP dry-run must succeed");
+        let _ = dist_dir;
 
         // 3. Full attested bundle (`--package <dist_parent_dir>`) upload + public endpoint verification.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3101,7 +3773,7 @@ mod tests {
                 attestation_path: None,
                 expected_attestation_sha256: Some(att_sha256),
                 expected_commit: Some(TEST_COMMIT_SHA.into()),
-                unattested_package: false,
+                expected_archive_sha256: None,
                 notes_file: None,
                 notes_inline: Some("one-shot release test".into()),
                 private_key_file: key_file,

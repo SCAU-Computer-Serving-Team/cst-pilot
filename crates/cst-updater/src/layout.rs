@@ -145,6 +145,16 @@ pub fn classify(path: &str) -> Result<Area, String> {
                 | "test"
                 | "tests"
                 | "obj"
+                | "sessions"
+                | "plans"
+                | "inbox"
+                | "exports"
+                | "artifacts"
+                | "outbox"
+                | "session-exports"
+                | "command-plans"
+                | "fff"
+                | "npm"
                 | ".env"
                 | "auth.json"
                 | "models.json"
@@ -174,7 +184,23 @@ pub fn classify(path: &str) -> Result<Area, String> {
             | "LICENSE"
             | "THIRD-PARTY-NOTICES.md"
     );
-    if root_file || path.starts_with("app/") || (!path.contains('/') && lower.ends_with(".dll")) {
+    let app_allowed = if let Some(rest) = path.strip_prefix("app/") {
+        !rest.contains('/')
+            || matches!(
+                rest.split('/').next().unwrap_or(""),
+                "defaults"
+                    | "docs"
+                    | "fonts"
+                    | "licenses"
+                    | "prompts"
+                    | "skills"
+                    | "telemetry"
+                    | "tools"
+            )
+    } else {
+        false
+    };
+    if root_file || app_allowed || (!path.contains('/') && lower.ends_with(".dll")) {
         Ok(Area::Program)
     } else {
         Err("升级包含程序白名单外的路径，用户数据不可随包替换。".into())

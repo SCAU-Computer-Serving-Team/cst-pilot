@@ -82,18 +82,7 @@ fn run() -> Result<(), String> {
     };
     match cmd.as_str() {
         "dist" => run_dist(args),
-        "verify-tree" => {
-            let dir = args.next().ok_or("verify-tree 需要目标目录路径。")?;
-            let version = args.next();
-            let dir = PathBuf::from(dir);
-            let target_version = match version {
-                Some(v) => v,
-                None => cst_updater::layout::read_version(&dir)?,
-            };
-            let count = cst_updater::verify::verify_clean_dist_tree(&dir, &target_version)?;
-            println!("[xtask] verify-tree PASS: {count} files validated for {target_version}");
-            Ok(())
-        }
+        "verify-tree" => run_verify_tree(args),
         "keygen" => release::run_keygen(args),
         "sign-release" => release::run_sign_release(args),
         "publish-release" => release::run_publish_release(args),
@@ -109,9 +98,62 @@ fn run() -> Result<(), String> {
     }
 }
 
+struct VerifyTreeArgs {
+    dir: PathBuf,
+    version: Option<String>,
+    strict_keyless_env: bool,
+}
+
+fn parse_verify_tree_args(args: impl Iterator<Item = String>) -> Result<VerifyTreeArgs, String> {
+    let mut strict_keyless_env = false;
+    let mut positionals = Vec::new();
+    for arg in args {
+        if arg == "--strict-keyless-env" {
+            strict_keyless_env = true;
+        } else if arg.starts_with('-') {
+            return Err(format!("未知的 verify-tree 参数：{arg}"));
+        } else {
+            positionals.push(arg);
+        }
+    }
+    if positionals.is_empty() || positionals.len() > 2 {
+        return Err(
+            "verify-tree 用法：xtask verify-tree [--strict-keyless-env] <dir> [version]".into(),
+        );
+    }
+    let dir = PathBuf::from(positionals.remove(0));
+    let version = positionals.pop();
+    if let Some(ref v) = version {
+        cst_updater::manifest::version(v)?;
+    }
+    Ok(VerifyTreeArgs {
+        dir,
+        version,
+        strict_keyless_env,
+    })
+}
+
+fn run_verify_tree(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
+    let parsed = parse_verify_tree_args(raw_args)?;
+    if parsed.strict_keyless_env {
+        check_build_env_secret_vars(
+            env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some(),
+            env::var_os(release::ENV_ADMIN_TOKEN).is_some(),
+        )?;
+    }
+    let target_version = match parsed.version {
+        Some(v) => v,
+        None => cst_updater::layout::read_version(&parsed.dir)?,
+    };
+    let count = cst_updater::verify::verify_clean_dist_tree(&parsed.dir, &target_version)?;
+    release::verify_canonical_release_defaults(&parsed.dir)?;
+    println!("[xtask] verify-tree PASS: {count} files validated for {target_version}");
+    Ok(())
+}
+
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--channel stable|beta|disabled] [--require-update-config] [--strict-keyless-env] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release [--dist-dir <dir>] --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]\n  xtask release --package <zip-or-dir> --min-upgradable <vX.Y.Z> [--channel stable|beta] [--attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> | --unattested-package] [--version <vX.Y.Z>] [--notes-file <md> | --notes <text>] [--private-key-file <path>] [--out-manifest <path>] [--ssh-host <alias> [--ssh-remote-port <port>] | --admin-url <url>] [--public-base-url <url>] [--no-activate] [--dry-run]"
+        "Usage (pre-compile xtask in a keyless shell first via `cargo build --release -p xtask --locked`):\n  xtask dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--channel stable|beta|disabled] [--require-update-config] [--strict-keyless-env] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  xtask verify-tree [--strict-keyless-env] <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release [--dist-dir <dir>] --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]\n  xtask release --package <zip-or-dir> --min-upgradable <vX.Y.Z> [--channel stable|beta] [--attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> | --expected-archive-sha256 <64-hex>] [--version <vX.Y.Z>] [--notes-file <md> | --notes <text>] [--private-key-file <path>] [--out-manifest <path>] [--ssh-host <alias> [--ssh-remote-port <port>] | --admin-url <url>] [--public-base-url <url>] [--no-activate] [--dry-run]"
     );
 }
 
@@ -322,7 +364,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     }
 
     // 2. Optional Cargo build (with embed-web on cst-server; static CRT on Windows dist)
-    if !args.skip_cargo_build {
+    let built_executables = if !args.skip_cargo_build {
         println!(
             "[xtask] Building Rust binaries (profile={}, updateEnabled={})...",
             args.profile,
@@ -348,6 +390,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             "--profile",
             &args.profile,
             "--locked",
+            "--message-format=json-render-diagnostics",
             "-p",
             "cst-desktop",
             "-p",
@@ -365,12 +408,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         if let Some(flags) = &dist_rustflags {
             cmd1.env("RUSTFLAGS", flags);
         }
-        let st1 = cmd1
-            .status()
-            .map_err(|e| format!("无法执行 cargo build：{e}"))?;
-        if !st1.success() {
-            return Err(format!("cst-desktop / cst-updater 编译失败：{st1}"));
-        }
+        let mut exes = run_cargo_and_collect_executables(&mut cmd1, "cst-desktop / cst-updater")?;
 
         let mut cmd2 = Command::new(&cargo);
         strip_release_secrets(&mut cmd2);
@@ -379,6 +417,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             "--profile",
             &args.profile,
             "--locked",
+            "--message-format=json-render-diagnostics",
             "-p",
             "cst-server",
             "--features",
@@ -396,13 +435,14 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         if let Some(flags) = &dist_rustflags {
             cmd2.env("RUSTFLAGS", flags);
         }
-        let st2 = cmd2
-            .status()
-            .map_err(|e| format!("无法执行 cargo build (cst-server)：{e}"))?;
-        if !st2.success() {
-            return Err(format!("cst-server (embed-web) 编译失败：{st2}"));
-        }
-    }
+        exes.extend(run_cargo_and_collect_executables(
+            &mut cmd2,
+            "cst-server (embed-web)",
+        )?);
+        Some(exes)
+    } else {
+        None
+    };
 
     // 3. Assemble clean release tree under `<out>/cst-pilot/`
     let kit_dir = args.out_dir.join("cst-pilot");
@@ -411,19 +451,41 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     }
     fs::create_dir_all(kit_dir.join("app")).map_err(|e| format!("无法创建发行目录：{e}"))?;
 
-    let bin_dir = cargo_target_dir(&root)?.join(target_subdir);
-    copy_required_file(
-        &bin_dir.join("cst-pilot.exe"),
-        &kit_dir.join("cst-pilot.exe"),
-    )?;
-    copy_required_file(
-        &bin_dir.join("cst-server.exe"),
-        &kit_dir.join(SERVER_EXE_PATH),
-    )?;
-    copy_required_file(
-        &bin_dir.join("cst-updater.exe"),
-        &kit_dir.join(UPDATER_EXE_PATH),
-    )?;
+    if let Some(exes) = &built_executables {
+        let pilot_src = exes
+            .get("cst-pilot")
+            .ok_or("Cargo 编译输出未报告 cst-pilot 可执行产物路径。")?;
+        let server_src = exes
+            .get("cst-server")
+            .ok_or("Cargo 编译输出未报告 cst-server 可执行产物路径。")?;
+        let updater_src = exes
+            .get("cst-updater")
+            .ok_or("Cargo 编译输出未报告 cst-updater 可执行产物路径。")?;
+        copy_required_file(pilot_src, &kit_dir.join("cst-pilot.exe"))?;
+        copy_required_file(server_src, &kit_dir.join(SERVER_EXE_PATH))?;
+        copy_required_file(updater_src, &kit_dir.join(UPDATER_EXE_PATH))?;
+    } else {
+        let bin_dir = cargo_target_dir(&root)?.join(target_subdir);
+        copy_required_file(
+            &bin_dir.join("cst-pilot.exe"),
+            &kit_dir.join("cst-pilot.exe"),
+        )?;
+        copy_required_file(
+            &bin_dir.join("cst-server.exe"),
+            &kit_dir.join(SERVER_EXE_PATH),
+        )?;
+        copy_required_file(
+            &bin_dir.join("cst-updater.exe"),
+            &kit_dir.join(UPDATER_EXE_PATH),
+        )?;
+    }
+
+    for rel in ["cst-pilot.exe", SERVER_EXE_PATH, UPDATER_EXE_PATH] {
+        let bin_bytes =
+            fs::read(kit_dir.join(rel)).map_err(|e| format!("无法读取发行二进制 {rel}：{e}"))?;
+        release::verify_pe64_windows_gui_binary(&bin_bytes, rel)?;
+    }
+
     if let Some(cfg) = &update_cfg {
         release::verify_static_binary_update_root(
             &kit_dir,
@@ -431,7 +493,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             &cfg.public_key_b64,
         )?;
         release::verify_binaries_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
-    } else if !args.skip_cargo_build {
+    } else {
         release::verify_binaries_update_disabled(&kit_dir)?;
     }
 
@@ -552,9 +614,10 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         })?;
     }
 
-    // 4. Redline & metadata scan using shared `cst-updater` validator
+    // 4. Redline & metadata scan using shared `cst-updater` validator + canonical defaults check
     println!("[xtask] Validating clean release tree...");
     let sums = cst_updater::verify::scan_clean_dist_tree(&kit_dir, &args.version)?;
+    release::verify_canonical_release_defaults(&kit_dir)?;
     let sums_text = format_sums(&sums);
     fs::write(kit_dir.join(SHA256SUMS_PATH), sums_text.as_bytes())
         .map_err(|e| format!("无法写入 {SHA256SUMS_PATH}：{e}"))?;
@@ -589,7 +652,6 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 update_cfg
                     .as_ref()
                     .map(|cfg| cfg.public_key_fingerprint.as_str()),
-                !args.skip_cargo_build,
             )?;
         }
         let zip_bytes = fs::read(&zip_path).map_err(|e| format!("读取发行 ZIP 失败：{e}"))?;
@@ -656,11 +718,59 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             update_cfg
                 .as_ref()
                 .map(|cfg| cfg.public_key_fingerprint.as_str()),
-            !args.skip_cargo_build,
         )?;
     }
 
     Ok(())
+}
+
+fn run_cargo_and_collect_executables(
+    cmd: &mut Command,
+    label: &str,
+) -> Result<BTreeMap<String, PathBuf>, String> {
+    use std::io::{BufRead, BufReader};
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("无法启动 cargo build ({label})：{e}"))?;
+    let mut exes = BTreeMap::new();
+    if let Some(stdout) = child.stdout.take() {
+        for line in BufReader::new(stdout).lines() {
+            let line = line.map_err(|e| format!("读取 cargo 输出失败 ({label})：{e}"))?;
+            let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if msg.get("reason").and_then(serde_json::Value::as_str) != Some("compiler-artifact") {
+                continue;
+            }
+            let is_bin = msg
+                .get("target")
+                .and_then(|t| t.get("kind"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|kinds| kinds.iter().any(|k| k.as_str() == Some("bin")));
+            let Some(name) = msg
+                .get("target")
+                .and_then(|t| t.get("name"))
+                .and_then(serde_json::Value::as_str)
+            else {
+                continue;
+            };
+            let Some(exe) = msg.get("executable").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if is_bin {
+                exes.insert(name.to_owned(), PathBuf::from(exe));
+            }
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|e| format!("等待 cargo build 结束失败 ({label})：{e}"))?;
+    if !status.success() {
+        return Err(format!("{label} 编译失败：{status}"));
+    }
+    Ok(exes)
 }
 
 fn cargo_target_dir(root: &Path) -> Result<PathBuf, String> {
@@ -736,12 +846,12 @@ fn smoke_release(
     root: &Path,
     version: &str,
     expected_key_fingerprint: Option<&str>,
-    verify_disabled_probe: bool,
 ) -> Result<(), String> {
     cst_updater::verify::verify_clean_dist_tree(root, version)?;
+    release::verify_canonical_release_defaults(root)?;
     if let Some(expected_fp) = expected_key_fingerprint {
         release::verify_binaries_key_fingerprint(root, expected_fp)?;
-    } else if verify_disabled_probe {
+    } else {
         release::verify_binaries_update_disabled(root)?;
     }
     let expected = format!("cst-pilot {version}");
@@ -966,5 +1076,20 @@ mod tests {
         .expect("valid disabled dist args");
         assert_eq!(disabled.channel, Some(release::DistChannel::Disabled));
         assert!(!disabled.make_zip);
+    }
+
+    #[test]
+    fn parse_verify_tree_args_accepts_strict_keyless_flag_in_any_position() {
+        let parsed = parse_verify_tree_args(
+            ["--strict-keyless-env", "E:\\tmp\\kit", "v0.9.8"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .unwrap();
+        assert_eq!(parsed.dir, PathBuf::from("E:\\tmp\\kit"));
+        assert_eq!(parsed.version.as_deref(), Some("v0.9.8"));
+        assert!(parsed.strict_keyless_env);
+
+        assert!(parse_verify_tree_args(["--unknown"].into_iter().map(str::to_owned)).is_err());
     }
 }

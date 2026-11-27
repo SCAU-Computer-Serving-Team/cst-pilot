@@ -388,6 +388,10 @@ fn validate_open(file: &File, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn is_same_existing_file(a: &Path, b: &Path) -> bool {
+    same_file::is_same_file(a, b).unwrap_or(false)
+}
+
 pub fn link_count(file: &File) -> Result<u64, String> {
     #[cfg(windows)]
     let links = {

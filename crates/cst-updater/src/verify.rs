@@ -320,12 +320,18 @@ pub fn extract_clean_dist_archive(
     if archive.len() > MAX_FILES * 2 {
         return Err("发行归档条目过多。".into());
     }
+    let root_meta =
+        std::fs::symlink_metadata(root).map_err(|_| "解包目标目录不存在或无法读取。".to_owned())?;
+    if cst_os::is_reparse_or_symlink(&root_meta) || !root_meta.is_dir() {
+        return Err("解包目标目录不能是符号链接、重解析点或普通文件。".into());
+    }
     let storage = Storage::new(root)?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
     let mut explicit_dirs = Vec::new();
     let mut extracted_files = Vec::new();
     let mut total_unpacked = 0u64;
+    let mut written_total = 0u64;
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|_| "发行归档条目无法读取。")?;
@@ -408,6 +414,10 @@ pub fn extract_clean_dist_archive(
                 .checked_add(n as u64)
                 .filter(|v| *v <= per_file_limit)
                 .ok_or("发行归档文件实际解压体积超限。")?;
+            written_total = written_total
+                .checked_add(n as u64)
+                .filter(|v| *v <= max_unpacked_bytes)
+                .ok_or("发行归档实际写入总体积超限。")?;
             output
                 .write_all(&buffer[..n])
                 .map_err(|_| "发行解包写入失败。")?;
@@ -501,8 +511,138 @@ fn zip_bounds(file: &mut File) -> Result<(), String> {
     {
         return Err(error());
     }
+    verify_central_and_local_headers(file, count as usize, offset, size as usize)?;
     file.seek(SeekFrom::Start(0)).map_err(|_| error())?;
     Ok(())
+}
+
+fn verify_central_and_local_headers(
+    file: &mut File,
+    expected_count: usize,
+    cd_offset: u64,
+    cd_size: usize,
+) -> Result<(), String> {
+    let error = || "升级 ZIP 中央目录与本地文件头不一致或存在重复条目。".to_owned();
+    file.seek(SeekFrom::Start(cd_offset)).map_err(|_| error())?;
+    let mut cd = vec![0u8; cd_size];
+    file.read_exact(&mut cd).map_err(|_| error())?;
+
+    let mut pos = 0usize;
+    let mut parsed_count = 0usize;
+    let mut seen_names = BTreeSet::new();
+    while pos < cd.len() {
+        if pos + 46 > cd.len() || &cd[pos..pos + 4] != b"PK\x01\x02" {
+            return Err(error());
+        }
+        let name_len = u16::from_le_bytes([cd[pos + 28], cd[pos + 29]]) as usize;
+        let extra_len = u16::from_le_bytes([cd[pos + 30], cd[pos + 31]]) as usize;
+        let comment_len = u16::from_le_bytes([cd[pos + 32], cd[pos + 33]]) as usize;
+        let record_end = pos
+            .checked_add(46)
+            .and_then(|v| v.checked_add(name_len))
+            .and_then(|v| v.checked_add(extra_len))
+            .and_then(|v| v.checked_add(comment_len))
+            .ok_or_else(error)?;
+        if record_end > cd.len() || name_len == 0 {
+            return Err(error());
+        }
+        let cd_name_bytes = &cd[pos + 46..pos + 46 + name_len];
+        let cd_name = std::str::from_utf8(cd_name_bytes).map_err(|_| error())?;
+        let normalized_key = cd_name.trim_end_matches('/').to_lowercase();
+        if !seen_names.insert(normalized_key) {
+            return Err("升级 ZIP 中央目录存在重复或大小写冲突条目。".into());
+        }
+        let cd_extra = &cd[pos + 46 + name_len..pos + 46 + name_len + extra_len];
+        check_extra(cd_extra)?;
+
+        let uncomp_32 =
+            u32::from_le_bytes([cd[pos + 24], cd[pos + 25], cd[pos + 26], cd[pos + 27]]);
+        let comp_32 = u32::from_le_bytes([cd[pos + 20], cd[pos + 21], cd[pos + 22], cd[pos + 23]]);
+        let disk_16 = u16::from_le_bytes([cd[pos + 34], cd[pos + 35]]);
+        let lfh_32 = u32::from_le_bytes([cd[pos + 42], cd[pos + 43], cd[pos + 44], cd[pos + 45]]);
+        let local_offset = if lfh_32 == 0xffff_ffff {
+            extract_zip64_local_offset(
+                cd_extra,
+                uncomp_32 == 0xffff_ffff,
+                comp_32 == 0xffff_ffff,
+                disk_16 == 0xffff,
+            )
+            .ok_or_else(error)?
+        } else {
+            u64::from(lfh_32)
+        };
+        if local_offset
+            .checked_add(30)
+            .is_none_or(|end| end > cd_offset)
+        {
+            return Err(error());
+        }
+        file.seek(SeekFrom::Start(local_offset))
+            .map_err(|_| error())?;
+        let mut lfh = [0u8; 30];
+        file.read_exact(&mut lfh).map_err(|_| error())?;
+        if &lfh[..4] != b"PK\x03\x04" {
+            return Err(error());
+        }
+        let lfh_name_len = u16::from_le_bytes([lfh[26], lfh[27]]) as usize;
+        let lfh_extra_len = u16::from_le_bytes([lfh[28], lfh[29]]) as usize;
+        if lfh_name_len != name_len {
+            return Err(error());
+        }
+        let var_end = local_offset
+            .checked_add(30)
+            .and_then(|v| v.checked_add(lfh_name_len as u64))
+            .and_then(|v| v.checked_add(lfh_extra_len as u64))
+            .ok_or_else(error)?;
+        if var_end > cd_offset {
+            return Err(error());
+        }
+        let mut lfh_var = vec![0u8; lfh_name_len + lfh_extra_len];
+        file.read_exact(&mut lfh_var).map_err(|_| error())?;
+        if &lfh_var[..lfh_name_len] != cd_name_bytes {
+            return Err(error());
+        }
+        check_extra(&lfh_var[lfh_name_len..])?;
+
+        parsed_count += 1;
+        pos = record_end;
+    }
+    if parsed_count != expected_count {
+        return Err(error());
+    }
+    Ok(())
+}
+
+fn extract_zip64_local_offset(
+    mut extra: &[u8],
+    has_uncomp64: bool,
+    has_comp64: bool,
+    _has_disk32: bool,
+) -> Option<u64> {
+    while extra.len() >= 4 {
+        let id = u16::from_le_bytes([extra[0], extra[1]]);
+        let len = u16::from_le_bytes([extra[2], extra[3]]) as usize;
+        if len > extra.len() - 4 {
+            return None;
+        }
+        let body = &extra[4..4 + len];
+        if id == 0x0001 {
+            let mut off = 0usize;
+            if has_uncomp64 {
+                off = off.checked_add(8)?;
+            }
+            if has_comp64 {
+                off = off.checked_add(8)?;
+            }
+            let end = off.checked_add(8)?;
+            if end > body.len() {
+                return None;
+            }
+            return Some(u64::from_le_bytes(body[off..end].try_into().ok()?));
+        }
+        extra = &extra[4 + len..];
+    }
+    None
 }
 
 fn check_spelling(path: &str, names: &mut BTreeMap<String, String>) -> Result<(), String> {
@@ -604,7 +744,7 @@ pub fn verify_tree(
                     if format!("{:x}", hash.finalize()) != *expected {
                         return Err("升级目录文件哈希不匹配。".into());
                     }
-                    if name.ends_with(".json") {
+                    if name.to_ascii_lowercase().ends_with(".json") {
                         let bytes = storage
                             .read_limited(&item.path(), 8 * 1024 * 1024)?
                             .ok_or("升级 JSON 文件消失。")?;
@@ -673,7 +813,7 @@ pub fn scan_clean_dist_tree(
                 hash.update(&buffer[..n]);
                 secret_scan.check(&buffer[..n])?;
             }
-            if name.ends_with(".json") {
+            if name.to_ascii_lowercase().ends_with(".json") {
                 let bytes = storage
                     .read_limited(&item.path(), 8 * 1024 * 1024)?
                     .ok_or("发行 JSON 文件消失。")?;
@@ -728,6 +868,104 @@ mod dist_sum_tests {
         assert!(check_dist_sums(&actual, &format!("{a}  cst-pilot.exe\n")).is_err());
         assert!(check_dist_sums(&actual, &format!("{good}{b}  cst-pilot.exe\n")).is_err());
     }
+
+    fn build_raw_stored_zip(entries: &[(&str, &str, &[u8])]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut cd = Vec::new();
+        for &(lfh_name, cd_name, data) in entries {
+            let local_off = out.len() as u32;
+            let lfh_bytes = lfh_name.as_bytes();
+            out.extend_from_slice(b"PK\x03\x04");
+            out.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            out.extend_from_slice(&0u16.to_le_bytes()); // flags
+            out.extend_from_slice(&0u16.to_le_bytes()); // stored
+            out.extend_from_slice(&0u32.to_le_bytes()); // time/date
+            out.extend_from_slice(&0u32.to_le_bytes()); // crc32
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(lfh_bytes.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes()); // extra len
+            out.extend_from_slice(lfh_bytes);
+            out.extend_from_slice(data);
+
+            let cd_bytes = cd_name.as_bytes();
+            cd.extend_from_slice(b"PK\x01\x02");
+            cd.extend_from_slice(&20u16.to_le_bytes()); // version made by
+            cd.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            cd.extend_from_slice(&0u16.to_le_bytes()); // flags
+            cd.extend_from_slice(&0u16.to_le_bytes()); // stored
+            cd.extend_from_slice(&0u32.to_le_bytes()); // time/date
+            cd.extend_from_slice(&0u32.to_le_bytes()); // crc32
+            cd.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            cd.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            cd.extend_from_slice(&(cd_bytes.len() as u16).to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes()); // extra len
+            cd.extend_from_slice(&0u16.to_le_bytes()); // comment len
+            cd.extend_from_slice(&0u16.to_le_bytes()); // disk start
+            cd.extend_from_slice(&0u16.to_le_bytes()); // internal attr
+            cd.extend_from_slice(&0u32.to_le_bytes()); // external attr
+            cd.extend_from_slice(&local_off.to_le_bytes());
+            cd.extend_from_slice(cd_bytes);
+        }
+        let cd_offset = out.len() as u32;
+        let cd_size = cd.len() as u32;
+        let count = entries.len() as u16;
+        out.extend_from_slice(&cd);
+        out.extend_from_slice(b"PK\x05\x06");
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&cd_size.to_le_bytes());
+        out.extend_from_slice(&cd_offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn zip_bounds_rejects_duplicate_cd_entries_and_lfh_name_spoofing() {
+        let dir = std::env::temp_dir().join(format!("cst-zip-bounds-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let good_path = dir.join("good.zip");
+        fs::write(
+            &good_path,
+            build_raw_stored_zip(&[(
+                "cst-pilot/VERSION",
+                "cst-pilot/VERSION",
+                b"cst-pilot v1.0.0\n",
+            )]),
+        )
+        .unwrap();
+        assert!(zip_bounds(&mut File::open(&good_path).unwrap()).is_ok());
+
+        let dup_path = dir.join("dup.zip");
+        fs::write(
+            &dup_path,
+            build_raw_stored_zip(&[
+                ("cst-pilot/VERSION", "cst-pilot/VERSION", b"evil"),
+                ("cst-pilot/VERSION", "cst-pilot/VERSION", b"clean"),
+            ]),
+        )
+        .unwrap();
+        let dup_err = zip_bounds(&mut File::open(&dup_path).unwrap()).unwrap_err();
+        assert!(dup_err.contains("重复"));
+
+        let spoof_path = dir.join("spoof.zip");
+        fs::write(
+            &spoof_path,
+            build_raw_stored_zip(&[(
+                "cst-pilot/data/config/auth.json",
+                "cst-pilot/VERSION",
+                b"spoof",
+            )]),
+        )
+        .unwrap();
+        let spoof_err = zip_bounds(&mut File::open(&spoof_path).unwrap()).unwrap_err();
+        assert!(spoof_err.contains("不一致"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 #[derive(Default)]
@@ -769,7 +1007,7 @@ fn check_json(value: &Value) -> Result<(), String> {
                         | "clientsecret"
                         | "authorization"
                         | "identitykey"
-                ) && value.as_str().is_some_and(|v| !v.trim().is_empty())
+                ) && is_non_empty_credential_json_value(value)
                 {
                     return Err("升级 JSON 包含非空凭据字段。".into());
                 }
@@ -784,6 +1022,17 @@ fn check_json(value: &Value) -> Result<(), String> {
         _ => (),
     }
     Ok(())
+}
+
+fn is_non_empty_credential_json_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(_) => true,
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(map) => !map.is_empty(),
+    }
 }
 
 pub fn remove_stage(storage: &Storage, relative: &Path) -> Result<(), String> {

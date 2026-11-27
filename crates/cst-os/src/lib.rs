@@ -14,8 +14,8 @@ pub use discovery::{
 };
 pub use fs_safe::{
     DirectoryLease, Storage, StorageError, StorageErrorKind, atomic_write_bytes_sync,
-    atomic_write_json_sync, is_reparse_or_symlink, is_storage_full_io, is_transient_replace_error,
-    link_count,
+    atomic_write_json_sync, is_reparse_or_symlink, is_same_existing_file, is_storage_full_io,
+    is_transient_replace_error, link_count,
 };
 pub use json::{parse_local_json, parse_strict_json, strip_json_comments};
 pub use layout::{

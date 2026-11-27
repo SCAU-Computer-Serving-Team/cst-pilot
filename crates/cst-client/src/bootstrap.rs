@@ -450,9 +450,11 @@ fn spawn_elevated_server_via_uac(
 
         let mut params = OsString::new();
         params.push(quote_win32_arg(OsStr::new("--sanitize-env")));
+        params.push(" ");
         if cst_os::is_offline_env_enabled() {
-            params.push(" ");
             params.push(quote_win32_arg(OsStr::new("--offline")));
+        } else {
+            params.push(quote_win32_arg(OsStr::new("--online")));
         }
         params.push(" ");
         params.push(quote_win32_arg(OsStr::new("--kit-root")));

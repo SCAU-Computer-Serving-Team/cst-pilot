@@ -70,10 +70,10 @@
 | 子命令 | 核心职责与安全边界 |
 |---|---|
 | `keygen` | 离线生成官方 Ed25519 密钥对，拒绝覆盖已有私钥文件 |
-| `dist` | 默认按 `--channel stable` 构建（支持 `beta` 或 `disabled`），单线程入口自动清除本进程与全部子进程的私钥及令牌变量（独立构建机传 `--strict-keyless-env` 则检测到凭据即拒绝构建）。启用在线更新时强制锁定干净 Git 工作树同一 40 位 `HEAD`，禁用跳编与 `--no-zip`，核验静态 `CST_UPDATE_ROOT_V1` 标记与双进程 `--key-fingerprint`，产出 `*.attestation.json` 及 64 位 SHA-256 摘要 |
-| `sign-release` | 带外核对 `--expected-attestation-sha256` 与 `--expected-commit`，未传 `--dist-dir` 时经纯 Rust `extract_clean_dist_archive` 安全解包核验（全程零子进程），计算含 `app/SHA256SUMS` 的 `unpackedSize`，执行双重签名并调用 `VerifiedPackage::stage_from_archive_bytes` 离线自验 |
-| `publish-release` | 仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取令牌，经回环地址流式上传 `multipart/form-data`（先 `manifest` 后 `archive`），激活后复验公开清单签名与归档 `HEAD` |
-| `release` | 面向单包或 `dist` 目录的一键发布入口：默认校验构建证明及通道匹配，传入 `--unattested-package` 时以零子进程静态核验三支 PE64 GUI 头、`CST_UPDATE_ROOT_V1` 通道与公钥标记及干净树红线；支持 `--ssh-host` 托管绑定 `127.0.0.1` 随机端口的 OpenSSH 临时隧道完成上传与公网复验 |
+| `dist` | 默认按 `--channel stable` 构建（支持 `beta` 或 `disabled`），单线程入口清除本进程与全部子进程的私钥及令牌变量（独立无密钥构建机传 `--strict-keyless-env` 则检测到凭据即拒绝）。从 Cargo 编译消息提取精确可执行路径，校验 PE32+ 节表与 GUI 头、`.rdata` 唯一 `CST_UPDATE_ROOT_V1` 标记、标准预置配置及双进程 `--key-fingerprint`（禁用通道同步核验 `disabled` 标记与拒绝探针），锁定干净 Git 树同一 40 位 `HEAD` 产出 `*.attestation.json` |
+| `sign-release` | 解包前先带外核对 `--expected-attestation-sha256`、`--expected-commit` 及归档大小与 SHA-256，再从不可变归档快照经 `extract_clean_dist_archive` 解包校验（核对中央目录与本地文件头一致性，全程零子进程），执行双重签名并调用 `VerifiedPackage` 离线自验 |
+| `publish-release` | 仅从环境变量 `CST_RELEASE_ADMIN_TOKEN` 读取令牌，在内存中固定归档快照、复核 SHA-256 与包内 `.rdata` 通道标记防止跨通道误发，经本地回环地址上传并在激活后复验公开清单签名与归档 `HEAD` |
+| `release` | 一键发布入口：要求可信构建证明或带外核准的 `--expected-archive-sha256` 固定归档摘要，解包前锁定哈希并对同一不可变快照完成 PE32+ `.rdata` 信任根、标准预置配置、干净树红线、双重签名与 `VerifiedPackage` 自验；指定 `--ssh-host` 时不绑定本机端口，直接经系统 OpenSSH `-W` 标准流推送内存快照并复验公网接口 |
 
 ## 随包外部组件与过渡期装配
 

@@ -28,6 +28,10 @@ pub const OFFICIAL_PUBLIC_KEY_FINGERPRINT: &str = "146afb5bf759af97";
 
 /// Delimited marker prefix embedded into compiled binaries for zero-execution static inspection.
 pub const UPDATE_ROOT_MARKER_PREFIX: &[u8] = b"CST_UPDATE_ROOT_V1\n";
+/// Maximum byte length of a compiled-in manifest URL embedded in [`COMPILED_UPDATE_ROOT_MARKER`].
+pub const MAX_COMPILED_MANIFEST_URL_BYTES: usize = 200;
+/// Maximum byte length of a compiled-in public key string embedded in [`COMPILED_UPDATE_ROOT_MARKER`].
+pub const MAX_COMPILED_PUBLIC_KEY_BYTES: usize = 88;
 
 const COMPILED_MANIFEST_URL_RAW: &str = match option_env!("CST_UPDATE_MANIFEST_URL") {
     Some(v) => v,
@@ -39,15 +43,98 @@ const COMPILED_PUBLIC_KEY_RAW: &str = match option_env!("CST_UPDATE_PUBLIC_KEY")
     None => OFFICIAL_PUBLIC_KEY_B64,
 };
 
+const fn trim_ascii_bytes(bytes: &[u8]) -> &[u8] {
+    let mut start = 0usize;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let mut out_len = end - start;
+    let mut slice = bytes;
+    let mut s = 0usize;
+    while s < start {
+        if let Some((_, rest)) = slice.split_first() {
+            slice = rest;
+        }
+        s += 1;
+    }
+    while slice.len() > out_len {
+        if let Some((_, head)) = slice.split_last() {
+            slice = head;
+        } else {
+            out_len = 0;
+        }
+    }
+    slice
+}
+
+const fn is_disabled_bytes(trimmed: &[u8]) -> bool {
+    matches!(
+        trimmed.len(),
+        8 if trimmed[0].eq_ignore_ascii_case(&b'd')
+            && trimmed[1].eq_ignore_ascii_case(&b'i')
+            && trimmed[2].eq_ignore_ascii_case(&b's')
+            && trimmed[3].eq_ignore_ascii_case(&b'a')
+            && trimmed[4].eq_ignore_ascii_case(&b'b')
+            && trimmed[5].eq_ignore_ascii_case(&b'l')
+            && trimmed[6].eq_ignore_ascii_case(&b'e')
+            && trimmed[7].eq_ignore_ascii_case(&b'd')
+    ) || matches!(
+        trimmed.len(),
+        4 if trimmed[0].eq_ignore_ascii_case(&b'n')
+            && trimmed[1].eq_ignore_ascii_case(&b'o')
+            && trimmed[2].eq_ignore_ascii_case(&b'n')
+            && trimmed[3].eq_ignore_ascii_case(&b'e')
+    ) || matches!(
+        trimmed.len(),
+        3 if trimmed[0].eq_ignore_ascii_case(&b'o')
+            && trimmed[1].eq_ignore_ascii_case(&b'f')
+            && trimmed[2].eq_ignore_ascii_case(&b'f')
+    )
+}
+
+const fn assert_printable_ascii_token(bytes: &[u8]) {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b <= 0x20 || b >= 0x7f {
+            panic!(
+                "CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY must not contain whitespace or control bytes"
+            );
+        }
+        i += 1;
+    }
+}
+
 const fn build_update_root_marker(url: &str, key: &str) -> [u8; 320] {
     let mut out = [0u8; 320];
     let prefix = UPDATE_ROOT_MARKER_PREFIX;
-    let url_b = url.as_bytes();
-    let key_b = key.as_bytes();
-    // Require room for `prefix + url + '\n' + key + '\n'` inside 320 bytes.
-    if prefix.len() + url_b.len() + 1 + key_b.len() + 1 > out.len() {
-        return out;
+    let u_trim = trim_ascii_bytes(url.as_bytes());
+    let k_trim = trim_ascii_bytes(key.as_bytes());
+    let disabled = is_disabled_bytes(u_trim) || is_disabled_bytes(k_trim);
+    let url_b: &[u8] = if disabled {
+        b"disabled"
+    } else if u_trim.is_empty() {
+        OFFICIAL_MANIFEST_URL.as_bytes()
+    } else {
+        u_trim
+    };
+    let key_b: &[u8] = if disabled {
+        b"disabled"
+    } else if k_trim.is_empty() {
+        OFFICIAL_PUBLIC_KEY_B64.as_bytes()
+    } else {
+        k_trim
+    };
+    if url_b.len() > MAX_COMPILED_MANIFEST_URL_BYTES || key_b.len() > MAX_COMPILED_PUBLIC_KEY_BYTES
+    {
+        panic!("CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY exceeds static marker capacity");
     }
+    assert_printable_ascii_token(url_b);
+    assert_printable_ascii_token(key_b);
     let mut idx = 0;
     let mut i = 0;
     while i < prefix.len() {
@@ -100,6 +187,9 @@ pub fn is_disabled_update_sentinel(raw: &str) -> bool {
 
 /// Pure offline HTTPS release URL validation shared by `cst-updater` and `cst-kit`.
 pub fn validate_release_url(text: &str) -> Result<Url, String> {
+    if text.is_empty() || text.len() > 2048 || !text.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
+        return Err("URL 包含空白、控制字符或长度超出限制。".into());
+    }
     let url = Url::parse(text).map_err(|_| "URL 无效。")?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host().is_none()
@@ -206,6 +296,11 @@ impl ReleaseKey {
             return Err("当前构建未启用在线更新。".into());
         }
         if let Some(raw) = public_key_env.map(str::trim).filter(|s| !s.is_empty()) {
+            if raw.len() > MAX_COMPILED_PUBLIC_KEY_BYTES
+                || !raw.bytes().all(|b| (0x21..=0x7e).contains(&b))
+            {
+                return Err("构建中的升级公钥长度或字符无效。".into());
+            }
             let bytes = STANDARD.decode(raw).map_err(|_| "构建中的升级公钥无效。")?;
             if STANDARD.encode(&bytes) != raw {
                 return Err("构建中的升级公钥必须为标准 Base64 编码。".into());
@@ -424,7 +519,13 @@ pub fn resolve_compiled_manifest_url_from_opt(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or(OFFICIAL_MANIFEST_URL);
+    if effective.len() > MAX_COMPILED_MANIFEST_URL_BYTES {
+        return Err("升级源地址超出编译期标记容量上限。".into());
+    }
     let parsed = validate_release_url(effective)?;
+    if parsed.as_str() != effective {
+        return Err("升级源地址必须为已规范化的标准 HTTPS URL。".into());
+    }
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err("升级源地址不允许包含查询参数或片段。".into());
     }
