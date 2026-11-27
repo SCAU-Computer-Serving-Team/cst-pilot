@@ -133,6 +133,20 @@ const fn build_update_root_marker(url: &str, key: &str) -> [u8; 320] {
     {
         panic!("CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY exceeds static marker capacity");
     }
+    if !disabled
+        && (url_b.len() <= 8
+            || url_b[0] != b'h'
+            || url_b[1] != b't'
+            || url_b[2] != b't'
+            || url_b[3] != b'p'
+            || url_b[4] != b's'
+            || url_b[5] != b':'
+            || url_b[6] != b'/'
+            || url_b[7] != b'/'
+            || url_b[8] == b'/')
+    {
+        panic!("CST_UPDATE_MANIFEST_URL must start with https://<host>");
+    }
     assert_printable_ascii_token(url_b);
     assert_printable_ascii_token(key_b);
     let mut idx = 0;

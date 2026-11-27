@@ -187,15 +187,12 @@ pub fn classify(path: &str) -> Result<Area, String> {
     let app_allowed = if let Some(rest) = path.strip_prefix("app/") {
         !rest.contains('/')
             || matches!(
+                path,
+                "app/telemetry/timserver_1.crt" | "app/telemetry/currency.json"
+            )
+            || matches!(
                 rest.split('/').next().unwrap_or(""),
-                "defaults"
-                    | "docs"
-                    | "fonts"
-                    | "licenses"
-                    | "prompts"
-                    | "skills"
-                    | "telemetry"
-                    | "tools"
+                "defaults" | "docs" | "fonts" | "licenses" | "prompts" | "skills" | "tools"
             )
     } else {
         false

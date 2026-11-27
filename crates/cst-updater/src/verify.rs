@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -163,6 +163,33 @@ fn stopped(cancel: &CancellationToken) -> Result<(), String> {
     }
 }
 
+fn open_pinned_target_storage(
+    root: &Path,
+    label: &str,
+) -> Result<(Storage, cst_os::DirectoryLease, Storage), String> {
+    let root_meta = fs::symlink_metadata(root).map_err(|_| format!("{label}不存在或无法读取。"))?;
+    if is_reparse_or_symlink(&root_meta) || !root_meta.is_dir() {
+        return Err(format!("{label}不能是符号链接、重解析点或普通文件。"));
+    }
+    let root_name = root
+        .file_name()
+        .ok_or_else(|| format!("{label}路径无效。"))?;
+    let parent_dir = match root.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let parent_storage = Storage::new(parent_dir)?;
+    let lease = parent_storage.pin_directory(Path::new(root_name), false)?;
+    let pinned_target = parent_storage.root.join(root_name);
+    let storage = Storage::new(&pinned_target)?;
+    if !cst_os::is_same_existing_file(&pinned_target, &storage.root)
+        && storage.root != pinned_target
+    {
+        return Err(format!("{label}真实身份发生变化。"));
+    }
+    Ok((parent_storage, lease, storage))
+}
+
 pub fn extract_archive(
     archive: &Path,
     root: &Path,
@@ -172,19 +199,36 @@ pub fn extract_archive(
     let parent = Storage::new(archive.parent().ok_or("升级文件路径无效。")?)?;
     let _parent_pin = parent.pin_directory(Path::new(""), false)?;
     let mut file = parent.open_read(archive)?.ok_or("升级包不存在。")?;
-    let records = zip_bounds(&mut file)?;
-    let mut archive = ZipArchive::new(file).map_err(|_| "升级包 ZIP 格式无效。")?;
+    let len = file.metadata().map_err(|_| "升级包无法读取元数据。")?.len();
+    extract_archive_reader(&mut file, len, root, release, cancel)
+}
+
+pub fn extract_archive_bytes(
+    zip_bytes: &[u8],
+    root: &Path,
+    release: &VerifiedRelease,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let mut cursor = std::io::Cursor::new(zip_bytes);
+    extract_archive_reader(&mut cursor, zip_bytes.len() as u64, root, release, cancel)
+}
+
+fn extract_archive_reader<R: Read + Seek>(
+    reader: &mut R,
+    reader_len: u64,
+    root: &Path,
+    release: &VerifiedRelease,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let records = zip_bounds_reader(reader, reader_len)?;
+    let mut archive = ZipArchive::new(reader).map_err(|_| "升级包 ZIP 格式无效。")?;
     if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
         return Err("升级归档条目数量异常或与中央目录不一致。".into());
     }
-    let root_meta =
-        fs::symlink_metadata(root).map_err(|_| "升级解包目录不存在或无法读取。".to_owned())?;
-    if is_reparse_or_symlink(&root_meta) || !root_meta.is_dir() {
-        return Err("升级解包目录不能是符号链接、重解析点或普通文件。".into());
-    }
-    let storage = Storage::new(root)?;
+    let (_parent_storage, _root_lease, storage) = open_pinned_target_storage(root, "升级解包目录")?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
+    let mut saw_root_dir = false;
     let mut count = 0u64;
     let mut written_total = 0u64;
     let sums_size = release.info.sha256_sums.len() as u64;
@@ -205,23 +249,6 @@ pub fn extract_archive(
             return Err("升级归档文件名编码存在歧义。".into());
         }
         let directory = file.is_dir();
-        let raw = if directory {
-            raw.strip_suffix('/').unwrap_or(raw)
-        } else {
-            raw
-        };
-        let Some(relative) = raw.strip_prefix("cst-pilot/") else {
-            if raw == "cst-pilot" && directory {
-                continue;
-            }
-            return Err("升级归档必须仅包含 cst-pilot/ 顶层目录。".into());
-        };
-        layout::safe_path(relative)?;
-        let relative = relative.to_owned();
-        if !seen.insert(relative.to_lowercase()) {
-            return Err("升级归档有重复或大小写冲突。".into());
-        }
-        check_spelling(&relative, &mut spellings)?;
         let mode = file
             .unix_mode()
             .unwrap_or(if directory { 0o040000 } else { 0o100000 })
@@ -232,10 +259,28 @@ pub fn extract_archive(
         {
             return Err("升级归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(
-            file.extra_data().unwrap_or_default(),
-            expected_rec.expected_cd_zip64_len,
-        )?;
+        check_extra(file.extra_data().unwrap_or_default(), 0)?;
+        let raw = if directory {
+            raw.strip_suffix('/').unwrap_or(raw)
+        } else {
+            raw
+        };
+        let Some(relative) = raw.strip_prefix("cst-pilot/") else {
+            if raw == "cst-pilot" && directory {
+                if file.size() != 0 || saw_root_dir {
+                    return Err("升级归档顶层目录条目异常或重复。".into());
+                }
+                saw_root_dir = true;
+                continue;
+            }
+            return Err("升级归档必须仅包含 cst-pilot/ 顶层目录。".into());
+        };
+        layout::safe_path(relative)?;
+        let relative = relative.to_owned();
+        if !seen.insert(relative.to_lowercase()) {
+            return Err("升级归档有重复或大小写冲突。".into());
+        }
+        check_spelling(&relative, &mut spellings)?;
         if directory {
             layout::reject_retired_release_path(&relative)?;
             if file.size() != 0
@@ -320,7 +365,6 @@ pub fn extract_clean_dist_archive(
     root: &Path,
     max_unpacked_bytes: u64,
 ) -> Result<u64, String> {
-    const MAX_SUMS_FILE_BYTES: u64 = 6 * 1024 * 1024;
     let archive_meta =
         std::fs::symlink_metadata(archive).map_err(|_| "发行归档不存在或无法读取。".to_owned())?;
     if cst_os::is_reparse_or_symlink(&archive_meta) || !archive_meta.is_file() {
@@ -337,19 +381,45 @@ pub fn extract_clean_dist_archive(
     let mut file = parent
         .open_read(&canonical_archive)?
         .ok_or("发行归档不存在。")?;
-    let records = zip_bounds(&mut file)?;
-    let mut archive = ZipArchive::new(file).map_err(|_| "发行归档 ZIP 格式无效。")?;
+    let len = file
+        .metadata()
+        .map_err(|_| "发行归档无法读取元数据。")?
+        .len();
+    extract_clean_dist_archive_reader(&mut file, len, root, max_unpacked_bytes)
+}
+
+/// Extracts directly from an already hash-verified in-memory `zip_bytes` slice without writing
+/// or re-opening any temporary archive file on disk.
+pub fn extract_clean_dist_archive_bytes(
+    zip_bytes: &[u8],
+    root: &Path,
+    max_unpacked_bytes: u64,
+) -> Result<u64, String> {
+    let mut cursor = std::io::Cursor::new(zip_bytes);
+    extract_clean_dist_archive_reader(
+        &mut cursor,
+        zip_bytes.len() as u64,
+        root,
+        max_unpacked_bytes,
+    )
+}
+
+fn extract_clean_dist_archive_reader<R: Read + Seek>(
+    reader: &mut R,
+    reader_len: u64,
+    root: &Path,
+    max_unpacked_bytes: u64,
+) -> Result<u64, String> {
+    const MAX_SUMS_FILE_BYTES: u64 = 6 * 1024 * 1024;
+    let records = zip_bounds_reader(reader, reader_len)?;
+    let mut archive = ZipArchive::new(reader).map_err(|_| "发行归档 ZIP 格式无效。")?;
     if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
         return Err("发行归档条目数量异常或与中央目录不一致。".into());
     }
-    let root_meta =
-        std::fs::symlink_metadata(root).map_err(|_| "解包目标目录不存在或无法读取。".to_owned())?;
-    if cst_os::is_reparse_or_symlink(&root_meta) || !root_meta.is_dir() {
-        return Err("解包目标目录不能是符号链接、重解析点或普通文件。".into());
-    }
-    let storage = Storage::new(root)?;
+    let (_parent_storage, _root_lease, storage) = open_pinned_target_storage(root, "解包目标目录")?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
+    let mut saw_root_dir = false;
     let mut explicit_dirs = Vec::new();
     let mut extracted_files = Vec::new();
     let mut total_unpacked = 0u64;
@@ -371,23 +441,6 @@ pub fn extract_clean_dist_archive(
             return Err("发行归档文件名编码存在歧义。".into());
         }
         let directory = entry.is_dir();
-        let raw = if directory {
-            raw.strip_suffix('/').unwrap_or(raw)
-        } else {
-            raw
-        };
-        let Some(relative) = raw.strip_prefix("cst-pilot/") else {
-            if raw == "cst-pilot" && directory {
-                continue;
-            }
-            return Err("发行归档必须仅包含 cst-pilot/ 顶层目录。".into());
-        };
-        layout::safe_path(relative)?;
-        let relative = relative.to_owned();
-        if !seen.insert(relative.to_lowercase()) {
-            return Err("发行归档有重复或大小写冲突。".into());
-        }
-        check_spelling(&relative, &mut spellings)?;
         let mode = entry
             .unix_mode()
             .unwrap_or(if directory { 0o040000 } else { 0o100000 })
@@ -398,10 +451,28 @@ pub fn extract_clean_dist_archive(
         {
             return Err("发行归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(
-            entry.extra_data().unwrap_or_default(),
-            expected_rec.expected_cd_zip64_len,
-        )?;
+        check_extra(entry.extra_data().unwrap_or_default(), 0)?;
+        let raw = if directory {
+            raw.strip_suffix('/').unwrap_or(raw)
+        } else {
+            raw
+        };
+        let Some(relative) = raw.strip_prefix("cst-pilot/") else {
+            if raw == "cst-pilot" && directory {
+                if entry.size() != 0 || saw_root_dir {
+                    return Err("发行归档顶层目录条目异常或重复。".into());
+                }
+                saw_root_dir = true;
+                continue;
+            }
+            return Err("发行归档必须仅包含 cst-pilot/ 顶层目录。".into());
+        };
+        layout::safe_path(relative)?;
+        let relative = relative.to_owned();
+        if !seen.insert(relative.to_lowercase()) {
+            return Err("发行归档有重复或大小写冲突。".into());
+        }
+        check_spelling(&relative, &mut spellings)?;
         if directory {
             layout::reject_retired_release_path(&relative)?;
             if entry.size() != 0 {
@@ -480,17 +551,26 @@ struct VerifiedZipRecord {
     local_header_start: u64,
     compressed_size: u64,
     uncompressed_size: u64,
-    expected_cd_zip64_len: usize,
 }
 
-fn zip_bounds(file: &mut File) -> Result<Vec<VerifiedZipRecord>, String> {
+#[cfg(test)]
+fn zip_bounds(file: &mut std::fs::File) -> Result<Vec<VerifiedZipRecord>, String> {
+    let len = file
+        .metadata()
+        .map_err(|_| "升级 ZIP 元数据无法读取。")?
+        .len();
+    zip_bounds_reader(file, len)
+}
+
+fn zip_bounds_reader<R: Read + Seek>(
+    file: &mut R,
+    len: u64,
+) -> Result<Vec<VerifiedZipRecord>, String> {
     let error = || "升级 ZIP 的目录结构无效或超过资源限制。".to_owned();
-    let len = file.metadata().map_err(|_| error())?.len();
     let start = len.saturating_sub(65_557);
     file.seek(SeekFrom::Start(start)).map_err(|_| error())?;
     let mut tail = Vec::new();
-    (&mut *file)
-        .take(65_557)
+    file.take(65_557)
         .read_to_end(&mut tail)
         .map_err(|_| error())?;
     let at = (0..tail.len().saturating_sub(21))
@@ -505,19 +585,22 @@ fn zip_bounds(file: &mut File) -> Result<Vec<VerifiedZipRecord>, String> {
     if eocd[4..8] != [0, 0, 0, 0] || eocd[8..10] != eocd[10..12] {
         return Err(error());
     }
-    let mut count = u64::from(u16::from_le_bytes(
+    let eocd_count = u64::from(u16::from_le_bytes(
         eocd[10..12].try_into().map_err(|_| error())?,
     ));
-    let mut size = u64::from(u32::from_le_bytes(
+    let eocd_size = u64::from(u32::from_le_bytes(
         eocd[12..16].try_into().map_err(|_| error())?,
     ));
-    let mut offset = u64::from(u32::from_le_bytes(
+    let eocd_offset = u64::from(u32::from_le_bytes(
         eocd[16..20].try_into().map_err(|_| error())?,
     ));
-    if size == 0xffff_ffff && count != 0xffff && offset != 0xffff_ffff {
+    if eocd_size == 0xffff_ffff && eocd_count != 0xffff && eocd_offset != 0xffff_ffff {
         return Err(error());
     }
-    let cd_limit = if count == 0xffff || offset == 0xffff_ffff {
+    let mut count = eocd_count;
+    let mut size = eocd_size;
+    let mut offset = eocd_offset;
+    let cd_limit = if eocd_count == 0xffff || eocd_offset == 0xffff_ffff {
         if at < 20 {
             return Err(error());
         }
@@ -545,9 +628,18 @@ fn zip_bounds(file: &mut File) -> Result<Vec<VerifiedZipRecord>, String> {
         {
             return Err(error());
         }
-        count = u64::from_le_bytes(zip64[32..40].try_into().map_err(|_| error())?);
-        size = u64::from_le_bytes(zip64[40..48].try_into().map_err(|_| error())?);
-        offset = u64::from_le_bytes(zip64[48..56].try_into().map_err(|_| error())?);
+        let z_count = u64::from_le_bytes(zip64[32..40].try_into().map_err(|_| error())?);
+        let z_size = u64::from_le_bytes(zip64[40..48].try_into().map_err(|_| error())?);
+        let z_offset = u64::from_le_bytes(zip64[48..56].try_into().map_err(|_| error())?);
+        if (eocd_count != 0xffff && z_count != eocd_count)
+            || (eocd_size != 0xffff_ffff && z_size != eocd_size)
+            || (eocd_offset != 0xffff_ffff && z_offset != eocd_offset)
+        {
+            return Err(error());
+        }
+        count = z_count;
+        size = z_size;
+        offset = z_offset;
         pos
     } else {
         start + at as u64
@@ -564,8 +656,8 @@ fn zip_bounds(file: &mut File) -> Result<Vec<VerifiedZipRecord>, String> {
     Ok(records)
 }
 
-fn verify_central_and_local_headers(
-    file: &mut File,
+fn verify_central_and_local_headers<R: Read + Seek>(
+    file: &mut R,
     expected_count: usize,
     cd_offset: u64,
     cd_size: usize,
@@ -580,7 +672,10 @@ fn verify_central_and_local_headers(
     let mut records = Vec::with_capacity(expected_count);
     let mut spans = Vec::with_capacity(expected_count);
     while pos < cd.len() {
-        if pos + 46 > cd.len() || &cd[pos..pos + 4] != b"PK\x01\x02" {
+        if records.len() >= expected_count
+            || pos + 46 > cd.len()
+            || &cd[pos..pos + 4] != b"PK\x01\x02"
+        {
             return Err(error());
         }
         let cd_flags = u16::from_le_bytes([cd[pos + 8], cd[pos + 9]]);
@@ -718,7 +813,6 @@ fn verify_central_and_local_headers(
             local_header_start: local_offset,
             compressed_size,
             uncompressed_size,
-            expected_cd_zip64_len,
         });
         pos = record_end;
     }
@@ -767,11 +861,48 @@ fn check_extra(mut extra: &[u8], expected_zip64_len: usize) -> Result<Option<&[u
             return Err("升级 ZIP 包含未支持的链接或扩展元数据。".into());
         }
         let body = &extra[4..4 + len];
-        if id == 0x0001 {
-            if expected_zip64_len == 0 || len != expected_zip64_len || zip64_body.is_some() {
-                return Err("升级 ZIP 包含异常或冗余的 ZIP64 扩展字段。".into());
+        match id {
+            0x0001 => {
+                if expected_zip64_len == 0 || len != expected_zip64_len || zip64_body.is_some() {
+                    return Err("升级 ZIP 包含异常或冗余的 ZIP64 扩展字段。".into());
+                }
+                zip64_body = Some(body);
             }
-            zip64_body = Some(body);
+            0x5455 => {
+                if body.is_empty() || !(body.len() - 1).is_multiple_of(4) {
+                    return Err("升级 ZIP 时间戳扩展字段长度无效。".into());
+                }
+            }
+            0x7875 => {
+                if body.len() < 3 || body[0] != 1 {
+                    return Err("升级 ZIP Unix UID/GID 扩展字段格式无效。".into());
+                }
+                let uid_len = body[1] as usize;
+                if 2 + uid_len >= body.len() {
+                    return Err("升级 ZIP Unix UID 扩展字段越界。".into());
+                }
+                let gid_len = body[2 + uid_len] as usize;
+                if 3 + uid_len + gid_len != body.len() {
+                    return Err("升级 ZIP Unix GID 扩展字段长度不匹配。".into());
+                }
+            }
+            0x000a => {
+                if body.len() < 4 || body[0..4] != [0, 0, 0, 0] {
+                    return Err("升级 ZIP NTFS 扩展字段头无效。".into());
+                }
+                let mut sub = &body[4..];
+                while !sub.is_empty() {
+                    if sub.len() < 4 {
+                        return Err("升级 ZIP NTFS 子属性截断。".into());
+                    }
+                    let sub_len = u16::from_le_bytes([sub[2], sub[3]]) as usize;
+                    if sub_len > sub.len() - 4 {
+                        return Err("升级 ZIP NTFS 子属性长度越界。".into());
+                    }
+                    sub = &sub[4 + sub_len..];
+                }
+            }
+            _ => unreachable!(),
         }
         extra = &extra[4 + len..];
     }
@@ -961,6 +1092,7 @@ fn check_dist_sums(actual: &BTreeMap<String, String>, text: &str) -> Result<(), 
 #[cfg(test)]
 mod dist_sum_tests {
     use super::*;
+    use std::fs::File;
 
     #[test]
     fn rejects_tampering_missing_and_extra_files() {
@@ -1164,6 +1296,9 @@ fn check_json(value: &Value) -> Result<(), String> {
                         | "refreshtoken"
                         | "token"
                         | "secret"
+                        | "secretkey"
+                        | "privatekey"
+                        | "signingkey"
                         | "password"
                         | "clientsecret"
                         | "authorization"
@@ -1188,7 +1323,7 @@ fn check_json(value: &Value) -> Result<(), String> {
 fn is_non_empty_credential_json_value(value: &Value) -> bool {
     match value {
         Value::Null => false,
-        Value::Bool(b) => *b,
+        Value::Bool(_) => true,
         Value::Number(_) => true,
         Value::String(s) => !s.trim().is_empty(),
         Value::Array(items) => !items.is_empty(),

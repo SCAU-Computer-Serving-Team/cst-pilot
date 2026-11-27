@@ -125,6 +125,18 @@ fn resolve_default_kit_root() -> Result<PathBuf, String> {
     cst_os::resolve_kit_root()
 }
 
+fn resolve_effective_offline_state(
+    offline_mode: OfflineCliMode,
+    cst_offline: Option<&str>,
+    pi_offline: Option<&str>,
+) -> bool {
+    match offline_mode {
+        OfflineCliMode::ForceOffline => true,
+        OfflineCliMode::ForceOnline => false,
+        OfflineCliMode::Inherit => cst_os::is_offline_env_values(cst_offline, pi_offline),
+    }
+}
+
 /// Sanitizes the current single-threaded process environment when launched via `ShellExecuteExW("runas")`
 /// (before spawning any Tokio worker threads), matching `cst_client::apply_portable_sanitized_env`.
 fn sanitize_current_process_env(
@@ -177,11 +189,10 @@ fn sanitize_current_process_env(
         "PROCESSOR_ARCHITECTURE",
     ];
 
-    let caller_offline = match offline_mode {
-        OfflineCliMode::ForceOffline => true,
-        OfflineCliMode::ForceOnline => false,
-        OfflineCliMode::Inherit => cst_os::is_offline_env_enabled(),
-    };
+    let cur_cst = std::env::var("CST_OFFLINE").ok();
+    let cur_pi = std::env::var("PI_OFFLINE").ok();
+    let caller_offline =
+        resolve_effective_offline_state(offline_mode, cur_cst.as_deref(), cur_pi.as_deref());
     let existing_keys: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     // SAFETY: Called strictly at single-threaded `fn main()` entry before building the Tokio runtime.
     unsafe {
@@ -453,5 +464,26 @@ mod tests {
         assert_eq!(on.offline_mode, super::OfflineCliMode::ForceOnline);
 
         assert!(parse_args_from(["--offline", "--online"].into_iter().map(str::to_owned)).is_err());
+
+        assert!(super::resolve_effective_offline_state(
+            super::OfflineCliMode::ForceOffline,
+            Some("0"),
+            Some("0"),
+        ));
+        assert!(!super::resolve_effective_offline_state(
+            super::OfflineCliMode::ForceOnline,
+            Some("1"),
+            Some("1"),
+        ));
+        assert!(super::resolve_effective_offline_state(
+            super::OfflineCliMode::Inherit,
+            None,
+            Some("1"),
+        ));
+        assert!(!super::resolve_effective_offline_state(
+            super::OfflineCliMode::Inherit,
+            Some("0"),
+            Some("0"),
+        ));
     }
 }

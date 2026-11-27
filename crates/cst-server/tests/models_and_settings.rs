@@ -863,24 +863,58 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             );
         }
 
-        // Verify isolated child `cst-server` processes honor `--offline`, `CST_OFFLINE=1`,
-        // `PI_OFFLINE=1`, and `--standalone-web` end-to-end without background network requests.
+        // Verify isolated child `cst-server` processes honor `--offline`, `--sanitize-env --offline`,
+        // `CST_OFFLINE=1`, `PI_OFFLINE=1`, and `--standalone-web` end-to-end without touching real
+        // user data, production telemetry, or external update endpoints.
         let server_exe = env!("CARGO_BIN_EXE_cst-server");
+        let expected_compiled_offline =
+            if cst_kit::update::service::compiled_update_key_fingerprint().is_ok() {
+                "idle"
+            } else {
+                "unavailable"
+            };
         for (extra_args, cst_off, pi_off, expected_phase) in [
-            (&["--offline"][..], "0", "0", "idle"),
-            (&[][..], "1", "0", "idle"),
-            (&[][..], "0", "1", "idle"),
-            (&["--standalone-web"][..], "0", "0", "unavailable"),
+            (&["--offline"][..], "0", "0", expected_compiled_offline),
+            (
+                &["--sanitize-env", "--offline"][..],
+                "0",
+                "0",
+                expected_compiled_offline,
+            ),
+            (&[][..], "1", "0", expected_compiled_offline),
+            (&[][..], "0", "1", expected_compiled_offline),
+            (&["--standalone-web"][..], "1", "0", "unavailable"),
         ] {
             let child_kit = TestKitDir::new();
             fs::write(child_kit.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
+            let cfg_dir = child_kit.0.join("data/config");
+            fs::create_dir_all(&cfg_dir).unwrap();
+            fs::write(
+                cfg_dir.join("telemetry.json"),
+                br#"{"enabled":false,"endpoint":"https://telemetry.invalid/v1/events"}"#,
+            )
+            .unwrap();
+            fs::write(
+                cfg_dir.join("settings.json"),
+                br#"{"enableInstallTelemetry":false}"#,
+            )
+            .unwrap();
             let tmp_sub = child_kit.0.join(".state/tmp");
+            let fake_home = child_kit.0.join(".state/home");
             fs::create_dir_all(&tmp_sub).unwrap();
+            fs::create_dir_all(&fake_home).unwrap();
             let mut cmd = std::process::Command::new(server_exe);
             cmd.args(["--kit-root"])
                 .arg(&child_kit.0)
                 .args(["--port", "0"])
                 .args(extra_args)
+                .env_remove("CST_PILOT_ROOT")
+                .env_remove("CST_PILOT_DATA_DIR")
+                .env_remove("PI_CODING_AGENT_DIR")
+                .env("USERPROFILE", &fake_home)
+                .env("APPDATA", &fake_home)
+                .env("LOCALAPPDATA", &fake_home)
+                .env("HOME", &fake_home)
                 .env("CST_OFFLINE", cst_off)
                 .env("PI_OFFLINE", pi_off)
                 .env("CST_ALLOW_UNELEVATED", "1")

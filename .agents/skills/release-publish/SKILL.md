@@ -27,7 +27,7 @@ description: Sign, verify, upload, and activate a CST-Pilot Windows x64 portable
 
 | 输入形态 | 适用命令与参数 | 安全核验机制 |
 |---|---|---|
-| 独立发行包（单个 `.zip` 或解压目录，无构建证明） | `xtask.exe release --package <路径> --expected-archive-sha256 <64位摘要>` | 解包前先锁定带外核准的归档 SHA-256，再以零子进程纯静态核验 PE32+ 节表与 GUI 头、`.rdata` 唯一 `CST_UPDATE_ROOT_V1` 通道与公钥标记、`BUILD-INFO.json`、预置配置精确匹配、干净树红线及 `VerifiedPackage` 闭环自验 |
+| 独立发行包（现成 `.zip`，或同级含规范 `.zip` 的解压目录） | `xtask.exe release --package <ZIP路径> --expected-archive-sha256 <64位摘要>` | 解包前先在内存中核对带外核准的归档 SHA-256，再直接从内存归档以零子进程静态核验 PE32+ 节表与入口点、`.rdata` 唯一 `CST_UPDATE_ROOT_V1` 通道与公钥标记、`BUILD-INFO.json`、预置配置与全套许可证、私钥防夹带扫描及 `VerifiedPackage` 闭环自验 |
 | `xtask dist` 产物目录（含 `.zip` 与 `.attestation.json`） | `xtask.exe release --package <目录或ZIP> --expected-attestation-sha256 <摘要> --expected-commit <40位提交>` | 解包前先带外核对构建证明 SHA-256、干净 Git 提交哈希、目标通道与归档摘要，再执行双重签名与闭环自验 |
 | 从干净 `main` 现编并发布 | 先在无凭据环境执行 `xtask.exe dist --channel <stable\|beta>`，再执行带证明的 `xtask.exe release` | 锁定构建前后同一 40 位 `HEAD`，提取本次 Cargo 编译产出的可执行路径，完成 PE 头、`.rdata` 静态标记、双进程 `--key-fingerprint` 与隔离冒烟核验 |
 
@@ -37,22 +37,26 @@ description: Sign, verify, upload, and activate a CST-Pilot Windows x64 portable
    ```powershell
    .\target\release\xtask.exe dist --out E:/tmp/<YYYY-MM-DD>/dist --version vX.Y.Z --profile dist --channel stable
    ```
-2. **执行离线预演**：仅向预编译 `xtask.exe` 提供私钥路径（离线预演无需 `CST_RELEASE_ADMIN_TOKEN`），先附加 `--dry-run` 跑通摘要绑定、信任根核验、双重签名与归档解包自验：
+2. **执行离线预演**：仅向预编译 `xtask.exe` 提供私钥路径（离线预演无需 `CST_RELEASE_ADMIN_TOKEN`），先附加 `--dry-run` 跑通摘要绑定、信任根核验、双重签名与内存解包自验：
    ```powershell
    $privKey = [Environment]::GetEnvironmentVariable('CST_RELEASE_PRIVATE_KEY_FILE', 'User')
 
-   # 场景 A：用户直接提供独立发行包（先计算并与用户核准 SHA-256）
-   $pkgSha = (Get-FileHash <包路径> -Algorithm SHA256).Hash.ToLowerInvariant()
-   .\target\release\xtask.exe release --package <包路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
+   # 场景 A：用户直接提供独立发行 ZIP（先计算并与用户核准 SHA-256）
+   $pkgSha = (Get-FileHash <ZIP路径> -Algorithm SHA256).Hash.ToLowerInvariant()
+   .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
 
-   # 场景 B：带构建证明的 dist 产物
-   .\target\release\xtask.exe release --package <dist目录或ZIP> --min-upgradable vX.Y.Z --channel stable --expected-attestation-sha256 <64位摘要> --expected-commit <40位提交> --private-key-file $privKey --notes-file <说明文件.md> --dry-run
+   # 场景 B：带构建证明的 dist 产物（记录构建输出的证明摘要与 40 位提交哈希）
+   .\target\release\xtask.exe release --package <dist目录或ZIP> --min-upgradable vX.Y.Z --channel stable --expected-attestation-sha256 $attSha --expected-commit $commitSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
    ```
-3. **经 OpenSSH 标准流正式上线**：仅在最终上传步骤读取用户级 `CST_RELEASE_ADMIN_TOKEN` 注入子进程环境，移除 `--dry-run` 并传入 SSH 主机别名（如 `--ssh-host cstoa`）。`xtask.exe release` 不绑定任何本机 TCP 端口，直接通过系统 OpenSSH `-W` 匿名管道流式上传内存中已自验的签名清单与归档副本，激活后向公网核验清单签名与归档 `HEAD` 响应：
+3. **经 OpenSSH 标准流正式上线**：仅在最终上传步骤读取用户级 `CST_RELEASE_ADMIN_TOKEN` 注入子进程环境，复用预演阶段同一组带外核准摘要参数，移除 `--dry-run` 并显式传入 `--ssh-host <别名>`。`xtask.exe release` 不绑定任何本机 TCP 端口，直接通过系统 OpenSSH `-W` 匿名管道流式上传内存中已自验的签名清单与归档副本，激活后向公网核验清单签名与归档 `HEAD` 响应：
    ```powershell
    $env:CST_RELEASE_ADMIN_TOKEN = [Environment]::GetEnvironmentVariable('CST_RELEASE_ADMIN_TOKEN', 'User')
    try {
-       .\target\release\xtask.exe release --package <包路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa
+       # 场景 A（独立发行 ZIP）：
+       .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa
+
+       # 场景 B（带构建证明的 dist 产物）：
+       # .\target\release\xtask.exe release --package <dist目录或ZIP> --min-upgradable vX.Y.Z --channel stable --expected-attestation-sha256 $attSha --expected-commit $commitSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa
    } finally {
        Remove-Item Env:CST_RELEASE_ADMIN_TOKEN -ErrorAction SilentlyContinue
    }

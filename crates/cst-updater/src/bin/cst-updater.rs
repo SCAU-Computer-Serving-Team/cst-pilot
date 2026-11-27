@@ -27,6 +27,7 @@ fn run(args: &[std::ffi::OsString]) -> Result<(), String> {
         return Ok(());
     }
     if args.len() == 1 && args[0] == "--key-fingerprint" {
+        let _ = cst_updater::manifest::compiled_manifest_url()?;
         let key = ReleaseKey::compiled()?;
         let _ = writeln!(std::io::stdout(), "{}", key.fingerprint());
         let _ = std::io::stdout().flush();
