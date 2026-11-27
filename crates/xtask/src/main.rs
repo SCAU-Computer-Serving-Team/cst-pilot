@@ -18,7 +18,13 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+const ENV_STRICT_KEYLESS_BUILD: &str = "CST_STRICT_KEYLESS_BUILD";
+
 fn main() -> ExitCode {
+    if let Err(err) = scrub_or_reject_build_secrets_at_entry() {
+        eprintln!("[xtask] ERROR: {err}");
+        return ExitCode::FAILURE;
+    }
     if let Err(err) = run() {
         eprintln!("[xtask] ERROR: {err}");
         return ExitCode::FAILURE;
@@ -26,12 +32,51 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Runs at single-threaded `fn main()` entry before any worker threads or child processes exist.
+/// When running `dist` or `verify-tree`:
+/// - under `--strict-keyless-env` or `CST_STRICT_KEYLESS_BUILD=1`, fails closed if release secrets
+///   (`CST_RELEASE_PRIVATE_KEY_FILE` / `CST_RELEASE_ADMIN_TOKEN`) are present in the environment;
+/// - otherwise purges both variables from `xtask`'s own process environment immediately so
+///   maintainer workstations with user-scoped release variables never leak them to build tools.
+fn scrub_or_reject_build_secrets_at_entry() -> Result<(), String> {
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    let Some(subcmd) = raw_args.first().map(String::as_str) else {
+        return Ok(());
+    };
+    if !matches!(subcmd, "dist" | "verify-tree") {
+        return Ok(());
+    }
+    let strict_flag = raw_args.iter().any(|a| a == "--strict-keyless-env");
+    let strict_env = env::var(ENV_STRICT_KEYLESS_BUILD)
+        .ok()
+        .as_deref()
+        .is_some_and(cst_os::is_truthy_env_value);
+    let has_key = env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some();
+    let has_tok = env::var_os(release::ENV_ADMIN_TOKEN).is_some();
+    if strict_flag || strict_env {
+        return check_build_env_secret_vars(has_key, has_tok);
+    }
+    if has_key || has_tok {
+        // SAFETY: Called strictly at single-threaded `fn main()` entry before spawning threads.
+        unsafe {
+            env::remove_var(release::ENV_PRIVATE_KEY_FILE);
+            env::remove_var(release::ENV_ADMIN_TOKEN);
+        }
+        eprintln!(
+            "[xtask] Scrubbed {} / {} from {subcmd} process environment.",
+            release::ENV_PRIVATE_KEY_FILE,
+            release::ENV_ADMIN_TOKEN
+        );
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let Some(cmd) = args.next() else {
         print_usage();
         return Err(
-            "缺少子命令（支持 dist / verify-tree / keygen / sign-release / publish-release）。"
+            "缺少子命令（支持 dist / verify-tree / keygen / sign-release / publish-release / release）。"
                 .into(),
         );
     };
@@ -52,6 +97,7 @@ fn run() -> Result<(), String> {
         "keygen" => release::run_keygen(args),
         "sign-release" => release::run_sign_release(args),
         "publish-release" => release::run_publish_release(args),
+        "release" => release::run_release(args),
         "-h" | "--help" | "help" => {
             print_usage();
             Ok(())
@@ -65,7 +111,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--channel stable|beta|disabled] [--require-update-config] [--strict-keyless-env] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release [--dist-dir <dir>] --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]\n  xtask release --package <zip-or-dir> --min-upgradable <vX.Y.Z> [--channel stable|beta] [--attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> | --unattested-package] [--version <vX.Y.Z>] [--notes-file <md> | --notes <text>] [--private-key-file <path>] [--out-manifest <path>] [--ssh-host <alias> [--ssh-remote-port <port>] | --admin-url <url>] [--public-base-url <url>] [--no-activate] [--dry-run]"
     );
 }
 
@@ -73,7 +119,9 @@ struct DistArgs {
     out_dir: PathBuf,
     version: String,
     profile: String,
+    channel: Option<release::DistChannel>,
     require_update_config: bool,
+    strict_keyless_env: bool,
     skip_web_build: bool,
     skip_cargo_build: bool,
     skip_smoke: bool,
@@ -84,7 +132,9 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
     let mut out_dir: Option<PathBuf> = None;
     let mut version = format!("v{}", env!("CARGO_PKG_VERSION"));
     let mut profile = "release".to_owned();
+    let mut channel: Option<release::DistChannel> = None;
     let mut require_update_config = false;
+    let mut strict_keyless_env = false;
     let mut skip_web_build = false;
     let mut skip_cargo_build = false;
     let mut skip_smoke = false;
@@ -107,7 +157,14 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
                     ));
                 }
             }
+            "--channel" => {
+                let raw = args
+                    .next()
+                    .ok_or("--channel 需要 stable、beta 或 disabled。")?;
+                channel = Some(release::DistChannel::parse(&raw)?);
+            }
             "--require-update-config" => require_update_config = true,
+            "--strict-keyless-env" => strict_keyless_env = true,
             "--skip-web-build" => skip_web_build = true,
             "--skip-cargo-build" => skip_cargo_build = true,
             "--skip-smoke" => skip_smoke = true,
@@ -126,7 +183,9 @@ fn parse_dist_args(mut args: impl Iterator<Item = String>) -> Result<DistArgs, S
         out_dir,
         version,
         profile,
+        channel,
         require_update_config,
+        strict_keyless_env,
         skip_web_build,
         skip_cargo_build,
         skip_smoke,
@@ -151,7 +210,7 @@ fn validate_dist_update_build_flags(
 ) -> Result<(), String> {
     if has_update_config && (skip_cargo_build || skip_web_build || !make_zip) {
         return Err(
-            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），禁止使用 --skip-cargo-build、--skip-web-build 或 --no-zip，必须从干净源码全量构建并产出 ZIP 与构建证明。"
+            "启用在线更新打包时禁止使用 --skip-cargo-build、--skip-web-build 或 --no-zip（仅本地调试可指定 --channel disabled）；正式构建必须从干净源码全量编译并产出 ZIP 与构建证明。"
                 .into(),
         );
     }
@@ -164,7 +223,7 @@ fn check_build_env_secret_vars(
 ) -> Result<(), String> {
     if has_private_key_var || has_admin_token_var {
         return Err(format!(
-            "构建环境禁止存在 {} 或 {}，请将在线构建与离线签名/发布环境严格隔离。",
+            "严格无密钥构建模式禁止环境中存在 {} 或 {}，请将在线构建与离线签名/发布环境严格隔离。",
             release::ENV_PRIVATE_KEY_FILE,
             release::ENV_ADMIN_TOKEN
         ));
@@ -172,13 +231,15 @@ fn check_build_env_secret_vars(
     Ok(())
 }
 
-fn strip_release_secrets(cmd: &mut Command) -> &mut Command {
+pub(crate) fn strip_release_secrets(cmd: &mut Command) -> &mut Command {
     cmd.env_remove(release::ENV_PRIVATE_KEY_FILE)
         .env_remove(release::ENV_ADMIN_TOKEN)
 }
 
 fn verify_clean_git_head(root: &Path) -> Result<String, String> {
-    let status = Command::new("git")
+    let mut status_cmd = Command::new("git");
+    strip_release_secrets(&mut status_cmd);
+    let status = status_cmd
         .args(["status", "--porcelain=v1", "--untracked-files=all"])
         .current_dir(root)
         .output()
@@ -191,7 +252,9 @@ fn verify_clean_git_head(root: &Path) -> Result<String, String> {
             "启用在线更新打包要求 Git 工作树完全干净（无未提交或未跟踪文件），拒绝打包。".into(),
         );
     }
-    let head = Command::new("git")
+    let mut head_cmd = Command::new("git");
+    strip_release_secrets(&mut head_cmd);
+    let head = head_cmd
         .args(["rev-parse", "HEAD"])
         .current_dir(root)
         .output()
@@ -214,11 +277,14 @@ fn verify_clean_git_head(root: &Path) -> Result<String, String> {
 
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
-    check_build_env_secret_vars(
-        env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some(),
-        env::var_os(release::ENV_ADMIN_TOKEN).is_some(),
-    )?;
-    let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
+    if args.strict_keyless_env {
+        check_build_env_secret_vars(
+            env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some(),
+            env::var_os(release::ENV_ADMIN_TOKEN).is_some(),
+        )?;
+    }
+    let update_cfg =
+        release::resolve_update_build_config(args.channel, args.require_update_config)?;
     validate_dist_update_build_flags(
         update_cfg.is_some(),
         args.skip_cargo_build,
@@ -292,6 +358,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         if let Some(cfg) = &update_cfg {
             cmd1.env(release::ENV_MANIFEST_URL, &cfg.manifest_url)
                 .env(release::ENV_PUBLIC_KEY, &cfg.public_key_b64);
+        } else {
+            cmd1.env(release::ENV_MANIFEST_URL, "disabled")
+                .env(release::ENV_PUBLIC_KEY, "disabled");
         }
         if let Some(flags) = &dist_rustflags {
             cmd1.env("RUSTFLAGS", flags);
@@ -320,6 +389,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         if let Some(cfg) = &update_cfg {
             cmd2.env(release::ENV_MANIFEST_URL, &cfg.manifest_url)
                 .env(release::ENV_PUBLIC_KEY, &cfg.public_key_b64);
+        } else {
+            cmd2.env(release::ENV_MANIFEST_URL, "disabled")
+                .env(release::ENV_PUBLIC_KEY, "disabled");
         }
         if let Some(flags) = &dist_rustflags {
             cmd2.env("RUSTFLAGS", flags);
@@ -353,7 +425,14 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         &kit_dir.join(UPDATER_EXE_PATH),
     )?;
     if let Some(cfg) = &update_cfg {
+        release::verify_static_binary_update_root(
+            &kit_dir,
+            &cfg.manifest_url,
+            &cfg.public_key_b64,
+        )?;
         release::verify_binaries_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
+    } else if !args.skip_cargo_build {
+        release::verify_binaries_update_disabled(&kit_dir)?;
     }
 
     for doc in [
@@ -374,7 +453,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     )
     .map_err(|e| format!("无法写入 VERSION：{e}"))?;
 
-    let git_commit_full = Command::new("git")
+    let mut git_rev_cmd = Command::new("git");
+    strip_release_secrets(&mut git_rev_cmd);
+    let git_commit_full = git_rev_cmd
         .args(["rev-parse", "HEAD"])
         .current_dir(&root)
         .output()
@@ -508,6 +589,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 update_cfg
                     .as_ref()
                     .map(|cfg| cfg.public_key_fingerprint.as_str()),
+                !args.skip_cargo_build,
             )?;
         }
         let zip_bytes = fs::read(&zip_path).map_err(|e| format!("读取发行 ZIP 失败：{e}"))?;
@@ -548,6 +630,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
                 built_at: built_at.clone(),
                 git_commit: post_build_head.clone(),
                 update_enabled: true,
+                manifest_url: cfg.manifest_url.clone(),
                 update_public_key_fingerprint: cfg.public_key_fingerprint.clone(),
                 verified_key_probe: true,
                 archive_filename: zip_name,
@@ -573,6 +656,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             update_cfg
                 .as_ref()
                 .map(|cfg| cfg.public_key_fingerprint.as_str()),
+            !args.skip_cargo_build,
         )?;
     }
 
@@ -652,10 +736,13 @@ fn smoke_release(
     root: &Path,
     version: &str,
     expected_key_fingerprint: Option<&str>,
+    verify_disabled_probe: bool,
 ) -> Result<(), String> {
     cst_updater::verify::verify_clean_dist_tree(root, version)?;
     if let Some(expected_fp) = expected_key_fingerprint {
         release::verify_binaries_key_fingerprint(root, expected_fp)?;
+    } else if verify_disabled_probe {
+        release::verify_binaries_update_disabled(root)?;
     }
     let expected = format!("cst-pilot {version}");
     for exe in [SERVER_EXE_PATH, "cst-pilot.exe"] {
@@ -748,7 +835,7 @@ fn copy_required_file(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_dir_filtered<F>(src_root: &Path, dst_root: &Path, allow: F) -> Result<(), String>
+pub(crate) fn copy_dir_filtered<F>(src_root: &Path, dst_root: &Path, allow: F) -> Result<(), String>
 where
     F: Fn(&str) -> bool,
 {
@@ -790,7 +877,7 @@ where
     walk(src_root, src_root, dst_root, &allow)
 }
 
-fn write_release_zip(
+pub(crate) fn write_release_zip(
     kit_dir: &Path,
     zip_path: &Path,
     sums: &BTreeMap<String, String>,
@@ -821,6 +908,7 @@ fn write_release_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
 
     #[test]
     fn dist_rejects_skip_build_or_no_zip_whenever_update_config_is_present() {
@@ -833,10 +921,50 @@ mod tests {
     }
 
     #[test]
-    fn dist_rejects_release_secrets_in_build_env() {
+    fn dist_strict_keyless_mode_rejects_secrets_and_strip_helper_removes_them() {
         assert!(check_build_env_secret_vars(true, false).is_err());
         assert!(check_build_env_secret_vars(false, true).is_err());
         assert!(check_build_env_secret_vars(true, true).is_err());
         assert!(check_build_env_secret_vars(false, false).is_ok());
+
+        let mut cmd = Command::new("cargo");
+        strip_release_secrets(&mut cmd);
+        let envs: Vec<_> = cmd.get_envs().collect();
+        assert!(envs.contains(&(OsStr::new(release::ENV_PRIVATE_KEY_FILE), None)));
+        assert!(envs.contains(&(OsStr::new(release::ENV_ADMIN_TOKEN), None)));
+    }
+
+    #[test]
+    fn parse_dist_args_supports_channels_and_strict_keyless_flag() {
+        let parsed = parse_dist_args(
+            [
+                "--out",
+                "E:\\tmp\\dist",
+                "--channel",
+                "beta",
+                "--strict-keyless-env",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("valid dist args");
+        assert_eq!(parsed.channel, Some(release::DistChannel::Beta));
+        assert!(parsed.strict_keyless_env);
+
+        let disabled = parse_dist_args(
+            [
+                "--out",
+                "E:\\tmp\\dist",
+                "--channel",
+                "disabled",
+                "--skip-web-build",
+                "--no-zip",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .expect("valid disabled dist args");
+        assert_eq!(disabled.channel, Some(release::DistChannel::Disabled));
+        assert!(!disabled.make_zip);
     }
 }

@@ -17,6 +17,7 @@ struct CliArgs {
     standalone_web: bool,
     open_browser: bool,
     sanitize_env: bool,
+    offline: bool,
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
@@ -36,6 +37,7 @@ where
     let mut standalone_web = false;
     let mut open_browser = false;
     let mut sanitize_env = false;
+    let mut offline = false;
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
@@ -49,6 +51,7 @@ where
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
             "--sanitize-env" => sanitize_env = true,
+            "--offline" => offline = true,
             "--port" => {
                 let val = iter.next().ok_or("`--port` 缺少端口号参数")?;
                 port = Some(val.parse::<u16>().map_err(|_| "`--port` 端口号格式无效")?);
@@ -79,6 +82,7 @@ where
         standalone_web,
         open_browser,
         sanitize_env,
+        offline,
         port,
         kit_root,
         cwd,
@@ -106,7 +110,10 @@ fn resolve_default_kit_root() -> Result<PathBuf, String> {
 
 /// Sanitizes the current single-threaded process environment when launched via `ShellExecuteExW("runas")`
 /// (before spawning any Tokio worker threads), matching `cst_client::apply_portable_sanitized_env`.
-fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String> {
+fn sanitize_current_process_env(
+    kit_root: &std::path::Path,
+    force_offline: bool,
+) -> Result<(), String> {
     let canonical = kit_root
         .canonicalize()
         .map_err(|e| format!("无法读取工具包根目录 {}：{e}", kit_root.display()))?;
@@ -153,6 +160,7 @@ fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String
         "PROCESSOR_ARCHITECTURE",
     ];
 
+    let caller_offline = force_offline || cst_os::is_offline_env_enabled();
     let existing_keys: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     // SAFETY: Called strictly at single-threaded `fn main()` entry before building the Tokio runtime.
     unsafe {
@@ -174,7 +182,9 @@ fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String
         std::env::set_var("TEMP", &tmp_dir);
         std::env::set_var("TMP", &tmp_dir);
         std::env::set_var("CST_PILOT_ROOT", &clean_root);
-        std::env::set_var("CST_OFFLINE", "1");
+        if caller_offline {
+            std::env::set_var("CST_OFFLINE", "1");
+        }
     }
     let _ = std::env::set_current_dir(&clean_root);
     Ok(())
@@ -225,12 +235,17 @@ fn main() -> ExitCode {
         }
     };
 
-    if args.sanitize_env
-        && let Err(msg) = sanitize_current_process_env(&kit_root)
-    {
-        let _ = writeln!(std::io::stderr(), "{msg}");
-        let _ = std::io::stderr().flush();
-        return ExitCode::FAILURE;
+    if args.sanitize_env {
+        if let Err(msg) = sanitize_current_process_env(&kit_root, args.offline) {
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
+            return ExitCode::FAILURE;
+        }
+    } else if args.offline {
+        // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
+        unsafe {
+            std::env::set_var("CST_OFFLINE", "1");
+        }
     }
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
@@ -299,14 +314,12 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
         }
     };
 
-    let host = match KitHost::new(
-        kit,
-        auth,
-        TelemetryOptions::default(),
-        UpdateOptions::Compiled,
-    )
-    .await
-    {
+    let update_options = if args.standalone_web {
+        UpdateOptions::Disabled
+    } else {
+        UpdateOptions::Compiled
+    };
+    let host = match KitHost::new(kit, auth, TelemetryOptions::default(), update_options).await {
         Ok(h) => h,
         Err(msg) => {
             let _ = writeln!(std::io::stderr(), "{msg}");

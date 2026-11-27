@@ -251,7 +251,7 @@ pub fn extract_archive(
             .checked_add(file.size())
             .filter(|n| *n <= release.info.archive.unpacked_size)
             .ok_or("升级解压总体积超限。")?;
-        let path = root.join(&relative);
+        let path = storage.root.join(&relative);
         let _pin =
             storage.pin_directory(Path::new(&relative).parent().unwrap_or(Path::new("")), true)?;
         let mut output = OpenOptions::new()
@@ -288,6 +288,145 @@ pub fn extract_archive(
         return Err("升级解压体积与签名清单不一致。".into());
     }
     Ok(())
+}
+
+/// Safely extracts an unsigned `cst-pilot-<ver>-windows-x64.zip` into `root` for offline signing
+/// or validation, enforcing the same EOCD/ZIP64 bounds, path traversal/case/symlink/extra-field
+/// guards, `Area::Program` classification, and total unpacked size cap as [`extract_archive`].
+pub fn extract_clean_dist_archive(
+    archive: &Path,
+    root: &Path,
+    max_unpacked_bytes: u64,
+) -> Result<u64, String> {
+    const MAX_SUMS_FILE_BYTES: u64 = 6 * 1024 * 1024;
+    let archive_meta =
+        std::fs::symlink_metadata(archive).map_err(|_| "发行归档不存在或无法读取。".to_owned())?;
+    if cst_os::is_reparse_or_symlink(&archive_meta) || !archive_meta.is_file() {
+        return Err("发行归档路径不能是符号链接、重解析点或目录。".into());
+    }
+    let archive_name = archive.file_name().ok_or("发行归档文件名无效。")?;
+    let parent_dir = match archive.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let parent = Storage::new(parent_dir)?;
+    let _parent_pin = parent.pin_directory(Path::new(""), false)?;
+    let canonical_archive = parent.root.join(archive_name);
+    let mut file = parent
+        .open_read(&canonical_archive)?
+        .ok_or("发行归档不存在。")?;
+    zip_bounds(&mut file)?;
+    let mut archive = ZipArchive::new(file).map_err(|_| "发行归档 ZIP 格式无效。")?;
+    if archive.len() > MAX_FILES * 2 {
+        return Err("发行归档条目过多。".into());
+    }
+    let storage = Storage::new(root)?;
+    let mut seen = BTreeSet::new();
+    let mut spellings = BTreeMap::new();
+    let mut explicit_dirs = Vec::new();
+    let mut extracted_files = Vec::new();
+    let mut total_unpacked = 0u64;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|_| "发行归档条目无法读取。")?;
+        let raw =
+            std::str::from_utf8(entry.name_raw()).map_err(|_| "发行归档文件名必须是 UTF-8。")?;
+        if raw != entry.name() {
+            return Err("发行归档文件名编码存在歧义。".into());
+        }
+        let directory = entry.is_dir();
+        let raw = if directory {
+            raw.strip_suffix('/').unwrap_or(raw)
+        } else {
+            raw
+        };
+        let Some(relative) = raw.strip_prefix("cst-pilot/") else {
+            if raw == "cst-pilot" && directory {
+                continue;
+            }
+            return Err("发行归档必须仅包含 cst-pilot/ 顶层目录。".into());
+        };
+        layout::safe_path(relative)?;
+        let relative = relative.to_owned();
+        if !seen.insert(relative.to_lowercase()) {
+            return Err("发行归档有重复或大小写冲突。".into());
+        }
+        check_spelling(&relative, &mut spellings)?;
+        let mode = entry
+            .unix_mode()
+            .unwrap_or(if directory { 0o040000 } else { 0o100000 })
+            & 0o170000;
+        if entry.encrypted()
+            || entry.is_symlink()
+            || (mode != 0 && mode != if directory { 0o040000 } else { 0o100000 })
+        {
+            return Err("发行归档包含加密文件、链接或特殊文件。".into());
+        }
+        check_extra(entry.extra_data().unwrap_or_default())?;
+        if directory {
+            layout::reject_retired_release_path(&relative)?;
+            if entry.size() != 0 {
+                return Err("发行归档目录条目大小必须为 0。".into());
+            }
+            let _pin = storage.pin_directory(Path::new(&relative), true)?;
+            explicit_dirs.push(relative);
+            continue;
+        }
+        if layout::classify_release(&relative)? != layout::Area::Program {
+            return Err("发行归档不能包含用户数据路径。".into());
+        }
+        let per_file_limit = if relative == layout::SHA256SUMS_PATH {
+            MAX_SUMS_FILE_BYTES.min(max_unpacked_bytes)
+        } else {
+            max_unpacked_bytes
+        };
+        if entry.size() > per_file_limit {
+            return Err("发行归档单文件体积超过限制。".into());
+        }
+        total_unpacked = total_unpacked
+            .checked_add(entry.size())
+            .filter(|n| *n <= max_unpacked_bytes)
+            .ok_or("发行归档解压总体积超限。")?;
+        let path = storage.root.join(&relative);
+        let _pin =
+            storage.pin_directory(Path::new(&relative).parent().unwrap_or(Path::new("")), true)?;
+        let mut output = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .map_err(|_| "无法创建发行解包文件。")?;
+        let mut copied = 0u64;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let n = entry
+                .read(&mut buffer)
+                .map_err(|_| "发行归档解压或 CRC 校验失败。")?;
+            if n == 0 {
+                break;
+            }
+            copied = copied
+                .checked_add(n as u64)
+                .filter(|v| *v <= per_file_limit)
+                .ok_or("发行归档文件实际解压体积超限。")?;
+            output
+                .write_all(&buffer[..n])
+                .map_err(|_| "发行解包写入失败。")?;
+        }
+        if copied != entry.size() {
+            return Err("发行归档文件解压大小与声明不一致。".into());
+        }
+        output.sync_all().map_err(|_| "发行解包同步失败。")?;
+        extracted_files.push(relative);
+    }
+
+    for dir in &explicit_dirs {
+        let prefix = format!("{dir}/");
+        if !extracted_files.iter().any(|f| f.starts_with(&prefix)) {
+            return Err(format!("发行归档包含空目录或未受管目录条目：{dir}"));
+        }
+    }
+
+    Ok(total_unpacked)
 }
 
 fn zip_bounds(file: &mut File) -> Result<(), String> {

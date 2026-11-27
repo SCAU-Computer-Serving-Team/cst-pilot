@@ -776,7 +776,8 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     use tokio_util::sync::CancellationToken;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
-    // 1. Default `UpdateOptions::Compiled` without compile-time env vars -> Phase::Unavailable (200)
+    // 1. `UpdateOptions::Disabled` (e.g. standalone web host) -> Phase::Unavailable (200),
+    //    and `UpdateOptions::Compiled` under offline test mode -> Phase::Idle without network I/O.
     {
         let fixture = TestKitDir::new();
         fs::write(fixture.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
@@ -794,7 +795,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             kit,
             auth,
             TelemetryOptions::default(),
-            UpdateOptions::Compiled,
+            UpdateOptions::Disabled,
         )
         .await
         .unwrap();
@@ -818,7 +819,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             .await
             .unwrap();
         assert_eq!(status_resp["status"]["phase"], "unavailable");
-        assert_eq!(status_resp["status"]["message"], "当前构建未启用在线更新。");
+        assert_eq!(status_resp["status"]["message"], "此宿主已关闭升级检查。");
 
         let check_resp = client
             .post(format!("{}/api/app/update/check", server.base_url()))
@@ -833,6 +834,33 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         let check_json: Value = check_resp.json().await.unwrap();
         assert_eq!(check_json["phase"], "unavailable");
         server.shutdown().await;
+
+        if cst_os::is_offline_env_enabled()
+            && cst_kit::update::service::compiled_update_key_fingerprint().is_ok()
+        {
+            let oa2 = OaClient::with_transport(
+                "https://oa.example",
+                Arc::new(CountingOaTransport::default()),
+                Arc::new(cst_kit::auth::oa::SystemClock),
+            )
+            .unwrap();
+            let kit2 = Kit::new(&fixture.0).unwrap();
+            let auth2 = AuthRuntime::create(&fixture.0, Channel::Gui, oa2)
+                .await
+                .unwrap();
+            let compiled_host = KitHost::new(
+                kit2,
+                auth2,
+                TelemetryOptions::default(),
+                UpdateOptions::Compiled,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                compiled_host.updates().status().phase,
+                cst_kit::update::service::Phase::Idle
+            );
+        }
     }
 
     // 2. Trusted signed release: check -> prepare + cancel -> prepare -> launch validation & handoff

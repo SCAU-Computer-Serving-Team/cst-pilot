@@ -30,3 +30,39 @@ pub use process::{
     system_directory, windows_directory,
 };
 pub use update_types::{HandoffRequest, LaunchReceipt, RestartUi, RollbackReason, UpdateReport};
+
+/// Returns `true` when an environment variable string represents an enabled boolean flag.
+pub fn is_truthy_env_value(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// Pure helper evaluating `(CST_OFFLINE, PI_OFFLINE)` string values for deterministic unit tests.
+pub fn is_offline_env_values(cst_offline: Option<&str>, pi_offline: Option<&str>) -> bool {
+    cst_offline.is_some_and(is_truthy_env_value) || pi_offline.is_some_and(is_truthy_env_value)
+}
+
+/// Returns `true` when caller requested offline execution via `CST_OFFLINE` or `PI_OFFLINE`.
+pub fn is_offline_env_enabled() -> bool {
+    let cst = std::env::var("CST_OFFLINE").ok();
+    let pi = std::env::var("PI_OFFLINE").ok();
+    is_offline_env_values(cst.as_deref(), pi.as_deref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offline_env_helper_parses_truthy_and_falsy_values() {
+        assert!(!is_offline_env_values(None, None));
+        assert!(!is_offline_env_values(Some(""), Some("0")));
+        assert!(!is_offline_env_values(Some("false"), Some("off")));
+        assert!(is_offline_env_values(Some("1"), None));
+        assert!(is_offline_env_values(None, Some("1")));
+        assert!(is_offline_env_values(Some(" TRUE "), None));
+        assert!(is_offline_env_values(None, Some("yes")));
+    }
+}

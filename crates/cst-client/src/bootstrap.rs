@@ -450,6 +450,10 @@ fn spawn_elevated_server_via_uac(
 
         let mut params = OsString::new();
         params.push(quote_win32_arg(OsStr::new("--sanitize-env")));
+        if cst_os::is_offline_env_enabled() {
+            params.push(" ");
+            params.push(quote_win32_arg(OsStr::new("--offline")));
+        }
         params.push(" ");
         params.push(quote_win32_arg(OsStr::new("--kit-root")));
         params.push(" ");
@@ -648,7 +652,7 @@ async fn probe_existing_server(
 /// Applies the strict portable environment whitelist to `app/cst-server.exe` / `app/cst-updater.exe`:
 /// - `SystemRoot` / `WINDIR` / `ComSpec` resolved via trusted Win32 APIs (`GetWindowsDirectoryW` / `GetSystemDirectoryW`)
 /// - `TEMP` / `TMP` redirected to `<kit_root>/.state/tmp`
-/// - `CST_PILOT_ROOT` = `<kit_root>`, `CST_OFFLINE` = `1`
+/// - `CST_PILOT_ROOT` = `<kit_root>`, propagating `CST_OFFLINE` = `1` only when caller requested offline mode
 /// - Strips untrusted `PATH`, `PI_*`, `*_API_KEY`, `HTTP_PROXY`, `CST_EXPORT_BROWSER`, `CHROME_PATH`, etc.
 pub fn apply_portable_sanitized_env(
     cmd: &mut Command,
@@ -681,6 +685,7 @@ pub fn apply_portable_sanitized_env(
     let joined_path = std::env::join_paths(path_entries)
         .map_err(|e| ClientError::BootstrapFailed(format!("组装安全 PATH 失败：{e}")))?;
 
+    let caller_offline = cst_os::is_offline_env_enabled();
     cmd.env_clear();
     cmd.env("SystemRoot", &win_dir);
     cmd.env("WINDIR", &win_dir);
@@ -690,7 +695,9 @@ pub fn apply_portable_sanitized_env(
     cmd.env("TEMP", &tmp_dir);
     cmd.env("TMP", &tmp_dir);
     cmd.env("CST_PILOT_ROOT", &clean_root);
-    cmd.env("CST_OFFLINE", "1");
+    if caller_offline {
+        cmd.env("CST_OFFLINE", "1");
+    }
 
     for passthrough in [
         "SYSTEMDRIVE",

@@ -274,9 +274,11 @@ pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
         .current_dir(&canonical_root)
         .env_clear()
         .env("CST_PILOT_ROOT", &canonical_root)
-        .env("CST_OFFLINE", "1")
         .env("TEMP", &tmp_dir)
         .env("TMP", &tmp_dir);
+    if cst_os::is_offline_env_enabled() {
+        cmd.env("CST_OFFLINE", "1");
+    }
 
     #[cfg(windows)]
     {

@@ -952,15 +952,29 @@ fn independent_updater_help_and_missing_compiled_key_do_not_touch_a_kit() {
             .status
             .success()
     );
-    if ReleaseKey::compiled().is_err() {
-        let result = std::process::Command::new(exe)
-            .arg("--root")
-            .arg(&f.root)
-            .arg("--recover")
-            .output()
-            .unwrap();
-        assert!(!result.status.success());
-        assert!(String::from_utf8_lossy(&result.stderr).contains("未配置官方升级公钥"));
+    match ReleaseKey::compiled() {
+        Ok(compiled) => {
+            let probe = std::process::Command::new(exe)
+                .arg("--key-fingerprint")
+                .output()
+                .unwrap();
+            assert!(probe.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&probe.stdout).trim(),
+                compiled.fingerprint()
+            );
+        }
+        Err(_) => {
+            let result = std::process::Command::new(exe)
+                .arg("--root")
+                .arg(&f.root)
+                .arg("--recover")
+                .output()
+                .unwrap();
+            assert!(!result.status.success());
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert!(stderr.contains("未配置官方升级公钥") || stderr.contains("未启用在线更新"));
+        }
     }
     assert_eq!(old, f.old_program());
     assert!(!f.root.join(".state/update").exists());
