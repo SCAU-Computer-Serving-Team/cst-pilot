@@ -277,9 +277,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         &kit_dir.join(UPDATER_EXE_PATH),
     )?;
     if let Some(cfg) = &update_cfg {
-        release::verify_binaries_embed_public_key(&kit_dir, &cfg.public_key_b64)?;
-        #[cfg(windows)]
-        verify_updater_binary_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
+        release::verify_binaries_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
     }
 
     for doc in [
@@ -517,43 +515,6 @@ fn isolated_command(root: &Path, exe: &str) -> Command {
     cmd
 }
 
-fn verify_updater_binary_key_fingerprint(root: &Path, expected_fp: &str) -> Result<(), String> {
-    let mut cmd = Command::new(root.join(UPDATER_EXE_PATH));
-    cmd.env_clear();
-    for key in [
-        "SystemRoot",
-        "WINDIR",
-        "ComSpec",
-        "ProgramData",
-        "ProgramFiles",
-        "ProgramFiles(x86)",
-        "ProgramW6432",
-        "OS",
-    ] {
-        if let Some(value) = env::var_os(key) {
-            cmd.env(key, value);
-        }
-    }
-    let output = cmd
-        .current_dir(root)
-        .arg("--key-fingerprint")
-        .output()
-        .map_err(|e| format!("无法执行 {UPDATER_EXE_PATH} --key-fingerprint：{e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "{UPDATER_EXE_PATH} 公钥自检失败：{}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let actual_fp = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if actual_fp != expected_fp {
-        return Err(format!(
-            "{UPDATER_EXE_PATH} 内嵌公钥指纹（{actual_fp}）与预期（{expected_fp}）不一致。"
-        ));
-    }
-    Ok(())
-}
-
 fn smoke_release(
     root: &Path,
     version: &str,
@@ -561,7 +522,7 @@ fn smoke_release(
 ) -> Result<(), String> {
     cst_updater::verify::verify_clean_dist_tree(root, version)?;
     if let Some(expected_fp) = expected_key_fingerprint {
-        verify_updater_binary_key_fingerprint(root, expected_fp)?;
+        release::verify_binaries_key_fingerprint(root, expected_fp)?;
     }
     let expected = format!("cst-pilot {version}");
     for exe in [SERVER_EXE_PATH, "cst-pilot.exe"] {

@@ -1747,14 +1747,20 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert_eq!(draft.selected_thinking_level.as_deref(), Some("high"));
     });
 
-    // 8. Software Update lifecycle (silent startup check on `Available` -> open via Settings `C9or7K` -> `kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
+    // 8. Software Update lifecycle (silent startup/home check on `Available` -> open via Settings `C9or7K` -> `kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Home, cx));
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
+    })
+    .unwrap();
     {
         backend.state.lock().unwrap().update_phase = "available".into();
     }
     backend.rt().block_on(handle.refresh_globals()).unwrap();
 
-    // Wait until the desktop shell has observed the `Available` snapshot and rendered,
-    // then verify startup background check stays silent and does not auto-open the modal.
+    // Wait until the desktop shell has observed the `Available` snapshot while on Home,
+    // then verify background check stays silent and does not auto-open the modal.
     cx.wait_for(win_handle, Duration::from_secs(2), |_, cx| {
         shell
             .read(cx)
@@ -1767,6 +1773,7 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
 
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
         assert!(window.try_find("update-available-dialog-kom7j").is_none());
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
         let sv_ent = shell.read(cx).settings_view().clone();

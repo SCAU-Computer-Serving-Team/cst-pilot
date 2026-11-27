@@ -13,6 +13,7 @@ use cst_server::{RunningServer, ServerConfig};
 #[derive(Debug, PartialEq, Eq)]
 struct CliArgs {
     health_check: bool,
+    key_fingerprint: bool,
     standalone_web: bool,
     open_browser: bool,
     sanitize_env: bool,
@@ -31,6 +32,7 @@ where
     I: IntoIterator<Item = String>,
 {
     let mut health_check = false;
+    let mut key_fingerprint = false;
     let mut standalone_web = false;
     let mut open_browser = false;
     let mut sanitize_env = false;
@@ -43,6 +45,7 @@ where
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--health-check" => health_check = true,
+            "--key-fingerprint" => key_fingerprint = true,
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
             "--sanitize-env" => sanitize_env = true,
@@ -72,6 +75,7 @@ where
 
     Ok(CliArgs {
         health_check,
+        key_fingerprint,
         standalone_web,
         open_browser,
         sanitize_env,
@@ -186,6 +190,22 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if args.key_fingerprint {
+        cst_os::attach_parent_console_if_stdio_missing();
+        return match cst_kit::update::service::compiled_update_key_fingerprint() {
+            Ok(fp) => {
+                let _ = writeln!(std::io::stdout(), "{fp}");
+                let _ = std::io::stdout().flush();
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                let _ = writeln!(std::io::stderr(), "{msg}");
+                let _ = std::io::stderr().flush();
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     if args.standalone_web || args.health_check {
         cst_os::attach_parent_console_if_stdio_missing();
@@ -369,5 +389,12 @@ mod tests {
             parsed.kit_root.as_deref(),
             Some(std::path::Path::new(r"E:\kit"))
         );
+    }
+
+    #[test]
+    fn parse_key_fingerprint_flag() {
+        let parsed =
+            parse_args_from(["--key-fingerprint"].into_iter().map(str::to_owned)).expect("valid");
+        assert!(parsed.key_fingerprint);
     }
 }

@@ -2,12 +2,16 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(any(windows, test))]
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
-use cst_updater::layout::{BUILD_INFO_PATH, SERVER_EXE_PATH, SHA256SUMS_PATH, UPDATER_EXE_PATH};
+use cst_updater::layout::{BUILD_INFO_PATH, SHA256SUMS_PATH};
+#[cfg(windows)]
+use cst_updater::layout::{SERVER_EXE_PATH, UPDATER_EXE_PATH};
 use cst_updater::manifest::{
     Archive, MANIFEST_DOMAIN, ReleaseKey, ReleaseManifest, SUMS_DOMAIN, SignedManifest,
     validate_release_url,
@@ -65,22 +69,61 @@ pub fn public_key_fingerprint(public_key_bytes: &[u8; 32]) -> String {
     hex[..16].to_owned()
 }
 
-pub fn verify_binaries_embed_public_key(
-    dist_dir: &Path,
-    public_key_b64: &str,
-) -> Result<(), String> {
-    let needle = public_key_b64.as_bytes();
-    for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
-        let path = dist_dir.join(rel);
-        let bytes =
-            fs::read(&path).map_err(|e| format!("无法读取发行二进制 {rel} 以校验内嵌公钥：{e}"))?;
-        if !bytes.windows(needle.len()).any(|w| w == needle) {
-            return Err(format!(
-                "发行二进制 {rel} 未内嵌与当前签名密钥匹配的升级公钥，拒绝继续（请确认未使用过期构建产物）。"
-            ));
-        }
+#[cfg(any(windows, test))]
+fn verify_probe_command(mut cmd: Command, label: &str, expected_fp: &str) -> Result<(), String> {
+    let output = cmd
+        .output()
+        .map_err(|e| format!("无法执行 {label} --key-fingerprint：{e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{label} 公钥自检失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let actual_fp = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if actual_fp != expected_fp {
+        return Err(format!(
+            "{label} 实际编译内嵌公钥指纹（{actual_fp}）与预期（{expected_fp}）不一致，拒绝继续。"
+        ));
     }
     Ok(())
+}
+
+/// Executes packaged `app/cst-updater.exe --key-fingerprint` and `app/cst-server.exe --key-fingerprint`
+/// to prove both binaries actually verify updates with the expected compiled-in Ed25519 key.
+pub fn verify_binaries_key_fingerprint(dist_dir: &Path, expected_fp: &str) -> Result<(), String> {
+    #[cfg(not(windows))]
+    {
+        let _ = (dist_dir, expected_fp);
+        return Err(
+            "校验 windows-x86_64 发行二进制内嵌公钥必须在 Windows 环境运行 app/cst-updater.exe 与 app/cst-server.exe --key-fingerprint。"
+                .into(),
+        );
+    }
+    #[cfg(windows)]
+    {
+        for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
+            let mut cmd = Command::new(dist_dir.join(rel));
+            cmd.env_clear();
+            for key in [
+                "SystemRoot",
+                "WINDIR",
+                "ComSpec",
+                "ProgramData",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "OS",
+            ] {
+                if let Some(value) = env::var_os(key) {
+                    cmd.env(key, value);
+                }
+            }
+            cmd.current_dir(dist_dir).arg("--key-fingerprint");
+            verify_probe_command(cmd, rel, expected_fp)?;
+        }
+        Ok(())
+    }
 }
 
 pub fn resolve_update_build_config(require: bool) -> Result<Option<UpdateBuildConfig>, String> {
@@ -345,6 +388,16 @@ pub struct SignReleaseSummary {
 }
 
 pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String> {
+    sign_release_with_binary_probe(args, verify_binaries_key_fingerprint)
+}
+
+fn sign_release_with_binary_probe<F>(
+    args: &SignReleaseArgs,
+    probe_binaries: F,
+) -> Result<SignReleaseSummary, String>
+where
+    F: FnOnce(&Path, &str) -> Result<(), String>,
+{
     let version = match &args.version {
         Some(v) => v.clone(),
         None => cst_updater::layout::read_version(&args.dist_dir)?,
@@ -370,7 +423,6 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     }
 
     let (signing_key, release_key) = load_signing_key(&args.private_key_file)?;
-    let signing_pub_b64 = STANDARD.encode(signing_key.verifying_key().as_bytes());
     let signing_pub_fp = release_key.fingerprint();
     cst_updater::verify::verify_clean_dist_tree(&args.dist_dir, &version)?;
 
@@ -407,7 +459,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
             "签名私钥对应公钥指纹（{signing_pub_fp}）与构建内嵌公钥指纹（{built_fp}）不一致，拒绝签名。"
         ));
     }
-    verify_binaries_embed_public_key(&args.dist_dir, &signing_pub_b64)?;
+    probe_binaries(&args.dist_dir, &signing_pub_fp)?;
     let built_at = build_info
         .get("builtAt")
         .and_then(serde_json::Value::as_str)
@@ -1105,24 +1157,32 @@ mod tests {
         let dir = env::temp_dir().join(format!("xtask-sign-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
-        let (pub_b64, _) = generate_keypair_file(&key_file).unwrap();
+        let (pub_b64, fp) = generate_keypair_file(&key_file).unwrap();
         let (dist_dir, zip_path, expected_unpacked) =
             build_synthetic_dist(&dir, "v0.9.8", Some(&pub_b64), None);
         let out_manifest = dir.join("manifest.signed.json");
 
-        let summary = sign_release(&SignReleaseArgs {
-            dist_dir,
-            zip_path,
-            version: Some("v0.9.8".into()),
-            min_upgradable: "v0.9.0".into(),
-            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-            notes_file: None,
-            notes_inline: Some("test notes".into()),
-            out_path: out_manifest.clone(),
-            private_key_file: key_file,
-        })
+        let mut probed_fp = String::new();
+        let summary = sign_release_with_binary_probe(
+            &SignReleaseArgs {
+                dist_dir,
+                zip_path,
+                version: Some("v0.9.8".into()),
+                min_upgradable: "v0.9.0".into(),
+                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+                notes_file: None,
+                notes_inline: Some("test notes".into()),
+                out_path: out_manifest.clone(),
+                private_key_file: key_file,
+            },
+            |_, expected| {
+                probed_fp = expected.to_owned();
+                Ok(())
+            },
+        )
         .unwrap();
 
+        assert_eq!(probed_fp, fp);
         assert_eq!(summary.unpacked_size, expected_unpacked);
         assert_eq!(
             summary.archive_url,
@@ -1135,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn sign_release_rejects_missing_metadata_or_unmatched_binary_key() {
+    fn sign_release_rejects_missing_metadata_and_fake_binaries() {
         let dir = env::temp_dir().join(format!("xtask-sign-bind-{}", Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let key_file = dir.join("release.key");
@@ -1151,27 +1211,31 @@ mod tests {
                 "{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true}\n",
             ),
         );
-        let err = sign_release(&SignReleaseArgs {
-            dist_dir,
-            zip_path,
-            version: Some("v0.9.8".into()),
-            min_upgradable: "v0.9.0".into(),
-            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-            notes_file: None,
-            notes_inline: None,
-            out_path: out_manifest.clone(),
-            private_key_file: key_file.clone(),
-        })
+        let err = sign_release_with_binary_probe(
+            &SignReleaseArgs {
+                dist_dir,
+                zip_path,
+                version: Some("v0.9.8".into()),
+                min_upgradable: "v0.9.0".into(),
+                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+                notes_file: None,
+                notes_inline: None,
+                out_path: out_manifest.clone(),
+                private_key_file: key_file.clone(),
+            },
+            |_, _| Ok(()),
+        )
         .err()
         .expect("missing fingerprint must fail");
         assert!(err.contains("updatePublicKeyFingerprint"));
 
-        // 2. Forged BUILD-INFO.json with matching fingerprint, but binaries lack embedded key.
-        let forged_info = format!(
+        // 2. Real `sign_release` MUST reject fake EXE files even when both BUILD-INFO.json
+        // and the raw file bytes contain the matching public key string.
+        let matching_info = format!(
             "{{\"version\":\"v0.9.8\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{fp}\"}}\n"
         );
         let (dist_dir, zip_path, _) =
-            build_synthetic_dist(&dir, "v0.9.8", None, Some(&forged_info));
+            build_synthetic_dist(&dir, "v0.9.8", Some(&pub_b64), Some(&matching_info));
         let err = sign_release(&SignReleaseArgs {
             dist_dir,
             zip_path,
@@ -1184,10 +1248,47 @@ mod tests {
             private_key_file: key_file,
         })
         .err()
-        .expect("binary without embedded key must fail");
-        assert!(err.contains("未内嵌"));
+        .expect("fake binaries with stuffed public key string must fail real binary probe");
+        assert!(
+            err.contains("--key-fingerprint") || err.contains("公钥自检失败"),
+            "unexpected error: {err}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_probe_command_validates_stdout_and_exit_status() {
+        #[cfg(windows)]
+        let make_cmd = |script: &str| {
+            let mut c = Command::new("cmd.exe");
+            c.args(["/C", script]);
+            c
+        };
+        #[cfg(not(windows))]
+        let make_cmd = |script: &str| {
+            let mut c = Command::new("/bin/sh");
+            c.args(["-c", script]);
+            c
+        };
+
+        assert!(
+            verify_probe_command(
+                make_cmd("echo 0123456789abcdef"),
+                "test.exe",
+                "0123456789abcdef"
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_probe_command(
+                make_cmd("echo deadbeefdeadbeef"),
+                "test.exe",
+                "0123456789abcdef"
+            )
+            .is_err()
+        );
+        assert!(verify_probe_command(make_cmd("exit 1"), "test.exe", "0123456789abcdef").is_err());
     }
 
     #[tokio::test]
@@ -1198,17 +1299,20 @@ mod tests {
         let (pub_b64, _) = generate_keypair_file(&key_file).unwrap();
         let (dist_dir, zip_path, _) = build_synthetic_dist(&dir, "v0.9.9", Some(&pub_b64), None);
         let out_manifest = dir.join("manifest.signed.json");
-        let summary = sign_release(&SignReleaseArgs {
-            dist_dir,
-            zip_path: zip_path.clone(),
-            version: Some("v0.9.9".into()),
-            min_upgradable: "v0.9.0".into(),
-            base_url: DEFAULT_PUBLIC_BASE_URL.into(),
-            notes_file: None,
-            notes_inline: Some("publish test".into()),
-            out_path: out_manifest.clone(),
-            private_key_file: key_file,
-        })
+        let summary = sign_release_with_binary_probe(
+            &SignReleaseArgs {
+                dist_dir,
+                zip_path: zip_path.clone(),
+                version: Some("v0.9.9".into()),
+                min_upgradable: "v0.9.0".into(),
+                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+                notes_file: None,
+                notes_inline: Some("publish test".into()),
+                out_path: out_manifest.clone(),
+                private_key_file: key_file,
+            },
+            |_, _| Ok(()),
+        )
         .unwrap();
         let manifest_bytes = fs::read(&out_manifest).unwrap();
         let archive_size = summary.archive_size;
