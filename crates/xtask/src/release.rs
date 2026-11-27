@@ -12,7 +12,10 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD},
 };
 use bytes::Bytes;
-use cst_updater::layout::{BUILD_INFO_PATH, SERVER_EXE_PATH, SHA256SUMS_PATH, UPDATER_EXE_PATH};
+use cst_updater::layout::{
+    BUILD_INFO_PATH, REQUIRED_APP_LICENSES, REQUIRED_FONT_FILES, SERVER_EXE_PATH, SHA256SUMS_PATH,
+    UPDATER_EXE_PATH,
+};
 use cst_updater::manifest::{
     Archive, MANIFEST_DOMAIN, OFFICIAL_BETA_MANIFEST_URL, OFFICIAL_MANIFEST_URL,
     OFFICIAL_PUBLIC_KEY_B64, ReleaseKey, ReleaseManifest, SUMS_DOMAIN, SignedManifest,
@@ -277,12 +280,6 @@ fn isolated_probe_command(dist_dir: &Path, rel: &str) -> Command {
 
 const CANONICAL_TELEMETRY_JSON: &[u8] = include_bytes!("../../../app/defaults/telemetry.json");
 const CANONICAL_WEB_SEARCH_JSON: &[u8] = include_bytes!("../../../app/defaults/web-search.json");
-const REQUIRED_APP_LICENSES: &[&str] = &[
-    "app/licenses/MPL-2.0.txt",
-    "app/licenses/ntfs-ng-LICENSE.txt",
-    "app/licenses/pi-LICENSE.txt",
-    "app/licenses/puppeteer-LICENSE.txt",
-];
 
 /// Verifies clean-tree rules specific to official release assembly (`telemetry.json` and
 /// `web-search.json` match canonical repository defaults, all third-party licenses are present,
@@ -355,22 +352,61 @@ pub fn verify_embedded_web_build_dir(web_dir: &Path, repo_root: &Path) -> Result
     verify_html_css_references_with_fonts(web_dir, Some(&fonts_dir))
 }
 
+fn verify_non_symlink_descendant(
+    canon_base: &Path,
+    start_dir: &Path,
+    rel_ref: &str,
+) -> Result<(), &'static str> {
+    if !start_dir.starts_with(canon_base) {
+        return Err("静态资源起始目录越出根目录边界。");
+    }
+    let mut cur = start_dir.to_path_buf();
+    for comp in Path::new(rel_ref).components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if cur == canon_base {
+                    return Err("静态资源引用越出目录边界。");
+                }
+                if !cur.pop() || !cur.starts_with(canon_base) {
+                    return Err("静态资源引用越出目录边界。");
+                }
+            }
+            std::path::Component::Normal(seg) => {
+                cur.push(seg);
+                let meta = fs::symlink_metadata(&cur).map_err(|_| "静态资源引用目标缺失。")?;
+                if cst_os::is_reparse_or_symlink(&meta) {
+                    return Err("静态资源引用目标包含符号链接或重解析点。");
+                }
+            }
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err("静态资源引用包含非法根路径或盘符前缀。");
+            }
+        }
+    }
+    let final_meta = fs::symlink_metadata(&cur).map_err(|_| "静态资源引用目标缺失。")?;
+    if cst_os::is_reparse_or_symlink(&final_meta) || !final_meta.is_file() {
+        return Err("静态资源引用目标不是普通文件。");
+    }
+    let resolved = fs::canonicalize(&cur).map_err(|_| "静态资源引用目标缺失。")?;
+    if !resolved.starts_with(canon_base) {
+        return Err("静态资源引用越出目录边界。");
+    }
+    Ok(())
+}
+
 fn verify_html_css_references_with_fonts(
     root_dir: &Path,
     shared_fonts_dir: Option<&Path>,
 ) -> Result<(), String> {
     let (pinned_root, _root_handles, _) =
         open_pinned_ancestor_chain(root_dir, false, "静态资源根目录")?;
-    let canon_root = fs::canonicalize(&pinned_root)
-        .map_err(|e| format!("无法解析目录 {}：{e}", root_dir.display()))?;
+    let canon_root = fs::canonicalize(&pinned_root).map_err(|_| "无法解析静态资源根目录。")?;
     let canon_fonts = match shared_fonts_dir {
         Some(fdir) => {
             let (pinned_f, _f_handles, _) =
                 open_pinned_ancestor_chain(fdir, false, "共享字体目录")?;
-            Some(
-                fs::canonicalize(&pinned_f)
-                    .map_err(|e| format!("无法解析共享字体目录 {}：{e}", fdir.display()))?,
-            )
+            Some(fs::canonicalize(&pinned_f).map_err(|_| "无法解析共享字体目录。")?)
         }
         None => None,
     };
@@ -379,10 +415,9 @@ fn verify_html_css_references_with_fonts(
         for entry in fs::read_dir(&dir).map_err(|e| format!("无法遍历目录：{e}"))? {
             let entry = entry.map_err(|e| format!("无法读取目录项：{e}"))?;
             let path = entry.path();
-            let meta = fs::symlink_metadata(&path)
-                .map_err(|e| format!("无法读取元数据 {}：{e}", path.display()))?;
+            let meta = fs::symlink_metadata(&path).map_err(|_| "无法读取静态资源元数据。")?;
             if cst_os::is_reparse_or_symlink(&meta) {
-                return Err(format!("目录包含链接或重解析点：{}", path.display()));
+                return Err("静态资源目录包含符号链接或重解析点。".into());
             }
             if meta.is_dir() {
                 stack.push(path);
@@ -392,18 +427,25 @@ fn verify_html_css_references_with_fonts(
                 .extension()
                 .and_then(|e| e.to_str())
                 .map(str::to_ascii_lowercase);
-            if !matches!(ext.as_deref(), Some("html" | "css")) {
-                continue;
-            }
+            let is_html = match ext.as_deref() {
+                Some("html") => true,
+                Some("css") => false,
+                _ => continue,
+            };
             let text = std::str::from_utf8(&read_bounded_regular_file(
                 &path,
                 4 * 1024 * 1024,
                 "静态前端资源",
             )?)
-            .map_err(|_| format!("静态资源不是有效 UTF-8：{}", path.display()))?
+            .map_err(|_| "静态前端资源不是有效 UTF-8 文本。")?
             .to_owned();
             let base_dir = path.parent().unwrap_or(&canon_root);
-            for raw_ref in extract_local_asset_refs(&text) {
+            let refs = if is_html {
+                extract_html_asset_refs(&text)
+            } else {
+                extract_css_asset_refs(&text)
+            };
+            for raw_ref in refs {
                 let clean_ref = raw_ref.split(['?', '#']).next().unwrap_or("").trim();
                 let lower_ref = clean_ref.to_ascii_lowercase();
                 if clean_ref.is_empty()
@@ -422,36 +464,33 @@ fn verify_html_css_references_with_fonts(
                     || clean_ref.contains('\\')
                     || clean_ref.contains(':')
                 {
-                    return Err(format!(
-                        "静态资源包含不允许的外部协议或绝对盘符引用：{}",
-                        path.display()
-                    ));
+                    return Err("静态资源包含不允许的外部协议或盘符引用。".into());
                 }
-                if let Some(font_rel) = clean_ref.strip_prefix("/fonts/")
+                let shared_font_name = clean_ref.strip_prefix("/fonts/").or_else(|| {
+                    (base_dir.parent() == Some(canon_root.as_path()))
+                        .then(|| clean_ref.strip_prefix("../fonts/"))
+                        .flatten()
+                });
+                if let Some(font_rel) = shared_font_name
                     && let Some(ref f_root) = canon_fonts
                 {
-                    let font_candidate = f_root.join(font_rel);
-                    ensure_no_reparse_ancestors(&font_candidate, "共享字体引用目标")?;
-                    let resolved_font = fs::canonicalize(&font_candidate)
-                        .map_err(|_| format!("静态资源引用的共享字体缺失：{}", path.display()))?;
-                    if !resolved_font.starts_with(f_root) || !resolved_font.is_file() {
-                        return Err(format!(
-                            "静态资源共享字体引用越出目录边界：{}",
-                            path.display()
-                        ));
+                    let is_packaged_font = !font_rel.contains('/')
+                        && REQUIRED_FONT_FILES
+                            .iter()
+                            .any(|p| p.strip_prefix("app/fonts/") == Some(font_rel));
+                    if !is_packaged_font {
+                        return Err("静态资源引用了未列入发行打包清单的共享字体。".into());
                     }
+                    verify_non_symlink_descendant(f_root, f_root, font_rel)
+                        .map_err(str::to_owned)?;
                     continue;
                 }
-                let candidate = if let Some(stripped) = clean_ref.strip_prefix('/') {
-                    canon_root.join(stripped)
+                if let Some(stripped) = clean_ref.strip_prefix('/') {
+                    verify_non_symlink_descendant(&canon_root, &canon_root, stripped)
+                        .map_err(str::to_owned)?;
                 } else {
-                    base_dir.join(clean_ref)
-                };
-                ensure_no_reparse_ancestors(&candidate, "静态资源引用目标")?;
-                let resolved = fs::canonicalize(&candidate)
-                    .map_err(|_| format!("静态资源引用目标缺失：{}", path.display()))?;
-                if !resolved.starts_with(&canon_root) || !resolved.is_file() {
-                    return Err(format!("静态资源引用越出目录边界：{}", path.display()));
+                    verify_non_symlink_descendant(&canon_root, base_dir, clean_ref)
+                        .map_err(str::to_owned)?;
                 }
             }
         }
@@ -472,21 +511,24 @@ fn split_srcset_urls(val: &str) -> Vec<String> {
             break;
         }
         let u_start = i;
-        let is_data =
-            val[u_start..].len() >= 5 && val[u_start..u_start + 5].eq_ignore_ascii_case("data:");
+        let is_data = bytes[u_start..].len() >= 5
+            && bytes[u_start..u_start + 5].eq_ignore_ascii_case(b"data:");
         while i < len && !bytes[i].is_ascii_whitespace() && (is_data || bytes[i] != b',') {
             i += 1;
         }
         let mut u_end = i;
-        if !is_data {
-            while u_end > u_start && bytes[u_end - 1] == b',' {
-                u_end -= 1;
-            }
+        let mut ended_with_comma = false;
+        while u_end > u_start && bytes[u_end - 1] == b',' {
+            u_end -= 1;
+            ended_with_comma = true;
         }
         if u_end > u_start {
             urls.push(val[u_start..u_end].to_owned());
         }
-        // Skip optional descriptor up to next unquoted comma
+        if ended_with_comma {
+            continue;
+        }
+        // Skip optional descriptor up to next unparenthesized comma
         let mut paren_depth = 0usize;
         while i < len {
             if bytes[i] == b'(' {
@@ -519,7 +561,7 @@ fn strip_css_comments_preserving_strings(text: &str) -> String {
                 i += 2;
                 continue;
             }
-            if bytes[i] == q {
+            if bytes[i] == q || bytes[i] == b'\n' || bytes[i] == b'\r' {
                 quote = None;
             }
             i += 1;
@@ -546,13 +588,120 @@ fn strip_css_comments_preserving_strings(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
 }
 
-fn extract_local_asset_refs(text: &str) -> Vec<String> {
+fn read_css_quoted_string(css: &str, start_quote_idx: usize) -> (String, usize) {
+    let bytes = css.as_bytes();
+    let len = bytes.len();
+    let q = bytes[start_quote_idx];
+    let mut cur = start_quote_idx + 1;
+    let mut val = String::new();
+    while cur < len && bytes[cur] != q && bytes[cur] != b'\n' && bytes[cur] != b'\r' {
+        if bytes[cur] == b'\\' && cur + 1 < len {
+            let next_ch = css[cur + 1..].chars().next().unwrap_or_default();
+            if next_ch != '\n' && next_ch != '\r' {
+                val.push(next_ch);
+            }
+            cur += 1 + next_ch.len_utf8().max(1);
+        } else {
+            let ch = css[cur..].chars().next().unwrap_or_default();
+            val.push(ch);
+            cur += ch.len_utf8().max(1);
+        }
+    }
+    if cur < len && bytes[cur] == q {
+        cur += 1;
+    }
+    (val, cur)
+}
+
+/// Extracts `@import "..."` and `url(...)` asset references from CSS while skipping arbitrary CSS
+/// string literals (such as `content: "see url(fake.png)"`).
+fn extract_css_asset_refs(css_text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let cleaned = strip_css_comments_preserving_strings(css_text);
+    let cbytes = cleaned.as_bytes();
+    let clen = cbytes.len();
+    let mut i = 0usize;
+
+    while i < clen {
+        if cbytes[i] == b'"' || cbytes[i] == b'\'' {
+            let (_, next_i) = read_css_quoted_string(&cleaned, i);
+            i = next_i;
+            continue;
+        }
+        if cbytes[i] == b'@'
+            && clen - i >= 7
+            && cbytes[i..i + 7].eq_ignore_ascii_case(b"@import")
+            && (i + 7 == clen
+                || !(cbytes[i + 7].is_ascii_alphanumeric()
+                    || cbytes[i + 7] == b'-'
+                    || cbytes[i + 7] == b'_'))
+        {
+            let mut cur = i + 7;
+            while cur < clen && cbytes[cur].is_ascii_whitespace() {
+                cur += 1;
+            }
+            if cur < clen && (cbytes[cur] == b'"' || cbytes[cur] == b'\'') {
+                let (val, next_i) = read_css_quoted_string(&cleaned, cur);
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_owned());
+                }
+                i = next_i;
+                continue;
+            }
+            // If `@import url(...)`, let the `url(` branch handle `cur` on the next iteration.
+            i = cur;
+            continue;
+        }
+        if clen - i >= 4
+            && cbytes[i..i + 4].eq_ignore_ascii_case(b"url(")
+            && (i == 0
+                || !(cbytes[i - 1].is_ascii_alphanumeric()
+                    || cbytes[i - 1] == b'-'
+                    || cbytes[i - 1] == b'_'))
+        {
+            let mut cur = i + 4;
+            while cur < clen && cbytes[cur].is_ascii_whitespace() {
+                cur += 1;
+            }
+            if cur < clen && (cbytes[cur] == b'"' || cbytes[cur] == b'\'') {
+                let (val, mut next_i) = read_css_quoted_string(&cleaned, cur);
+                while next_i < clen && cbytes[next_i] != b')' {
+                    next_i += 1;
+                }
+                if next_i < clen {
+                    next_i += 1;
+                }
+                let trimmed = val.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_owned());
+                }
+                i = next_i;
+                continue;
+            }
+            if let Some(end_rel) = cleaned[cur..].find(')') {
+                let inner = cleaned[cur..cur + end_rel].trim();
+                if !inner.is_empty() {
+                    out.push(inner.to_owned());
+                }
+                i = cur + end_rel + 1;
+                continue;
+            }
+            i = cur;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+fn extract_html_asset_refs(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
     let len = bytes.len();
 
-    // 1. HTML attributes (`src`, `href`, `poster`, `data`, `srcset`) with optional whitespace
-    //    around `=` and double-quoted, single-quoted, or unquoted values.
+    // 1. HTML attributes (`src`, `href`, `poster`, `data`, `srcset`, and inline `style`) with
+    //    optional whitespace around `=` and double-quoted, single-quoted, or unquoted values.
     let mut i = 0usize;
     while i < len {
         let prev_boundary = i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b'<';
@@ -563,7 +712,9 @@ fn extract_local_asset_refs(text: &str) -> Vec<String> {
             }
             let attr_name = &text[start..i];
             let is_srcset = attr_name.eq_ignore_ascii_case("srcset");
+            let is_style_attr = attr_name.eq_ignore_ascii_case("style");
             let is_url_attr = is_srcset
+                || is_style_attr
                 || attr_name.eq_ignore_ascii_case("src")
                 || attr_name.eq_ignore_ascii_case("href")
                 || attr_name.eq_ignore_ascii_case("poster")
@@ -605,6 +756,8 @@ fn extract_local_asset_refs(text: &str) -> Vec<String> {
                         if let Some(val) = raw_val {
                             if is_srcset {
                                 out.extend(split_srcset_urls(val));
+                            } else if is_style_attr {
+                                out.extend(extract_css_asset_refs(val));
                             } else {
                                 out.push(val.to_owned());
                             }
@@ -619,97 +772,51 @@ fn extract_local_asset_refs(text: &str) -> Vec<String> {
         i += 1;
     }
 
-    // Strip CSS comments outside string literals before scanning `url(...)` and `@import`.
-    let cleaned_css = strip_css_comments_preserving_strings(text);
-    let cbytes = cleaned_css.as_bytes();
-    let clen = cbytes.len();
-    let lower = cleaned_css.to_ascii_lowercase();
-
-    // 2. CSS `url(...)` (respecting quoted strings containing `)` or spaces)
-    let mut search_from = 0usize;
-    while let Some(rel_idx) = lower[search_from..].find("url(") {
-        let idx = search_from + rel_idx;
-        let prev_ok = idx == 0
-            || !(cbytes[idx - 1].is_ascii_alphanumeric()
-                || cbytes[idx - 1] == b'-'
-                || cbytes[idx - 1] == b'_');
-        let mut cur = idx + 4;
-        if !prev_ok {
-            search_from = cur;
+    // 2. `<style ...>...</style>` blocks scanned as CSS (so apostrophes in HTML prose never skew
+    //    CSS string quoting, and CSS `content: "url(...)"` inside `<style>` is ignored).
+    let mut pos = 0usize;
+    while pos + 6 <= len {
+        if bytes[pos] == b'<'
+            && bytes[pos + 1..pos + 6].eq_ignore_ascii_case(b"style")
+            && (pos + 6 == len
+                || bytes[pos + 6].is_ascii_whitespace()
+                || bytes[pos + 6] == b'>'
+                || bytes[pos + 6] == b'/')
+        {
+            let mut tag_end = pos + 6;
+            let mut in_quote: Option<u8> = None;
+            while tag_end < len {
+                if let Some(q) = in_quote {
+                    if bytes[tag_end] == q {
+                        in_quote = None;
+                    }
+                } else if bytes[tag_end] == b'"' || bytes[tag_end] == b'\'' {
+                    in_quote = Some(bytes[tag_end]);
+                } else if bytes[tag_end] == b'>' {
+                    break;
+                }
+                tag_end += 1;
+            }
+            if tag_end >= len {
+                break;
+            }
+            let body_start = tag_end + 1;
+            let mut close_pos = body_start;
+            while close_pos + 7 <= len {
+                if bytes[close_pos] == b'<'
+                    && bytes[close_pos + 1] == b'/'
+                    && bytes[close_pos + 2..close_pos + 7].eq_ignore_ascii_case(b"style")
+                {
+                    break;
+                }
+                close_pos += 1;
+            }
+            let body_end = if close_pos + 7 <= len { close_pos } else { len };
+            out.extend(extract_css_asset_refs(&text[body_start..body_end]));
+            pos = (body_end + 7).min(len);
             continue;
         }
-        while cur < clen && cbytes[cur].is_ascii_whitespace() {
-            cur += 1;
-        }
-        if cur < clen && (cbytes[cur] == b'"' || cbytes[cur] == b'\'') {
-            let q = cbytes[cur];
-            cur += 1;
-            let mut val = String::new();
-            while cur < clen && cbytes[cur] != q {
-                if cbytes[cur] == b'\\' && cur + 1 < clen {
-                    val.push(cleaned_css[cur + 1..].chars().next().unwrap_or_default());
-                    cur += 1 + cleaned_css[cur + 1..]
-                        .chars()
-                        .next()
-                        .map_or(1, char::len_utf8);
-                } else {
-                    let ch = cleaned_css[cur..].chars().next().unwrap_or_default();
-                    val.push(ch);
-                    cur += ch.len_utf8().max(1);
-                }
-            }
-            if cur < clen {
-                cur += 1;
-            }
-            while cur < clen && cbytes[cur] != b')' {
-                cur += 1;
-            }
-            if cur < clen {
-                cur += 1;
-            }
-            let trimmed = val.trim();
-            if !trimmed.is_empty() {
-                out.push(trimmed.to_owned());
-            }
-            search_from = cur;
-        } else if let Some(end_rel) = cleaned_css[cur..].find(')') {
-            let inner = cleaned_css[cur..cur + end_rel].trim();
-            if !inner.is_empty() {
-                out.push(inner.to_owned());
-            }
-            search_from = cur + end_rel + 1;
-        } else {
-            search_from = cur;
-        }
-    }
-
-    // 3. CSS `@import "..."` / `@import '...'` (comments already stripped)
-    let mut imp_from = 0usize;
-    while let Some(rel_idx) = lower[imp_from..].find("@import") {
-        let mut cur = imp_from + rel_idx + 7;
-        while cur < clen && cbytes[cur].is_ascii_whitespace() {
-            cur += 1;
-        }
-        if cur < clen && (cbytes[cur] == b'"' || cbytes[cur] == b'\'') {
-            let q = cbytes[cur];
-            cur += 1;
-            let v_start = cur;
-            while cur < clen && cbytes[cur] != q {
-                if cbytes[cur] == b'\\' && cur + 1 < clen {
-                    cur += 2;
-                } else {
-                    cur += 1;
-                }
-            }
-            let val = cleaned_css[v_start..cur].trim();
-            if !val.is_empty() {
-                out.push(val.to_owned());
-            }
-            if cur < clen {
-                cur += 1;
-            }
-        }
-        imp_from = cur;
+        pos += 1;
     }
 
     out
@@ -1426,20 +1533,37 @@ fn verify_no_signing_key_leak(
     if contains_any(release_notes.as_bytes()) || contains_any(zip_bytes) {
         return Err("安全阻断：更新说明或待签归档疑似包含当前签名私钥材料，拒绝签名。".into());
     }
+    let max_unpacked = cst_updater::manifest::MAX_UNPACKED_BYTES;
+    let mut total_scanned = 0u64;
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
         .map_err(|e| format!("发行 ZIP 格式无效：{e}"))?;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("读取发行 ZIP 条目失败：{e}"))?;
+        if entry.size() > max_unpacked
+            || total_scanned
+                .checked_add(entry.size())
+                .is_none_or(|sum| sum > max_unpacked)
+        {
+            return Err("发行 ZIP 声明解压总体积超出安全上限，拒绝扫描或签名。".into());
+        }
+        let mut entry_read = 0u64;
         let mut tail = Zeroizing::new(Vec::new());
         let mut buf = Zeroizing::new([0u8; 64 * 1024]);
         loop {
+            let remaining = max_unpacked.saturating_sub(total_scanned);
+            let max_chunk = (buf.len() as u64).min(remaining.saturating_add(1)) as usize;
             let n = entry
-                .read(&mut buf[..])
+                .read(&mut buf[..max_chunk])
                 .map_err(|e| format!("扫描发行 ZIP 条目失败：{e}"))?;
             if n == 0 {
                 break;
+            }
+            entry_read = entry_read.saturating_add(n as u64);
+            total_scanned = total_scanned.saturating_add(n as u64);
+            if entry_read > entry.size() || total_scanned > max_unpacked {
+                return Err("发行 ZIP 实际解压字节超出声明值或安全上限，拒绝签名。".into());
             }
             tail.extend_from_slice(&buf[..n]);
             if contains_any(&tail) {
@@ -1702,14 +1826,10 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     if let Some(ref explicit_ver) = args.version
         && *explicit_ver != attestation.version
     {
-        return Err(format!(
-            "构建证明版本与待签版本（{explicit_ver}）不一致，拒绝签名。"
-        ));
+        return Err("构建证明版本与命令行指定版本不一致，拒绝签名。".into());
     }
     if !is_lower_hex_len(&attestation.git_commit, 40) || attestation.git_commit != expected_commit {
-        return Err(format!(
-            "构建证明提交哈希无效或与获准发布提交（{expected_commit}）不一致，拒绝签名。"
-        ));
+        return Err("构建证明提交哈希无效或与获准发布提交不一致，拒绝签名。".into());
     }
     let parsed_att_url = validate_release_url(&attestation.manifest_url)?;
     if parsed_att_url.query().is_some()
@@ -1718,9 +1838,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
             .manifest_url
             .starts_with(&format!("{base_url}/"))
     {
-        return Err(format!(
-            "构建证明清单地址与当前发布基址（{base_url}）不匹配，拒绝签名。"
-        ));
+        return Err("构建证明清单地址与当前发布基址不匹配，拒绝签名。".into());
     }
 
     let (signing_key, release_key, signing_pub_b64, signing_seed, signing_key_id) =
@@ -1979,9 +2097,7 @@ fn verify_in_memory_zip_release_invariants(
         .find_map(|l| l.strip_prefix("cst-pilot "))
         .ok_or("ZIP 内 VERSION 格式无效。")?;
     if zip_ver != expected_version {
-        return Err(format!(
-            "ZIP 内 VERSION 与预期版本（{expected_version}）不一致。"
-        ));
+        return Err("ZIP 内 VERSION 与预期发布版本不一致，拒绝签名。".into());
     }
 
     let bi_bytes = read_zip_entry(&mut archive, BUILD_INFO_PATH, 64 * 1024)?;
@@ -2246,11 +2362,26 @@ fn validate_output_path_not_aliasing(
     Ok(())
 }
 
-struct TempManifestGuard(PathBuf);
+#[derive(Default)]
+struct TempManifestGuard {
+    path: Option<PathBuf>,
+}
+
+impl TempManifestGuard {
+    fn arm(&mut self, path: PathBuf) {
+        self.path = Some(path);
+    }
+
+    fn disarm(&mut self) {
+        self.path = None;
+    }
+}
 
 impl Drop for TempManifestGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        if let Some(ref p) = self.path {
+            let _ = fs::remove_file(p);
+        }
     }
 }
 
@@ -2296,9 +2427,12 @@ fn write_manifest_file_atomic(
 
     let pinned_target = pinned_parent.join(file_name);
     let tmp_name = format!(".manifest-{}.tmp", Uuid::new_v4().simple());
+    // Declare `tmp_guard` BEFORE `tmp_file` so on error unwind `tmp_file` drops FIRST (releasing
+    // Windows `share_mode(0)` exclusive lock) before `TempManifestGuard::drop` unlinks `tmp_path`!
+    let mut tmp_guard = TempManifestGuard::default();
     let (mut tmp_file, tmp_path) =
         cst_os::open_exclusive_temp_file_in_pinned_dir(leaf_dir_file, &pinned_parent, &tmp_name)?;
-    let _tmp_guard = TempManifestGuard(tmp_path.clone());
+    tmp_guard.arm(tmp_path.clone());
     tmp_file
         .write_all(bytes)
         .and_then(|_| tmp_file.sync_all())
@@ -2319,7 +2453,7 @@ fn write_manifest_file_atomic(
 
     verify_ancestor_chain_unchanged(&ancestor_chain, "清单输出目录")?;
     // Commit directly from the STILL-OPEN `tmp_file` handle (`SetFileInformationByHandle` on
-    // Windows, `linkat("/proc/self/fd/<tmp_fd>", leaf_dir_fd, ...)` on Linux) without closing!
+    // Windows, `linkat` + unlink on Linux) without closing!
     cst_os::commit_open_temp_file_no_overwrite(
         &tmp_file,
         leaf_dir_file,
@@ -2327,6 +2461,7 @@ fn write_manifest_file_atomic(
         &pinned_target,
         file_name,
     )?;
+    tmp_guard.disarm();
     drop(tmp_file);
     Ok(())
 }
@@ -3202,9 +3337,27 @@ fn decode_chunked_body(mut input: &[u8], max_body: usize) -> Result<Vec<u8>, Str
                             | "transfer-encoding"
                             | "host"
                             | "authorization"
+                            | "proxy-authenticate"
+                            | "proxy-authorization"
+                            | "www-authenticate"
+                            | "content-encoding"
                             | "content-type"
-                            | "trailer"
+                            | "content-range"
+                            | "cache-control"
+                            | "expect"
+                            | "max-forwards"
+                            | "pragma"
+                            | "range"
                             | "te"
+                            | "trailer"
+                            | "set-cookie"
+                            | "age"
+                            | "expires"
+                            | "date"
+                            | "location"
+                            | "retry-after"
+                            | "vary"
+                            | "warning"
                     )
                     || t_val
                         .bytes()
@@ -3488,13 +3641,12 @@ fn parse_canonical_zip_version(file_name: &str) -> Option<&str> {
         .filter(|ver| !ver.contains('+') && cst_updater::manifest::version(ver).is_ok())
 }
 
-/// Captures an immutable bounded in-memory ZIP snapshot (`<= 256 MiB`) without unpacking any
-/// archive entry yet, rejecting symlinks/reparse points on all inspected paths and ancestors.
+/// Captures an immutable bounded in-memory ZIP snapshot (`<= 256 MiB`) without reading untrusted
+/// inner files, walking directory trees, or unpacking any archive entry before cryptographic
+/// digest & secret-leak checks, rejecting symlinks/reparse points on all inspected paths.
 fn resolve_immutable_archive_input(
     package_path: &Path,
     explicit_version: Option<&str>,
-    disallow_synthesizing_zip: bool,
-    work_dir: &Path,
 ) -> Result<ResolvedArchiveInput, String> {
     if let Some(ver) = explicit_version {
         if ver.contains('+') {
@@ -3524,7 +3676,7 @@ fn resolve_immutable_archive_input(
         if let (Some(exp), Some(inf)) = (explicit_version, inferred_version.as_deref())
             && exp != inf
         {
-            return Err(format!("--version（{exp}）与发行 ZIP 文件名版本不一致。"));
+            return Err("--version 与发行 ZIP 文件名版本不一致。".into());
         }
         return Ok(ResolvedArchiveInput {
             zip_bytes,
@@ -3539,57 +3691,25 @@ fn resolve_immutable_archive_input(
         let has_version = is_regular_non_symlink_file(&package_path.join("VERSION"))?;
         let has_main_exe = is_regular_non_symlink_file(&package_path.join("cst-pilot.exe"))?;
         if has_version && has_main_exe {
-            let disk_version = cst_updater::layout::read_version(package_path)?;
-            if disk_version.contains('+') {
-                return Err("发布版本号不能包含 + 构建元数据。".into());
-            }
-            if let Some(exp) = explicit_version
-                && exp != disk_version
-            {
-                return Err(format!("--version（{exp}）与目录内 VERSION 不一致。"));
-            }
-            let canonical_name = format!("cst-pilot-{disk_version}-windows-x64.zip");
-            let sibling_zip = if let Some(parent) = package_path.parent() {
-                let candidate = parent.join(&canonical_name);
-                if is_regular_non_symlink_file(&candidate)? {
-                    Some(candidate)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            let (zip_bytes, source_zip_path) = if let Some(existing_zip) = sibling_zip {
-                let bytes = read_bounded_regular_file(
-                    &existing_zip,
-                    MAX_SERVER_ARCHIVE_BYTES,
-                    "同级发行 ZIP",
-                )?;
-                (bytes, Some(existing_zip))
-            } else {
-                if disallow_synthesizing_zip {
-                    return Err(
-                        "使用 --expected-archive-sha256 时必须提供现成的发行 ZIP（或同级存在规范 ZIP），不能现场重新压缩未归档目录。"
-                            .into(),
-                    );
-                }
-                cst_updater::verify::verify_clean_dist_tree(package_path, &disk_version)?;
-                let sums = cst_updater::verify::scan_clean_dist_tree(package_path, &disk_version)?;
-                let generated_zip = work_dir.join(&canonical_name);
-                super::write_release_zip(package_path, &generated_zip, &sums)?;
-                let bytes = read_bounded_regular_file(
-                    &generated_zip,
-                    MAX_SERVER_ARCHIVE_BYTES,
-                    "生成的发行 ZIP",
-                )?;
-                (bytes, None)
-            };
+            let parent = package_path.parent().ok_or(
+                "指定已解压发行目录时，其上级目录必须同时存在对应的 cst-pilot-*-windows-x64.zip 归档文件。",
+            )?;
+            let existing_zip = locate_zip_in_dist_parent(parent, explicit_version).map_err(|_| {
+                "指定已解压发行目录时，其上级目录必须同时存在唯一匹配的 cst-pilot-*-windows-x64.zip 归档文件（禁止在哈希与私钥扫描前现场打包未核验目录）。".to_owned()
+            })?;
+            let zip_bytes =
+                read_bounded_regular_file(&existing_zip, MAX_SERVER_ARCHIVE_BYTES, "同级发行 ZIP")?;
+            let inferred_version = existing_zip
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(parse_canonical_zip_version)
+                .map(str::to_owned);
             return Ok(ResolvedArchiveInput {
                 zip_bytes,
-                source_zip_path,
+                source_zip_path: Some(existing_zip),
                 source_kit_dir: Some(package_path.to_path_buf()),
-                sibling_search_dir: package_path.parent().map(Path::to_path_buf),
-                inferred_version: Some(disk_version),
+                sibling_search_dir: Some(parent.to_path_buf()),
+                inferred_version,
             });
         }
 
@@ -3735,12 +3855,7 @@ pub async fn execute_release(
     let (_, _, signing_pub_b64, _, _) = load_signing_key(&args.private_key_file)?;
 
     let work_dir = TempWorkDir::create("cst-release-run")?;
-    let resolved = resolve_immutable_archive_input(
-        &args.package_path,
-        args.version.as_deref(),
-        args.expected_archive_sha256.is_some(),
-        work_dir.path(),
-    )?;
+    let resolved = resolve_immutable_archive_input(&args.package_path, args.version.as_deref())?;
 
     let mut protected_paths: Vec<&Path> = vec![&args.private_key_file, &args.package_path];
     if let Some(ref src_zip) = resolved.source_zip_path {
@@ -3929,14 +4044,10 @@ fn sign_attested_in_memory(
     if let Some(exp_v) = explicit_version
         && exp_v != attestation.version
     {
-        return Err(format!(
-            "构建证明版本与待签版本（{exp_v}）不一致，拒绝签名。"
-        ));
+        return Err("构建证明版本与命令行指定版本不一致，拒绝签名。".into());
     }
     if !is_lower_hex_len(&attestation.git_commit, 40) || attestation.git_commit != exp_commit {
-        return Err(format!(
-            "构建证明提交哈希无效或与获准发布提交（{exp_commit}）不一致，拒绝签名。"
-        ));
+        return Err("构建证明提交哈希无效或与获准发布提交不一致，拒绝签名。".into());
     }
 
     let (signing_key, release_key, signing_pub_b64, signing_seed, signing_key_id) =
@@ -4084,9 +4195,7 @@ fn sign_digest_pinned_package(
     if let Some(exp_ver) = version_hint
         && exp_ver != version
     {
-        return Err(format!(
-            "待发归档内 VERSION 与预期版本（{exp_ver}）不一致。"
-        ));
+        return Err("待发归档内 VERSION 与预期发布版本不一致，拒绝签名。".into());
     }
     let parsed_ver = cst_updater::manifest::version(&version)?;
     let parsed_min = cst_updater::manifest::version(min_upgradable)?;
@@ -4458,31 +4567,56 @@ mod tests {
         no_cnt_code_pe[sec0_off + 36..sec0_off + 40].copy_from_slice(&0x6000_0040u32.to_le_bytes());
         assert!(verify_pe64_windows_gui_binary(&no_cnt_code_pe, "cst-pilot.exe").is_err());
 
-        // Overlapping or gapped virtual section layout must fail (`B2-P3-2`).
+        // Overlapping, reversed, gapped, or SizeOfImage-mismatched virtual section layouts must fail.
         let mut overlap_virt_pe = gui_pe.clone();
         overlap_virt_pe[sec0_off + 40 + 12..sec0_off + 40 + 16]
             .copy_from_slice(&0x1000u32.to_le_bytes());
         assert!(verify_pe64_windows_gui_binary(&overlap_virt_pe, "cst-pilot.exe").is_err());
 
-        // HTML/CSS asset extractor must catch unquoted attrs, whitespace around `=`, `srcset` with `data:`,
-        // quoted `url("a)b.svg")` containing `)`, and `@import /* comment */ "theme.css"`.
-        let refs = extract_local_asset_refs(
-            "<link rel=stylesheet href=app.css><img src = '/a.png' srcset=\"data:image/svg+xml,<svg,/> 1x, b.png 2x, ../escape.png 3x\"><style>@import /* c */ 'theme.css'; body{background:url(\"a)b.svg\")}</style>",
+        let mut reversed_virt_pe = gui_pe.clone();
+        reversed_virt_pe[sec0_off + 12..sec0_off + 16].copy_from_slice(&0x2000u32.to_le_bytes());
+        reversed_virt_pe[sec0_off + 40 + 12..sec0_off + 40 + 16]
+            .copy_from_slice(&0x1000u32.to_le_bytes());
+        assert!(verify_pe64_windows_gui_binary(&reversed_virt_pe, "cst-pilot.exe").is_err());
+
+        let mut gapped_virt_pe = gui_pe.clone();
+        gapped_virt_pe[0x80 + 24 + 56..0x80 + 24 + 60].copy_from_slice(&0x4000u32.to_le_bytes());
+        gapped_virt_pe[sec0_off + 40 + 12..sec0_off + 40 + 16]
+            .copy_from_slice(&0x3000u32.to_le_bytes());
+        assert!(verify_pe64_windows_gui_binary(&gapped_virt_pe, "cst-pilot.exe").is_err());
+
+        let mut oversized_image_pe = gui_pe.clone();
+        oversized_image_pe[0x80 + 24 + 56..0x80 + 24 + 60]
+            .copy_from_slice(&0x4000u32.to_le_bytes());
+        assert!(verify_pe64_windows_gui_binary(&oversized_image_pe, "cst-pilot.exe").is_err());
+
+        // HTML/CSS asset extractors must handle non-ASCII UTF-8 `srcset`, descriptorless `data:...,`
+        // candidates, HTML prose apostrophes outside `<style>`, quoted `url("a)b.svg")`,
+        // `@import /* comment */ "theme.css"`, and ignore `content: "url(fake.png)"` string literals.
+        let refs = extract_html_asset_refs(
+            "<p>Don't panic</p><link rel=stylesheet href=app.css><img src = '/a.png' srcset=\"中文图.png 1x, data:image/gif;base64,R0lGODlhAQABAAAAACw=, data:image/svg+xml,<svg,/> 2x, 备用图.png 3x, ../escape.png 4x\"><style>@import /* c */ 'theme.css'; body{content:\"see url(fake.png)\";background:url(\"a)b.svg\")}</style>",
         );
         assert_eq!(
             refs,
             vec![
                 "app.css",
                 "/a.png",
+                "中文图.png",
+                "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
                 "data:image/svg+xml,<svg,/>",
-                "b.png",
+                "备用图.png",
                 "../escape.png",
-                "a)b.svg",
-                "theme.css"
+                "theme.css",
+                "a)b.svg"
             ]
         );
+        let css_refs = extract_css_asset_refs(
+            "@import url(\"base.css\"); .note::after { content: 'url(ignore-me.png)'; } .hero { background-image: url(hero.webp); }",
+        );
+        assert_eq!(css_refs, vec!["base.css", "hero.webp"]);
 
-        // Embedded web build verifier must resolve `/fonts/SourceHanSansCN-VF.otf` against repo fonts.
+        // Embedded web build verifier must resolve `/fonts/*` and `/assets/*.css` `../fonts/*`
+        // strictly against `REQUIRED_FONT_FILES`, rejecting unpackaged extra fonts.
         let mock_web_repo = env::temp_dir().join(format!("xtask-web-fonts-{}", Uuid::new_v4()));
         let mock_client = mock_web_repo.join("src/web/frontend/build/client");
         let mock_fonts = mock_web_repo.join("assets/fonts");
@@ -4495,12 +4629,20 @@ mod tests {
         .unwrap();
         fs::write(
             mock_client.join("assets/app.css"),
-            r#"@font-face { src: url("/fonts/SourceHanSansCN-VF.otf") format("opentype"); }"#,
+            r#"@font-face { src: url("/fonts/SourceHanSansCN-VF.otf") format("opentype"), url("../fonts/JetBrainsMono-Regular.ttf") format("truetype"); }"#,
         )
         .unwrap();
         assert!(verify_embedded_web_build_dir(&mock_client, &mock_web_repo).is_err());
         fs::write(mock_fonts.join("SourceHanSansCN-VF.otf"), b"OTTO").unwrap();
+        fs::write(mock_fonts.join("JetBrainsMono-Regular.ttf"), b"TTF").unwrap();
         assert!(verify_embedded_web_build_dir(&mock_client, &mock_web_repo).is_ok());
+        fs::write(mock_fonts.join("UnpackagedExtra.ttf"), b"TTF").unwrap();
+        fs::write(
+            mock_client.join("assets/app.css"),
+            r#"@font-face { src: url("/fonts/UnpackagedExtra.ttf") format("truetype"); }"#,
+        )
+        .unwrap();
+        assert!(verify_embedded_web_build_dir(&mock_client, &mock_web_repo).is_err());
         let _ = fs::remove_dir_all(&mock_web_repo);
 
         let console_pe = mock_pe64_gui_with_marker(3, b"test");
@@ -5246,14 +5388,17 @@ mod tests {
             )
             .is_err()
         );
-        // Forbidden trailer (`Content-Length` in chunked trailer) must be rejected.
-        assert!(
-            parse_raw_http1_response(
-                b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nContent-Length: 2\r\n\r\n",
-                1024,
-            )
-            .is_err()
-        );
+        // Forbidden trailers (`Content-Length`, `Content-Encoding`, `Content-Range`) in chunked trailer must be rejected.
+        for bad_trailer in [
+            "Content-Length: 2",
+            "Content-Encoding: gzip",
+            "Content-Range: bytes 0-1/2",
+        ] {
+            let raw_t = format!(
+                "HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{{}}\r\n0\r\n{bad_trailer}\r\n\r\n"
+            );
+            assert!(parse_raw_http1_response(raw_t.as_bytes(), 1024).is_err());
+        }
         let (code, body) = parse_raw_http1_response(
             b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nX-Checksum: ok\r\n\r\n",
             1024,
@@ -5292,17 +5437,32 @@ mod tests {
             c.spawn().unwrap()
         };
 
-        let req_h = b"POST / HTTP/1.1\r\n\r\n";
+        // Cross the 64 KiB chunk-streaming boundary (`70_000` bytes) with full multipart HTTP/1.1 framing.
+        let multi_chunk_zip: Vec<u8> = (0..70_000usize).map(|i| (i % 251) as u8).collect();
+        let mp_prefix = b"--cst-b\r\nContent-Disposition: form-data; name=\"archive\"; filename=\"a.zip\"\r\nContent-Type: application/zip\r\n\r\n";
+        let mp_suffix = b"\r\n--cst-b--\r\n";
+        let mp_total = mp_prefix.len() + multi_chunk_zip.len() + mp_suffix.len();
+        let req_h = format!(
+            "POST /v1/admin/releases?channel=stable&activate=true HTTP/1.1\r\nHost: 127.0.0.1:8787\r\nContent-Type: multipart/form-data; boundary=cst-b\r\nContent-Length: {mp_total}\r\nConnection: close\r\n\r\n"
+        );
         let expected_wire_sha = format!(
             "{:x}",
-            Sha256::digest([req_h.as_slice(), b"pre", b"zip", b"suf"].concat())
+            Sha256::digest(
+                [
+                    req_h.as_bytes(),
+                    mp_prefix.as_slice(),
+                    multi_chunk_zip.as_slice(),
+                    mp_suffix.as_slice()
+                ]
+                .concat()
+            )
         );
         let (ok_code, ok_body) = exchange_http1_over_child_stdio(
             spawn_mock_ssh(0),
-            req_h,
-            b"pre",
-            b"zip",
-            b"suf",
+            req_h.as_bytes(),
+            mp_prefix,
+            &multi_chunk_zip,
+            mp_suffix,
             Duration::from_secs(15),
         )
         .await
@@ -5315,17 +5475,18 @@ mod tests {
 
         let nonzero_err = exchange_http1_over_child_stdio(
             spawn_mock_ssh(255),
-            req_h,
-            b"pre",
+            req_h.as_bytes(),
+            mp_prefix,
             b"zip",
-            b"suf",
+            mp_suffix,
             Duration::from_secs(15),
         )
         .await
         .expect_err("non-zero ssh exit must fail even if HTTP 201 was printed");
         assert!(nonzero_err.contains("异常退出"));
 
-        // Write failure (child closes stdin immediately while caller streams large body) must fail!
+        // Write failure (child closes stdin immediately while caller streams large body) must fail
+        // specifically with write-incomplete / broken-stream error rather than timeout!
         #[cfg(windows)]
         let early_close_child = tokio::process::Command::new("pwsh")
             .args([
@@ -5350,18 +5511,21 @@ mod tests {
             .spawn()
             .unwrap();
         let big_payload = vec![b'Z'; 4 * 1024 * 1024];
+        let write_fail_err = exchange_http1_over_child_stdio(
+            early_close_child,
+            req_h.as_bytes(),
+            mp_prefix,
+            &big_payload,
+            mp_suffix,
+            Duration::from_secs(15),
+        )
+        .await
+        .expect_err("early stdin close during multi-MiB upload must fail");
         assert!(
-            exchange_http1_over_child_stdio(
-                early_close_child,
-                req_h,
-                b"pre",
-                &big_payload,
-                b"suf",
-                Duration::from_secs(15),
-            )
-            .await
-            .is_err()
+            write_fail_err.contains("请求发送未完整结束") || write_fail_err.contains("写入流中断"),
+            "unexpected write failure message: {write_fail_err}"
         );
+        assert!(!write_fail_err.contains("超时"));
 
         // Hung child exceeding `io_timeout` must be killed and reaped cleanly (`!is_process_alive`).
         #[cfg(windows)]
@@ -5383,10 +5547,10 @@ mod tests {
         let hung_pid = hung_child.id().expect("hung child pid");
         let timeout_err = exchange_http1_over_child_stdio(
             hung_child,
-            req_h,
-            b"pre",
+            req_h.as_bytes(),
+            mp_prefix,
             b"zip",
-            b"suf",
+            mp_suffix,
             Duration::from_millis(200),
         )
         .await

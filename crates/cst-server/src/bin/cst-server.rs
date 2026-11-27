@@ -491,17 +491,18 @@ mod tests {
     #[test]
     fn sanitize_env_child_process_honors_online_and_offline_overrides() {
         const CHILD_MODE_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_MODE";
+        const CHILD_DIR_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_DIR";
         if let Ok(mode_str) = std::env::var(CHILD_MODE_ENV) {
-            let dir = std::env::temp_dir()
-                .join(format!("cst-server-sanitize-probe-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
+            let dir = std::path::PathBuf::from(
+                std::env::var_os(CHILD_DIR_ENV).expect("missing probe dir env"),
+            );
             let mode = match mode_str.as_str() {
                 "online" => super::OfflineCliMode::ForceOnline,
                 "offline" => super::OfflineCliMode::ForceOffline,
                 _ => super::OfflineCliMode::Inherit,
             };
             super::sanitize_current_process_env(&dir, mode).unwrap();
-            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::env::set_current_dir(std::env::temp_dir());
             assert!(std::env::var_os("PI_OFFLINE").is_none());
             match mode_str.as_str() {
                 "online" => {
@@ -523,6 +524,12 @@ mod tests {
             ("offline", "0", "0"),
             ("inherit", "0", "1"),
         ] {
+            let probe_dir = std::env::temp_dir().join(format!(
+                "cst-server-sanitize-probe-{}-{mode}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&probe_dir);
+            std::fs::create_dir_all(&probe_dir).expect("create probe dir");
             let status = std::process::Command::new(&exe)
                 .args([
                     "--exact",
@@ -530,13 +537,19 @@ mod tests {
                     "--nocapture",
                 ])
                 .env(CHILD_MODE_ENV, mode)
+                .env(CHILD_DIR_ENV, &probe_dir)
                 .env("CST_OFFLINE", cst_off)
                 .env("PI_OFFLINE", pi_off)
                 .status()
                 .expect("spawn child probe");
+            let _ = std::fs::remove_dir_all(&probe_dir);
             assert!(
                 status.success(),
                 "child sanitize probe failed for mode={mode}"
+            );
+            assert!(
+                !probe_dir.exists(),
+                "probe_dir must be cleaned up after child exit"
             );
         }
     }

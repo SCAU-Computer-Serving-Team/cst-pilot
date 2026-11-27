@@ -110,7 +110,28 @@ pub fn is_process_alive(pid: u32) -> bool {
             Err(error) => error.code().0 as u32 != 0x8007_0057,
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    {
+        if pid == 0 || pid > i32::MAX as u32 {
+            return false;
+        }
+        unsafe extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let rc = unsafe { kill(pid as i32, 0) };
+        if rc != 0 {
+            return std::io::Error::last_os_error().raw_os_error() != Some(3);
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            && let Some(rparen) = stat.rfind(')')
+            && stat[rparen + 1..].trim_start().starts_with('Z')
+        {
+            return false;
+        }
+        true
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         let _ = pid;
         true

@@ -21,6 +21,13 @@ pub const REQUIRED_FONT_FILES: &[&str] = &[
     "app/fonts/JetBrainsMono-OFL.txt",
 ];
 
+pub const REQUIRED_APP_LICENSES: &[&str] = &[
+    "app/licenses/MPL-2.0.txt",
+    "app/licenses/ntfs-ng-LICENSE.txt",
+    "app/licenses/pi-LICENSE.txt",
+    "app/licenses/puppeteer-LICENSE.txt",
+];
+
 pub const DEFAULT_CONFIG_FILES: &[&str] = &[
     "app/defaults/models-store.json",
     "app/defaults/telemetry.json",
@@ -399,8 +406,10 @@ pub fn validate_metadata(
             return Err("升级包缺少维护技能。".into());
         }
     }
-    if !files.keys().any(|p| p.starts_with("app/licenses/")) {
-        return Err("升级包缺少第三方许可目录。".into());
+    for req_lic in REQUIRED_APP_LICENSES {
+        if !files.contains_key(*req_lic) {
+            return Err("升级包缺少必需的第三方许可文件。".into());
+        }
     }
     if read_version(root)? != target {
         return Err("升级包 VERSION 与签名清单不一致。".into());

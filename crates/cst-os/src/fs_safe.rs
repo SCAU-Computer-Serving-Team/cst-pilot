@@ -204,8 +204,37 @@ impl Storage {
                 return Err("交付目录路径无效。".into());
             };
             partial.push(part);
-            let path = self.directory(&partial, create)?;
-            handles.push(pin(&path)?);
+            let fallback = self.root.join(&partial);
+            let parent_f = handles.last().expect("root handle present");
+            let (child_f, _) = pin_child_directory_handle(parent_f, &fallback, part, create)?;
+            handles.push(child_f);
+        }
+        Ok(DirectoryLease { _handles: handles })
+    }
+
+    pub fn pin_directory_from_lease(
+        &self,
+        root_lease: &DirectoryLease,
+        relative: &Path,
+        create: bool,
+    ) -> Result<DirectoryLease, String> {
+        let root_f = root_lease
+            ._handles
+            .last()
+            .ok_or("缺少目标根目录锁定句柄。")?
+            .try_clone()
+            .map_err(|e| io_error("复制根目录租约句柄", e))?;
+        let mut handles = vec![root_f];
+        let mut partial = PathBuf::new();
+        for component in relative.components() {
+            let Component::Normal(part) = component else {
+                return Err("交付目录路径无效。".into());
+            };
+            partial.push(part);
+            let fallback = self.root.join(&partial);
+            let parent_f = handles.last().expect("root handle present");
+            let (child_f, _) = pin_child_directory_handle(parent_f, &fallback, part, create)?;
+            handles.push(child_f);
         }
         Ok(DirectoryLease { _handles: handles })
     }
@@ -371,6 +400,18 @@ fn pin(path: &Path) -> Result<File, String> {
             .share_mode(3)
             .custom_flags(0x0200_0000 | 0x0020_0000);
     }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_DIRECTORY (0o0200000) | O_NOFOLLOW (0o0400000) | O_NONBLOCK (0o0004000)
+        options.custom_flags(0o0200_000 | 0o0400_000 | 0o0004_000);
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_DIRECTORY (0o0040000) | O_NOFOLLOW (0o0100000) | O_NONBLOCK (0o0004000)
+        options.custom_flags(0o0040_000 | 0o0100_000 | 0o0004_000);
+    }
     let file = options
         .open(path)
         .map_err(|e| io_error("锁定交付目录路径", e))?;
@@ -526,6 +567,17 @@ pub fn open_read_in_pinned_dir(
     {
         use std::os::windows::fs::OpenOptionsExt;
         opts.share_mode(1);
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NOFOLLOW (0o0400000) | O_NONBLOCK (0o0004000) prevents symlink-follow & FIFO hang!
+        opts.custom_flags(0o0400_000 | 0o0004_000);
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(0o0100_000 | 0o0004_000);
     }
     let file = opts
         .open(&step_path)

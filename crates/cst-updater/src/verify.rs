@@ -253,7 +253,7 @@ fn extract_archive_reader<R: Read + Seek>(
     if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
         return Err("升级归档条目数量异常或与中央目录不一致。".into());
     }
-    let (_parent_storage, _root_lease, storage) = open_pinned_target_storage(root, "升级解包目录")?;
+    let (_parent_storage, root_lease, storage) = open_pinned_target_storage(root, "升级解包目录")?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
     let mut saw_root_dir = false;
@@ -320,7 +320,7 @@ fn extract_archive_reader<R: Read + Seek>(
             {
                 return Err("升级归档目录不在签名清单中。".into());
             }
-            let _pin = storage.pin_directory(Path::new(&relative), true)?;
+            let _pin = storage.pin_directory_from_lease(&root_lease, Path::new(&relative), true)?;
             continue;
         }
         if layout::classify_release(&relative)? != layout::Area::Program {
@@ -347,7 +347,7 @@ fn extract_archive_reader<R: Read + Seek>(
         let file_name = rel_path.file_name().ok_or("升级归档文件名无效。")?;
         let parent_rel = rel_path.parent().unwrap_or(Path::new(""));
         let parent_dir = storage.root.join(parent_rel);
-        let pin = storage.pin_directory(parent_rel, true)?;
+        let pin = storage.pin_directory_from_lease(&root_lease, parent_rel, true)?;
         let mut output = pin
             .create_new_file(&parent_dir, file_name)
             .map_err(|_| "无法创建升级程序文件。")?;
@@ -445,7 +445,7 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
     if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
         return Err("发行归档条目数量异常或与中央目录不一致。".into());
     }
-    let (_parent_storage, _root_lease, storage) = open_pinned_target_storage(root, "解包目标目录")?;
+    let (_parent_storage, root_lease, storage) = open_pinned_target_storage(root, "解包目标目录")?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
     let mut saw_root_dir = false;
@@ -506,7 +506,7 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         if directory {
             layout::validate_release_dir_path(&relative)?;
             verify_empty_zip_dir_entry(&mut entry)?;
-            let _pin = storage.pin_directory(Path::new(&relative), true)?;
+            let _pin = storage.pin_directory_from_lease(&root_lease, Path::new(&relative), true)?;
             explicit_dirs.push(relative);
             continue;
         }
@@ -530,7 +530,7 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         let file_name = rel_path.file_name().ok_or("发行归档文件名无效。")?;
         let parent_rel = rel_path.parent().unwrap_or(Path::new(""));
         let parent_dir = storage.root.join(parent_rel);
-        let pin = storage.pin_directory(parent_rel, true)?;
+        let pin = storage.pin_directory_from_lease(&root_lease, parent_rel, true)?;
         let mut output = pin
             .create_new_file(&parent_dir, file_name)
             .map_err(|_| "无法创建发行解包文件。")?;

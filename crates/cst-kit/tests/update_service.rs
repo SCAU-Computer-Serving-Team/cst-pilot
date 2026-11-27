@@ -202,7 +202,13 @@ impl Network {
             ),
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-            ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
+            ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+            ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+            ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+            (
+                "app/licenses/puppeteer-LICENSE.txt".into(),
+                b"Apache-2.0".to_vec(),
+            ),
             (
                 "app/fonts/SourceHanSansCN-VF.otf".into(),
                 mock_sfnt(b"OTTO"),

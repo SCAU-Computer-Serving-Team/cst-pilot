@@ -68,7 +68,13 @@ fn defaults() -> BTreeMap<String, Vec<u8>> {
         ),
         ("LICENSE".into(), b"mock MIT license".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"mock notices".to_vec()),
-        ("app/licenses/example.txt".into(), b"mock license".to_vec()),
+        ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+        ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+        ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+        (
+            "app/licenses/puppeteer-LICENSE.txt".into(),
+            b"Apache-2.0".to_vec(),
+        ),
         (
             "app/fonts/SourceHanSansCN-VF.otf".into(),
             mock_sfnt(b"OTTO"),

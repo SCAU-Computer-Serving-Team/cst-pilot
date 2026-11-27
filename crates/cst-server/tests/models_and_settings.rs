@@ -1003,7 +1003,13 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-        ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
+        ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+        ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+        ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+        (
+            "app/licenses/puppeteer-LICENSE.txt".into(),
+            b"Apache-2.0".to_vec(),
+        ),
         ("cst-pilot.exe".into(), b"new-pilot-bin".to_vec()),
         ("app/cst-server.exe".into(), b"new-server-bin".to_vec()),
         ("app/cst-updater.exe".into(), b"new-updater-bin".to_vec()),
@@ -1252,16 +1258,18 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let dummy_pilot = fixture.0.join("cst-pilot.exe");
     fs::copy(env!("CARGO_BIN_EXE_cst-server"), &dummy_pilot).unwrap();
     let dummy_agent_kit = TestKitDir::new();
-    let mut child = std::process::Command::new(&dummy_pilot)
-        .arg("--standalone-web")
-        .arg("--port")
-        .arg("0")
-        .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn dummy cst-pilot.exe");
-    let child_identity = ProcessIdentity::capture(child.id())
+    let child_guard = KillOnDropChild(
+        std::process::Command::new(&dummy_pilot)
+            .arg("--standalone-web")
+            .arg("--port")
+            .arg("0")
+            .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn dummy cst-pilot.exe"),
+    );
+    let child_identity = ProcessIdentity::capture(child_guard.0.id())
         .unwrap()
         .expect("child identity alive");
 
@@ -1328,8 +1336,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     assert_eq!(launch_val["receipt"]["updaterPid"], 42424);
     assert_eq!(*launcher.launched.lock().unwrap(), Some(42424));
 
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(child_guard);
     drop(sse_stream);
     server.shutdown().await;
 }
