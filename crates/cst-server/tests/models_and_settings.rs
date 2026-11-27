@@ -786,6 +786,46 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     use tokio_util::sync::CancellationToken;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
+    // Run the entire update routes test in a scrubbed child process so even an inherited absolute
+    // `CST_PILOT_DATA_DIR` / `CST_PILOT_ROOT` / `PI_CODING_AGENT_DIR` in the developer shell can
+    // never redirect `Kit::new` or `AuthRuntime::create` to real user data or live telemetry.
+    const ISOLATED_ENV_MARKER: &str = "CST_TEST_ISOLATED_UPDATE_ROUTES_SUBPROC";
+    if std::env::var_os(ISOLATED_ENV_MARKER).is_none() {
+        let iso_holder = TestKitDir::new();
+        let fake_home = iso_holder.0.join(".state/home");
+        let fake_tmp = iso_holder.0.join(".state/tmp");
+        fs::create_dir_all(&fake_home).unwrap();
+        fs::create_dir_all(&fake_tmp).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "app_update_routes_check_prepare_cancel_and_launch_guards",
+                "--nocapture",
+            ])
+            .env(ISOLATED_ENV_MARKER, "1")
+            .env_remove("CST_PILOT_ROOT")
+            .env_remove("CST_PILOT_DATA_DIR")
+            .env_remove("PI_CODING_AGENT_DIR")
+            .env("USERPROFILE", &fake_home)
+            .env("APPDATA", &fake_home)
+            .env("LOCALAPPDATA", &fake_home)
+            .env("HOME", &fake_home)
+            .env("TEMP", &fake_tmp)
+            .env("TMP", &fake_tmp)
+            .status()
+            .expect("spawn isolated update routes test subprocess");
+        assert!(status.success(), "isolated update routes subprocess failed");
+        return;
+    }
+
+    struct KillOnDropChild(std::process::Child);
+    impl Drop for KillOnDropChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     // 1. Verify isolated child `cst-server` processes honor `--standalone-web` (`UpdateOptions::Disabled`
     //    -> `Phase::Unavailable`), `--offline`, `--sanitize-env --offline`, `CST_OFFLINE=1`, and
     //    `PI_OFFLINE=1` end-to-end without touching real user data (`CST_PILOT_DATA_DIR` scrubbed),
@@ -807,6 +847,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 expected_compiled_offline,
                 false,
             ),
+            #[cfg(windows)]
             (
                 &["--sanitize-env", "--offline"][..],
                 "0",
@@ -843,7 +884,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 .env("TMP", &tmp_sub)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
-            let mut child = cmd.spawn().unwrap();
+            let _child_guard = KillOnDropChild(cmd.spawn().unwrap());
             let disc_path = child_kit.0.join(".state/server.json");
             let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             while !disc_path.is_file() && std::time::Instant::now() < wait_deadline {
@@ -885,8 +926,6 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 let check_json: Value = check_resp.json().await.unwrap();
                 assert_eq!(check_json["phase"], "unavailable");
             }
-            let _ = child.kill();
-            let _ = child.wait();
         }
     }
 

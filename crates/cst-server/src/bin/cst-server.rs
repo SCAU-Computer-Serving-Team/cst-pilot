@@ -487,6 +487,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn sanitize_env_child_process_honors_online_and_offline_overrides() {
         const CHILD_MODE_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_MODE";
@@ -503,8 +504,14 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             assert!(std::env::var_os("PI_OFFLINE").is_none());
             match mode_str.as_str() {
-                "online" => assert!(!cst_os::is_offline_env_enabled()),
-                "offline" | "inherit" => assert!(cst_os::is_offline_env_enabled()),
+                "online" => {
+                    assert!(std::env::var_os("CST_OFFLINE").is_none());
+                    assert!(!cst_os::is_offline_env_enabled());
+                }
+                "offline" | "inherit" => {
+                    assert_eq!(std::env::var("CST_OFFLINE").as_deref(), Ok("1"));
+                    assert!(cst_os::is_offline_env_enabled());
+                }
                 other => panic!("unexpected probe mode: {other}"),
             }
             return;

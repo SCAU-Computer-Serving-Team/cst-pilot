@@ -287,9 +287,7 @@ fn extract_archive_reader<R: Read + Seek>(
         {
             return Err("升级归档包含加密文件、链接或特殊文件。".into());
         }
-        // `zip 6.0.0` consumes valid `0x0001` ZIP64 fields into `file.size()` / `compressed_size()`
-        // and strips them from `extra_data()`; raw `0x0001` was already verified in `zip_bounds_reader`.
-        check_extra(file.extra_data().unwrap_or_default(), 0, false)?;
+        check_parsed_zipfile_extra(file.extra_data().unwrap_or_default())?;
         let raw = if directory {
             raw.strip_suffix('/').unwrap_or(raw)
         } else {
@@ -345,13 +343,13 @@ fn extract_archive_reader<R: Read + Seek>(
             .checked_add(entry_size)
             .filter(|n| *n <= release.info.archive.unpacked_size)
             .ok_or("升级解压总体积超限。")?;
-        let path = storage.root.join(&relative);
-        let _pin =
-            storage.pin_directory(Path::new(&relative).parent().unwrap_or(Path::new("")), true)?;
-        let mut output = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)
+        let rel_path = Path::new(&relative);
+        let file_name = rel_path.file_name().ok_or("升级归档文件名无效。")?;
+        let parent_rel = rel_path.parent().unwrap_or(Path::new(""));
+        let parent_dir = storage.root.join(parent_rel);
+        let pin = storage.pin_directory(parent_rel, true)?;
+        let mut output = pin
+            .create_new_file(&parent_dir, file_name)
             .map_err(|_| "无法创建升级程序文件。")?;
         let mut hash = Sha256::new();
         let mut read = 0u64;
@@ -482,7 +480,7 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         {
             return Err("发行归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(entry.extra_data().unwrap_or_default(), 0, false)?;
+        check_parsed_zipfile_extra(entry.extra_data().unwrap_or_default())?;
         let raw = if directory {
             raw.strip_suffix('/').unwrap_or(raw)
         } else {
@@ -528,13 +526,13 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
             .checked_add(entry_size)
             .filter(|n| *n <= max_unpacked_bytes)
             .ok_or("发行归档解压总体积超限。")?;
-        let path = storage.root.join(&relative);
-        let _pin =
-            storage.pin_directory(Path::new(&relative).parent().unwrap_or(Path::new("")), true)?;
-        let mut output = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)
+        let rel_path = Path::new(&relative);
+        let file_name = rel_path.file_name().ok_or("发行归档文件名无效。")?;
+        let parent_rel = rel_path.parent().unwrap_or(Path::new(""));
+        let parent_dir = storage.root.join(parent_rel);
+        let pin = storage.pin_directory(parent_rel, true)?;
+        let mut output = pin
+            .create_new_file(&parent_dir, file_name)
             .map_err(|_| "无法创建发行解包文件。")?;
         let mut copied = 0u64;
         let mut buffer = [0u8; 64 * 1024];
@@ -600,7 +598,8 @@ fn zip_bounds_reader<R: Read + Seek>(
     let start = len.saturating_sub(65_557);
     file.seek(SeekFrom::Start(start)).map_err(|_| error())?;
     let mut tail = Vec::new();
-    file.take(65_557)
+    file.by_ref()
+        .take(65_557)
         .read_to_end(&mut tail)
         .map_err(|_| error())?;
     let at = (0..tail.len().saturating_sub(21))
@@ -737,7 +736,14 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         }
         let cd_name_bytes = &cd[pos + 46..pos + 46 + name_len];
         let cd_name = std::str::from_utf8(cd_name_bytes).map_err(|_| error())?;
-        if !cd_name.ends_with('/') && (ext_attr & 0x10) != 0 {
+        if cd_name.contains('\\') {
+            return Err(error());
+        }
+        let unix_ftype = (ext_attr >> 16) & 0o170000;
+        let is_dir_name = cd_name.ends_with('/');
+        if (!is_dir_name && ((ext_attr & 0x10) != 0 || unix_ftype == 0o040000))
+            || (is_dir_name && unix_ftype != 0 && unix_ftype != 0o040000)
+        {
             return Err(error());
         }
         let normalized_key = cd_name.trim_end_matches('/').to_lowercase();
@@ -991,6 +997,65 @@ fn check_extra(
         return Err("升级 ZIP 缺少必需的 ZIP64 扩展字段。".into());
     }
     Ok(out)
+}
+
+/// Validates `ZipFile::extra_data()` returned by `zip 6.0.0` (which strips `0x0001` and may
+/// concatenate Central Directory and Local File Header extra blocks, where CD `0x5455` carries
+/// only `mtime` even if `atime`/`ctime` flag bits are set).
+fn check_parsed_zipfile_extra(mut extra: &[u8]) -> Result<(), String> {
+    while !extra.is_empty() {
+        if extra.len() < 4 {
+            return Err("升级 ZIP 扩展字段无效。".into());
+        }
+        let id = u16::from_le_bytes([extra[0], extra[1]]);
+        let len = u16::from_le_bytes([extra[2], extra[3]]) as usize;
+        if !matches!(id, 0x5455 | 0x7875 | 0x000a) || len > extra.len() - 4 {
+            return Err("升级 ZIP 包含未支持的链接或扩展元数据。".into());
+        }
+        let body = &extra[4..4 + len];
+        match id {
+            0x5455 => {
+                if body.is_empty() {
+                    return Err("升级 ZIP 时间戳扩展字段缺失。".into());
+                }
+                let flags = body[0];
+                if (flags & !0x07) != 0 {
+                    return Err("升级 ZIP 时间戳扩展字段标志位无效。".into());
+                }
+                let cd_len = 1 + usize::from((flags & 0x01) != 0) * 4;
+                let lfh_len = 1 + (flags.count_ones() as usize) * 4;
+                if body.len() != cd_len && body.len() != lfh_len {
+                    return Err("升级 ZIP 时间戳扩展字段长度无效。".into());
+                }
+            }
+            0x7875 => {
+                if body.len() < 3 || body[0] != 1 {
+                    return Err("升级 ZIP Unix UID/GID 扩展字段格式无效。".into());
+                }
+                let uid_len = body[1] as usize;
+                if 2 + uid_len >= body.len() {
+                    return Err("升级 ZIP Unix UID 扩展字段越界。".into());
+                }
+                let gid_len = body[2 + uid_len] as usize;
+                if 3 + uid_len + gid_len != body.len() {
+                    return Err("升级 ZIP Unix GID 扩展字段长度不匹配。".into());
+                }
+            }
+            0x000a => {
+                if body.len() != 32 || body[0..4] != [0, 0, 0, 0] {
+                    return Err("升级 ZIP NTFS 扩展字段头或固定长度无效。".into());
+                }
+                let sub_tag = u16::from_le_bytes([body[4], body[5]]);
+                let sub_len = u16::from_le_bytes([body[6], body[7]]) as usize;
+                if sub_tag != 0x0001 || sub_len != 24 {
+                    return Err("升级 ZIP NTFS 子属性类型或长度无效。".into());
+                }
+            }
+            _ => unreachable!(),
+        }
+        extra = &extra[4 + len..];
+    }
+    Ok(())
 }
 
 pub fn verify_tree(
@@ -1408,6 +1473,12 @@ mod dist_sum_tests {
         z64_sizes.extend_from_slice(&16u16.to_le_bytes());
         z64_sizes.extend_from_slice(&(ver_body.len() as u64).to_le_bytes());
         z64_sizes.extend_from_slice(&(ver_body.len() as u64).to_le_bytes());
+        // Also attach an Info-ZIP `0x5455` timestamp block where flags = 0x03 (mtime + atime):
+        // LFH carries 9 bytes (flags + mtime + atime), while CD carries 5 bytes (flags + mtime).
+        let mut lfh_extra0 = z64_sizes.clone();
+        lfh_extra0.extend_from_slice(&[0x55, 0x54, 9, 0, 0x03, 1, 2, 3, 4, 5, 6, 7, 8]);
+        let mut cd_extra0 = z64_sizes.clone();
+        cd_extra0.extend_from_slice(&[0x55, 0x54, 5, 0, 0x03, 1, 2, 3, 4]);
 
         let off0 = zip64_archive.len() as u32;
         zip64_archive.extend_from_slice(b"PK\x03\x04");
@@ -1419,9 +1490,9 @@ mod dist_sum_tests {
         zip64_archive.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
         zip64_archive.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
         zip64_archive.extend_from_slice(&(name0.len() as u16).to_le_bytes());
-        zip64_archive.extend_from_slice(&(z64_sizes.len() as u16).to_le_bytes());
+        zip64_archive.extend_from_slice(&(lfh_extra0.len() as u16).to_le_bytes());
         zip64_archive.extend_from_slice(name0);
-        zip64_archive.extend_from_slice(&z64_sizes);
+        zip64_archive.extend_from_slice(&lfh_extra0);
         zip64_archive.extend_from_slice(ver_body);
 
         cd.extend_from_slice(b"PK\x01\x02");
@@ -1434,14 +1505,14 @@ mod dist_sum_tests {
         cd.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
         cd.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
         cd.extend_from_slice(&(name0.len() as u16).to_le_bytes());
-        cd.extend_from_slice(&(z64_sizes.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&(cd_extra0.len() as u16).to_le_bytes());
         cd.extend_from_slice(&0u16.to_le_bytes());
         cd.extend_from_slice(&0u16.to_le_bytes());
         cd.extend_from_slice(&0u16.to_le_bytes());
         cd.extend_from_slice(&0u32.to_le_bytes());
         cd.extend_from_slice(&off0.to_le_bytes());
         cd.extend_from_slice(name0);
-        cd.extend_from_slice(&z64_sizes);
+        cd.extend_from_slice(&cd_extra0);
 
         // Entry 1: `cst-pilot/app/SHA256SUMS`
         let name1 = b"cst-pilot/app/SHA256SUMS";

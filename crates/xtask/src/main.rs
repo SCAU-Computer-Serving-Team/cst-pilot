@@ -365,7 +365,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
 
     // 2. Optional Cargo build (with embed-web on cst-server; static CRT on Windows dist)
     let built_executables = if !args.skip_cargo_build {
-        release::verify_embedded_web_build_dir(&root.join("src/web/frontend/build/client"))?;
+        release::verify_embedded_web_build_dir(&root.join("src/web/frontend/build/client"), &root)?;
         println!(
             "[xtask] Building Rust binaries (profile={}, updateEnabled={})...",
             args.profile,
@@ -643,12 +643,16 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         write_release_zip(&kit_dir, &zip_path, &sums)?;
         if !args.skip_smoke {
             let temp = SmokeDir::new()?;
-            let archive = File::open(&zip_path).map_err(|e| format!("无法打开发行 ZIP：{e}"))?;
-            zip::ZipArchive::new(archive)
-                .and_then(|mut archive| archive.extract(&temp.0))
-                .map_err(|e| format!("解压发行 ZIP 失败：{e}"))?;
+            let smoke_kit = temp.0.join("cst-pilot");
+            fs::create_dir_all(&smoke_kit)
+                .map_err(|e| format!("无法创建冒烟解压目录 {}：{e}", smoke_kit.display()))?;
+            cst_updater::verify::extract_clean_dist_archive(
+                &zip_path,
+                &smoke_kit,
+                cst_updater::manifest::MAX_UNPACKED_BYTES,
+            )?;
             smoke_release(
-                &temp.0.join("cst-pilot"),
+                &smoke_kit,
                 &args.version,
                 update_cfg
                     .as_ref()

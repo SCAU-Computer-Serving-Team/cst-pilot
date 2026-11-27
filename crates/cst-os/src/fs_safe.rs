@@ -329,6 +329,28 @@ impl DirectoryLease {
             same_file::Handle::from_path(other).map_err(|e| io_error("核对目标目录身份", e))?;
         Ok(leaf_h == other_h)
     }
+
+    pub fn create_new_file(
+        &self,
+        fallback_dir: &Path,
+        file_name: &std::ffi::OsStr,
+    ) -> Result<File, String> {
+        #[cfg(target_os = "linux")]
+        let target = if let Some(leaf) = self._handles.last() {
+            use std::os::unix::io::AsRawFd;
+            PathBuf::from(format!("/proc/self/fd/{}", leaf.as_raw_fd())).join(file_name)
+        } else {
+            fallback_dir.join(file_name)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let target = fallback_dir.join(file_name);
+
+        OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&target)
+            .map_err(|e| io_error("在锁定目录创建新文件", e))
+    }
 }
 
 fn pin(path: &Path) -> Result<File, String> {
@@ -341,8 +363,11 @@ fn pin(path: &Path) -> Result<File, String> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
+        // Request `FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES` (`0x0081`) with `share_mode(3)`
+        // (`FILE_SHARE_READ | FILE_SHARE_WRITE`, omitting `FILE_SHARE_DELETE`) so Windows NTFS
+        // `IoCheckShareAccess` enforces `ReadAccess` share tracking and denies rename/delete!
         options
-            .access_mode(0)
+            .access_mode(0x0001 | 0x0080)
             .share_mode(3)
             .custom_flags(0x0200_0000 | 0x0020_0000);
     }
@@ -354,6 +379,13 @@ fn pin(path: &Path) -> Result<File, String> {
         .map_err(|e| io_error("读取交付目录身份", e))?;
     if is_reparse_or_symlink(&meta) || !meta.is_dir() {
         return Err("交付目录包含链接或重解析点。".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if (lmeta.dev(), lmeta.ino()) != (meta.dev(), meta.ino()) {
+            return Err("交付目录真实身份发生变化。".into());
+        }
     }
     let opened_h =
         same_file::Handle::from_file(file.try_clone().map_err(|e| io_error("复制目录句柄", e))?)
@@ -439,22 +471,228 @@ pub fn pin_directory_handle(path: &Path) -> Result<(File, FileIdentity), String>
     Ok((f, id))
 }
 
-pub fn commit_new_file_no_overwrite(temp_path: &Path, target_path: &Path) -> Result<(), String> {
+pub fn pin_child_directory_handle(
+    parent_dir: &File,
+    fallback_child_path: &Path,
+    child_name: &std::ffi::OsStr,
+    create_missing: bool,
+) -> Result<(File, FileIdentity), String> {
+    #[cfg(target_os = "linux")]
+    let step_path = {
+        use std::os::unix::io::AsRawFd;
+        let _ = fallback_child_path;
+        PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(child_name)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let step_path = {
+        let _ = (parent_dir, child_name);
+        fallback_child_path.to_path_buf()
+    };
+
+    if create_missing {
+        match fs::create_dir(&step_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(io_error("在锁定父目录创建子目录", e)),
+        }
+    }
+    pin_directory_handle(&step_path)
+}
+
+pub fn open_read_in_pinned_dir(
+    parent_dir: &File,
+    fallback_path: &Path,
+    file_name: &std::ffi::OsStr,
+) -> Result<(File, FileIdentity, u64), String> {
+    #[cfg(target_os = "linux")]
+    let step_path = {
+        use std::os::unix::io::AsRawFd;
+        let _ = fallback_path;
+        PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(file_name)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let step_path = {
+        let _ = (parent_dir, file_name);
+        fallback_path.to_path_buf()
+    };
+
+    let lmeta = fs::symlink_metadata(&step_path).map_err(|e| io_error("读取文件链接状态", e))?;
+    if is_reparse_or_symlink(&lmeta) || !lmeta.is_file() {
+        return Err("目标路径包含链接、重解析点或非普通文件。".into());
+    }
+    let mut opts = OpenOptions::new();
+    opts.read(true);
     #[cfg(windows)]
     {
-        rename_file(temp_path, target_path, false).map_err(|e| io_error("原子创建目标文件", e))?;
+        use std::os::windows::fs::OpenOptionsExt;
+        opts.share_mode(1);
     }
-    #[cfg(not(windows))]
+    let file = opts
+        .open(&step_path)
+        .map_err(|e| io_error("打开受固定目录保护的文件", e))?;
+    let fmeta = file
+        .metadata()
+        .map_err(|e| io_error("读取已打开文件元数据", e))?;
+    if is_reparse_or_symlink(&fmeta) || !fmeta.is_file() {
+        return Err("已打开句柄不是普通文件。".into());
+    }
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::MetadataExt;
+        if (lmeta.dev(), lmeta.ino()) != (fmeta.dev(), fmeta.ino()) {
+            return Err("打开期间文件真实身份发生变化。".into());
+        }
+    }
+    let opened_id = FileIdentity::from_file(&file)?;
+    let path_id = FileIdentity::from_path(&step_path)?;
+    if opened_id != path_id {
+        return Err("打开期间文件真实身份发生变化。".into());
+    }
+    Ok((file, opened_id, fmeta.len()))
+}
+
+pub fn open_exclusive_temp_file_in_pinned_dir(
+    parent_dir: &File,
+    fallback_parent: &Path,
+    temp_name: &str,
+) -> Result<(File, PathBuf), String> {
+    #[cfg(target_os = "linux")]
+    let temp_path = {
+        use std::os::unix::io::AsRawFd;
+        let _ = fallback_parent;
+        PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(temp_name)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let temp_path = {
+        let _ = parent_dir;
+        fallback_parent.join(temp_name)
+    };
+
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Exclusive `share_mode(0)` + `GENERIC_READ | GENERIC_WRITE | DELETE` so nobody can open,
+        // swap, or delete the staged file and `SetFileInformationByHandle(FileRenameInfo)` can
+        // atomically rename the STILL-OPEN handle directly to the destination!
+        opts.access_mode(0x8000_0000 | 0x4000_0000 | 0x0001_0000)
+            .share_mode(0);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o644);
+    }
+    let f = opts
+        .open(&temp_path)
+        .map_err(|e| io_error("创建独占临时文件", e))?;
+    Ok((f, temp_path))
+}
+
+pub fn commit_open_temp_file_no_overwrite(
+    temp_file: &File,
+    parent_dir: &File,
+    temp_path: &Path,
+    target_path: &Path,
+    target_name: &std::ffi::OsStr,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::{
+            Foundation::HANDLE,
+            Storage::FileSystem::{FILE_RENAME_INFO, FileRenameInfo, SetFileInformationByHandle},
+        };
+        let _ = (parent_dir, temp_path, target_name);
+        let wide: Vec<u16> = target_path.as_os_str().encode_wide().collect();
+        let byte_len = wide.len().saturating_mul(std::mem::size_of::<u16>());
+        let total_bytes = std::mem::size_of::<FILE_RENAME_INFO>().saturating_add(byte_len);
+        let mut backing = vec![0u64; total_bytes.div_ceil(8)];
+        unsafe {
+            let info_ptr = backing.as_mut_ptr() as *mut FILE_RENAME_INFO;
+            info_ptr.write(FILE_RENAME_INFO {
+                RootDirectory: HANDLE::default(),
+                FileNameLength: byte_len as u32,
+                ..Default::default()
+            });
+            let dst_name = std::ptr::addr_of_mut!((*info_ptr).FileName) as *mut u16;
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), dst_name, wide.len());
+            SetFileInformationByHandle(
+                HANDLE(temp_file.as_raw_handle()),
+                FileRenameInfo,
+                info_ptr as *const core::ffi::c_void,
+                total_bytes as u32,
+            )
+            .map_err(|e| {
+                io_error(
+                    "按句柄原子提交新目标文件",
+                    io::Error::from_raw_os_error(e.code().0),
+                )
+            })?;
+        }
+        if let Some(parent) = target_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            sync_directory(parent)?;
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::io::AsRawFd;
+        unsafe extern "C" {
+            fn linkat(
+                olddirfd: i32,
+                oldpath: *const std::ffi::c_char,
+                newdirfd: i32,
+                newpath: *const std::ffi::c_char,
+                flags: i32,
+            ) -> i32;
+        }
+        const AT_FDCWD: i32 = -100;
+        const AT_SYMLINK_FOLLOW: i32 = 0x400;
+        let _ = target_path;
+        let fd_path = CString::new(format!("/proc/self/fd/{}", temp_file.as_raw_fd()))
+            .map_err(|_| "临时句柄路径无效。".to_owned())?;
+        let dst_name = CString::new(target_name.as_bytes())
+            .map_err(|_| "目标文件名包含空字节。".to_owned())?;
+        let rc = unsafe {
+            linkat(
+                AT_FDCWD,
+                fd_path.as_ptr(),
+                parent_dir.as_raw_fd(),
+                dst_name.as_ptr(),
+                AT_SYMLINK_FOLLOW,
+            )
+        };
+        if rc != 0 {
+            return Err(io_error(
+                "按句柄原子链接新目标文件",
+                io::Error::last_os_error(),
+            ));
+        }
+        let _ = fs::remove_file(temp_path);
+        parent_dir
+            .sync_all()
+            .map_err(|e| io_error("同步父目录句柄", e))?;
+        Ok(())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (temp_file, parent_dir, target_name);
         fs::hard_link(temp_path, target_path).map_err(|e| io_error("原子链接新目标文件", e))?;
         let _ = fs::remove_file(temp_path);
+        if let Some(parent) = target_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            sync_directory(parent)?;
+        }
+        Ok(())
     }
-    if let Some(parent) = target_path.parent()
-        && !parent.as_os_str().is_empty()
-    {
-        sync_directory(parent)?;
-    }
-    Ok(())
 }
 
 pub fn is_same_existing_file(a: &Path, b: &Path) -> bool {

@@ -407,6 +407,40 @@ pub fn validate_metadata(
     }
     let storage = Storage::new(root)?;
     let _pin = storage.pin_directory(Path::new("app"), false)?;
+    for non_empty_lic in [
+        "LICENSE",
+        "THIRD-PARTY-NOTICES.md",
+        "app/fonts/LICENSE.txt",
+        "app/fonts/JetBrainsMono-OFL.txt",
+    ] {
+        let lic_bytes = storage
+            .read_limited(&root.join(non_empty_lic), 512 * 1024)?
+            .ok_or("升级包缺少开源许可文件。")?;
+        if lic_bytes.is_empty() {
+            return Err("升级包开源许可文件不能为空。".into());
+        }
+    }
+    for (lic_path, _) in files.iter().filter(|(p, _)| p.starts_with("app/licenses/")) {
+        let lic_bytes = storage
+            .read_limited(&root.join(lic_path), 512 * 1024)?
+            .ok_or("升级包缺少第三方许可文件。")?;
+        if lic_bytes.is_empty() {
+            return Err("升级包第三方许可文件不能为空。".into());
+        }
+    }
+    let _defaults_pin = storage.pin_directory(Path::new("app/defaults"), false)?;
+    for default_cfg in DEFAULT_CONFIG_FILES {
+        let cfg_bytes = storage
+            .read_limited(&root.join(default_cfg), 8 * 1024 * 1024)?
+            .ok_or("升级包缺少默认配置模板。")?;
+        let trimmed = cfg_bytes
+            .strip_prefix(&[0xef, 0xbb, 0xbf])
+            .unwrap_or(&cfg_bytes);
+        let parsed = crate::json::parse(trimmed)?;
+        if !parsed.is_object() {
+            return Err("升级包默认配置模板必须为 JSON 对象。".into());
+        }
+    }
     let bytes = storage
         .read_limited(&root.join(BUILD_INFO_PATH), 64 * 1024)?
         .ok_or("升级包缺少构建信息。")?;
