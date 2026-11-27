@@ -41,9 +41,11 @@ description: Sign, verify, upload, and activate a CST-Pilot Windows x64 portable
    ```powershell
    $privKey = [Environment]::GetEnvironmentVariable('CST_RELEASE_PRIVATE_KEY_FILE', 'User')
 
-   # 场景 A：用户直接提供独立发行 ZIP（先计算并与用户核准 SHA-256）
-   $pkgSha = (Get-FileHash <ZIP路径> -Algorithm SHA256).Hash.ToLowerInvariant()
-   .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
+   # 场景 A：用户直接提供独立发行 ZIP（先将本地摘要与用户带外核准值严格比对）
+   $approvedSha = '<用户带外核准的64位小写SHA256>'
+   $localSha = (Get-FileHash <ZIP路径> -Algorithm SHA256).Hash.ToLowerInvariant()
+   if ($localSha -ne $approvedSha) { throw "本地归档摘要 ($localSha) 与用户核准值 ($approvedSha) 不一致，停止发布。" }
+   .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $approvedSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
 
    # 场景 B：带构建证明的 dist 产物（记录构建输出的证明摘要与 40 位提交哈希）
    .\target\release\xtask.exe release --package <dist目录或ZIP> --min-upgradable vX.Y.Z --channel stable --expected-attestation-sha256 $attSha --expected-commit $commitSha --private-key-file $privKey --notes-file <说明文件.md> --dry-run
@@ -53,7 +55,7 @@ description: Sign, verify, upload, and activate a CST-Pilot Windows x64 portable
    $env:CST_RELEASE_ADMIN_TOKEN = [Environment]::GetEnvironmentVariable('CST_RELEASE_ADMIN_TOKEN', 'User')
    try {
        # 场景 A（独立发行 ZIP）：
-       .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $pkgSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa
+       .\target\release\xtask.exe release --package <ZIP路径> --min-upgradable vX.Y.Z --channel stable --expected-archive-sha256 $approvedSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa
 
        # 场景 B（带构建证明的 dist 产物）：
        # .\target\release\xtask.exe release --package <dist目录或ZIP> --min-upgradable vX.Y.Z --channel stable --expected-attestation-sha256 $attSha --expected-commit $commitSha --private-key-file $privKey --notes-file <说明文件.md> --ssh-host cstoa

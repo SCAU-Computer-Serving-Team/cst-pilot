@@ -76,6 +76,16 @@ impl TestKitDir {
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
+        fs::write(
+            root.join("data/config/telemetry.json"),
+            br#"{"enabled":false,"endpoint":"https://telemetry.invalid/v1/events"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("data/config/settings.json"),
+            br#"{"enableInstallTelemetry":false}"#,
+        )
+        .unwrap();
         Self(root)
     }
 }
@@ -776,96 +786,12 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     use tokio_util::sync::CancellationToken;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
-    // 1. `UpdateOptions::Disabled` (e.g. standalone web host) -> Phase::Unavailable (200),
-    //    and `UpdateOptions::Compiled` under offline test mode -> Phase::Idle without network I/O.
+    // 1. Verify isolated child `cst-server` processes honor `--standalone-web` (`UpdateOptions::Disabled`
+    //    -> `Phase::Unavailable`), `--offline`, `--sanitize-env --offline`, `CST_OFFLINE=1`, and
+    //    `PI_OFFLINE=1` end-to-end without touching real user data (`CST_PILOT_DATA_DIR` scrubbed),
+    //    production telemetry, or external update endpoints.
     {
-        let fixture = TestKitDir::new();
-        fs::write(fixture.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
-        let oa = OaClient::with_transport(
-            "https://oa.example",
-            Arc::new(CountingOaTransport::default()),
-            Arc::new(cst_kit::auth::oa::SystemClock),
-        )
-        .unwrap();
-        let kit = Kit::new(&fixture.0).unwrap();
-        let auth = AuthRuntime::create(&fixture.0, Channel::Gui, oa)
-            .await
-            .unwrap();
-        let host = KitHost::new(
-            kit,
-            auth,
-            TelemetryOptions::default(),
-            UpdateOptions::Disabled,
-        )
-        .await
-        .unwrap();
-        let mut cfg = ServerConfig::new(&fixture.0);
-        cfg.port = Some(0);
-        cfg.acquire_instance_lock = false;
-        cfg.mode_config.standalone_web = true;
-        let server = RunningServer::start(host, cfg).await.unwrap();
-        let host_header = format!("127.0.0.1:{}", server.port());
         let client = reqwest::Client::new();
-
-        let status_resp: Value = client
-            .get(format!("{}/api/app/update/status", server.base_url()))
-            .header("Host", &host_header)
-            .header("X-CST-Client", "app")
-            .header("Authorization", format!("Bearer {}", server.app_token()))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(status_resp["status"]["phase"], "unavailable");
-        assert_eq!(status_resp["status"]["message"], "此宿主已关闭升级检查。");
-
-        let check_resp = client
-            .post(format!("{}/api/app/update/check", server.base_url()))
-            .header("Host", &host_header)
-            .header("X-CST-Client", "app")
-            .header("Authorization", format!("Bearer {}", server.app_token()))
-            .json(&json!({}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(check_resp.status(), 200);
-        let check_json: Value = check_resp.json().await.unwrap();
-        assert_eq!(check_json["phase"], "unavailable");
-        server.shutdown().await;
-
-        if cst_os::is_offline_env_enabled()
-            && cst_kit::update::service::compiled_update_key_fingerprint().is_ok()
-        {
-            let oa2 = OaClient::with_transport(
-                "https://oa.example",
-                Arc::new(CountingOaTransport::default()),
-                Arc::new(cst_kit::auth::oa::SystemClock),
-            )
-            .unwrap();
-            let kit2 = Kit::new(&fixture.0).unwrap();
-            let auth2 = AuthRuntime::create(&fixture.0, Channel::Gui, oa2)
-                .await
-                .unwrap();
-            let compiled_host = KitHost::new(
-                kit2,
-                auth2,
-                TelemetryOptions::default(),
-                UpdateOptions::Compiled,
-            )
-            .await
-            .unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            assert_eq!(
-                compiled_host.updates().status().phase,
-                cst_kit::update::service::Phase::Idle
-            );
-        }
-
-        // Verify isolated child `cst-server` processes honor `--offline`, `--sanitize-env --offline`,
-        // `CST_OFFLINE=1`, `PI_OFFLINE=1`, and `--standalone-web` end-to-end without touching real
-        // user data, production telemetry, or external update endpoints.
         let server_exe = env!("CARGO_BIN_EXE_cst-server");
         let expected_compiled_offline =
             if cst_kit::update::service::compiled_update_key_fingerprint().is_ok() {
@@ -873,32 +799,27 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             } else {
                 "unavailable"
             };
-        for (extra_args, cst_off, pi_off, expected_phase) in [
-            (&["--offline"][..], "0", "0", expected_compiled_offline),
+        for (extra_args, cst_off, pi_off, expected_phase, check_unavailable_post) in [
+            (
+                &["--offline"][..],
+                "0",
+                "0",
+                expected_compiled_offline,
+                false,
+            ),
             (
                 &["--sanitize-env", "--offline"][..],
                 "0",
                 "0",
                 expected_compiled_offline,
+                false,
             ),
-            (&[][..], "1", "0", expected_compiled_offline),
-            (&[][..], "0", "1", expected_compiled_offline),
-            (&["--standalone-web"][..], "1", "0", "unavailable"),
+            (&[][..], "1", "0", expected_compiled_offline, false),
+            (&[][..], "0", "1", expected_compiled_offline, false),
+            (&["--standalone-web"][..], "1", "0", "unavailable", true),
         ] {
             let child_kit = TestKitDir::new();
             fs::write(child_kit.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
-            let cfg_dir = child_kit.0.join("data/config");
-            fs::create_dir_all(&cfg_dir).unwrap();
-            fs::write(
-                cfg_dir.join("telemetry.json"),
-                br#"{"enabled":false,"endpoint":"https://telemetry.invalid/v1/events"}"#,
-            )
-            .unwrap();
-            fs::write(
-                cfg_dir.join("settings.json"),
-                br#"{"enableInstallTelemetry":false}"#,
-            )
-            .unwrap();
             let tmp_sub = child_kit.0.join(".state/tmp");
             let fake_home = child_kit.0.join(".state/home");
             fs::create_dir_all(&tmp_sub).unwrap();
@@ -935,10 +856,11 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             let disc: Value = serde_json::from_slice(&fs::read(&disc_path).unwrap()).unwrap();
             let port = disc["port"].as_u64().unwrap();
             let app_tok = disc["token"].as_str().unwrap();
+            let host_hdr = format!("127.0.0.1:{port}");
             tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             let st: Value = client
                 .get(format!("http://127.0.0.1:{port}/api/app/update/status"))
-                .header("Host", format!("127.0.0.1:{port}"))
+                .header("Host", &host_hdr)
                 .header("X-CST-Client", "app")
                 .header("Authorization", format!("Bearer {app_tok}"))
                 .send()
@@ -948,6 +870,21 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 .await
                 .unwrap();
             assert_eq!(st["status"]["phase"], expected_phase);
+            if check_unavailable_post {
+                assert_eq!(st["status"]["message"], "此宿主已关闭升级检查。");
+                let check_resp = client
+                    .post(format!("http://127.0.0.1:{port}/api/app/update/check"))
+                    .header("Host", &host_hdr)
+                    .header("X-CST-Client", "app")
+                    .header("Authorization", format!("Bearer {app_tok}"))
+                    .json(&json!({}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(check_resp.status(), 200);
+                let check_json: Value = check_resp.json().await.unwrap();
+                assert_eq!(check_json["phase"], "unavailable");
+            }
             let _ = child.kill();
             let _ = child.wait();
         }

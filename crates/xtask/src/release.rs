@@ -31,7 +31,6 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 pub const DEFAULT_PUBLIC_BASE_URL: &str = "https://www.cstoa.top/api/agent/releases";
-pub const DEFAULT_ADMIN_URL: &str = "http://127.0.0.1:18787/v1/admin/releases";
 pub const DEFAULT_SSH_REMOTE_PORT: u16 = 8787;
 pub const ENV_MANIFEST_URL: &str = "CST_UPDATE_MANIFEST_URL";
 pub const ENV_PUBLIC_KEY: &str = "CST_UPDATE_PUBLIC_KEY";
@@ -317,18 +316,34 @@ pub fn verify_canonical_release_defaults(kit_dir: &Path) -> Result<(), String> {
     verify_local_html_css_references(kit_dir)
 }
 
+/// Verifies that the built Web static directory (`src/web/frontend/build/client`) embedded into
+/// `cst-server` via `embed-web` exists, contains `index.html`, has no symlinks/reparse points,
+/// and all local HTML/CSS asset references resolve inside `web_dir`.
+pub fn verify_embedded_web_build_dir(web_dir: &Path) -> Result<(), String> {
+    let (_pinned, _handles, _) = open_pinned_ancestor_chain(web_dir, false, "内嵌前端构建目录")?;
+    if !is_regular_non_symlink_file(&web_dir.join("index.html"))? {
+        return Err(format!(
+            "内嵌前端构建目录缺少 index.html：{}",
+            web_dir.display()
+        ));
+    }
+    verify_local_html_css_references(web_dir)
+}
+
 fn verify_local_html_css_references(kit_dir: &Path) -> Result<(), String> {
-    let canon_root = fs::canonicalize(kit_dir)
-        .map_err(|e| format!("无法解析发行目录 {}：{e}", kit_dir.display()))?;
+    let (pinned_root, _root_handles, _) =
+        open_pinned_ancestor_chain(kit_dir, false, "静态资源根目录")?;
+    let canon_root = fs::canonicalize(&pinned_root)
+        .map_err(|e| format!("无法解析目录 {}：{e}", kit_dir.display()))?;
     let mut stack = vec![canon_root.clone()];
     while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir).map_err(|e| format!("无法遍历发行目录：{e}"))? {
+        for entry in fs::read_dir(&dir).map_err(|e| format!("无法遍历目录：{e}"))? {
             let entry = entry.map_err(|e| format!("无法读取目录项：{e}"))?;
             let path = entry.path();
             let meta = fs::symlink_metadata(&path)
                 .map_err(|e| format!("无法读取元数据 {}：{e}", path.display()))?;
             if cst_os::is_reparse_or_symlink(&meta) {
-                return Err(format!("发行目录包含链接或重解析点：{}", path.display()));
+                return Err(format!("目录包含链接或重解析点：{}", path.display()));
             }
             if meta.is_dir() {
                 stack.push(path);
@@ -351,25 +366,39 @@ fn verify_local_html_css_references(kit_dir: &Path) -> Result<(), String> {
             let base_dir = path.parent().unwrap_or(&canon_root);
             for raw_ref in extract_local_asset_refs(&text) {
                 let clean_ref = raw_ref.split(['?', '#']).next().unwrap_or("").trim();
+                let lower_ref = clean_ref.to_ascii_lowercase();
                 if clean_ref.is_empty()
-                    || clean_ref.starts_with("http://")
-                    || clean_ref.starts_with("https://")
-                    || clean_ref.starts_with("data:")
-                    || clean_ref.starts_with("mailto:")
+                    || lower_ref.starts_with("http://")
+                    || lower_ref.starts_with("https://")
+                    || lower_ref.starts_with("data:")
+                    || lower_ref.starts_with("mailto:")
+                    || lower_ref.starts_with("javascript:")
+                    || lower_ref.starts_with("blob:")
+                    || lower_ref.starts_with("tel:")
                     || clean_ref.starts_with('#')
                 {
                     continue;
+                }
+                if clean_ref.starts_with("//")
+                    || clean_ref.contains('\\')
+                    || clean_ref.contains(':')
+                {
+                    return Err(format!(
+                        "静态资源包含不允许的外部协议或绝对盘符引用：{} -> {clean_ref}",
+                        path.display()
+                    ));
                 }
                 let candidate = if let Some(stripped) = clean_ref.strip_prefix('/') {
                     canon_root.join(stripped)
                 } else {
                     base_dir.join(clean_ref)
                 };
+                ensure_no_reparse_ancestors(&candidate, "静态资源引用目标")?;
                 let resolved = fs::canonicalize(&candidate)
                     .map_err(|_| format!("静态资源引用缺失：{} -> {clean_ref}", path.display()))?;
                 if !resolved.starts_with(&canon_root) || !resolved.is_file() {
                     return Err(format!(
-                        "静态资源引用越出发行目录边界：{} -> {clean_ref}",
+                        "静态资源引用越出目录边界：{} -> {clean_ref}",
                         path.display()
                     ));
                 }
@@ -381,62 +410,267 @@ fn verify_local_html_css_references(kit_dir: &Path) -> Result<(), String> {
 
 fn extract_local_asset_refs(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    for attr in ["src=\"", "href=\"", "src='", "href='"] {
-        let quote = attr.as_bytes()[attr.len() - 1] as char;
-        let mut rest = text;
-        while let Some(idx) = rest.find(attr) {
-            let after = &rest[idx + attr.len()..];
-            if let Some(end) = after.find(quote) {
-                out.push(&after[..end]);
-                rest = &after[end + 1..];
-            } else {
-                break;
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+
+    // 1. HTML attributes (`src`, `href`, `poster`, `data`, `srcset`) with optional whitespace
+    //    around `=` and double-quoted, single-quoted, or unquoted values.
+    let mut i = 0usize;
+    while i < len {
+        let prev_boundary = i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b'<';
+        if prev_boundary && bytes[i].is_ascii_alphabetic() {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
+                i += 1;
+            }
+            let attr_name = &text[start..i];
+            let is_srcset = attr_name.eq_ignore_ascii_case("srcset");
+            let is_url_attr = is_srcset
+                || attr_name.eq_ignore_ascii_case("src")
+                || attr_name.eq_ignore_ascii_case("href")
+                || attr_name.eq_ignore_ascii_case("poster")
+                || attr_name.eq_ignore_ascii_case("data");
+            if is_url_attr {
+                let mut cur = i;
+                while cur < len && bytes[cur].is_ascii_whitespace() {
+                    cur += 1;
+                }
+                if cur < len && bytes[cur] == b'=' {
+                    cur += 1;
+                    while cur < len && bytes[cur].is_ascii_whitespace() {
+                        cur += 1;
+                    }
+                    if cur < len {
+                        let raw_val = if bytes[cur] == b'"' || bytes[cur] == b'\'' {
+                            let q = bytes[cur];
+                            cur += 1;
+                            let v_start = cur;
+                            while cur < len && bytes[cur] != q {
+                                cur += 1;
+                            }
+                            let val = &text[v_start..cur];
+                            if cur < len {
+                                cur += 1;
+                            }
+                            Some(val)
+                        } else {
+                            let v_start = cur;
+                            while cur < len
+                                && !bytes[cur].is_ascii_whitespace()
+                                && bytes[cur] != b'>'
+                            {
+                                cur += 1;
+                            }
+                            let val = text[v_start..cur].trim_end_matches('/');
+                            (!val.is_empty()).then_some(val)
+                        };
+                        if let Some(val) = raw_val {
+                            if is_srcset {
+                                for item in val.split(',') {
+                                    if let Some(url_tok) = item.split_whitespace().next()
+                                        && !url_tok.is_empty()
+                                    {
+                                        out.push(url_tok);
+                                    }
+                                }
+                            } else {
+                                out.push(val);
+                            }
+                        }
+                        i = cur;
+                        continue;
+                    }
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+
+    // 2. CSS `url(...)` (case-insensitive)
+    let lower = text.to_ascii_lowercase();
+    let mut search_from = 0usize;
+    while let Some(rel_idx) = lower[search_from..].find("url(") {
+        let idx = search_from + rel_idx;
+        let prev_ok = idx == 0
+            || !(bytes[idx - 1].is_ascii_alphanumeric()
+                || bytes[idx - 1] == b'-'
+                || bytes[idx - 1] == b'_');
+        let after_start = idx + 4;
+        if prev_ok && let Some(end_rel) = text[after_start..].find(')') {
+            let inner = text[after_start..after_start + end_rel]
+                .trim()
+                .trim_matches(['"', '\'']);
+            if !inner.is_empty() {
+                out.push(inner);
+            }
+            search_from = after_start + end_rel + 1;
+        } else {
+            search_from = after_start;
+        }
+    }
+
+    // 3. CSS `@import "..."` / `@import '...'` (when not using `url(...)`)
+    let mut imp_from = 0usize;
+    while let Some(rel_idx) = lower[imp_from..].find("@import") {
+        let mut cur = imp_from + rel_idx + 7;
+        while cur < len && bytes[cur].is_ascii_whitespace() {
+            cur += 1;
+        }
+        if cur < len && (bytes[cur] == b'"' || bytes[cur] == b'\'') {
+            let q = bytes[cur];
+            cur += 1;
+            let v_start = cur;
+            while cur < len && bytes[cur] != q {
+                cur += 1;
+            }
+            let val = text[v_start..cur].trim();
+            if !val.is_empty() {
+                out.push(val);
+            }
+            if cur < len {
+                cur += 1;
             }
         }
+        imp_from = cur;
     }
-    let mut rest = text;
-    while let Some(idx) = rest.find("url(") {
-        let after = &rest[idx + 4..];
-        if let Some(end) = after.find(')') {
-            let inner = after[..end].trim().trim_matches(['"', '\'']);
-            out.push(inner);
-            rest = &after[end + 1..];
-        } else {
-            break;
-        }
-    }
+
     out
 }
 
-pub fn ensure_no_reparse_ancestors(path: &Path, label: &str) -> Result<(), String> {
+type PinnedAncestorChain = Vec<(PathBuf, fs::File, cst_os::FileIdentity)>;
+type PinnedDirOpen = (PathBuf, PinnedAncestorChain, cst_os::FileIdentity);
+
+fn open_pinned_ancestor_chain(
+    dir_path: &Path,
+    create_missing: bool,
+    label: &str,
+) -> Result<PinnedDirOpen, String> {
+    let full = if dir_path.is_absolute() {
+        dir_path.to_path_buf()
+    } else {
+        let cwd = env::current_dir().map_err(|e| format!("无法读取当前工作目录：{e}"))?;
+        cwd.join(dir_path)
+    };
     let mut acc = PathBuf::new();
-    for comp in path.components() {
-        acc.push(comp);
-        if matches!(
-            comp,
-            std::path::Component::Prefix(_) | std::path::Component::RootDir
-        ) {
-            continue;
+    let mut chain: Vec<(PathBuf, fs::File, cst_os::FileIdentity)> = Vec::new();
+    let mut root_pushed = false;
+
+    for comp in full.components() {
+        match comp {
+            std::path::Component::Prefix(p) => {
+                acc.push(p.as_os_str());
+            }
+            std::path::Component::RootDir => {
+                acc.push(comp.as_os_str());
+                let (h, id) = cst_os::pin_directory_handle(&acc)?;
+                chain.push((acc.clone(), h, id));
+                root_pushed = true;
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if chain.len() <= 1 {
+                    return Err(format!(
+                        "{label} 路径越出根目录边界：{}",
+                        dir_path.display()
+                    ));
+                }
+                chain.pop();
+                acc.pop();
+            }
+            std::path::Component::Normal(part) => {
+                if !root_pushed && !acc.as_os_str().is_empty() {
+                    let (h, id) = cst_os::pin_directory_handle(&acc)?;
+                    chain.push((acc.clone(), h, id));
+                    root_pushed = true;
+                }
+                acc.push(part);
+                if create_missing {
+                    match fs::create_dir(&acc) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                        Err(e) => {
+                            return Err(format!("无法创建 {label} 目录 {}：{e}", acc.display()));
+                        }
+                    }
+                }
+                let (h, id) = cst_os::pin_directory_handle(&acc).map_err(|e| {
+                    format!(
+                        "{label} 路径或其上级目录无效或包含重解析点（{}）：{e}",
+                        acc.display()
+                    )
+                })?;
+                chain.push((acc.clone(), h, id));
+            }
         }
-        if let Ok(meta) = fs::symlink_metadata(&acc)
-            && cst_os::is_reparse_or_symlink(&meta)
-        {
+    }
+    if chain.is_empty() {
+        let (h, id) = cst_os::pin_directory_handle(&acc)?;
+        chain.push((acc.clone(), h, id));
+    }
+    verify_ancestor_chain_unchanged(&chain, label)?;
+    let leaf_id = cst_os::FileIdentity::from_file(&chain.last().unwrap().1)?;
+    Ok((acc, chain, leaf_id))
+}
+
+fn verify_ancestor_chain_unchanged(
+    chain: &[(PathBuf, fs::File, cst_os::FileIdentity)],
+    label: &str,
+) -> Result<(), String> {
+    for (p, _f, expected_id) in chain {
+        let lmeta = fs::symlink_metadata(p)
+            .map_err(|e| format!("无法复核 {label} 祖先目录 {}：{e}", p.display()))?;
+        if cst_os::is_reparse_or_symlink(&lmeta) || !lmeta.is_dir() {
             return Err(format!(
-                "{label} 路径或其上级目录包含符号链接或重解析点：{}",
-                acc.display()
+                "{label} 祖先目录在操作期间变为符号链接或非目录：{}",
+                p.display()
+            ));
+        }
+        let cur_id = cst_os::FileIdentity::from_path(p)?;
+        if &cur_id != expected_id {
+            return Err(format!(
+                "{label} 祖先目录真实身份在操作期间发生变化：{}",
+                p.display()
             ));
         }
     }
     Ok(())
 }
 
-pub fn read_bounded_regular_file(
+pub fn ensure_no_reparse_ancestors(path: &Path, label: &str) -> Result<(), String> {
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let (pinned_parent, chain, _) = open_pinned_ancestor_chain(parent, false, label)?;
+    if let Some(name) = path.file_name() {
+        let leaf = pinned_parent.join(name);
+        if let Ok(meta) = fs::symlink_metadata(&leaf)
+            && cst_os::is_reparse_or_symlink(&meta)
+        {
+            return Err(format!(
+                "{label} 路径包含符号链接或重解析点：{}",
+                leaf.display()
+            ));
+        }
+    }
+    verify_ancestor_chain_unchanged(&chain, label)
+}
+
+fn open_regular_file_pinned(
     path: &Path,
-    max_bytes: u64,
     label: &str,
-) -> Result<Vec<u8>, String> {
-    ensure_no_reparse_ancestors(path, label)?;
-    let meta = fs::symlink_metadata(path)
+) -> Result<(fs::File, cst_os::FileIdentity, u64), String> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("{label} 文件名无效：{}", path.display()))?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let (pinned_parent, chain, _) = open_pinned_ancestor_chain(parent, false, label)?;
+    let target = pinned_parent.join(file_name);
+    let meta = fs::symlink_metadata(&target)
         .map_err(|e| format!("无法读取 {label}（{}）：{e}", path.display()))?;
     if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() {
         return Err(format!(
@@ -444,21 +678,48 @@ pub fn read_bounded_regular_file(
             path.display()
         ));
     }
-    if meta.len() == 0 || meta.len() > max_bytes {
-        return Err(format!(
-            "{label} 体积（{} 字节）无效或超出上限（{max_bytes} 字节）。",
-            meta.len()
-        ));
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        opts.share_mode(1);
     }
-    let mut file =
-        fs::File::open(path).map_err(|e| format!("无法打开 {label}（{}）：{e}", path.display()))?;
+    let file = opts
+        .open(&target)
+        .map_err(|e| format!("无法打开 {label}（{}）：{e}", path.display()))?;
     let opened_meta = file
         .metadata()
         .map_err(|e| format!("无法读取已打开文件元数据 {label}：{e}"))?;
     if cst_os::is_reparse_or_symlink(&opened_meta) || !opened_meta.is_file() {
         return Err(format!("{label} 打开后文件类型异常：{}", path.display()));
     }
-    let mut buf = Vec::with_capacity(opened_meta.len().min(max_bytes) as usize);
+    let opened_id = cst_os::FileIdentity::from_file(&file)?;
+    let post_lmeta =
+        fs::symlink_metadata(&target).map_err(|e| format!("无法复核 {label} 链接状态：{e}"))?;
+    if cst_os::is_reparse_or_symlink(&post_lmeta) || !post_lmeta.is_file() {
+        return Err(format!("{label} 复核时检测到符号链接或非普通文件。"));
+    }
+    let path_id = cst_os::FileIdentity::from_path(&target)?;
+    if opened_id != path_id {
+        return Err(format!("{label} 打开期间文件真实身份发生变化。"));
+    }
+    verify_ancestor_chain_unchanged(&chain, label)?;
+    Ok((file, opened_id, opened_meta.len()))
+}
+
+pub fn read_bounded_regular_file(
+    path: &Path,
+    max_bytes: u64,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let (mut file, _id, len) = open_regular_file_pinned(path, label)?;
+    if len == 0 || len > max_bytes {
+        return Err(format!(
+            "{label} 体积（{len} 字节）无效或超出上限（{max_bytes} 字节）。"
+        ));
+    }
+    let mut buf = Vec::with_capacity(len.min(max_bytes) as usize);
     (&mut file)
         .take(max_bytes.saturating_add(1))
         .read_to_end(&mut buf)
@@ -538,6 +799,32 @@ pub fn verify_pe64_windows_gui_sections(
     if entry_rva == 0 {
         return Err(format!("{label} PE 缺少有效入口点 AddressOfEntryPoint。"));
     }
+    let section_alignment = u32::from_le_bytes([
+        bytes[opt_offset + 32],
+        bytes[opt_offset + 33],
+        bytes[opt_offset + 34],
+        bytes[opt_offset + 35],
+    ]);
+    let file_alignment = u32::from_le_bytes([
+        bytes[opt_offset + 36],
+        bytes[opt_offset + 37],
+        bytes[opt_offset + 38],
+        bytes[opt_offset + 39],
+    ]);
+    if !file_alignment.is_power_of_two()
+        || !(0x200..=0x10000).contains(&file_alignment)
+        || !section_alignment.is_power_of_two()
+        || !(0x1000..=0x1000_0000).contains(&section_alignment)
+        || section_alignment < file_alignment
+    {
+        return Err(format!(
+            "{label} PE SectionAlignment 或 FileAlignment 无效。"
+        ));
+    }
+    let align_up_u32 = |val: u32, align: u32| -> Option<u32> {
+        let mask = align - 1;
+        val.checked_add(mask).map(|v| v & !mask)
+    };
     let size_of_image = u32::from_le_bytes([
         bytes[opt_offset + 56],
         bytes[opt_offset + 57],
@@ -550,9 +837,19 @@ pub fn verify_pe64_windows_gui_sections(
         bytes[opt_offset + 62],
         bytes[opt_offset + 63],
     ]) as usize;
-    if size_of_image == 0 || size_of_headers < sec_table_end || size_of_headers > bytes.len() {
-        return Err(format!("{label} PE SizeOfImage 或 SizeOfHeaders 无效。"));
+    if size_of_image == 0
+        || !size_of_image.is_multiple_of(section_alignment)
+        || size_of_headers < sec_table_end
+        || size_of_headers > bytes.len()
+        || !size_of_headers.is_multiple_of(file_alignment as usize)
+    {
+        return Err(format!(
+            "{label} PE SizeOfImage 或 SizeOfHeaders 无效或未对齐。"
+        ));
     }
+    let min_sec_rva = align_up_u32(size_of_headers as u32, section_alignment)
+        .filter(|&v| v <= size_of_image)
+        .ok_or_else(|| format!("{label} PE 头对齐后超出 SizeOfImage。"))?;
     let subsystem = u16::from_le_bytes([bytes[opt_offset + 68], bytes[opt_offset + 69]]);
     if subsystem != 2 {
         return Err(format!(
@@ -573,54 +870,68 @@ pub fn verify_pe64_windows_gui_sections(
         let raw_ptr = u32::from_le_bytes([sh[20], sh[21], sh[22], sh[23]]) as usize;
         let sec_chars = u32::from_le_bytes([sh[36], sh[37], sh[38], sh[39]]);
 
-        let virt_span = if virt_size > 0 {
-            virt_size
-        } else {
-            raw_size as u32
+        if virt_size == 0 || virt_addr < min_sec_rva || !virt_addr.is_multiple_of(section_alignment)
+        {
+            return Err(format!(
+                "{label} PE 节 VirtualSize 或 VirtualAddress 无效。"
+            ));
+        }
+        let Some(virt_end) = virt_addr
+            .checked_add(virt_size)
+            .and_then(|end| align_up_u32(end, section_alignment))
+        else {
+            return Err(format!("{label} PE 节虚拟地址范围溢出。"));
         };
-        if virt_span > 0 {
-            let Some(virt_end) = virt_addr.checked_add(virt_span) else {
-                return Err(format!("{label} PE 节虚拟地址范围溢出。"));
-            };
-            if virt_addr < size_of_headers as u32 || virt_end > size_of_image {
-                return Err(format!("{label} PE 节虚拟地址范围超出 SizeOfImage。"));
+        if virt_end > size_of_image {
+            return Err(format!("{label} PE 节对齐后虚拟范围超出 SizeOfImage。"));
+        }
+        virt_spans.push((virt_addr, virt_end));
+
+        if raw_size == 0 {
+            if raw_ptr != 0 {
+                return Err(format!("{label} PE 空文件节 PointerToRawData 必须为 0。"));
             }
-            virt_spans.push((virt_addr, virt_end));
+            continue;
+        }
+        let Some(raw_end) = raw_ptr.checked_add(raw_size) else {
+            return Err(format!("{label} PE 节原始数据偏移溢出。"));
+        };
+        if raw_ptr < size_of_headers
+            || raw_end > bytes.len()
+            || !raw_ptr.is_multiple_of(file_alignment as usize)
+            || !raw_size.is_multiple_of(file_alignment as usize)
+        {
+            return Err(format!(
+                "{label} PE 节原始数据范围越界或未按 FileAlignment 对齐。"
+            ));
+        }
+        raw_spans.push((raw_ptr, raw_end));
+
+        let mapped_len = raw_size.min(virt_size as usize);
+        const IMAGE_SCN_CNT_CODE: u32 = 0x0000_0020;
+        const IMAGE_SCN_CNT_INITIALIZED_DATA: u32 = 0x0000_0040;
+        const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
+        const IMAGE_SCN_MEM_READ: u32 = 0x4000_0000;
+        const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
+        if sec_name == b".rdata\0\0"
+            && mapped_len > 0
+            && (sec_chars & IMAGE_SCN_MEM_READ) != 0
+            && (sec_chars & IMAGE_SCN_MEM_WRITE) == 0
+            && (sec_chars & IMAGE_SCN_MEM_EXECUTE) == 0
+            && (sec_chars & IMAGE_SCN_CNT_INITIALIZED_DATA) != 0
+        {
+            rodata_ranges.push((raw_ptr, raw_ptr + mapped_len));
         }
 
-        if raw_size > 0 {
-            let Some(raw_end) = raw_ptr.checked_add(raw_size) else {
-                return Err(format!("{label} PE 节原始数据偏移溢出。"));
+        if (sec_chars & IMAGE_SCN_MEM_EXECUTE) != 0
+            && (sec_chars & IMAGE_SCN_CNT_CODE) != 0
+            && mapped_len > 0
+        {
+            let Some(backed_end) = virt_addr.checked_add(mapped_len as u32) else {
+                return Err(format!("{label} PE 代码节映射范围溢出。"));
             };
-            if raw_ptr < size_of_headers || raw_end > bytes.len() {
-                return Err(format!("{label} PE 节原始数据范围越界。"));
-            }
-            raw_spans.push((raw_ptr, raw_end));
-
-            let mapped_len = if virt_size > 0 {
-                raw_size.min(virt_size as usize)
-            } else {
-                raw_size
-            };
-            const IMAGE_SCN_CNT_INITIALIZED_DATA: u32 = 0x0000_0040;
-            const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
-            const IMAGE_SCN_MEM_READ: u32 = 0x4000_0000;
-            const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
-            if sec_name == b".rdata\0\0"
-                && mapped_len > 0
-                && (sec_chars & IMAGE_SCN_MEM_READ) != 0
-                && (sec_chars & IMAGE_SCN_MEM_WRITE) == 0
-                && (sec_chars & IMAGE_SCN_MEM_EXECUTE) == 0
-                && (sec_chars & IMAGE_SCN_CNT_INITIALIZED_DATA) != 0
-            {
-                rodata_ranges.push((raw_ptr, raw_ptr + mapped_len));
-            }
-
-            if (sec_chars & IMAGE_SCN_MEM_EXECUTE) != 0 && mapped_len > 0 {
-                let backed_end = virt_addr.saturating_add(mapped_len as u32);
-                if entry_rva >= virt_addr && entry_rva < backed_end {
-                    entry_in_exec_section = true;
-                }
+            if entry_rva >= virt_addr && entry_rva < backed_end {
+                entry_in_exec_section = true;
             }
         }
     }
@@ -905,6 +1216,7 @@ fn verify_no_signing_key_leak(
     zip_bytes: &[u8],
     release_notes: &str,
 ) -> Result<(), String> {
+    cst_updater::verify::validate_zip_bounds_bytes(zip_bytes)?;
     let std_b64 = Zeroizing::new(STANDARD.encode(seed));
     let std_unpad = Zeroizing::new(std_b64.trim_end_matches('=').to_owned());
     let url_b64 = Zeroizing::new(URL_SAFE.encode(seed));
@@ -914,7 +1226,6 @@ fn verify_no_signing_key_leak(
         use std::fmt::Write as _;
         let _ = write!(&mut *lower_hex, "{b:02x}");
     }
-    let upper_hex = Zeroizing::new(lower_hex.to_ascii_uppercase());
 
     let contains_any = |haystack: &[u8]| -> bool {
         let needles: &[&[u8]] = &[
@@ -923,12 +1234,13 @@ fn verify_no_signing_key_leak(
             std_unpad.as_bytes(),
             url_b64.as_bytes(),
             url_unpad.as_bytes(),
-            lower_hex.as_bytes(),
-            upper_hex.as_bytes(),
         ];
         needles
             .iter()
             .any(|n| !n.is_empty() && haystack.windows(n.len()).any(|w| w == *n))
+            || haystack
+                .windows(lower_hex.len())
+                .any(|w| w.eq_ignore_ascii_case(lower_hex.as_bytes()))
     };
 
     if contains_any(release_notes.as_bytes()) || contains_any(zip_bytes) {
@@ -940,9 +1252,6 @@ fn verify_no_signing_key_leak(
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("读取发行 ZIP 条目失败：{e}"))?;
-        if entry.is_dir() {
-            continue;
-        }
         let mut tail = Zeroizing::new(Vec::new());
         let mut buf = Zeroizing::new([0u8; 64 * 1024]);
         loop {
@@ -954,7 +1263,7 @@ fn verify_no_signing_key_leak(
             }
             tail.extend_from_slice(&buf[..n]);
             if contains_any(&tail) {
-                return Err("安全阻断：待签归档内部文件包含当前签名私钥材料，拒绝签名。".into());
+                return Err("安全阻断：待签归档内部条目包含当前签名私钥材料，拒绝签名。".into());
             }
             if tail.len() > 128 {
                 let drop_n = tail.len() - 128;
@@ -1214,14 +1523,12 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         && *explicit_ver != attestation.version
     {
         return Err(format!(
-            "构建证明版本（{}）与待签版本（{explicit_ver}）不一致，拒绝签名。",
-            attestation.version
+            "构建证明版本与待签版本（{explicit_ver}）不一致，拒绝签名。"
         ));
     }
     if !is_lower_hex_len(&attestation.git_commit, 40) || attestation.git_commit != expected_commit {
         return Err(format!(
-            "构建证明提交哈希（{}）与获准发布提交（{expected_commit}）不一致，拒绝签名。",
-            attestation.git_commit
+            "构建证明提交哈希无效或与获准发布提交（{expected_commit}）不一致，拒绝签名。"
         ));
     }
     let parsed_att_url = validate_release_url(&attestation.manifest_url)?;
@@ -1232,8 +1539,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
             .starts_with(&format!("{base_url}/"))
     {
         return Err(format!(
-            "构建证明清单地址（{}）与当前发布基址（{base_url}）不匹配，拒绝签名。",
-            attestation.manifest_url
+            "构建证明清单地址与当前发布基址（{base_url}）不匹配，拒绝签名。"
         ));
     }
 
@@ -1242,8 +1548,7 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     let signing_pub_fp = release_key.fingerprint();
     if attestation.update_public_key_fingerprint != signing_pub_fp {
         return Err(format!(
-            "构建证明公钥指纹（{}）与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。",
-            attestation.update_public_key_fingerprint
+            "构建证明公钥指纹无效或与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。"
         ));
     }
 
@@ -1261,23 +1566,33 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         return Err("发行 ZIP 的文件名、体积或 SHA-256 与构建证明不一致，拒绝解包或签名。".into());
     }
 
-    // 3. Verify PE64/.rdata/BUILD-INFO/SHA256SUMS directly on in-memory `zip_bytes` AND extract from RAM!
-    let (sha256_sums, build_info, unpacked_size) = verify_in_memory_zip_release_invariants(
+    // 3. Verify PE64/.rdata/BUILD-INFO/SHA256SUMS/binary-digests directly on in-memory `zip_bytes`!
+    let in_mem = verify_in_memory_zip_release_invariants(
         &zip_bytes,
         &version,
         &attestation.manifest_url,
         &signing_pub_b64,
         &signing_pub_fp,
     )?;
-    let actual_sums_sha256 = format!("{:x}", Sha256::digest(sha256_sums.as_bytes()));
+    let actual_sums_sha256 = format!("{:x}", Sha256::digest(in_mem.sha256_sums.as_bytes()));
     if actual_sums_sha256 != attestation.sha256_sums_sha256 {
         return Err("待签发行包 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into());
     }
-    if build_info.built_at != attestation.built_at {
+    if in_mem.built_at != attestation.built_at {
         return Err("BUILD-INFO.json 中的 builtAt 与构建证明不一致，拒绝签名。".into());
     }
-    if attestation.unpacked_size != unpacked_size {
+    if attestation.unpacked_size != in_mem.unpacked_size {
         return Err("发行 ZIP 解压体积与构建证明不一致，拒绝签名。".into());
+    }
+    if in_mem.updater_exe_sha256 != attestation.updater_exe_sha256 {
+        return Err(format!(
+            "待签 {UPDATER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
+    }
+    if in_mem.server_exe_sha256 != attestation.server_exe_sha256 {
+        return Err(format!(
+            "待签 {SERVER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
     }
 
     let extracted_holder = TempWorkDir::create("cst-sign-extract")?;
@@ -1343,33 +1658,6 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
     cst_updater::verify::verify_clean_dist_tree(&extracted_kit, &version)?;
     verify_canonical_release_defaults(&extracted_kit)?;
 
-    let actual_updater_sha256 = format!(
-        "{:x}",
-        Sha256::digest(read_bounded_regular_file(
-            &extracted_kit.join(UPDATER_EXE_PATH),
-            MAX_SERVER_ARCHIVE_BYTES,
-            UPDATER_EXE_PATH,
-        )?)
-    );
-    if actual_updater_sha256 != attestation.updater_exe_sha256 {
-        return Err(format!(
-            "待签 {UPDATER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
-        ));
-    }
-    let actual_server_sha256 = format!(
-        "{:x}",
-        Sha256::digest(read_bounded_regular_file(
-            &extracted_kit.join(SERVER_EXE_PATH),
-            MAX_SERVER_ARCHIVE_BYTES,
-            SERVER_EXE_PATH,
-        )?)
-    );
-    if actual_server_sha256 != attestation.server_exe_sha256 {
-        return Err(format!(
-            "待签 {SERVER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
-        ));
-    }
-
     let release_notes =
         read_bounded_release_notes(&args.notes_file, &args.notes_inline, &args.private_key_file)?;
     verify_no_signing_key_leak(&signing_seed, &zip_bytes, &release_notes)?;
@@ -1378,29 +1666,33 @@ pub fn sign_release(args: &SignReleaseArgs) -> Result<SignReleaseSummary, String
         &signing_key,
         &release_key,
         &version,
-        &build_info.built_at,
+        &in_mem.built_at,
         &args.min_upgradable,
         base_url,
         release_notes,
-        sha256_sums,
+        in_mem.sha256_sums,
         &zip_bytes,
         archive_size,
-        unpacked_size,
+        in_mem.unpacked_size,
         archive_sha256,
         Some((&args.out_path, args.dist_dir.as_deref(), &protected_inputs)),
     )?;
     Ok(summary)
 }
 
-struct ValidatedBuildInfo {
+struct VerifiedInMemoryZip {
+    sha256_sums: String,
     built_at: String,
+    unpacked_size: u64,
+    updater_exe_sha256: String,
+    server_exe_sha256: String,
 }
 
 fn validate_build_info_bytes(
     build_info_bytes: &[u8],
     expected_version: &str,
     expected_pub_fp: &str,
-) -> Result<ValidatedBuildInfo, String> {
+) -> Result<String, String> {
     let build_info: serde_json::Value =
         serde_json::from_slice(build_info_bytes).map_err(|_| "BUILD-INFO.json 格式无效。")?;
     if build_info
@@ -1444,9 +1736,9 @@ fn validate_build_info_bytes(
                 .into(),
         );
     };
-    if built_fp != expected_pub_fp {
+    if !is_lower_hex_len(built_fp, 16) || built_fp != expected_pub_fp {
         return Err(format!(
-            "签名私钥对应公钥指纹（{expected_pub_fp}）与构建内嵌公钥指纹（{built_fp}）不一致，拒绝签名。"
+            "BUILD-INFO.json 构建内嵌公钥指纹无效或与当前签名私钥对应公钥指纹（{expected_pub_fp}）不一致，拒绝签名。"
         ));
     }
     let built_at = build_info
@@ -1456,19 +1748,20 @@ fn validate_build_info_bytes(
         .ok_or("BUILD-INFO.json 缺少 builtAt 时间戳。")?;
     chrono::DateTime::parse_from_rfc3339(&built_at)
         .map_err(|_| "BUILD-INFO.json 中的 builtAt 不是有效的 RFC 3339 时间戳。")?;
-    Ok(ValidatedBuildInfo { built_at })
+    Ok(built_at)
 }
 
-/// Verifies `VERSION`, `BUILD-INFO.json`, all 3 PE32+ GUI binaries, `.rdata` single trust-root
-/// marker, canonical default configs, and `SHA256SUMS` directly from the immutable `zip_bytes`
-/// buffer in RAM, eliminating any `%TEMP%` extraction TOCTOU window.
+/// Verifies ZIP central/local bounds, `VERSION`, `BUILD-INFO.json`, all 3 PE32+ GUI binaries,
+/// `.rdata` single trust-root marker, canonical default configs, all required licenses, and
+/// `SHA256SUMS` directly from the immutable `zip_bytes` buffer in RAM.
 fn verify_in_memory_zip_release_invariants(
     zip_bytes: &[u8],
     expected_version: &str,
     expected_channel_url: &str,
     expected_public_key_b64: &str,
     expected_pub_fp: &str,
-) -> Result<(String, ValidatedBuildInfo, u64), String> {
+) -> Result<VerifiedInMemoryZip, String> {
+    cst_updater::verify::validate_zip_bounds_bytes(zip_bytes)?;
     let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
         .map_err(|e| format!("发行 ZIP 格式无效：{e}"))?;
 
@@ -1503,21 +1796,34 @@ fn verify_in_memory_zip_release_invariants(
         .ok_or("ZIP 内 VERSION 格式无效。")?;
     if zip_ver != expected_version {
         return Err(format!(
-            "ZIP 内 VERSION（{zip_ver}）与预期版本（{expected_version}）不一致。"
+            "ZIP 内 VERSION 与预期版本（{expected_version}）不一致。"
         ));
     }
 
     let bi_bytes = read_zip_entry(&mut archive, BUILD_INFO_PATH, 64 * 1024)?;
-    let build_info = validate_build_info_bytes(&bi_bytes, expected_version, expected_pub_fp)?;
+    let built_at = validate_build_info_bytes(&bi_bytes, expected_version, expected_pub_fp)?;
 
     let marker = format_update_root_marker(expected_channel_url, expected_public_key_b64);
-    for rel in ["cst-pilot.exe", SERVER_EXE_PATH, UPDATER_EXE_PATH] {
-        let bin = read_zip_entry(&mut archive, rel, MAX_SERVER_ARCHIVE_BYTES)?;
-        verify_pe64_windows_gui_binary(&bin, rel)?;
-        if rel != "cst-pilot.exe" {
-            verify_pe64_rdata_single_root_marker(&bin, &marker, rel, expected_channel_url)?;
-        }
-    }
+    let main_bin = read_zip_entry(&mut archive, "cst-pilot.exe", MAX_SERVER_ARCHIVE_BYTES)?;
+    verify_pe64_windows_gui_binary(&main_bin, "cst-pilot.exe")?;
+
+    let server_bin = read_zip_entry(&mut archive, SERVER_EXE_PATH, MAX_SERVER_ARCHIVE_BYTES)?;
+    verify_pe64_rdata_single_root_marker(
+        &server_bin,
+        &marker,
+        SERVER_EXE_PATH,
+        expected_channel_url,
+    )?;
+    let server_exe_sha256 = format!("{:x}", Sha256::digest(&server_bin));
+
+    let updater_bin = read_zip_entry(&mut archive, UPDATER_EXE_PATH, MAX_SERVER_ARCHIVE_BYTES)?;
+    verify_pe64_rdata_single_root_marker(
+        &updater_bin,
+        &marker,
+        UPDATER_EXE_PATH,
+        expected_channel_url,
+    )?;
+    let updater_exe_sha256 = format!("{:x}", Sha256::digest(&updater_bin));
 
     for (rel, expected_raw) in [
         ("app/defaults/telemetry.json", CANONICAL_TELEMETRY_JSON),
@@ -1549,7 +1855,13 @@ fn verify_in_memory_zip_release_invariants(
     let sha256_sums = String::from_utf8(sums_bytes)
         .map_err(|_| format!("{SHA256SUMS_PATH} 必须为 UTF-8 编码。"))?;
     let unpacked_size = inspect_zip_unpacked_size(zip_bytes, &sha256_sums)?;
-    Ok((sha256_sums, build_info, unpacked_size))
+    Ok(VerifiedInMemoryZip {
+        sha256_sums,
+        built_at,
+        unpacked_size,
+        updater_exe_sha256,
+        server_exe_sha256,
+    })
 }
 
 fn read_bounded_release_notes(
@@ -1559,27 +1871,21 @@ fn read_bounded_release_notes(
 ) -> Result<String, String> {
     const MAX_NOTES_BYTES: u64 = 16 * 1024;
     let release_notes = if let Some(notes_path) = notes_file {
-        ensure_no_reparse_ancestors(notes_path, "更新说明")?;
-        if same_existing_file(notes_path, private_key_file) {
+        let key_id = cst_os::FileIdentity::from_path(private_key_file)?;
+        if notes_path == private_key_file {
             return Err("安全阻断：--notes-file 不能指向签名私钥文件或其硬链接别名。".into());
         }
-        let meta = fs::symlink_metadata(notes_path)
-            .map_err(|e| format!("无法读取更新说明 {}：{e}", notes_path.display()))?;
-        if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() {
-            return Err(format!(
-                "更新说明路径不能是符号链接、重解析点或目录：{}",
-                notes_path.display()
-            ));
+        let (mut f, notes_id, len) = open_regular_file_pinned(notes_path, "更新说明")?;
+        if notes_id == key_id {
+            return Err("安全阻断：--notes-file 不能指向签名私钥文件或其硬链接别名。".into());
         }
-        if meta.len() > MAX_NOTES_BYTES {
-            return Err("更新说明超过 16 KiB 上限。".into());
-        }
-        let mut f = fs::File::open(notes_path)
-            .map_err(|e| format!("无法打开更新说明 {}：{e}", notes_path.display()))?;
         if cst_os::link_count(&f)? != 1 {
             return Err("更新说明文件不能存在硬链接别名。".into());
         }
-        let mut buf = Vec::with_capacity(meta.len() as usize);
+        if len > MAX_NOTES_BYTES {
+            return Err("更新说明超过 16 KiB 上限。".into());
+        }
+        let mut buf = Vec::with_capacity(len as usize);
         (&mut f)
             .take(MAX_NOTES_BYTES + 1)
             .read_to_end(&mut buf)
@@ -1667,27 +1973,33 @@ fn validate_output_path_not_aliasing(
     disallowed_dir: Option<&Path>,
     protected_files: &[&Path],
 ) -> Result<(), String> {
-    ensure_no_reparse_ancestors(out_path, "清单输出")?;
+    let _ = out_path
+        .file_name()
+        .ok_or_else(|| format!("清单输出文件名无效：{}", out_path.display()))?;
+    let mut probe = match out_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    while !probe.exists() {
+        ensure_no_reparse_ancestors(&probe, "清单输出目录")?;
+        let Some(next) = probe.parent() else {
+            break;
+        };
+        if next.as_os_str().is_empty() {
+            probe = PathBuf::from(".");
+            break;
+        }
+        probe = next.to_path_buf();
+    }
+    let (_pinned_probe, ancestor_chain, _) =
+        open_pinned_ancestor_chain(&probe, false, "清单输出目录")?;
+
     match fs::symlink_metadata(out_path) {
-        Ok(meta) => {
-            if cst_os::is_reparse_or_symlink(&meta) || meta.is_dir() {
-                return Err(format!(
-                    "清单输出路径不能是符号链接、重解析点或目录：{}",
-                    out_path.display()
-                ));
-            }
-            let opened = fs::File::open(out_path).map_err(|e| {
-                format!(
-                    "清单输出路径已存在但无法核验文件链接数（拒绝盲写覆盖）{}：{e}",
-                    out_path.display()
-                )
-            })?;
-            if cst_os::link_count(&opened)? > 1 {
-                return Err(format!(
-                    "清单输出路径存在硬链接别名，拒绝覆盖：{}",
-                    out_path.display()
-                ));
-            }
+        Ok(_) => {
+            return Err(format!(
+                "清单输出目标文件已存在，拒绝覆盖（请指定新的输出路径或先删除旧文件）：{}",
+                out_path.display()
+            ));
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => {
@@ -1698,30 +2010,15 @@ fn validate_output_path_not_aliasing(
         }
     }
     for protected in protected_files {
-        if same_existing_file(out_path, protected) {
+        let _ = cst_os::FileIdentity::from_path(protected)?;
+        if out_path == *protected {
             return Err("清单输出路径不能指向私钥文件、发行包或构建证明文件。".into());
         }
     }
     if let Some(dir) = disallowed_dir {
-        let canon_dir = fs::canonicalize(dir)
-            .map_err(|e| format!("无法解析禁止写入的发行树目录 {}：{e}", dir.display()))?;
-        let mut probe = match out_path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-            _ => PathBuf::from("."),
-        };
-        while !probe.exists() {
-            let Some(next) = probe.parent() else {
-                break;
-            };
-            if next.as_os_str().is_empty() {
-                probe = PathBuf::from(".");
-                break;
-            }
-            probe = next.to_path_buf();
-        }
-        let canon_parent = fs::canonicalize(&probe)
-            .map_err(|e| format!("无法解析清单输出父目录 {}：{e}", probe.display()))?;
-        if canon_parent.starts_with(&canon_dir) {
+        let (_dis_p, _dis_chain, dis_id) =
+            open_pinned_ancestor_chain(dir, false, "禁止写入的发行树目录")?;
+        if ancestor_chain.iter().any(|(_, _, id)| *id == dis_id) {
             return Err(format!(
                 "清单输出路径禁止写入发行树目录内部：{}",
                 out_path.display()
@@ -1731,13 +2028,20 @@ fn validate_output_path_not_aliasing(
     Ok(())
 }
 
+struct TempManifestGuard(PathBuf);
+
+impl Drop for TempManifestGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
 fn write_manifest_file_atomic(
     out_path: &Path,
     disallowed_dir: Option<&Path>,
     protected_files: &[&Path],
     bytes: &[u8],
 ) -> Result<(), String> {
-    ensure_no_reparse_ancestors(out_path, "清单输出")?;
     let file_name = out_path
         .file_name()
         .ok_or_else(|| format!("清单输出文件名无效：{}", out_path.display()))?;
@@ -1745,38 +2049,82 @@ fn write_manifest_file_atomic(
         Some(p) if !p.as_os_str().is_empty() => p,
         _ => Path::new("."),
     };
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("无法创建清单输出目录 {}：{e}", parent.display()))?;
-    ensure_no_reparse_ancestors(parent, "清单输出目录")?;
 
-    // Pin the output parent directory via `Storage` and re-verify disallowed-tree & protected-file
-    // boundaries WHILE holding the directory lease so no ancestor swap can occur before commit.
-    let parent_storage = cst_os::Storage::new(parent)?;
-    let _parent_lease = parent_storage.pin_directory(Path::new(""), false)?;
-    let _disallowed_lease = if let Some(dir) = disallowed_dir {
-        let disallowed_storage = cst_os::Storage::new(dir)?;
-        let lease = disallowed_storage.pin_directory(Path::new(""), false)?;
-        if parent_storage.root.starts_with(&disallowed_storage.root) {
+    // Pin EVERY ancestor directory component from root down to `parent` (creating missing leaf
+    // directories step-by-step without following symlinks/reparse points), holding handles alive
+    // through staging, identity checks, and non-overwriting atomic commit.
+    let (pinned_parent, ancestor_chain, _) =
+        open_pinned_ancestor_chain(parent, true, "清单输出目录")?;
+
+    let _disallowed_guard = if let Some(dir) = disallowed_dir {
+        let (_dis_p, dis_chain, dis_id) =
+            open_pinned_ancestor_chain(dir, false, "禁止写入的发行树目录")?;
+        if ancestor_chain.iter().any(|(_, _, id)| *id == dis_id) {
             return Err(format!(
                 "清单输出路径禁止写入发行树目录内部：{}",
                 out_path.display()
             ));
         }
-        Some((disallowed_storage, lease))
+        Some(dis_chain)
     } else {
         None
     };
 
-    let pinned_target = parent_storage.root.join(file_name);
+    let mut protected_ids = Vec::with_capacity(protected_files.len());
     for protected in protected_files {
-        if same_existing_file(&pinned_target, protected) {
-            return Err("清单输出路径不能指向私钥文件、发行包或构建证明文件。".into());
+        protected_ids.push(cst_os::FileIdentity::from_path(protected)?);
+    }
+
+    let pinned_target = pinned_parent.join(file_name);
+    match fs::symlink_metadata(&pinned_target) {
+        Ok(_) => {
+            return Err(format!(
+                "清单输出目标文件已存在，拒绝覆盖：{}",
+                out_path.display()
+            ));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(format!(
+                "无法检查清单输出路径状态 {}：{e}",
+                out_path.display()
+            ));
         }
     }
-    // Use `replace = false` (`create_new` commit) when target does not exist, and when target
-    // exists verify `link_count == 1` under the pinned parent via `Storage::atomic_checked`.
-    let replace = pinned_target.exists();
-    parent_storage.atomic_checked(&pinned_target, bytes, replace, &|| false)
+
+    let tmp_path = pinned_parent.join(format!(".manifest-{}.tmp", Uuid::new_v4().simple()));
+    let _tmp_guard = TempManifestGuard(tmp_path.clone());
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|e| format!("无法创建清单临时文件 {}：{e}", tmp_path.display()))?;
+    tmp_file
+        .write_all(bytes)
+        .and_then(|_| tmp_file.sync_all())
+        .map_err(|e| format!("写入清单临时文件失败：{e}"))?;
+    let tmp_meta = tmp_file
+        .metadata()
+        .map_err(|e| format!("无法读取清单临时文件元数据：{e}"))?;
+    if cst_os::is_reparse_or_symlink(&tmp_meta) || !tmp_meta.is_file() {
+        return Err("清单临时文件类型异常。".into());
+    }
+    if cst_os::link_count(&tmp_file)? != 1 {
+        return Err("清单临时文件链接计数异常。".into());
+    }
+    let tmp_id = cst_os::FileIdentity::from_file(&tmp_file)?;
+    if protected_ids.contains(&tmp_id) {
+        return Err("清单临时文件与受保护输入文件发生身份冲突。".into());
+    }
+    drop(tmp_file);
+
+    verify_ancestor_chain_unchanged(&ancestor_chain, "清单输出目录")?;
+    cst_os::commit_new_file_no_overwrite(&tmp_path, &pinned_target)?;
+    if let Err(err) = verify_ancestor_chain_unchanged(&ancestor_chain, "清单输出目录") {
+        let _ = fs::remove_file(&pinned_target);
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn sign_domain(signing_key: &SigningKey, domain: &[u8], data: &[u8]) -> String {
@@ -1784,10 +2132,6 @@ fn sign_domain(signing_key: &SigningKey, domain: &[u8], data: &[u8]) -> String {
     buf.extend_from_slice(domain);
     buf.extend_from_slice(data);
     STANDARD.encode(signing_key.sign(&buf).to_bytes())
-}
-
-fn same_existing_file(a: &Path, b: &Path) -> bool {
-    a == b || cst_os::is_same_existing_file(a, b)
 }
 
 fn inspect_zip_unpacked_size(zip_bytes: &[u8], expected_sums: &str) -> Result<u64, String> {
@@ -1867,7 +2211,7 @@ fn parse_publish_release_args(
     let mut zip_path: Option<PathBuf> = None;
     let mut channel = "stable".to_owned();
     let mut activate = true;
-    let mut admin_url = DEFAULT_ADMIN_URL.to_owned();
+    let mut admin_url: Option<String> = None;
     let mut public_base_url = DEFAULT_PUBLIC_BASE_URL.to_owned();
     let mut public_manifest_url: Option<String> = None;
     let mut public_archive_url: Option<String> = None;
@@ -1890,7 +2234,7 @@ fn parse_publish_release_args(
             }
             "--no-activate" => activate = false,
             "--admin-url" => {
-                admin_url = args.next().ok_or("--admin-url 需要管理接口 URL。")?;
+                admin_url = Some(args.next().ok_or("--admin-url 需要管理接口 URL。")?);
             }
             "--public-base-url" => {
                 public_base_url = args.next().ok_or("--public-base-url 需要公开基址 URL。")?;
@@ -1926,6 +2270,9 @@ fn parse_publish_release_args(
     }
     let manifest_path = manifest_path.ok_or("publish-release 必须指定 --manifest <path>。")?;
     let zip_path = zip_path.ok_or("publish-release 必须指定 --zip <path>。")?;
+    let admin_url = admin_url.ok_or(
+        "publish-release 必须显式指定 --admin-url <url>（禁止默认向本机未声明端口发送管理令牌）。",
+    )?;
     let public_key_b64 = resolve_publish_public_key(public_key_b64)?;
 
     Ok(PublishReleaseArgs {
@@ -2029,35 +2376,6 @@ enum UploadTarget<'a> {
     SshStdio { host: &'a str, remote_port: u16 },
 }
 
-fn verify_zip_binaries_match_channel(
-    zip_bytes: &[u8],
-    expected_channel_url: &str,
-    expected_public_key_b64: &str,
-) -> Result<(), String> {
-    let marker = format_update_root_marker(expected_channel_url, expected_public_key_b64);
-    let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes))
-        .map_err(|e| format!("发行 ZIP 格式无效：{e}"))?;
-    for rel in [UPDATER_EXE_PATH, SERVER_EXE_PATH] {
-        let entry_name = format!("cst-pilot/{rel}");
-        let entry = archive
-            .by_name(&entry_name)
-            .map_err(|_| format!("发行 ZIP 缺少 {entry_name}。"))?;
-        if entry.size() > MAX_SERVER_ARCHIVE_BYTES {
-            return Err(format!("发行 ZIP 内 {entry_name} 体积超出限制。"));
-        }
-        let mut bin_bytes = Vec::with_capacity(entry.size() as usize);
-        entry
-            .take(MAX_SERVER_ARCHIVE_BYTES + 1)
-            .read_to_end(&mut bin_bytes)
-            .map_err(|e| format!("读取发行 ZIP 内 {entry_name} 失败：{e}"))?;
-        if bin_bytes.len() as u64 > MAX_SERVER_ARCHIVE_BYTES {
-            return Err(format!("发行 ZIP 内 {entry_name} 实际体积超出限制。"));
-        }
-        verify_pe64_rdata_single_root_marker(&bin_bytes, &marker, rel, expected_channel_url)?;
-    }
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn publish_verified_bundle(
     manifest_bytes: &[u8],
@@ -2086,7 +2404,13 @@ async fn publish_verified_bundle(
     }
     let public_base = public_base_url.trim().trim_end_matches('/');
     let expected_channel_url = expected_channel_manifest_url(public_base, channel)?;
-    verify_zip_binaries_match_channel(zip_bytes, &expected_channel_url, public_key_b64)?;
+    verify_in_memory_zip_release_invariants(
+        zip_bytes,
+        &verified.info().version,
+        &expected_channel_url,
+        public_key_b64,
+        &release_key.fingerprint(),
+    )?;
 
     let boundary = format!("cstpilot-{}", Uuid::new_v4().simple());
     let archive_filename = format!("cst-pilot-{}-windows-x64.zip", verified.info().version);
@@ -2366,6 +2690,48 @@ fn resolve_trusted_ssh_binary() -> Result<PathBuf, String> {
     }
 }
 
+fn build_ssh_stdio_args(ssh_host: &str, remote_port: u16) -> Result<Vec<String>, String> {
+    let host = validate_ssh_host(ssh_host)?;
+    if remote_port == 0 {
+        return Err("--ssh-remote-port 不能为 0。".into());
+    }
+    let target_spec = format!("127.0.0.1:{remote_port}");
+    Ok([
+        "-T",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "ForkAfterAuthentication=no",
+        "-o",
+        "PermitLocalCommand=no",
+        "-o",
+        "RequestTTY=no",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-W",
+        &target_spec,
+        "--",
+        &host,
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect())
+}
+
 /// Streams a single HTTP/1.1 `POST /v1/admin/releases` multipart request directly over an
 /// anonymous OS pipe to `ssh -W 127.0.0.1:<remote_port> -- <host>` without binding ANY local
 /// TCP port on `127.0.0.1` (eliminating all local port-sharing / token-interception vectors).
@@ -2382,10 +2748,6 @@ async fn upload_multipart_over_ssh_stdio(
     suffix: &[u8],
     total_len: u64,
 ) -> Result<(u16, Vec<u8>), String> {
-    let host = validate_ssh_host(ssh_host)?;
-    if remote_port == 0 {
-        return Err("--ssh-remote-port 不能为 0。".into());
-    }
     if admin_token
         .as_bytes()
         .iter()
@@ -2393,42 +2755,14 @@ async fn upload_multipart_over_ssh_stdio(
     {
         return Err("管理令牌包含非法 HTTP 头字符。".into());
     }
+    let ssh_args = build_ssh_stdio_args(ssh_host, remote_port)?;
     let ssh_bin = resolve_trusted_ssh_binary()?;
-    let target_spec = format!("127.0.0.1:{remote_port}");
 
     let mut cmd = tokio::process::Command::new(&ssh_bin);
     cmd.env_remove(ENV_PRIVATE_KEY_FILE)
         .env_remove(ENV_ADMIN_TOKEN)
         .kill_on_drop(true)
-        .args([
-            "-T",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ClearAllForwardings=yes",
-            "-o",
-            "ControlMaster=no",
-            "-o",
-            "ControlPath=none",
-            "-o",
-            "PermitLocalCommand=no",
-            "-o",
-            "RequestTTY=no",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            "ConnectTimeout=15",
-            "-o",
-            "ServerAliveInterval=15",
-            "-o",
-            "ServerAliveCountMax=3",
-            "-W",
-            &target_spec,
-            "--",
-            &host,
-        ])
+        .args(&ssh_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2455,6 +2789,8 @@ async fn upload_multipart_over_ssh_stdio(
     )
     .await
 }
+
+const MAX_SSH_WIRE_RESPONSE_BYTES: usize = MAX_ADMIN_RESPONSE_BYTES + 16 * 1024;
 
 async fn exchange_http1_over_child_stdio(
     mut child: tokio::process::Child,
@@ -2493,7 +2829,7 @@ async fn exchange_http1_over_child_stdio(
     let read_resp = async move {
         let mut out = Vec::new();
         (&mut child_stdout)
-            .take((MAX_ADMIN_RESPONSE_BYTES + 16 * 1024) as u64)
+            .take((MAX_SSH_WIRE_RESPONSE_BYTES + 1) as u64)
             .read_to_end(&mut out)
             .await?;
         Ok::<Vec<u8>, std::io::Error>(out)
@@ -2533,6 +2869,9 @@ async fn exchange_http1_over_child_stdio(
 
     let stderr_text = String::from_utf8_lossy(&stderr_bytes).trim().to_owned();
     let raw_resp = resp_res.map_err(|e| format!("读取 OpenSSH 响应流失败：{e}"))?;
+    if raw_resp.len() > MAX_SSH_WIRE_RESPONSE_BYTES {
+        return Err("远端管理接口 HTTP 原始响应超出大小上限，拒绝截断解析。".into());
+    }
     if raw_resp.is_empty() {
         let write_note = write_res
             .err()
@@ -2607,10 +2946,10 @@ fn parse_raw_http1_response(raw: &[u8], max_body: usize) -> Result<(u16, Vec<u8>
     let body = if is_chunked {
         decode_chunked_body(body_slice, max_body)?
     } else if let Some(cl) = content_len {
-        if cl > max_body || body_slice.len() < cl {
-            return Err("远端 HTTP 响应体长度异常或超出限制。".into());
+        if cl > max_body || body_slice.len() != cl {
+            return Err("远端 HTTP 响应体长度与 Content-Length 不一致或超出限制。".into());
         }
-        body_slice[..cl].to_vec()
+        body_slice.to_vec()
     } else {
         if body_slice.len() > max_body {
             return Err("远端 HTTP 响应体超出大小限制。".into());
@@ -2636,10 +2975,32 @@ fn decode_chunked_body(mut input: &[u8], max_body: usize) -> Result<Vec<u8>, Str
             usize::from_str_radix(len_hex, 16).map_err(|_| "Chunked 长度值无效。".to_owned())?;
         input = &input[crlf + 2..];
         if chunk_len == 0 {
-            if input.starts_with(b"\r\n") || input.windows(4).any(|w| w == b"\r\n\r\n") {
-                break;
+            loop {
+                let Some(end) = input.windows(2).position(|w| w == b"\r\n") else {
+                    return Err("Chunked 响应缺少结尾空行（终止块未闭合）。".into());
+                };
+                if end == 0 {
+                    input = &input[2..];
+                    break;
+                }
+                let trailer = std::str::from_utf8(&input[..end])
+                    .map_err(|_| "Chunked 尾部字段不是有效 UTF-8。".to_owned())?;
+                let Some((t_name, _)) = trailer.split_once(':') else {
+                    return Err("Chunked 尾部字段格式无效。".into());
+                };
+                if t_name.is_empty()
+                    || !t_name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                {
+                    return Err("Chunked 尾部字段名包含非法字符。".into());
+                }
+                input = &input[end + 2..];
             }
-            return Err("Chunked 响应缺少结尾空行（终止块未闭合）。".into());
+            if !input.is_empty() {
+                return Err("Chunked 终止块后存在多余字节。".into());
+            }
+            break;
         }
         if out.len().saturating_add(chunk_len) > max_body || input.len() < chunk_len + 2 {
             return Err("Chunked 响应体超出限制或被截断。".into());
@@ -3236,8 +3597,8 @@ pub async fn execute_release(
         let att = read_and_verify_build_attestation(&attestation_path, &exp_att_sha)?;
         if att.manifest_url != expected_channel_url {
             return Err(format!(
-                "构建证明通道地址（{}）与目标发布通道 {}（期望 {expected_channel_url}）不一致，拒绝跨通道误发。",
-                att.manifest_url, args.channel
+                "构建证明通道地址与目标发布通道 {}（期望 {expected_channel_url}）不一致，拒绝跨通道误发。",
+                args.channel
             ));
         }
         sign_attested_in_memory(
@@ -3356,14 +3717,12 @@ fn sign_attested_in_memory(
         && exp_v != attestation.version
     {
         return Err(format!(
-            "构建证明版本（{}）与待签版本（{exp_v}）不一致，拒绝签名。",
-            attestation.version
+            "构建证明版本与待签版本（{exp_v}）不一致，拒绝签名。"
         ));
     }
     if !is_lower_hex_len(&attestation.git_commit, 40) || attestation.git_commit != exp_commit {
         return Err(format!(
-            "构建证明提交哈希（{}）与获准发布提交（{exp_commit}）不一致，拒绝签名。",
-            attestation.git_commit
+            "构建证明提交哈希无效或与获准发布提交（{exp_commit}）不一致，拒绝签名。"
         ));
     }
 
@@ -3372,8 +3731,7 @@ fn sign_attested_in_memory(
     let signing_pub_fp = release_key.fingerprint();
     if attestation.update_public_key_fingerprint != signing_pub_fp {
         return Err(format!(
-            "构建证明公钥指纹（{}）与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。",
-            attestation.update_public_key_fingerprint
+            "构建证明公钥指纹无效或与当前签名私钥公钥指纹（{signing_pub_fp}）不一致，拒绝签名。"
         ));
     }
 
@@ -3388,21 +3746,33 @@ fn sign_attested_in_memory(
         return Err("发行 ZIP 的文件名、体积或 SHA-256 与构建证明不一致，拒绝解包或签名。".into());
     }
 
-    let (sha256_sums, build_info, unpacked_size) = verify_in_memory_zip_release_invariants(
+    let in_mem = verify_in_memory_zip_release_invariants(
         zip_bytes,
         &version,
         &attestation.manifest_url,
         &signing_pub_b64,
         &signing_pub_fp,
     )?;
-    if format!("{:x}", Sha256::digest(sha256_sums.as_bytes())) != attestation.sha256_sums_sha256 {
+    if format!("{:x}", Sha256::digest(in_mem.sha256_sums.as_bytes()))
+        != attestation.sha256_sums_sha256
+    {
         return Err("待签发行包 app/SHA256SUMS 摘要与构建证明不一致，拒绝签名。".into());
     }
-    if build_info.built_at != attestation.built_at {
+    if in_mem.built_at != attestation.built_at {
         return Err("BUILD-INFO.json 中的 builtAt 与构建证明不一致，拒绝签名。".into());
     }
-    if attestation.unpacked_size != unpacked_size {
+    if attestation.unpacked_size != in_mem.unpacked_size {
         return Err("发行 ZIP 解压体积与构建证明不一致，拒绝签名。".into());
+    }
+    if in_mem.updater_exe_sha256 != attestation.updater_exe_sha256 {
+        return Err(format!(
+            "待签 {UPDATER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
+    }
+    if in_mem.server_exe_sha256 != attestation.server_exe_sha256 {
+        return Err(format!(
+            "待签 {SERVER_EXE_PATH} 摘要与构建证明不一致，拒绝签名。"
+        ));
     }
 
     let extracted_kit = work_dir.join("extracted-kit");
@@ -3423,7 +3793,7 @@ fn sign_attested_in_memory(
             MAX_SHA256SUMS_BYTES,
             SHA256SUMS_PATH,
         )?;
-        if src_sums != sha256_sums.as_bytes() {
+        if src_sums != in_mem.sha256_sums.as_bytes() {
             return Err("源发行目录的 app/SHA256SUMS 与发行 ZIP 内容不一致，拒绝签名。".into());
         }
     }
@@ -3435,14 +3805,14 @@ fn sign_attested_in_memory(
         &signing_key,
         &release_key,
         &version,
-        &build_info.built_at,
+        &in_mem.built_at,
         min_upgradable,
         base_url,
         release_notes,
-        sha256_sums,
+        in_mem.sha256_sums,
         zip_bytes,
         archive_size,
-        unpacked_size,
+        in_mem.unpacked_size,
         archive_sha256,
         out_path.map(|p| (p, disallowed_out_dir, protected_paths)),
     )
@@ -3499,7 +3869,7 @@ fn sign_digest_pinned_package(
         && exp_ver != version
     {
         return Err(format!(
-            "待发归档内 VERSION（{version}）与预期版本（{exp_ver}）不一致。"
+            "待发归档内 VERSION 与预期版本（{exp_ver}）不一致。"
         ));
     }
     let parsed_ver = cst_updater::manifest::version(&version)?;
@@ -3509,7 +3879,7 @@ fn sign_digest_pinned_package(
     }
 
     // Verify all PE64/.rdata/BUILD-INFO/defaults/licenses/SHA256SUMS invariants directly from `zip_bytes` in RAM!
-    let (sha256_sums, build_info, unpacked_size) = verify_in_memory_zip_release_invariants(
+    let in_mem = verify_in_memory_zip_release_invariants(
         zip_bytes,
         &version,
         expected_channel_url,
@@ -3528,7 +3898,7 @@ fn sign_digest_pinned_package(
             MAX_SHA256SUMS_BYTES,
             SHA256SUMS_PATH,
         )?;
-        if src_sums != sha256_sums.as_bytes() {
+        if src_sums != in_mem.sha256_sums.as_bytes() {
             return Err("源发行目录的 app/SHA256SUMS 与同级发行 ZIP 内容不一致，拒绝签名。".into());
         }
     }
@@ -3539,14 +3909,14 @@ fn sign_digest_pinned_package(
         &signing_key,
         &release_key,
         &version,
-        &build_info.built_at,
+        &in_mem.built_at,
         min_upgradable,
         base_url,
         release_notes,
-        sha256_sums,
+        in_mem.sha256_sums,
         zip_bytes,
         archive_size,
-        unpacked_size,
+        in_mem.unpacked_size,
         actual_archive_sha256,
         out_path.map(|p| (p, disallowed_out_dir, protected_paths)),
     )
@@ -3614,10 +3984,16 @@ mod tests {
         let opt_size = 240usize;
         let num_sections = 2usize;
         let sec_table_offset = opt_offset + opt_size;
+        let section_alignment = 0x1000u32;
+        let file_alignment = 0x200usize;
         let text_raw_ptr = 0x200usize;
-        let text_raw_size = 0x80usize;
+        let text_virt_size = 0x80u32;
+        let text_raw_size = 0x200usize;
         let rdata_raw_ptr = text_raw_ptr + text_raw_size;
-        let rdata_raw_size = rdata_payload.len().max(64).div_ceil(16) * 16;
+        let rdata_virt_size = rdata_payload.len().max(64) as u32;
+        let rdata_raw_size = (rdata_virt_size as usize).div_ceil(file_alignment) * file_alignment;
+        let rdata_virt_end =
+            (0x2000u32 + rdata_virt_size + section_alignment - 1) & !(section_alignment - 1);
         let mut buf = vec![0u8; rdata_raw_ptr + rdata_raw_size];
 
         // DOS + PE signature
@@ -3632,17 +4008,20 @@ mod tests {
         buf[coff_offset + 18..coff_offset + 20].copy_from_slice(&0x0022u16.to_le_bytes());
 
         // OptionalHeader (PE32+): Magic = 0x020b, AddressOfEntryPoint = 0x1000 (.text),
-        // SizeOfImage = 0x4000, SizeOfHeaders = 0x200, Subsystem
+        // SectionAlignment = 0x1000, FileAlignment = 0x200, SizeOfImage, SizeOfHeaders = 0x200, Subsystem
         buf[opt_offset..opt_offset + 2].copy_from_slice(&0x020bu16.to_le_bytes());
         buf[opt_offset + 16..opt_offset + 20].copy_from_slice(&0x1000u32.to_le_bytes());
-        buf[opt_offset + 56..opt_offset + 60].copy_from_slice(&0x4000u32.to_le_bytes());
+        buf[opt_offset + 32..opt_offset + 36].copy_from_slice(&section_alignment.to_le_bytes());
+        buf[opt_offset + 36..opt_offset + 40]
+            .copy_from_slice(&(file_alignment as u32).to_le_bytes());
+        buf[opt_offset + 56..opt_offset + 60].copy_from_slice(&rdata_virt_end.to_le_bytes());
         buf[opt_offset + 60..opt_offset + 64].copy_from_slice(&(text_raw_ptr as u32).to_le_bytes());
         buf[opt_offset + 68..opt_offset + 70].copy_from_slice(&subsystem.to_le_bytes());
 
         // Section 0: `.text` (CNT_CODE | MEM_EXECUTE | MEM_READ = 0x60000020)
         let s0 = sec_table_offset;
         buf[s0..s0 + 5].copy_from_slice(b".text");
-        buf[s0 + 8..s0 + 12].copy_from_slice(&(text_raw_size as u32).to_le_bytes());
+        buf[s0 + 8..s0 + 12].copy_from_slice(&text_virt_size.to_le_bytes());
         buf[s0 + 12..s0 + 16].copy_from_slice(&0x1000u32.to_le_bytes());
         buf[s0 + 16..s0 + 20].copy_from_slice(&(text_raw_size as u32).to_le_bytes());
         buf[s0 + 20..s0 + 24].copy_from_slice(&(text_raw_ptr as u32).to_le_bytes());
@@ -3652,7 +4031,7 @@ mod tests {
         // Section 1: `.rdata` (CNT_INITIALIZED_DATA | MEM_READ = 0x40000040, non-writable, non-executable)
         let s1 = sec_table_offset + 40;
         buf[s1..s1 + 6].copy_from_slice(b".rdata");
-        buf[s1 + 8..s1 + 12].copy_from_slice(&(rdata_raw_size as u32).to_le_bytes());
+        buf[s1 + 8..s1 + 12].copy_from_slice(&rdata_virt_size.to_le_bytes());
         buf[s1 + 12..s1 + 16].copy_from_slice(&0x2000u32.to_le_bytes());
         buf[s1 + 16..s1 + 20].copy_from_slice(&(rdata_raw_size as u32).to_le_bytes());
         buf[s1 + 20..s1 + 24].copy_from_slice(&(rdata_raw_ptr as u32).to_le_bytes());
@@ -3850,6 +4229,36 @@ mod tests {
     fn pe64_gui_and_ssh_host_validators_enforce_strict_boundaries() {
         let gui_pe = mock_pe64_gui_with_marker(2, b"test");
         assert!(verify_pe64_windows_gui_binary(&gui_pe, "cst-pilot.exe").is_ok());
+
+        // Zero SectionAlignment/FileAlignment, VirtualSize=0, or missing IMAGE_SCN_CNT_CODE must fail.
+        let mut zero_align_pe = gui_pe.clone();
+        zero_align_pe[0x80 + 24 + 32..0x80 + 24 + 40].fill(0);
+        assert!(verify_pe64_windows_gui_binary(&zero_align_pe, "cst-pilot.exe").is_err());
+
+        let mut zero_vsize_pe = gui_pe.clone();
+        let sec0_off = 0x80 + 24 + 240;
+        zero_vsize_pe[sec0_off + 8..sec0_off + 12].fill(0);
+        assert!(verify_pe64_windows_gui_binary(&zero_vsize_pe, "cst-pilot.exe").is_err());
+
+        let mut no_cnt_code_pe = gui_pe.clone();
+        no_cnt_code_pe[sec0_off + 36..sec0_off + 40].copy_from_slice(&0x6000_0040u32.to_le_bytes());
+        assert!(verify_pe64_windows_gui_binary(&no_cnt_code_pe, "cst-pilot.exe").is_err());
+
+        // HTML/CSS asset extractor must catch unquoted attrs, whitespace around `=`, `srcset`, and `@import`.
+        let refs = extract_local_asset_refs(
+            "<link rel=stylesheet href=app.css><img src = '/a.png' srcset=\"b.png 1x, ../escape.png 2x\"><style>@import 'theme.css'; body{background:url(bg.svg)}</style>",
+        );
+        assert_eq!(
+            refs,
+            vec![
+                "app.css",
+                "/a.png",
+                "b.png",
+                "../escape.png",
+                "bg.svg",
+                "theme.css"
+            ]
+        );
 
         let console_pe = mock_pe64_gui_with_marker(3, b"test");
         assert!(verify_pe64_windows_gui_binary(&console_pe, "cst-pilot.exe").is_err());
@@ -4376,7 +4785,7 @@ mod tests {
         let (_dist_dir, zip_path, att_path, att_sha256, _) =
             build_synthetic_dist(&dir, "v0.9.10", &pub_b64, &fp, TEST_COMMIT_SHA, None);
 
-        // 1. Live `release` without `--ssh-host` or `--admin-url` must fail closed (no implicit localhost port).
+        // 1. Live `release` AND `publish-release` without explicit target must fail closed!
         let missing_target_err = parse_release_command_args(
             [
                 "--package",
@@ -4396,6 +4805,37 @@ mod tests {
         .err()
         .expect("live release without explicit target must fail");
         assert!(missing_target_err.contains("--ssh-host"));
+
+        let missing_pub_admin_err = parse_publish_release_args(
+            ["--manifest", "m.json", "--zip", zip_path.to_str().unwrap()]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .err()
+        .expect("publish-release without --admin-url must fail");
+        assert!(missing_pub_admin_err.contains("--admin-url"));
+
+        let ssh_argv = build_ssh_stdio_args("cstoa", 8787).unwrap();
+        assert!(
+            ssh_argv
+                .windows(2)
+                .any(|w| w == ["-o", "ForkAfterAuthentication=no"])
+        );
+        assert!(
+            ssh_argv
+                .windows(4)
+                .any(|w| w == ["-W", "127.0.0.1:8787", "--", "cstoa"])
+        );
+
+        // Error message when `BUILD-INFO.json` contains a secret in `updatePublicKeyFingerprint` must NOT echo it!
+        let raw_key_b64 = fs::read_to_string(&key_file).unwrap();
+        let secret_trimmed = raw_key_b64.trim();
+        let bad_bi = format!(
+            "{{\"version\":\"v0.9.10\",\"builtAt\":\"2026-11-26T12:00:00Z\",\"platform\":\"windows-x86_64\",\"embedWeb\":true,\"updateEnabled\":true,\"updatePublicKeyFingerprint\":\"{secret_trimmed}\"}}"
+        );
+        let bi_err = validate_build_info_bytes(bad_bi.as_bytes(), "v0.9.10", &fp).unwrap_err();
+        assert!(!bi_err.contains(secret_trimmed));
+        assert!(!bi_err.contains(&secret_trimmed[..16]));
 
         // 2. Passing `--notes-file` pointing to `release.key` (or embedding signing seed in notes) must fail!
         let out_manifest = dir.join("manifest.signed.json");
@@ -4436,12 +4876,25 @@ mod tests {
         .expect("inline notes containing signing key seed must be blocked");
         assert!(inline_leak_err.contains("安全阻断"));
 
-        // 3. Sign a valid manifest, then verify standalone `publish_release` rejects wrong channel & wrong ZIP digest.
+        // Mixed-case 64-char hex of signing seed must ALSO be blocked!
+        let (_, _, _, seed_bytes) = load_signing_key(&key_file).unwrap();
+        let mut mixed_hex = String::new();
+        for (idx, b) in seed_bytes.iter().enumerate() {
+            if idx % 2 == 0 {
+                mixed_hex.push_str(&format!("{b:02x}"));
+            } else {
+                mixed_hex.push_str(&format!("{b:02X}"));
+            }
+        }
+        assert!(verify_no_signing_key_leak(&seed_bytes, b"", &mixed_hex).is_err());
+
+        // 3. Sign a valid manifest, verify overwrite refusal, then verify standalone `publish_release`
+        //    rejects wrong channel, wrong ZIP digest, and missing required licenses.
         sign_release(&SignReleaseArgs {
             dist_dir: None,
             zip_path: zip_path.clone(),
-            attestation_path: att_path,
-            expected_attestation_sha256: att_sha256,
+            attestation_path: att_path.clone(),
+            expected_attestation_sha256: att_sha256.clone(),
             expected_commit: TEST_COMMIT_SHA.into(),
             version: None,
             min_upgradable: "v0.9.0".into(),
@@ -4449,9 +4902,28 @@ mod tests {
             notes_file: None,
             notes_inline: Some("clean notes".into()),
             out_path: out_manifest.clone(),
-            private_key_file: key_file,
+            private_key_file: key_file.clone(),
         })
         .unwrap();
+
+        // Overwriting an existing manifest output path must fail closed!
+        assert!(
+            sign_release(&SignReleaseArgs {
+                dist_dir: None,
+                zip_path: zip_path.clone(),
+                attestation_path: att_path,
+                expected_attestation_sha256: att_sha256,
+                expected_commit: TEST_COMMIT_SHA.into(),
+                version: None,
+                min_upgradable: "v0.9.0".into(),
+                base_url: DEFAULT_PUBLIC_BASE_URL.into(),
+                notes_file: None,
+                notes_inline: Some("second write".into()),
+                out_path: out_manifest.clone(),
+                private_key_file: key_file,
+            })
+            .is_err()
+        );
 
         let tok = Zeroizing::new("t".repeat(48));
         let wrong_ch_err = publish_release(
@@ -4510,8 +4982,22 @@ mod tests {
             )
             .is_err()
         );
+        assert!(
+            parse_raw_http1_response(
+                b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\n{}EXTRA",
+                1024
+            )
+            .is_err()
+        );
+        assert!(
+            parse_raw_http1_response(
+                b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\nSMUGGLED",
+                1024
+            )
+            .is_err()
+        );
         let (code, body) = parse_raw_http1_response(
-            b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n",
+            b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nX-Checksum: ok\r\n\r\n",
             1024,
         )
         .unwrap();
@@ -4525,7 +5011,7 @@ mod tests {
                 "-NoProfile",
                 "-Command",
                 &format!(
-                    "$inBytes = [Console]::OpenStandardInput().ReadToEnd(); [Console]::Error.Write(('E' * 8192)); [Console]::Out.Write(\"HTTP/1.1 201 Created`r`nContent-Length: 2`r`n`r`n{{}}\"); exit {exit_code}"
+                    "$sr = [System.IO.StreamReader]::new([Console]::OpenStandardInput()); $inText = $sr.ReadToEnd(); [Console]::Error.Write(('E' * 8192)); $outJson = '{{\"rx\":' + $inText.Length + '}}'; [Console]::Out.Write(\"HTTP/1.1 201 Created`r`nContent-Length: $($outJson.Length)`r`n`r`n$outJson\"); exit {exit_code}"
                 ),
             ])
             .stdin(Stdio::piped())
@@ -4539,7 +5025,7 @@ mod tests {
             c.args([
                 "-c",
                 &format!(
-                    "cat >/dev/null; head -c 8192 /dev/zero | tr '\\0' 'E' >&2; printf 'HTTP/1.1 201 Created\\r\\nContent-Length: 2\\r\\n\\r\\n{{}}'; exit {exit_code}"
+                    "n=$(wc -c | tr -d ' '); head -c 8192 /dev/zero | tr '\\0' 'E' >&2; body=$(printf '{{\"rx\":%s}}' \"$n\"); printf 'HTTP/1.1 201 Created\\r\\nContent-Length: %s\\r\\n\\r\\n%s' \"${{#body}}\" \"$body\"; exit {exit_code}"
                 ),
             ])
             .stdin(Stdio::piped())
@@ -4548,9 +5034,10 @@ mod tests {
             c.spawn().unwrap()
         };
 
+        let req_h = b"POST / HTTP/1.1\r\n\r\n";
         let (ok_code, ok_body) = exchange_http1_over_child_stdio(
             spawn_mock_ssh(0),
-            b"POST / HTTP/1.1\r\n\r\n",
+            req_h,
             b"pre",
             b"zip",
             b"suf",
@@ -4559,11 +5046,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(ok_code, 201);
-        assert_eq!(ok_body, b"{}");
+        assert_eq!(
+            ok_body,
+            format!("{{\"rx\":{}}}", req_h.len() + 3 + 3 + 3).as_bytes()
+        );
 
         let nonzero_err = exchange_http1_over_child_stdio(
             spawn_mock_ssh(255),
-            b"POST / HTTP/1.1\r\n\r\n",
+            req_h,
             b"pre",
             b"zip",
             b"suf",
@@ -4572,6 +5062,35 @@ mod tests {
         .await
         .expect_err("non-zero ssh exit must fail even if HTTP 201 was printed");
         assert!(nonzero_err.contains("异常退出"));
+
+        // Hung child exceeding `io_timeout` must be killed and reaped cleanly.
+        #[cfg(windows)]
+        let hung_child = tokio::process::Command::new("pwsh")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        #[cfg(not(windows))]
+        let hung_child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 30"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let timeout_err = exchange_http1_over_child_stdio(
+            hung_child,
+            req_h,
+            b"pre",
+            b"zip",
+            b"suf",
+            Duration::from_millis(200),
+        )
+        .await
+        .expect_err("hung ssh child must time out and be killed");
+        assert!(timeout_err.contains("超时"));
 
         let _ = fs::remove_dir_all(&dir);
     }

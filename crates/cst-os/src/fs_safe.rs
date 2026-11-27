@@ -315,7 +315,27 @@ pub struct DirectoryLease {
     _handles: Vec<File>,
 }
 
+impl DirectoryLease {
+    pub fn leaf_same_handle(&self, other: &Path) -> Result<bool, String> {
+        let Some(leaf) = self._handles.last() else {
+            return Ok(false);
+        };
+        let leaf_h = same_file::Handle::from_file(
+            leaf.try_clone()
+                .map_err(|e| io_error("复制目录租约句柄", e))?,
+        )
+        .map_err(|e| io_error("读取目录租约身份", e))?;
+        let other_h =
+            same_file::Handle::from_path(other).map_err(|e| io_error("核对目标目录身份", e))?;
+        Ok(leaf_h == other_h)
+    }
+}
+
 fn pin(path: &Path) -> Result<File, String> {
+    let lmeta = fs::symlink_metadata(path).map_err(|e| io_error("检查交付目录链接状态", e))?;
+    if is_reparse_or_symlink(&lmeta) || !lmeta.is_dir() {
+        return Err("交付目录包含链接或重解析点。".into());
+    }
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(windows)]
@@ -334,6 +354,13 @@ fn pin(path: &Path) -> Result<File, String> {
         .map_err(|e| io_error("读取交付目录身份", e))?;
     if is_reparse_or_symlink(&meta) || !meta.is_dir() {
         return Err("交付目录包含链接或重解析点。".into());
+    }
+    let opened_h =
+        same_file::Handle::from_file(file.try_clone().map_err(|e| io_error("复制目录句柄", e))?)
+            .map_err(|e| io_error("读取打开目录身份", e))?;
+    let path_h = same_file::Handle::from_path(path).map_err(|e| io_error("复核目录身份", e))?;
+    if opened_h != path_h {
+        return Err("交付目录真实身份发生变化。".into());
     }
     Ok(file)
 }
@@ -384,6 +411,48 @@ fn validate_open(file: &File, path: &Path) -> Result<(), String> {
     }
     if link_count(file)? != 1 {
         return Err("方案或清单不能是硬链接文件。".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FileIdentity(same_file::Handle);
+
+impl FileIdentity {
+    pub fn from_file(file: &File) -> Result<Self, String> {
+        let cloned = file.try_clone().map_err(|e| io_error("复制文件句柄", e))?;
+        same_file::Handle::from_file(cloned)
+            .map(Self)
+            .map_err(|e| io_error("读取已打开句柄身份", e))
+    }
+
+    pub fn from_path(path: &Path) -> Result<Self, String> {
+        same_file::Handle::from_path(path)
+            .map(Self)
+            .map_err(|e| io_error("读取路径文件身份", e))
+    }
+}
+
+pub fn pin_directory_handle(path: &Path) -> Result<(File, FileIdentity), String> {
+    let f = pin(path)?;
+    let id = FileIdentity::from_file(&f)?;
+    Ok((f, id))
+}
+
+pub fn commit_new_file_no_overwrite(temp_path: &Path, target_path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        rename_file(temp_path, target_path, false).map_err(|e| io_error("原子创建目标文件", e))?;
+    }
+    #[cfg(not(windows))]
+    {
+        fs::hard_link(temp_path, target_path).map_err(|e| io_error("原子链接新目标文件", e))?;
+        let _ = fs::remove_file(temp_path);
+    }
+    if let Some(parent) = target_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        sync_directory(parent)?;
     }
     Ok(())
 }

@@ -62,6 +62,12 @@ impl VerifiedPackage {
         cancel: &CancellationToken,
     ) -> Result<Self, String> {
         stopped(cancel)?;
+        let actual_hash = format!("{:x}", Sha256::digest(archive_bytes));
+        if archive_bytes.len() as u64 != release.info.archive.size
+            || actual_hash != release.info.archive.sha256
+        {
+            return Err("升级包大小或 SHA-256 不匹配。".into());
+        }
         let stage = Stage::create(root, &release)?;
         let archive = stage.archive_path();
         {
@@ -75,14 +81,15 @@ impl VerifiedPackage {
                 .and_then(|_| file.sync_all())
                 .map_err(|_| "写入升级包失败。")?;
         }
-        let actual_hash = format!("{:x}", Sha256::digest(archive_bytes));
-        if archive_bytes.len() as u64 != release.info.archive.size
-            || actual_hash != release.info.archive.sha256
-        {
-            return Err("升级包大小或 SHA-256 不匹配。".into());
-        }
         stage.write_manifest(&release, cancel)?;
-        Self::extract_and_verify(stage, &archive, release, cancel)
+        {
+            let _stage_pin = stage.base.pin_directory(&stage.relative, false)?;
+            let local = Storage::new(&stage.root)?;
+            let program = local.directory(Path::new("program"), true)?;
+            extract_archive_bytes(archive_bytes, &program, &release, cancel)?;
+            verify_tree(&program, &release, cancel)?;
+        }
+        Ok(Self { stage, release })
     }
 }
 
@@ -182,12 +189,33 @@ fn open_pinned_target_storage(
     let lease = parent_storage.pin_directory(Path::new(root_name), false)?;
     let pinned_target = parent_storage.root.join(root_name);
     let storage = Storage::new(&pinned_target)?;
-    if !cst_os::is_same_existing_file(&pinned_target, &storage.root)
-        && storage.root != pinned_target
-    {
-        return Err(format!("{label}真实身份发生变化。"));
+    if !lease.leaf_same_handle(&storage.root)? {
+        return Err(format!("{label}真实身份与已锁定句柄不一致。"));
     }
     Ok((parent_storage, lease, storage))
+}
+
+/// Validates EOCD/ZIP64 central-directory bounds, entry count caps, and 1-to-1 Central Directory
+/// vs Local File Header consistency on an in-memory ZIP slice before constructing `ZipArchive`.
+pub fn validate_zip_bounds_bytes(zip_bytes: &[u8]) -> Result<(), String> {
+    let mut cursor = std::io::Cursor::new(zip_bytes);
+    zip_bounds_reader(&mut cursor, zip_bytes.len() as u64).map(|_| ())
+}
+
+fn verify_empty_zip_dir_entry<R: Read>(
+    entry: &mut zip::read::ZipFile<'_, R>,
+) -> Result<(), String> {
+    if entry.size() != 0 || entry.compressed_size() != 0 {
+        return Err("归档目录条目不允许携带压缩数据或非零大小。".into());
+    }
+    let mut probe = [0u8; 1];
+    let n = entry
+        .read(&mut probe)
+        .map_err(|_| "归档目录条目读取校验失败。")?;
+    if n != 0 {
+        return Err("归档目录条目实际解压内容不为空。".into());
+    }
+    Ok(())
 }
 
 pub fn extract_archive(
@@ -259,7 +287,9 @@ fn extract_archive_reader<R: Read + Seek>(
         {
             return Err("升级归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(file.extra_data().unwrap_or_default(), 0)?;
+        // `zip 6.0.0` consumes valid `0x0001` ZIP64 fields into `file.size()` / `compressed_size()`
+        // and strips them from `extra_data()`; raw `0x0001` was already verified in `zip_bounds_reader`.
+        check_extra(file.extra_data().unwrap_or_default(), 0, false)?;
         let raw = if directory {
             raw.strip_suffix('/').unwrap_or(raw)
         } else {
@@ -267,9 +297,10 @@ fn extract_archive_reader<R: Read + Seek>(
         };
         let Some(relative) = raw.strip_prefix("cst-pilot/") else {
             if raw == "cst-pilot" && directory {
-                if file.size() != 0 || saw_root_dir {
+                if saw_root_dir {
                     return Err("升级归档顶层目录条目异常或重复。".into());
                 }
+                verify_empty_zip_dir_entry(&mut file)?;
                 saw_root_dir = true;
                 continue;
             }
@@ -282,12 +313,12 @@ fn extract_archive_reader<R: Read + Seek>(
         }
         check_spelling(&relative, &mut spellings)?;
         if directory {
-            layout::reject_retired_release_path(&relative)?;
-            if file.size() != 0
-                || !release
-                    .sums
-                    .keys()
-                    .any(|p| p.starts_with(&format!("{relative}/")))
+            layout::validate_release_dir_path(&relative)?;
+            verify_empty_zip_dir_entry(&mut file)?;
+            if !release
+                .sums
+                .keys()
+                .any(|p| p.starts_with(&format!("{relative}/")))
             {
                 return Err("升级归档目录不在签名清单中。".into());
             }
@@ -451,7 +482,7 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         {
             return Err("发行归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(entry.extra_data().unwrap_or_default(), 0)?;
+        check_extra(entry.extra_data().unwrap_or_default(), 0, false)?;
         let raw = if directory {
             raw.strip_suffix('/').unwrap_or(raw)
         } else {
@@ -459,9 +490,10 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         };
         let Some(relative) = raw.strip_prefix("cst-pilot/") else {
             if raw == "cst-pilot" && directory {
-                if entry.size() != 0 || saw_root_dir {
+                if saw_root_dir {
                     return Err("发行归档顶层目录条目异常或重复。".into());
                 }
+                verify_empty_zip_dir_entry(&mut entry)?;
                 saw_root_dir = true;
                 continue;
             }
@@ -474,10 +506,8 @@ fn extract_clean_dist_archive_reader<R: Read + Seek>(
         }
         check_spelling(&relative, &mut spellings)?;
         if directory {
-            layout::reject_retired_release_path(&relative)?;
-            if entry.size() != 0 {
-                return Err("发行归档目录条目大小必须为 0。".into());
-            }
+            layout::validate_release_dir_path(&relative)?;
+            verify_empty_zip_dir_entry(&mut entry)?;
             let _pin = storage.pin_directory(Path::new(&relative), true)?;
             explicit_dirs.push(relative);
             continue;
@@ -680,6 +710,7 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         }
         let cd_flags = u16::from_le_bytes([cd[pos + 8], cd[pos + 9]]);
         let cd_method = u16::from_le_bytes([cd[pos + 10], cd[pos + 11]]);
+        let cd_mtime_mdate = &cd[pos + 12..pos + 16];
         let cd_crc32 = u32::from_le_bytes([cd[pos + 16], cd[pos + 17], cd[pos + 18], cd[pos + 19]]);
         let comp_32 = u32::from_le_bytes([cd[pos + 20], cd[pos + 21], cd[pos + 22], cd[pos + 23]]);
         let uncomp_32 =
@@ -688,6 +719,7 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         let extra_len = u16::from_le_bytes([cd[pos + 30], cd[pos + 31]]) as usize;
         let comment_len = u16::from_le_bytes([cd[pos + 32], cd[pos + 33]]) as usize;
         let disk_16 = u16::from_le_bytes([cd[pos + 34], cd[pos + 35]]);
+        let ext_attr = u32::from_le_bytes([cd[pos + 38], cd[pos + 39], cd[pos + 40], cd[pos + 41]]);
         let lfh_32 = u32::from_le_bytes([cd[pos + 42], cd[pos + 43], cd[pos + 44], cd[pos + 45]]);
 
         // Reject encrypted bit (0x01), data descriptor bit (0x08), or multi-disk archive entries.
@@ -705,6 +737,9 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         }
         let cd_name_bytes = &cd[pos + 46..pos + 46 + name_len];
         let cd_name = std::str::from_utf8(cd_name_bytes).map_err(|_| error())?;
+        if !cd_name.ends_with('/') && (ext_attr & 0x10) != 0 {
+            return Err(error());
+        }
         let normalized_key = cd_name.trim_end_matches('/').to_lowercase();
         if !seen_names.insert(normalized_key) {
             return Err("升级 ZIP 中央目录存在重复或大小写冲突条目。".into());
@@ -716,10 +751,10 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         let need_off = lfh_32 == 0xffff_ffff;
         let expected_cd_zip64_len =
             (usize::from(need_uncomp) + usize::from(need_comp) + usize::from(need_off)) * 8;
-        let cd_zip64 = check_extra(cd_extra, expected_cd_zip64_len)?;
+        let cd_parsed_extra = check_extra(cd_extra, expected_cd_zip64_len, true)?;
 
         let (uncompressed_size, compressed_size, local_offset) = if expected_cd_zip64_len > 0 {
-            let body = cd_zip64.ok_or_else(error)?;
+            let body = cd_parsed_extra.zip64.ok_or_else(error)?;
             let mut zoff = 0usize;
             let uncomp = if need_uncomp {
                 let v = u64::from_le_bytes(body[zoff..zoff + 8].try_into().map_err(|_| error())?);
@@ -745,6 +780,12 @@ fn verify_central_and_local_headers<R: Read + Seek>(
             (u64::from(uncomp_32), u64::from(comp_32), u64::from(lfh_32))
         };
 
+        if cd_name.ends_with('/')
+            && (uncompressed_size != 0 || compressed_size != 0 || cd_method != 0 || cd_crc32 != 0)
+        {
+            return Err("升级 ZIP 目录条目不允许携带压缩数据或非零大小。".into());
+        }
+
         if local_offset
             .checked_add(30)
             .is_none_or(|end| end > cd_offset)
@@ -760,6 +801,7 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         }
         let lfh_flags = u16::from_le_bytes([lfh[6], lfh[7]]);
         let lfh_method = u16::from_le_bytes([lfh[8], lfh[9]]);
+        let lfh_mtime_mdate = &lfh[10..14];
         let lfh_crc32 = u32::from_le_bytes([lfh[14], lfh[15], lfh[16], lfh[17]]);
         let lfh_comp32 = u32::from_le_bytes([lfh[18], lfh[19], lfh[20], lfh[21]]);
         let lfh_uncomp32 = u32::from_le_bytes([lfh[22], lfh[23], lfh[24], lfh[25]]);
@@ -767,6 +809,7 @@ fn verify_central_and_local_headers<R: Read + Seek>(
         let lfh_extra_len = u16::from_le_bytes([lfh[28], lfh[29]]) as usize;
         if lfh_flags != cd_flags
             || lfh_method != cd_method
+            || lfh_mtime_mdate != cd_mtime_mdate
             || lfh_crc32 != cd_crc32
             || lfh_name_len != name_len
         {
@@ -787,23 +830,39 @@ fn verify_central_and_local_headers<R: Read + Seek>(
             return Err(error());
         }
         let lfh_need_zip64 = lfh_uncomp32 == 0xffff_ffff || lfh_comp32 == 0xffff_ffff;
+        let lfh_zip64_len = if lfh_need_zip64 { 16 } else { 0 };
+        let lfh_parsed_extra = check_extra(&lfh_var[lfh_name_len..], lfh_zip64_len, false)?;
         if lfh_need_zip64 {
             if lfh_uncomp32 != 0xffff_ffff || lfh_comp32 != 0xffff_ffff {
                 return Err(error());
             }
-            let lfh_zip64 = check_extra(&lfh_var[lfh_name_len..], 16)?.ok_or_else(error)?;
+            let lfh_zip64 = lfh_parsed_extra.zip64.ok_or_else(error)?;
             let lfh_u64 = u64::from_le_bytes(lfh_zip64[0..8].try_into().map_err(|_| error())?);
             let lfh_c64 = u64::from_le_bytes(lfh_zip64[8..16].try_into().map_err(|_| error())?);
             if lfh_u64 != uncompressed_size || lfh_c64 != compressed_size {
                 return Err(error());
             }
-        } else {
-            check_extra(&lfh_var[lfh_name_len..], 0)?;
-            if u64::from(lfh_uncomp32) != uncompressed_size
-                || u64::from(lfh_comp32) != compressed_size
-            {
-                return Err(error());
-            }
+        } else if u64::from(lfh_uncomp32) != uncompressed_size
+            || u64::from(lfh_comp32) != compressed_size
+        {
+            return Err(error());
+        }
+        if let (Some((cd_ts_flags, cd_mtime)), Some((lfh_ts_flags, lfh_mtime))) =
+            (cd_parsed_extra.ext_ts, lfh_parsed_extra.ext_ts)
+            && (cd_ts_flags != lfh_ts_flags || cd_mtime != lfh_mtime)
+        {
+            return Err("升级 ZIP 中央目录与本地头时间戳扩展字段不一致。".into());
+        }
+        if let (Some(cd_ug), Some(lfh_ug)) = (cd_parsed_extra.unix_ug, lfh_parsed_extra.unix_ug)
+            && cd_ug != lfh_ug
+        {
+            return Err("升级 ZIP 中央目录与本地头 Unix UID/GID 扩展字段不一致。".into());
+        }
+        if let (Some(cd_ntfs), Some(lfh_ntfs)) =
+            (cd_parsed_extra.ntfs_times, lfh_parsed_extra.ntfs_times)
+            && cd_ntfs != lfh_ntfs
+        {
+            return Err("升级 ZIP 中央目录与本地头 NTFS 扩展字段不一致。".into());
         }
 
         spans.push((local_offset, data_end));
@@ -849,8 +908,20 @@ fn check_spelling(path: &str, names: &mut BTreeMap<String, String>) -> Result<()
     Ok(())
 }
 
-fn check_extra(mut extra: &[u8], expected_zip64_len: usize) -> Result<Option<&[u8]>, String> {
-    let mut zip64_body: Option<&[u8]> = None;
+#[derive(Default)]
+struct ParsedExtra<'a> {
+    zip64: Option<&'a [u8]>,
+    ext_ts: Option<(u8, Option<&'a [u8]>)>,
+    unix_ug: Option<&'a [u8]>,
+    ntfs_times: Option<&'a [u8]>,
+}
+
+fn check_extra(
+    mut extra: &[u8],
+    expected_zip64_len: usize,
+    is_central: bool,
+) -> Result<ParsedExtra<'_>, String> {
+    let mut out = ParsedExtra::default();
     while !extra.is_empty() {
         if extra.len() < 4 {
             return Err("升级 ZIP 扩展字段无效。".into());
@@ -863,19 +934,33 @@ fn check_extra(mut extra: &[u8], expected_zip64_len: usize) -> Result<Option<&[u
         let body = &extra[4..4 + len];
         match id {
             0x0001 => {
-                if expected_zip64_len == 0 || len != expected_zip64_len || zip64_body.is_some() {
+                if expected_zip64_len == 0 || len != expected_zip64_len || out.zip64.is_some() {
                     return Err("升级 ZIP 包含异常或冗余的 ZIP64 扩展字段。".into());
                 }
-                zip64_body = Some(body);
+                out.zip64 = Some(body);
             }
             0x5455 => {
-                if body.is_empty() || !(body.len() - 1).is_multiple_of(4) {
-                    return Err("升级 ZIP 时间戳扩展字段长度无效。".into());
+                if body.is_empty() || out.ext_ts.is_some() {
+                    return Err("升级 ZIP 时间戳扩展字段缺失或重复。".into());
                 }
+                let flags = body[0];
+                if (flags & !0x07) != 0 {
+                    return Err("升级 ZIP 时间戳扩展字段标志位无效。".into());
+                }
+                let expected_len = if is_central {
+                    1 + usize::from((flags & 0x01) != 0) * 4
+                } else {
+                    1 + (flags.count_ones() as usize) * 4
+                };
+                if body.len() != expected_len {
+                    return Err("升级 ZIP 时间戳扩展字段长度与标志位不匹配。".into());
+                }
+                let mtime = ((flags & 0x01) != 0).then(|| &body[1..5]);
+                out.ext_ts = Some((flags, mtime));
             }
             0x7875 => {
-                if body.len() < 3 || body[0] != 1 {
-                    return Err("升级 ZIP Unix UID/GID 扩展字段格式无效。".into());
+                if body.len() < 3 || body[0] != 1 || out.unix_ug.is_some() {
+                    return Err("升级 ZIP Unix UID/GID 扩展字段格式无效或重复。".into());
                 }
                 let uid_len = body[1] as usize;
                 if 2 + uid_len >= body.len() {
@@ -885,31 +970,27 @@ fn check_extra(mut extra: &[u8], expected_zip64_len: usize) -> Result<Option<&[u
                 if 3 + uid_len + gid_len != body.len() {
                     return Err("升级 ZIP Unix GID 扩展字段长度不匹配。".into());
                 }
+                out.unix_ug = Some(body);
             }
             0x000a => {
-                if body.len() < 4 || body[0..4] != [0, 0, 0, 0] {
-                    return Err("升级 ZIP NTFS 扩展字段头无效。".into());
+                if body.len() != 32 || body[0..4] != [0, 0, 0, 0] || out.ntfs_times.is_some() {
+                    return Err("升级 ZIP NTFS 扩展字段头或固定长度无效。".into());
                 }
-                let mut sub = &body[4..];
-                while !sub.is_empty() {
-                    if sub.len() < 4 {
-                        return Err("升级 ZIP NTFS 子属性截断。".into());
-                    }
-                    let sub_len = u16::from_le_bytes([sub[2], sub[3]]) as usize;
-                    if sub_len > sub.len() - 4 {
-                        return Err("升级 ZIP NTFS 子属性长度越界。".into());
-                    }
-                    sub = &sub[4 + sub_len..];
+                let sub_tag = u16::from_le_bytes([body[4], body[5]]);
+                let sub_len = u16::from_le_bytes([body[6], body[7]]) as usize;
+                if sub_tag != 0x0001 || sub_len != 24 {
+                    return Err("升级 ZIP NTFS 子属性类型或长度无效。".into());
                 }
+                out.ntfs_times = Some(&body[8..32]);
             }
             _ => unreachable!(),
         }
         extra = &extra[4 + len..];
     }
-    if expected_zip64_len > 0 && zip64_body.is_none() {
+    if expected_zip64_len > 0 && out.zip64.is_none() {
         return Err("升级 ZIP 缺少必需的 ZIP64 扩展字段。".into());
     }
-    Ok(zip64_body)
+    Ok(out)
 }
 
 pub fn verify_tree(
@@ -934,6 +1015,7 @@ pub fn verify_tree(
                 return Err("升级目录包含链接或重解析点。".into());
             }
             if meta.is_dir() {
+                layout::validate_release_dir_path(&name)?;
                 if !release
                     .sums
                     .keys()
@@ -1010,6 +1092,7 @@ pub fn scan_clean_dist_tree(
     let storage = Storage::new(root)?;
     let mut sums = BTreeMap::new();
     let mut seen_lower = BTreeSet::new();
+    let mut visited_dirs = Vec::new();
     let mut pending = vec![PathBuf::new()];
     while let Some(relative) = pending.pop() {
         let _pin = storage.pin_directory(&relative, false)?;
@@ -1023,8 +1106,8 @@ pub fn scan_clean_dist_tree(
                 return Err(format!("发行目录包含链接或重解析点：{name}"));
             }
             if meta.is_dir() {
-                layout::safe_path(&name)?;
-                layout::reject_retired_release_path(&name)?;
+                layout::validate_release_dir_path(&name)?;
+                visited_dirs.push(name);
                 pending.push(rel);
                 continue;
             }
@@ -1057,6 +1140,12 @@ pub fn scan_clean_dist_tree(
                 check_json(&value)?;
             }
             sums.insert(name, format!("{:x}", hash.finalize()));
+        }
+    }
+    for dir in &visited_dirs {
+        let prefix = format!("{dir}/");
+        if !sums.keys().any(|f| f.starts_with(&prefix)) {
+            return Err(format!("发行目录包含空目录或未受管目录：{dir}"));
         }
     }
     layout::validate_metadata(&sums, &storage.root, target_version)?;
@@ -1256,6 +1345,206 @@ mod dist_sum_tests {
         let poly_path = dir.join("polyglot.zip");
         fs::write(&poly_path, &polyglot).unwrap();
         assert!(zip_bounds(&mut File::open(&poly_path).unwrap()).is_err());
+
+        // Directory entry carrying hidden compressed payload must be rejected immediately.
+        let dir_with_payload = build_raw_stored_zip(&[
+            ("cst-pilot/app/", "cst-pilot/app/", b"smuggled-secret"),
+            (
+                "cst-pilot/VERSION",
+                "cst-pilot/VERSION",
+                b"cst-pilot v1.0.0\n",
+            ),
+        ]);
+        assert!(validate_zip_bounds_bytes(&dir_with_payload).is_err());
+
+        // Extra field validation (`0x5455` flag/len mismatch and `0x000a` bad tag/len) must fail.
+        assert!(check_extra(&[0x55, 0x54, 0x05, 0x00, 0x03, 1, 2, 3, 4], 0, false).is_err());
+        assert!(check_extra(&[0x55, 0x54, 0x05, 0x00, 0x03, 1, 2, 3, 4], 0, true).is_ok());
+        assert!(check_extra(&[0x55, 0x54, 0x05, 0x00, 0x08, 1, 2, 3, 4], 0, true).is_err());
+        let mut valid_ntfs = vec![0x0a, 0x00, 32, 0, 0, 0, 0, 0, 0x01, 0x00, 24, 0];
+        valid_ntfs.extend_from_slice(&[0x11; 24]);
+        assert!(check_extra(&valid_ntfs, 0, false).is_ok());
+        let mut bad_ntfs = valid_ntfs.clone();
+        bad_ntfs[8] = 0x02;
+        assert!(check_extra(&bad_ntfs, 0, false).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_level_zip64_entry_and_telemetry_dir_redlines_are_enforced() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use ed25519_dalek::{Signer as _, SigningKey};
+
+        let dir = std::env::temp_dir().join(format!("cst-zip64-file-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        // Build a valid 2-entry archive (`VERSION` + `app/SHA256SUMS`) where `VERSION` uses
+        // genuine file-level `0x0001` ZIP64 extra fields (`0xffff_ffff` in 32-bit size fields)
+        // in both Local File Header and Central Directory.
+        let crc32_ieee = |data: &[u8]| -> u32 {
+            let mut crc = 0xffff_ffffu32;
+            for &b in data {
+                crc ^= u32::from(b);
+                for _ in 0..8 {
+                    let mask = (crc & 1).wrapping_neg();
+                    crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+                }
+            }
+            !crc
+        };
+        let ver_body = b"cst-pilot v1.2.3\n";
+        let crc_ver = crc32_ieee(ver_body);
+        let sums_body = format!("{:x}  VERSION\n", Sha256::digest(ver_body));
+        let crc_sums = crc32_ieee(sums_body.as_bytes());
+
+        let mut zip64_archive = Vec::new();
+        let mut cd = Vec::new();
+
+        // Entry 0: `cst-pilot/VERSION` with 16-byte `0x0001` ZIP64 in LFH & CD
+        let name0 = b"cst-pilot/VERSION";
+        let mut z64_sizes = Vec::new();
+        z64_sizes.extend_from_slice(&0x0001u16.to_le_bytes());
+        z64_sizes.extend_from_slice(&16u16.to_le_bytes());
+        z64_sizes.extend_from_slice(&(ver_body.len() as u64).to_le_bytes());
+        z64_sizes.extend_from_slice(&(ver_body.len() as u64).to_le_bytes());
+
+        let off0 = zip64_archive.len() as u32;
+        zip64_archive.extend_from_slice(b"PK\x03\x04");
+        zip64_archive.extend_from_slice(&45u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u32.to_le_bytes());
+        zip64_archive.extend_from_slice(&crc_ver.to_le_bytes());
+        zip64_archive.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        zip64_archive.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        zip64_archive.extend_from_slice(&(name0.len() as u16).to_le_bytes());
+        zip64_archive.extend_from_slice(&(z64_sizes.len() as u16).to_le_bytes());
+        zip64_archive.extend_from_slice(name0);
+        zip64_archive.extend_from_slice(&z64_sizes);
+        zip64_archive.extend_from_slice(ver_body);
+
+        cd.extend_from_slice(b"PK\x01\x02");
+        cd.extend_from_slice(&45u16.to_le_bytes());
+        cd.extend_from_slice(&45u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&crc_ver.to_le_bytes());
+        cd.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        cd.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+        cd.extend_from_slice(&(name0.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&(z64_sizes.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&off0.to_le_bytes());
+        cd.extend_from_slice(name0);
+        cd.extend_from_slice(&z64_sizes);
+
+        // Entry 1: `cst-pilot/app/SHA256SUMS`
+        let name1 = b"cst-pilot/app/SHA256SUMS";
+        let off1 = zip64_archive.len() as u32;
+        zip64_archive.extend_from_slice(b"PK\x03\x04");
+        zip64_archive.extend_from_slice(&20u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u32.to_le_bytes());
+        zip64_archive.extend_from_slice(&crc_sums.to_le_bytes());
+        zip64_archive.extend_from_slice(&(sums_body.len() as u32).to_le_bytes());
+        zip64_archive.extend_from_slice(&(sums_body.len() as u32).to_le_bytes());
+        zip64_archive.extend_from_slice(&(name1.len() as u16).to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(name1);
+        zip64_archive.extend_from_slice(sums_body.as_bytes());
+
+        cd.extend_from_slice(b"PK\x01\x02");
+        cd.extend_from_slice(&20u16.to_le_bytes());
+        cd.extend_from_slice(&20u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&crc_sums.to_le_bytes());
+        cd.extend_from_slice(&(sums_body.len() as u32).to_le_bytes());
+        cd.extend_from_slice(&(sums_body.len() as u32).to_le_bytes());
+        cd.extend_from_slice(&(name1.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&off1.to_le_bytes());
+        cd.extend_from_slice(name1);
+
+        let cd_off = zip64_archive.len() as u32;
+        let cd_sz = cd.len() as u32;
+        zip64_archive.extend_from_slice(&cd);
+        zip64_archive.extend_from_slice(b"PK\x05\x06");
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&2u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&2u16.to_le_bytes());
+        zip64_archive.extend_from_slice(&cd_sz.to_le_bytes());
+        zip64_archive.extend_from_slice(&cd_off.to_le_bytes());
+        zip64_archive.extend_from_slice(&0u16.to_le_bytes());
+
+        let out_clean = dir.join("out-clean");
+        fs::create_dir_all(&out_clean).unwrap();
+        let unpacked =
+            extract_clean_dist_archive_bytes(&zip64_archive, &out_clean, 1024 * 1024).unwrap();
+        assert_eq!(unpacked, (ver_body.len() + sums_body.len()) as u64);
+        assert_eq!(fs::read(out_clean.join("VERSION")).unwrap(), ver_body);
+
+        let signing = SigningKey::from_bytes(&[7u8; 32]);
+        let rkey = ReleaseKey::from_bytes(&signing.verifying_key().to_bytes()).unwrap();
+        let sums_sig = STANDARD.encode(
+            signing
+                .sign(&[crate::manifest::SUMS_DOMAIN, sums_body.as_bytes()].concat())
+                .to_bytes(),
+        );
+        let manifest = crate::manifest::ReleaseManifest {
+            schema_version: 1,
+            platform: "windows-x86_64".into(),
+            version: "v1.2.3".into(),
+            min_upgradable_version: "v1.0.0".into(),
+            built_at: "2026-11-27T00:00:00Z".into(),
+            release_notes: String::new(),
+            archive: crate::manifest::Archive {
+                url: "https://www.cstoa.top/api/agent/releases/files/v1.2.3/cst-pilot-v1.2.3-windows-x64.zip".into(),
+                size: zip64_archive.len() as u64,
+                unpacked_size: unpacked,
+                sha256: format!("{:x}", Sha256::digest(&zip64_archive)),
+            },
+            sha256_sums: sums_body,
+            sha256_signature: sums_sig,
+        };
+        let payload = serde_json::to_string(&manifest).unwrap();
+        let sig = STANDARD.encode(
+            signing
+                .sign(&[crate::manifest::MANIFEST_DOMAIN, payload.as_bytes()].concat())
+                .to_bytes(),
+        );
+        let env_bytes = serde_json::to_vec(&crate::manifest::SignedManifest {
+            payload,
+            signature: sig,
+        })
+        .unwrap();
+        let verified = rkey.verify(&env_bytes).unwrap();
+        let out_upd = dir.join("out-upd");
+        fs::create_dir_all(&out_upd).unwrap();
+        extract_archive_bytes(
+            &zip64_archive,
+            &out_upd,
+            &verified,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(fs::read(out_upd.join("VERSION")).unwrap(), ver_body);
+
+        // Also verify `validate_release_dir_path` blocks `app/telemetry/drafts`.
+        assert!(layout::validate_release_dir_path("app/telemetry").is_ok());
+        assert!(layout::validate_release_dir_path("app/telemetry/drafts").is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }

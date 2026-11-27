@@ -217,6 +217,52 @@ pub(crate) fn reject_retired_release_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn validate_release_dir_path(path: &str) -> Result<(), String> {
+    safe_path(path)?;
+    reject_retired_release_path(path)?;
+    let lower = path.to_lowercase();
+    if lower.split('/').any(|p| {
+        matches!(
+            p,
+            ".state"
+                | ".git"
+                | ".cache"
+                | "node-compile-cache"
+                | "target"
+                | "src"
+                | "test"
+                | "tests"
+                | "obj"
+                | "sessions"
+                | "plans"
+                | "inbox"
+                | "exports"
+                | "artifacts"
+                | "outbox"
+                | "session-exports"
+                | "command-plans"
+                | "fff"
+                | "npm"
+                | ".env"
+                | "agents.md"
+        ) || p.starts_with(".env.")
+    }) {
+        return Err("发行目录包含运行状态或开发路径。".into());
+    }
+    let allowed = path == "app"
+        || path == "app/telemetry"
+        || path.strip_prefix("app/").is_some_and(|rest| {
+            matches!(
+                rest.split('/').next().unwrap_or(""),
+                "defaults" | "docs" | "fonts" | "licenses" | "prompts" | "skills" | "tools"
+            )
+        });
+    if !allowed {
+        return Err("发行目录包含程序白名单外的子目录。".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn classify_release(path: &str) -> Result<Area, String> {
     let area = classify(path)?;
     reject_retired_release_path(path)?;

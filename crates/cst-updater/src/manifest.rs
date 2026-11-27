@@ -143,7 +143,7 @@ const fn build_update_root_marker(url: &str, key: &str) -> [u8; 320] {
             || url_b[5] != b':'
             || url_b[6] != b'/'
             || url_b[7] != b'/'
-            || url_b[8] == b'/')
+            || !url_b[8].is_ascii_alphanumeric())
     {
         panic!("CST_UPDATE_MANIFEST_URL must start with https://<host>");
     }

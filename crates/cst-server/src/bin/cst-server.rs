@@ -486,4 +486,51 @@ mod tests {
             Some("0"),
         ));
     }
+
+    #[test]
+    fn sanitize_env_child_process_honors_online_and_offline_overrides() {
+        const CHILD_MODE_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_MODE";
+        if let Ok(mode_str) = std::env::var(CHILD_MODE_ENV) {
+            let dir = std::env::temp_dir()
+                .join(format!("cst-server-sanitize-probe-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mode = match mode_str.as_str() {
+                "online" => super::OfflineCliMode::ForceOnline,
+                "offline" => super::OfflineCliMode::ForceOffline,
+                _ => super::OfflineCliMode::Inherit,
+            };
+            super::sanitize_current_process_env(&dir, mode).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(std::env::var_os("PI_OFFLINE").is_none());
+            match mode_str.as_str() {
+                "online" => assert!(!cst_os::is_offline_env_enabled()),
+                "offline" | "inherit" => assert!(cst_os::is_offline_env_enabled()),
+                other => panic!("unexpected probe mode: {other}"),
+            }
+            return;
+        }
+
+        let exe = std::env::current_exe().expect("test binary path");
+        for (mode, cst_off, pi_off) in [
+            ("online", "1", "1"),
+            ("offline", "0", "0"),
+            ("inherit", "0", "1"),
+        ] {
+            let status = std::process::Command::new(&exe)
+                .args([
+                    "--exact",
+                    "tests::sanitize_env_child_process_honors_online_and_offline_overrides",
+                    "--nocapture",
+                ])
+                .env(CHILD_MODE_ENV, mode)
+                .env("CST_OFFLINE", cst_off)
+                .env("PI_OFFLINE", pi_off)
+                .status()
+                .expect("spawn child probe");
+            assert!(
+                status.success(),
+                "child sanitize probe failed for mode={mode}"
+            );
+        }
+    }
 }
