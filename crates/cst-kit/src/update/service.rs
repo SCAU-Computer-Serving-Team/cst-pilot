@@ -825,6 +825,17 @@ pub fn startup_check(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates compiled-in update manifest URL and public key, returning the 16-hex key fingerprint.
+pub fn compiled_update_key_fingerprint() -> Result<String, String> {
+    let raw_url = option_env!("CST_UPDATE_MANIFEST_URL")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("当前构建未启用在线更新。")?;
+    let _ = cst_updater::manifest::validate_release_url(raw_url)?;
+    let key = super::manifest::ReleaseKey::compiled()?;
+    Ok(key.fingerprint())
+}
+
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
     let raw_url = option_env!("CST_UPDATE_MANIFEST_URL")
         .map(str::trim)

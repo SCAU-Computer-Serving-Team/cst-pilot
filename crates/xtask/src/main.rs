@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  cargo run -p xtask -- keygen --out <key-file>\n  cargo run -p xtask -- sign-release --dist-dir <dir> --zip <path> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  cargo run -p xtask -- publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
+        "Usage:\n  cargo run -p xtask -- dist --out <dir> [--version <vX.Y.Z>] [--profile release|dist] [--require-update-config] [--skip-web-build] [--skip-cargo-build] [--skip-smoke] [--no-zip]\n  cargo run -p xtask -- verify-tree <dir> [version]\n  xtask keygen --out <key-file>\n  xtask sign-release --dist-dir <dir> --zip <path> --attestation <path> --expected-attestation-sha256 <64-hex> --expected-commit <40-hex> --min-upgradable <vX.Y.Z> --out <manifest.signed.json> [--version <vX.Y.Z>] [--base-url <url>] [--notes-file <md> | --notes <text>] [--private-key-file <path>]\n  xtask publish-release --manifest <path> --zip <path> [--channel stable|beta] [--no-activate] [--admin-url <url>] [--public-base-url <url>] [--public-manifest-url <url>] [--public-archive-url <url>] [--public-key <base64>]"
     );
 }
 
@@ -143,10 +143,96 @@ fn repo_root() -> Result<PathBuf, String> {
         .ok_or_else(|| "无法定位仓库根目录。".to_owned())
 }
 
+fn validate_dist_update_build_flags(
+    has_update_config: bool,
+    skip_cargo_build: bool,
+    skip_web_build: bool,
+    make_zip: bool,
+) -> Result<(), String> {
+    if has_update_config && (skip_cargo_build || skip_web_build || !make_zip) {
+        return Err(
+            "已配置在线更新环境变量（CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY），禁止使用 --skip-cargo-build、--skip-web-build 或 --no-zip，必须从干净源码全量构建并产出 ZIP 与构建证明。"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn check_build_env_secret_vars(
+    has_private_key_var: bool,
+    has_admin_token_var: bool,
+) -> Result<(), String> {
+    if has_private_key_var || has_admin_token_var {
+        return Err(format!(
+            "构建环境禁止存在 {} 或 {}，请将在线构建与离线签名/发布环境严格隔离。",
+            release::ENV_PRIVATE_KEY_FILE,
+            release::ENV_ADMIN_TOKEN
+        ));
+    }
+    Ok(())
+}
+
+fn strip_release_secrets(cmd: &mut Command) -> &mut Command {
+    cmd.env_remove(release::ENV_PRIVATE_KEY_FILE)
+        .env_remove(release::ENV_ADMIN_TOKEN)
+}
+
+fn verify_clean_git_head(root: &Path) -> Result<String, String> {
+    let status = Command::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法执行 git status 检查干净工作树：{e}"))?;
+    if !status.status.success() {
+        return Err("git status 执行失败，无法验证发布构建源码来源。".into());
+    }
+    if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Err(
+            "启用在线更新打包要求 Git 工作树完全干净（无未提交或未跟踪文件），拒绝打包。".into(),
+        );
+    }
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("无法执行 git rev-parse HEAD：{e}"))?;
+    if !head.status.success() {
+        return Err("无法读取完整 40 位 Git HEAD 提交哈希。".into());
+    }
+    let sha = String::from_utf8_lossy(&head.stdout)
+        .trim()
+        .to_ascii_lowercase();
+    if sha.len() != 40
+        || !sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err("Git HEAD 不是有效的 40 位小写十六进制提交哈希。".into());
+    }
+    Ok(sha)
+}
+
 fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     let args = parse_dist_args(raw_args)?;
+    check_build_env_secret_vars(
+        env::var_os(release::ENV_PRIVATE_KEY_FILE).is_some(),
+        env::var_os(release::ENV_ADMIN_TOKEN).is_some(),
+    )?;
     let update_cfg = release::resolve_update_build_config(args.require_update_config)?;
+    validate_dist_update_build_flags(
+        update_cfg.is_some(),
+        args.skip_cargo_build,
+        args.skip_web_build,
+        args.make_zip,
+    )?;
     let root = repo_root()?;
+    // Online-update builds never hold any private key; instead they lock to an unmodified Git
+    // commit before and after compilation so the resulting build attestation binds clean source.
+    let pre_build_clean_head = if update_cfg.is_some() {
+        Some(verify_clean_git_head(&root)?)
+    } else {
+        None
+    };
     let target_subdir = if args.profile == "dist" {
         "dist"
     } else {
@@ -157,7 +243,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     if !args.skip_web_build {
         println!("[xtask] Building Web frontend...");
         let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
-        let status = Command::new(npm)
+        let mut npm_cmd = Command::new(npm);
+        strip_release_secrets(&mut npm_cmd);
+        let status = npm_cmd
             .args(["run", "build", "--prefix", "src/web/frontend"])
             .current_dir(&root)
             .status()
@@ -188,6 +276,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             None
         };
         let mut cmd1 = Command::new(&cargo);
+        strip_release_secrets(&mut cmd1);
         cmd1.args([
             "build",
             "--profile",
@@ -215,6 +304,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         }
 
         let mut cmd2 = Command::new(&cargo);
+        strip_release_secrets(&mut cmd2);
         cmd2.args([
             "build",
             "--profile",
@@ -262,6 +352,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         &bin_dir.join("cst-updater.exe"),
         &kit_dir.join(UPDATER_EXE_PATH),
     )?;
+    if let Some(cfg) = &update_cfg {
+        release::verify_binaries_key_fingerprint(&kit_dir, &cfg.public_key_fingerprint)?;
+    }
 
     for doc in [
         "README.md",
@@ -281,18 +374,27 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
     )
     .map_err(|e| format!("无法写入 VERSION：{e}"))?;
 
-    let git_commit = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+    let git_commit_full = Command::new("git")
+        .args(["rev-parse", "HEAD"])
         .current_dir(&root)
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+    let git_commit = git_commit_full
+        .as_deref()
+        .map(|s| s[..7].to_owned())
         .unwrap_or_else(|| "unknown".to_owned());
+    let built_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     let mut build_info = json!({
         "version": args.version,
         "gitCommit": git_commit,
-        "builtAt": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        "builtAt": built_at,
         "profile": args.profile,
         "platform": "windows-x86_64",
         "embedWeb": true,
@@ -400,7 +502,13 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip::ZipArchive::new(archive)
                 .and_then(|mut archive| archive.extract(&temp.0))
                 .map_err(|e| format!("解压发行 ZIP 失败：{e}"))?;
-            smoke_release(&temp.0.join("cst-pilot"), &args.version)?;
+            smoke_release(
+                &temp.0.join("cst-pilot"),
+                &args.version,
+                update_cfg
+                    .as_ref()
+                    .map(|cfg| cfg.public_key_fingerprint.as_str()),
+            )?;
         }
         let zip_bytes = fs::read(&zip_path).map_err(|e| format!("读取发行 ZIP 失败：{e}"))?;
         let zip_hash = format!("{:x}", Sha256::digest(&zip_bytes));
@@ -410,10 +518,62 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
             zip_bytes.len() as f64 / (1024.0 * 1024.0),
             zip_hash
         );
+        if let Some(cfg) = &update_cfg {
+            let expected_head = pre_build_clean_head
+                .as_deref()
+                .ok_or("缺少构建前干净工作树 HEAD 记录。")?;
+            let post_build_head = verify_clean_git_head(&root)?;
+            if post_build_head != expected_head {
+                return Err(format!(
+                    "构建过程中 Git HEAD 发生变化（{expected_head} -> {post_build_head}），拒绝产出构建证明。"
+                ));
+            }
+            let attestation_path = args.out_dir.join(format!(
+                "cst-pilot-{}-windows-x64.attestation.json",
+                args.version
+            ));
+            let sums_hash = format!("{:x}", Sha256::digest(sums_text.as_bytes()));
+            let updater_hash = sums
+                .get(UPDATER_EXE_PATH)
+                .cloned()
+                .ok_or_else(|| format!("SHA256SUMS 缺少 {UPDATER_EXE_PATH}。"))?;
+            let server_hash = sums
+                .get(SERVER_EXE_PATH)
+                .cloned()
+                .ok_or_else(|| format!("SHA256SUMS 缺少 {SERVER_EXE_PATH}。"))?;
+            let attestation = release::BuildAttestation {
+                schema_version: 1,
+                version: args.version.clone(),
+                platform: "windows-x86_64".to_owned(),
+                built_at: built_at.clone(),
+                git_commit: post_build_head.clone(),
+                update_enabled: true,
+                update_public_key_fingerprint: cfg.public_key_fingerprint.clone(),
+                verified_key_probe: true,
+                archive_filename: zip_name,
+                archive_size: zip_bytes.len() as u64,
+                archive_sha256: zip_hash,
+                unpacked_size: total_bytes,
+                sha256_sums_sha256: sums_hash,
+                updater_exe_sha256: updater_hash,
+                server_exe_sha256: server_hash,
+            };
+            let att_sha256 = release::write_build_attestation(&attestation_path, &attestation)?;
+            println!(
+                "[xtask] Build attestation ready: {} (sha256={att_sha256}, commit={post_build_head})",
+                attestation_path.display()
+            );
+        }
     } else if !args.skip_smoke {
         let temp = SmokeDir::new()?;
         copy_dir_filtered(&kit_dir, &temp.0, |_| true)?;
-        smoke_release(&temp.0, &args.version)?;
+        smoke_release(
+            &temp.0,
+            &args.version,
+            update_cfg
+                .as_ref()
+                .map(|cfg| cfg.public_key_fingerprint.as_str()),
+        )?;
     }
 
     Ok(())
@@ -421,7 +581,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
 
 fn cargo_target_dir(root: &Path) -> Result<PathBuf, String> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(cargo)
+    let mut cmd = Command::new(cargo);
+    strip_release_secrets(&mut cmd);
+    let output = cmd
         .args(["metadata", "--no-deps", "--format-version", "1", "--locked"])
         .current_dir(root)
         .output()
@@ -486,8 +648,15 @@ fn isolated_command(root: &Path, exe: &str) -> Command {
     cmd
 }
 
-fn smoke_release(root: &Path, version: &str) -> Result<(), String> {
+fn smoke_release(
+    root: &Path,
+    version: &str,
+    expected_key_fingerprint: Option<&str>,
+) -> Result<(), String> {
     cst_updater::verify::verify_clean_dist_tree(root, version)?;
+    if let Some(expected_fp) = expected_key_fingerprint {
+        release::verify_binaries_key_fingerprint(root, expected_fp)?;
+    }
     let expected = format!("cst-pilot {version}");
     for exe in [SERVER_EXE_PATH, "cst-pilot.exe"] {
         let output = isolated_command(root, exe)
@@ -647,4 +816,27 @@ fn write_release_zip(
         .flush()
         .map_err(|e| format!("刷新 ZIP 失败：{e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dist_rejects_skip_build_or_no_zip_whenever_update_config_is_present() {
+        assert!(validate_dist_update_build_flags(true, true, false, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false, true, true).is_err());
+        assert!(validate_dist_update_build_flags(true, false, false, false).is_err());
+        assert!(validate_dist_update_build_flags(true, false, false, true).is_ok());
+        assert!(validate_dist_update_build_flags(false, true, true, false).is_ok());
+        assert!(validate_dist_update_build_flags(false, false, false, true).is_ok());
+    }
+
+    #[test]
+    fn dist_rejects_release_secrets_in_build_env() {
+        assert!(check_build_env_secret_vars(true, false).is_err());
+        assert!(check_build_env_secret_vars(false, true).is_err());
+        assert!(check_build_env_secret_vars(true, true).is_err());
+        assert!(check_build_env_secret_vars(false, false).is_ok());
+    }
 }

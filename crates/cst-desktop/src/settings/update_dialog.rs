@@ -168,20 +168,24 @@ pub fn render_update_dialog(
         .into_any_element();
     }
 
-    let is_preparing = matches!(phase, UpdatePhaseDto::Preparing | UpdatePhaseDto::Checking);
+    let is_checking = phase == UpdatePhaseDto::Checking;
+    let is_preparing = phase == UpdatePhaseDto::Preparing;
+    let is_busy_progress = is_checking || is_preparing;
     let is_ready = phase == UpdatePhaseDto::Ready;
-    let scrim_id = if is_preparing {
+    let scrim_id = if is_busy_progress {
         "update-preparing-scrim-ihkda"
     } else {
         "update-available-scrim-pvhss"
     };
-    let card_id = if is_preparing {
+    let card_id = if is_busy_progress {
         "update-preparing-dialog-tqizo"
     } else {
         "update-available-dialog-kom7j"
     };
 
-    let header_title = if is_preparing {
+    let header_title = if is_checking {
+        "正在检查更新…".to_owned()
+    } else if is_preparing {
         format!("正在下载更新 {target_ver}")
     } else if is_ready {
         format!("更新包 {target_ver} 已就绪")
@@ -241,18 +245,26 @@ pub fn render_update_dialog(
             })),
     );
 
-    if is_preparing {
-        let ratio = compute_update_progress_ratio(update_state).unwrap_or(0.5);
-        let dl_label = match (downloaded_bytes, archive_bytes) {
-            (Some(dl), Some(tot)) => {
-                format!(
-                    "已下载 {} / {}",
-                    format_megabytes(dl),
-                    format_megabytes(tot)
-                )
+    if is_busy_progress {
+        let ratio = if is_checking {
+            0.35
+        } else {
+            compute_update_progress_ratio(update_state).unwrap_or(0.5)
+        };
+        let dl_label = if is_checking {
+            "正在检查官方更新清单…".to_owned()
+        } else {
+            match (downloaded_bytes, archive_bytes) {
+                (Some(dl), Some(tot)) => {
+                    format!(
+                        "已下载 {} / {}",
+                        format_megabytes(dl),
+                        format_megabytes(tot)
+                    )
+                }
+                (None, Some(tot)) => format!("正在下载签名在线包（共 {}）…", format_megabytes(tot)),
+                _ => "正在下载并校验签名清单…".to_owned(),
             }
-            (None, Some(tot)) => format!("正在下载签名在线包（共 {}）…", format_megabytes(tot)),
-            _ => "正在下载并校验签名清单…".to_owned(),
         };
 
         card = card.child(
@@ -313,13 +325,22 @@ pub fn render_update_dialog(
         Rc::new(on_launch_restart);
 
     let secondary_focus = nav.fallback_focus(1, cx);
-    let focuses = [dismiss_focus.clone(), secondary_focus.clone()];
+    let focuses = if is_checking {
+        [dismiss_focus.clone(), dismiss_focus.clone()]
+    } else {
+        [dismiss_focus.clone(), secondary_focus.clone()]
+    };
     nav.clear_tracker(cx);
     let kbd_active = nav.is_keyboard_active(cx);
     let tracker_left = nav.tracker(cx);
     let tracker_right = nav.tracker(cx);
     let (tones, on_right): ([KbdTone; 2], crate::theme::kbd_focus::DialogActionCallback) =
-        if is_preparing {
+        if is_checking {
+            (
+                [KbdTone::Neutral, KbdTone::Neutral],
+                Rc::clone(&on_dismiss_later),
+            )
+        } else if is_preparing {
             (
                 [KbdTone::Neutral, KbdTone::Neutral],
                 Rc::clone(&on_cancel_prepare),
@@ -345,7 +366,41 @@ pub fn render_update_dialog(
     let key_left = Rc::clone(&on_dismiss_later);
     let key_right = Rc::clone(&on_right);
 
-    let footer = if is_preparing {
+    let footer = if is_checking {
+        div()
+            .relative()
+            .flex()
+            .justify_end()
+            .gap(space::SM)
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .id("update-dialog-background-btn")
+                    .test_support()
+                    .tab_index(0)
+                    .track_focus(dismiss_focus)
+                    .a11y_button("update-dialog-background-btn", "稍后")
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, w, cx| {
+                        nav_click_left.clear_keyboard(w, cx);
+                        click_left(w, cx);
+                    })
+                    .child(cjk_inline_label("稍后"))
+                    .on_prepaint(move |bounds, _, _| {
+                        tracker_left.set(0, bounds);
+                        tracker_right.set(1, bounds);
+                    }),
+            )
+            .child(kbd_overlay)
+    } else if is_preparing {
         div()
             .relative()
             .flex()

@@ -1747,15 +1747,33 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert_eq!(draft.selected_thinking_level.as_deref(), Some("high"));
     });
 
-    // 8. Software Update lifecycle (silent startup check on `Available` -> open via Settings `C9or7K` -> `kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
+    // 8. Software Update lifecycle (silent startup/home check on `Available` -> open via Settings `C9or7K` -> `kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Home, cx));
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
+    })
+    .unwrap();
     {
         backend.state.lock().unwrap().update_phase = "available".into();
     }
     backend.rt().block_on(handle.refresh_globals()).unwrap();
 
-    // Startup background check must stay silent and not auto-open the modal.
+    // Wait until the desktop shell has observed the `Available` snapshot while on Home,
+    // then verify background check stays silent and does not auto-open the modal.
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, cx| {
+        shell
+            .read(cx)
+            .client_snapshot()
+            .update_state
+            .as_ref()
+            .is_some_and(|u| u.status.phase == cst_client::UpdatePhaseDto::Available)
+    })
+    .await;
+
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
         assert!(window.try_find("update-available-dialog-kom7j").is_none());
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
         let sv_ent = shell.read(cx).settings_view().clone();
@@ -2293,5 +2311,92 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
     press(cx, "escape");
     cx.update(|cx| {
         assert_eq!(shell.read(cx).route(), initial_route);
+    });
+}
+
+#[gpui_kit::test]
+async fn cold_start_available_update_stays_silent_without_auto_modal(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = Step6MockBackend::start();
+    // Cold start: backend already reports `Available` before the window and shell are created.
+    backend.state.lock().unwrap().update_phase = "available".into();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+    assert_eq!(
+        handle
+            .snapshot()
+            .update_state
+            .as_ref()
+            .map(|u| u.status.phase),
+        Some(cst_client::UpdatePhaseDto::Available),
+        "snapshot must already be Available before opening the window"
+    );
+
+    let (win_handle, shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    // Inspect both the cumulative render counter (proving neither frame 1 nor any intermediate
+    // re-render during window open ever mounted the update dialog) and the current DOM tree.
+    cx.update_window(win_handle, |_, window, cx| {
+        assert_eq!(shell.read(cx).route(), ShellRoute::Home);
+        assert_eq!(
+            shell
+                .read(cx)
+                .client_snapshot()
+                .update_state
+                .as_ref()
+                .map(|u| u.status.phase),
+            Some(cst_client::UpdatePhaseDto::Available),
+        );
+        assert_eq!(
+            shell.read(cx).update_dialog_render_count(),
+            0,
+            "update dialog must never render on frame 1 or any intermediate frame during cold start"
+        );
+        assert!(
+            window.try_find("update-available-dialog-kom7j").is_none(),
+            "first frame on cold start must stay silent when update is Available"
+        );
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).update_dialog_render_count(), 0);
+        assert!(
+            window.try_find("update-available-dialog-kom7j").is_none(),
+            "subsequent frame on Home must stay silent when update is Available"
+        );
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        let sv_ent = shell.read(cx).settings_view().clone();
+        sv_ent.update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::General, cx);
+        });
+        window.render_frame(cx);
+        window.click("settings-update-action-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("update-available-dialog-kom7j").is_some()
+    })
+    .await;
+    cx.update(|cx| {
+        assert!(
+            shell.read(cx).update_dialog_render_count() > 0,
+            "manual trigger via Settings must render the update dialog"
+        );
     });
 }

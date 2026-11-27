@@ -7,7 +7,7 @@ use cst_updater::{applier::Applier, handoff, manifest::ReleaseKey};
 
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() == 1 && args[0] == "--help" {
+    if args.len() == 1 && (args[0] == "--help" || args[0] == "--key-fingerprint") {
         cst_os::attach_parent_console_if_stdio_missing();
     }
     if let Err(error) = run(&args) {
@@ -20,9 +20,15 @@ fn main() {
 }
 
 fn run(args: &[std::ffi::OsString]) -> Result<(), String> {
-    let usage = "用法：cst-updater --root <工具包目录> --request <交接标识>，或 --root <工具包目录> --recover";
+    let usage = "用法：cst-updater --root <工具包目录> --request <交接标识>，--root <工具包目录> --recover，或 --key-fingerprint";
     if args.len() == 1 && args[0] == "--help" {
         let _ = writeln!(std::io::stdout(), "{usage}");
+        let _ = std::io::stdout().flush();
+        return Ok(());
+    }
+    if args.len() == 1 && args[0] == "--key-fingerprint" {
+        let key = ReleaseKey::compiled()?;
+        let _ = writeln!(std::io::stdout(), "{}", key.fingerprint());
         let _ = std::io::stdout().flush();
         return Ok(());
     }
