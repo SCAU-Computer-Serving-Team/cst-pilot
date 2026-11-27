@@ -2,7 +2,9 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(any(windows, test))]
+use std::process::Command;
+use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
