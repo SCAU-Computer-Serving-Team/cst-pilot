@@ -1350,11 +1350,21 @@ fn validate_output_path_not_aliasing(
     if let Some(dir) = disallowed_dir
         && let Ok(canon_dir) = fs::canonicalize(dir)
     {
-        let parent = match out_path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p,
-            _ => Path::new("."),
+        let mut probe = match out_path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+            _ => PathBuf::from("."),
         };
-        if let Ok(canon_parent) = fs::canonicalize(parent)
+        while !probe.exists() {
+            let Some(next) = probe.parent() else {
+                break;
+            };
+            if next.as_os_str().is_empty() {
+                probe = PathBuf::from(".");
+                break;
+            }
+            probe = next.to_path_buf();
+        }
+        if let Ok(canon_parent) = fs::canonicalize(&probe)
             && canon_parent.starts_with(&canon_dir)
         {
             return Err(format!(
@@ -2086,6 +2096,7 @@ async fn upload_multipart_over_ssh_stdio(
     let read_err = async move {
         let mut err = Vec::new();
         let _ = (&mut child_stderr).take(4096).read_to_end(&mut err).await;
+        let _ = tokio::io::copy(&mut child_stderr, &mut tokio::io::sink()).await;
         err
     };
 

@@ -172,19 +172,33 @@ pub fn extract_archive(
     let parent = Storage::new(archive.parent().ok_or("升级文件路径无效。")?)?;
     let _parent_pin = parent.pin_directory(Path::new(""), false)?;
     let mut file = parent.open_read(archive)?.ok_or("升级包不存在。")?;
-    zip_bounds(&mut file)?;
+    let records = zip_bounds(&mut file)?;
     let mut archive = ZipArchive::new(file).map_err(|_| "升级包 ZIP 格式无效。")?;
-    if archive.len() > MAX_FILES * 2 {
-        return Err("升级归档条目过多。".into());
+    if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
+        return Err("升级归档条目数量异常或与中央目录不一致。".into());
+    }
+    let root_meta =
+        fs::symlink_metadata(root).map_err(|_| "升级解包目录不存在或无法读取。".to_owned())?;
+    if is_reparse_or_symlink(&root_meta) || !root_meta.is_dir() {
+        return Err("升级解包目录不能是符号链接、重解析点或普通文件。".into());
     }
     let storage = Storage::new(root)?;
     let mut seen = BTreeSet::new();
     let mut spellings = BTreeMap::new();
     let mut count = 0u64;
+    let mut written_total = 0u64;
     let sums_size = release.info.sha256_sums.len() as u64;
-    for i in 0..archive.len() {
+    for (i, expected_rec) in records.iter().enumerate() {
         stopped(cancel)?;
         let mut file = archive.by_index(i).map_err(|_| "升级归档条目无法读取。")?;
+        if file.name_raw() != expected_rec.name.as_slice()
+            || file.central_header_start() != expected_rec.central_header_start
+            || file.header_start() != expected_rec.local_header_start
+            || file.compressed_size() != expected_rec.compressed_size
+            || file.size() != expected_rec.uncompressed_size
+        {
+            return Err("升级归档解析结果与中央目录记录不一致。".into());
+        }
         let raw =
             std::str::from_utf8(file.name_raw()).map_err(|_| "升级归档文件名必须是 UTF-8。")?;
         if raw != file.name() {
@@ -218,7 +232,10 @@ pub fn extract_archive(
         {
             return Err("升级归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(file.extra_data().unwrap_or_default())?;
+        check_extra(
+            file.extra_data().unwrap_or_default(),
+            expected_rec.expected_cd_zip64_len,
+        )?;
         if directory {
             layout::reject_retired_release_path(&relative)?;
             if file.size() != 0
@@ -244,11 +261,12 @@ pub fn extract_archive(
         } else {
             release.info.archive.unpacked_size
         };
-        if file.size() > limit {
+        let entry_size = file.size();
+        if entry_size > limit {
             return Err("升级文件体积超过限制。".into());
         }
         count = count
-            .checked_add(file.size())
+            .checked_add(entry_size)
             .filter(|n| *n <= release.info.archive.unpacked_size)
             .ok_or("升级解压总体积超限。")?;
         let path = storage.root.join(&relative);
@@ -272,19 +290,23 @@ pub fn extract_archive(
             }
             read = read
                 .checked_add(n as u64)
-                .filter(|n| *n <= limit)
+                .filter(|n| *n <= entry_size)
                 .ok_or("升级文件解压体积超限。")?;
+            written_total = written_total
+                .checked_add(n as u64)
+                .filter(|n| *n <= release.info.archive.unpacked_size)
+                .ok_or("升级文件累计解压体积超限。")?;
             hash.update(&buffer[..n]);
             output
                 .write_all(&buffer[..n])
                 .map_err(|_| "升级文件写入失败。")?;
         }
-        if read != file.size() || expected.is_some_and(|v| *v != format!("{:x}", hash.finalize())) {
+        if read != entry_size || expected.is_some_and(|v| *v != format!("{:x}", hash.finalize())) {
             return Err("升级文件哈希或体积不匹配。".into());
         }
         output.sync_all().map_err(|_| "升级文件同步失败。")?;
     }
-    if count != release.info.archive.unpacked_size {
+    if count != release.info.archive.unpacked_size || written_total != count {
         return Err("升级解压体积与签名清单不一致。".into());
     }
     Ok(())
@@ -315,10 +337,10 @@ pub fn extract_clean_dist_archive(
     let mut file = parent
         .open_read(&canonical_archive)?
         .ok_or("发行归档不存在。")?;
-    zip_bounds(&mut file)?;
+    let records = zip_bounds(&mut file)?;
     let mut archive = ZipArchive::new(file).map_err(|_| "发行归档 ZIP 格式无效。")?;
-    if archive.len() > MAX_FILES * 2 {
-        return Err("发行归档条目过多。".into());
+    if archive.len() != records.len() || archive.len() > MAX_FILES * 2 {
+        return Err("发行归档条目数量异常或与中央目录不一致。".into());
     }
     let root_meta =
         std::fs::symlink_metadata(root).map_err(|_| "解包目标目录不存在或无法读取。".to_owned())?;
@@ -333,8 +355,16 @@ pub fn extract_clean_dist_archive(
     let mut total_unpacked = 0u64;
     let mut written_total = 0u64;
 
-    for i in 0..archive.len() {
+    for (i, expected_rec) in records.iter().enumerate() {
         let mut entry = archive.by_index(i).map_err(|_| "发行归档条目无法读取。")?;
+        if entry.name_raw() != expected_rec.name.as_slice()
+            || entry.central_header_start() != expected_rec.central_header_start
+            || entry.header_start() != expected_rec.local_header_start
+            || entry.compressed_size() != expected_rec.compressed_size
+            || entry.size() != expected_rec.uncompressed_size
+        {
+            return Err("发行归档解析结果与中央目录记录不一致。".into());
+        }
         let raw =
             std::str::from_utf8(entry.name_raw()).map_err(|_| "发行归档文件名必须是 UTF-8。")?;
         if raw != entry.name() {
@@ -368,7 +398,10 @@ pub fn extract_clean_dist_archive(
         {
             return Err("发行归档包含加密文件、链接或特殊文件。".into());
         }
-        check_extra(entry.extra_data().unwrap_or_default())?;
+        check_extra(
+            entry.extra_data().unwrap_or_default(),
+            expected_rec.expected_cd_zip64_len,
+        )?;
         if directory {
             layout::reject_retired_release_path(&relative)?;
             if entry.size() != 0 {
@@ -386,11 +419,12 @@ pub fn extract_clean_dist_archive(
         } else {
             max_unpacked_bytes
         };
-        if entry.size() > per_file_limit {
+        let entry_size = entry.size();
+        if entry_size > per_file_limit {
             return Err("发行归档单文件体积超过限制。".into());
         }
         total_unpacked = total_unpacked
-            .checked_add(entry.size())
+            .checked_add(entry_size)
             .filter(|n| *n <= max_unpacked_bytes)
             .ok_or("发行归档解压总体积超限。")?;
         let path = storage.root.join(&relative);
@@ -412,7 +446,7 @@ pub fn extract_clean_dist_archive(
             }
             copied = copied
                 .checked_add(n as u64)
-                .filter(|v| *v <= per_file_limit)
+                .filter(|v| *v <= entry_size)
                 .ok_or("发行归档文件实际解压体积超限。")?;
             written_total = written_total
                 .checked_add(n as u64)
@@ -422,7 +456,7 @@ pub fn extract_clean_dist_archive(
                 .write_all(&buffer[..n])
                 .map_err(|_| "发行解包写入失败。")?;
         }
-        if copied != entry.size() {
+        if copied != entry_size {
             return Err("发行归档文件解压大小与声明不一致。".into());
         }
         output.sync_all().map_err(|_| "发行解包同步失败。")?;
@@ -439,7 +473,17 @@ pub fn extract_clean_dist_archive(
     Ok(total_unpacked)
 }
 
-fn zip_bounds(file: &mut File) -> Result<(), String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VerifiedZipRecord {
+    name: Vec<u8>,
+    central_header_start: u64,
+    local_header_start: u64,
+    compressed_size: u64,
+    uncompressed_size: u64,
+    expected_cd_zip64_len: usize,
+}
+
+fn zip_bounds(file: &mut File) -> Result<Vec<VerifiedZipRecord>, String> {
     let error = || "升级 ZIP 的目录结构无效或超过资源限制。".to_owned();
     let len = file.metadata().map_err(|_| error())?.len();
     let start = len.saturating_sub(65_557);
@@ -470,7 +514,10 @@ fn zip_bounds(file: &mut File) -> Result<(), String> {
     let mut offset = u64::from(u32::from_le_bytes(
         eocd[16..20].try_into().map_err(|_| error())?,
     ));
-    if count == 0xffff || size == 0xffff_ffff || offset == 0xffff_ffff {
+    if size == 0xffff_ffff && count != 0xffff && offset != 0xffff_ffff {
+        return Err(error());
+    }
+    let cd_limit = if count == 0xffff || offset == 0xffff_ffff {
         if at < 20 {
             return Err(error());
         }
@@ -501,19 +548,20 @@ fn zip_bounds(file: &mut File) -> Result<(), String> {
         count = u64::from_le_bytes(zip64[32..40].try_into().map_err(|_| error())?);
         size = u64::from_le_bytes(zip64[40..48].try_into().map_err(|_| error())?);
         offset = u64::from_le_bytes(zip64[48..56].try_into().map_err(|_| error())?);
-    }
+        pos
+    } else {
+        start + at as u64
+    };
     if count == 0
         || count > (MAX_FILES * 2) as u64
         || size > 64 * 1024 * 1024
-        || offset
-            .checked_add(size)
-            .is_none_or(|n| n > start + at as u64)
+        || offset.checked_add(size) != Some(cd_limit)
     {
         return Err(error());
     }
-    verify_central_and_local_headers(file, count as usize, offset, size as usize)?;
+    let records = verify_central_and_local_headers(file, count as usize, offset, size as usize)?;
     file.seek(SeekFrom::Start(0)).map_err(|_| error())?;
-    Ok(())
+    Ok(records)
 }
 
 fn verify_central_and_local_headers(
@@ -521,22 +569,36 @@ fn verify_central_and_local_headers(
     expected_count: usize,
     cd_offset: u64,
     cd_size: usize,
-) -> Result<(), String> {
+) -> Result<Vec<VerifiedZipRecord>, String> {
     let error = || "升级 ZIP 中央目录与本地文件头不一致或存在重复条目。".to_owned();
     file.seek(SeekFrom::Start(cd_offset)).map_err(|_| error())?;
     let mut cd = vec![0u8; cd_size];
     file.read_exact(&mut cd).map_err(|_| error())?;
 
     let mut pos = 0usize;
-    let mut parsed_count = 0usize;
     let mut seen_names = BTreeSet::new();
+    let mut records = Vec::with_capacity(expected_count);
+    let mut spans = Vec::with_capacity(expected_count);
     while pos < cd.len() {
         if pos + 46 > cd.len() || &cd[pos..pos + 4] != b"PK\x01\x02" {
             return Err(error());
         }
+        let cd_flags = u16::from_le_bytes([cd[pos + 8], cd[pos + 9]]);
+        let cd_method = u16::from_le_bytes([cd[pos + 10], cd[pos + 11]]);
+        let cd_crc32 = u32::from_le_bytes([cd[pos + 16], cd[pos + 17], cd[pos + 18], cd[pos + 19]]);
+        let comp_32 = u32::from_le_bytes([cd[pos + 20], cd[pos + 21], cd[pos + 22], cd[pos + 23]]);
+        let uncomp_32 =
+            u32::from_le_bytes([cd[pos + 24], cd[pos + 25], cd[pos + 26], cd[pos + 27]]);
         let name_len = u16::from_le_bytes([cd[pos + 28], cd[pos + 29]]) as usize;
         let extra_len = u16::from_le_bytes([cd[pos + 30], cd[pos + 31]]) as usize;
         let comment_len = u16::from_le_bytes([cd[pos + 32], cd[pos + 33]]) as usize;
+        let disk_16 = u16::from_le_bytes([cd[pos + 34], cd[pos + 35]]);
+        let lfh_32 = u32::from_le_bytes([cd[pos + 42], cd[pos + 43], cd[pos + 44], cd[pos + 45]]);
+
+        // Reject encrypted bit (0x01), data descriptor bit (0x08), or multi-disk archive entries.
+        if (cd_flags & 0x0009) != 0 || disk_16 != 0 {
+            return Err(error());
+        }
         let record_end = pos
             .checked_add(46)
             .and_then(|v| v.checked_add(name_len))
@@ -553,24 +615,41 @@ fn verify_central_and_local_headers(
             return Err("升级 ZIP 中央目录存在重复或大小写冲突条目。".into());
         }
         let cd_extra = &cd[pos + 46 + name_len..pos + 46 + name_len + extra_len];
-        check_extra(cd_extra)?;
 
-        let uncomp_32 =
-            u32::from_le_bytes([cd[pos + 24], cd[pos + 25], cd[pos + 26], cd[pos + 27]]);
-        let comp_32 = u32::from_le_bytes([cd[pos + 20], cd[pos + 21], cd[pos + 22], cd[pos + 23]]);
-        let disk_16 = u16::from_le_bytes([cd[pos + 34], cd[pos + 35]]);
-        let lfh_32 = u32::from_le_bytes([cd[pos + 42], cd[pos + 43], cd[pos + 44], cd[pos + 45]]);
-        let local_offset = if lfh_32 == 0xffff_ffff {
-            extract_zip64_local_offset(
-                cd_extra,
-                uncomp_32 == 0xffff_ffff,
-                comp_32 == 0xffff_ffff,
-                disk_16 == 0xffff,
-            )
-            .ok_or_else(error)?
+        let need_uncomp = uncomp_32 == 0xffff_ffff;
+        let need_comp = comp_32 == 0xffff_ffff;
+        let need_off = lfh_32 == 0xffff_ffff;
+        let expected_cd_zip64_len =
+            (usize::from(need_uncomp) + usize::from(need_comp) + usize::from(need_off)) * 8;
+        let cd_zip64 = check_extra(cd_extra, expected_cd_zip64_len)?;
+
+        let (uncompressed_size, compressed_size, local_offset) = if expected_cd_zip64_len > 0 {
+            let body = cd_zip64.ok_or_else(error)?;
+            let mut zoff = 0usize;
+            let uncomp = if need_uncomp {
+                let v = u64::from_le_bytes(body[zoff..zoff + 8].try_into().map_err(|_| error())?);
+                zoff += 8;
+                v
+            } else {
+                u64::from(uncomp_32)
+            };
+            let comp = if need_comp {
+                let v = u64::from_le_bytes(body[zoff..zoff + 8].try_into().map_err(|_| error())?);
+                zoff += 8;
+                v
+            } else {
+                u64::from(comp_32)
+            };
+            let loff = if need_off {
+                u64::from_le_bytes(body[zoff..zoff + 8].try_into().map_err(|_| error())?)
+            } else {
+                u64::from(lfh_32)
+            };
+            (uncomp, comp, loff)
         } else {
-            u64::from(lfh_32)
+            (u64::from(uncomp_32), u64::from(comp_32), u64::from(lfh_32))
         };
+
         if local_offset
             .checked_add(30)
             .is_none_or(|end| end > cd_offset)
@@ -584,9 +663,18 @@ fn verify_central_and_local_headers(
         if &lfh[..4] != b"PK\x03\x04" {
             return Err(error());
         }
+        let lfh_flags = u16::from_le_bytes([lfh[6], lfh[7]]);
+        let lfh_method = u16::from_le_bytes([lfh[8], lfh[9]]);
+        let lfh_crc32 = u32::from_le_bytes([lfh[14], lfh[15], lfh[16], lfh[17]]);
+        let lfh_comp32 = u32::from_le_bytes([lfh[18], lfh[19], lfh[20], lfh[21]]);
+        let lfh_uncomp32 = u32::from_le_bytes([lfh[22], lfh[23], lfh[24], lfh[25]]);
         let lfh_name_len = u16::from_le_bytes([lfh[26], lfh[27]]) as usize;
         let lfh_extra_len = u16::from_le_bytes([lfh[28], lfh[29]]) as usize;
-        if lfh_name_len != name_len {
+        if lfh_flags != cd_flags
+            || lfh_method != cd_method
+            || lfh_crc32 != cd_crc32
+            || lfh_name_len != name_len
+        {
             return Err(error());
         }
         let var_end = local_offset
@@ -594,7 +682,8 @@ fn verify_central_and_local_headers(
             .and_then(|v| v.checked_add(lfh_name_len as u64))
             .and_then(|v| v.checked_add(lfh_extra_len as u64))
             .ok_or_else(error)?;
-        if var_end > cd_offset {
+        let data_end = var_end.checked_add(compressed_size).ok_or_else(error)?;
+        if data_end > cd_offset {
             return Err(error());
         }
         let mut lfh_var = vec![0u8; lfh_name_len + lfh_extra_len];
@@ -602,47 +691,52 @@ fn verify_central_and_local_headers(
         if &lfh_var[..lfh_name_len] != cd_name_bytes {
             return Err(error());
         }
-        check_extra(&lfh_var[lfh_name_len..])?;
+        let lfh_need_zip64 = lfh_uncomp32 == 0xffff_ffff || lfh_comp32 == 0xffff_ffff;
+        if lfh_need_zip64 {
+            if lfh_uncomp32 != 0xffff_ffff || lfh_comp32 != 0xffff_ffff {
+                return Err(error());
+            }
+            let lfh_zip64 = check_extra(&lfh_var[lfh_name_len..], 16)?.ok_or_else(error)?;
+            let lfh_u64 = u64::from_le_bytes(lfh_zip64[0..8].try_into().map_err(|_| error())?);
+            let lfh_c64 = u64::from_le_bytes(lfh_zip64[8..16].try_into().map_err(|_| error())?);
+            if lfh_u64 != uncompressed_size || lfh_c64 != compressed_size {
+                return Err(error());
+            }
+        } else {
+            check_extra(&lfh_var[lfh_name_len..], 0)?;
+            if u64::from(lfh_uncomp32) != uncompressed_size
+                || u64::from(lfh_comp32) != compressed_size
+            {
+                return Err(error());
+            }
+        }
 
-        parsed_count += 1;
+        spans.push((local_offset, data_end));
+        records.push(VerifiedZipRecord {
+            name: cd_name_bytes.to_vec(),
+            central_header_start: cd_offset + pos as u64,
+            local_header_start: local_offset,
+            compressed_size,
+            uncompressed_size,
+            expected_cd_zip64_len,
+        });
         pos = record_end;
     }
-    if parsed_count != expected_count {
+    if records.len() != expected_count {
         return Err(error());
     }
-    Ok(())
-}
-
-fn extract_zip64_local_offset(
-    mut extra: &[u8],
-    has_uncomp64: bool,
-    has_comp64: bool,
-    _has_disk32: bool,
-) -> Option<u64> {
-    while extra.len() >= 4 {
-        let id = u16::from_le_bytes([extra[0], extra[1]]);
-        let len = u16::from_le_bytes([extra[2], extra[3]]) as usize;
-        if len > extra.len() - 4 {
-            return None;
+    spans.sort_unstable_by_key(|&(start, _)| start);
+    let mut cursor = 0u64;
+    for (start, end) in spans {
+        if start != cursor {
+            return Err(error());
         }
-        let body = &extra[4..4 + len];
-        if id == 0x0001 {
-            let mut off = 0usize;
-            if has_uncomp64 {
-                off = off.checked_add(8)?;
-            }
-            if has_comp64 {
-                off = off.checked_add(8)?;
-            }
-            let end = off.checked_add(8)?;
-            if end > body.len() {
-                return None;
-            }
-            return Some(u64::from_le_bytes(body[off..end].try_into().ok()?));
-        }
-        extra = &extra[4 + len..];
+        cursor = end;
     }
-    None
+    if cursor != cd_offset {
+        return Err(error());
+    }
+    Ok(records)
 }
 
 fn check_spelling(path: &str, names: &mut BTreeMap<String, String>) -> Result<(), String> {
@@ -661,7 +755,8 @@ fn check_spelling(path: &str, names: &mut BTreeMap<String, String>) -> Result<()
     Ok(())
 }
 
-fn check_extra(mut extra: &[u8]) -> Result<(), String> {
+fn check_extra(mut extra: &[u8], expected_zip64_len: usize) -> Result<Option<&[u8]>, String> {
+    let mut zip64_body: Option<&[u8]> = None;
     while !extra.is_empty() {
         if extra.len() < 4 {
             return Err("升级 ZIP 扩展字段无效。".into());
@@ -671,9 +766,19 @@ fn check_extra(mut extra: &[u8]) -> Result<(), String> {
         if !matches!(id, 0x0001 | 0x5455 | 0x7875 | 0x000a) || len > extra.len() - 4 {
             return Err("升级 ZIP 包含未支持的链接或扩展元数据。".into());
         }
+        let body = &extra[4..4 + len];
+        if id == 0x0001 {
+            if expected_zip64_len == 0 || len != expected_zip64_len || zip64_body.is_some() {
+                return Err("升级 ZIP 包含异常或冗余的 ZIP64 扩展字段。".into());
+            }
+            zip64_body = Some(body);
+        }
         extra = &extra[4 + len..];
     }
-    Ok(())
+    if expected_zip64_len > 0 && zip64_body.is_none() {
+        return Err("升级 ZIP 缺少必需的 ZIP64 扩展字段。".into());
+    }
+    Ok(zip64_body)
 }
 
 pub fn verify_tree(
@@ -963,6 +1068,62 @@ mod dist_sum_tests {
         .unwrap();
         let spoof_err = zip_bounds(&mut File::open(&spoof_path).unwrap()).unwrap_err();
         assert!(spoof_err.contains("不一致"));
+
+        // Unsolicited 24-byte 0x0001 ZIP64 extra field on a 32-bit CD entry must be rejected
+        // so `zip 6.0.0` cannot be redirected away from the verified 32-bit LFH offset.
+        let mut base = build_raw_stored_zip(&[(
+            "cst-pilot/VERSION",
+            "cst-pilot/VERSION",
+            b"cst-pilot v1.0.0\n",
+        )]);
+        let eocd_pos = base.len() - 22;
+        let cd_off =
+            u32::from_le_bytes(base[eocd_pos + 16..eocd_pos + 20].try_into().unwrap()) as usize;
+        let mut z64_extra = Vec::new();
+        z64_extra.extend_from_slice(&0x0001u16.to_le_bytes());
+        z64_extra.extend_from_slice(&24u16.to_le_bytes());
+        z64_extra.extend_from_slice(&17u64.to_le_bytes());
+        z64_extra.extend_from_slice(&17u64.to_le_bytes());
+        z64_extra.extend_from_slice(&0u64.to_le_bytes());
+        let mut z64_spoof = base[..eocd_pos].to_vec();
+        let extra_len_pos = cd_off + 30;
+        z64_spoof[extra_len_pos..extra_len_pos + 2]
+            .copy_from_slice(&(z64_extra.len() as u16).to_le_bytes());
+        z64_spoof.extend_from_slice(&z64_extra);
+        let new_cd_size = (z64_spoof.len() - cd_off) as u32;
+        base[eocd_pos + 12..eocd_pos + 16].copy_from_slice(&new_cd_size.to_le_bytes());
+        z64_spoof.extend_from_slice(&base[eocd_pos..]);
+        let z64_path = dir.join("z64-spoof.zip");
+        fs::write(&z64_path, &z64_spoof).unwrap();
+        let z64_err = zip_bounds(&mut File::open(&z64_path).unwrap()).unwrap_err();
+        assert!(z64_err.contains("ZIP64"));
+
+        // Concatenated / multi-EOCD archive (non-contiguous prefix before CD/LFH spans) must be rejected.
+        let mut polyglot = build_raw_stored_zip(&[
+            ("cst-pilot/VERSION", "cst-pilot/VERSION", b"evil"),
+            ("cst-pilot/VERSION", "cst-pilot/VERSION", b"clean"),
+        ]);
+        let prefix_len = polyglot.len() as u32;
+        let mut tail_zip = build_raw_stored_zip(&[(
+            "cst-pilot/VERSION",
+            "cst-pilot/VERSION",
+            b"cst-pilot v1.0.0\n",
+        )]);
+        let t_eocd = tail_zip.len() - 22;
+        let old_cd_off = u32::from_le_bytes(tail_zip[t_eocd + 16..t_eocd + 20].try_into().unwrap());
+        let old_lfh_off = u32::from_le_bytes(
+            tail_zip[old_cd_off as usize + 42..old_cd_off as usize + 46]
+                .try_into()
+                .unwrap(),
+        );
+        tail_zip[old_cd_off as usize + 42..old_cd_off as usize + 46]
+            .copy_from_slice(&(old_lfh_off + prefix_len).to_le_bytes());
+        tail_zip[t_eocd + 16..t_eocd + 20]
+            .copy_from_slice(&(old_cd_off + prefix_len).to_le_bytes());
+        polyglot.extend_from_slice(&tail_zip);
+        let poly_path = dir.join("polyglot.zip");
+        fs::write(&poly_path, &polyglot).unwrap();
+        assert!(zip_bounds(&mut File::open(&poly_path).unwrap()).is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }
