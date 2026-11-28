@@ -242,7 +242,7 @@ export function buildQuickOpenEntries(
 		.sort((a, b) => (b.capturedAt ?? "").localeCompare(a.capturedAt ?? ""));
 
 	const sessionEntries: PaletteEntry[] = sortedSessions.map((session) => {
-		const title = session.title.trim() || "新对话";
+		const title = (session.title ?? "").trim() || "新对话";
 		const isCurrent = activeSessionId !== undefined && activeSessionId === session.id;
 		return {
 			id: `sess-${session.id}`,
@@ -260,7 +260,7 @@ export function buildQuickOpenEntries(
 
 	const exportEntries: PaletteEntry[] = sortedExports.map((exp) => {
 		const isPng = (exp.options?.format ?? "").toLowerCase() === "png";
-		const title = exp.title.trim() || exp.files[0]?.name || "会话导出";
+		const title = (exp.title ?? "").trim() || exp.files[0]?.name || "会话导出";
 		const totalBytes = exp.files.reduce((sum, file) => sum + (file.bytes || 0), 0);
 		const subtitle = isPng ? `PNG · ${Math.max(1, exp.files.length)} 页` : `HTML · ${formatExportBytes(totalBytes)}`;
 		const fileNames = exp.files.map((file) => file.name).join(" ");
