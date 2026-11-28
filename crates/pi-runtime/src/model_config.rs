@@ -949,14 +949,9 @@ pub fn compose_provider_with_model_config(
                 provider_id,
                 "cloudflare-workers-ai" | "cloudflare-ai-gateway"
             )
-            && (base_provider.is_none()
-                || cfg_headers.as_ref().is_some_and(|m| {
-                    m.keys().any(|k| {
-                        k.eq_ignore_ascii_case("authorization")
-                            || k.eq_ignore_ascii_case("x-api-key")
-                            || k.eq_ignore_ascii_case("api-key")
-                    })
-                }));
+            && cfg_headers
+                .as_ref()
+                .is_some_and(|m| m.keys().any(|k| is_auth_header_name(k)));
         let composed_api_key = if should_compose_api_key {
             let resolver_clone = resolver.clone();
             let pid = provider_id.to_owned();
@@ -964,7 +959,7 @@ pub fn compose_provider_with_model_config(
             let keyless = base_api_auth
                 .as_ref()
                 .is_some_and(|auth| auth.configured_without_credentials);
-            let env_only = base_api_auth.as_ref().is_none_or(|auth| auth.env_only);
+            let env_only = base_api_auth.as_ref().is_some_and(|auth| auth.env_only);
             let login_fn = base_api_auth.as_ref().and_then(|a| a.login_fn.clone());
 
             let resolve_composed = Arc::new(
@@ -1073,10 +1068,16 @@ pub fn compose_provider_with_model_config(
                         resolved_headers = merge_provider_headers(resolved_headers, Some(&bearer));
                     }
 
-                    if final_api_key.is_none() && resolved_headers.is_none() {
+                    let has_resolved_auth_header = resolved_headers.as_ref().is_some_and(|h| {
+                        h.iter().any(|(k, v)| {
+                            is_auth_header_name(k)
+                                && v.as_ref().is_some_and(|s| !s.trim().is_empty())
+                        })
+                    });
+                    if final_api_key.is_none() && !has_resolved_auth_header {
                         return Ok(None);
                     }
-                    if source.is_none() && resolved_headers.is_some() {
+                    if source.is_none() && has_resolved_auth_header {
                         source = Some("models_json_headers".to_owned());
                     }
 
@@ -1134,14 +1135,44 @@ pub fn compose_provider_with_model_config(
     create_provider(opts).map(Some)
 }
 
+fn is_auth_header_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("authorization")
+        || name.eq_ignore_ascii_case("cf-aig-authorization")
+        || name.eq_ignore_ascii_case("x-api-key")
+        || name.eq_ignore_ascii_case("api-key")
+        || name.eq_ignore_ascii_case("x-goog-api-key")
+}
+
 /// 只读检查 `models.json` 中的某服务商是否配置了可用凭据（零 Shell 命令执行）。
 pub fn has_configured_models_json_auth(prov: &ModelsJsonProvider) -> Option<&'static str> {
-    let key = prov.api_key.as_deref()?;
-    if is_command_config_value(key) {
-        Some("models_json_command")
-    } else if is_config_value_configured(key, None) {
-        Some("models_json_key")
-    } else {
+    if let Some(key) = prov.api_key.as_deref() {
+        return if is_command_config_value(key) {
+            Some("models_json_command")
+        } else if is_config_value_configured(key, None) {
+            Some("models_json_key")
+        } else {
+            None
+        };
+    }
+    let headers = prov.headers.as_ref()?;
+    let mut has_auth_header = false;
+    let mut has_command = false;
+    for (k, v) in headers {
+        if !is_auth_header_name(k) {
+            continue;
+        }
+        if is_command_config_value(v) {
+            has_auth_header = true;
+            has_command = true;
+        } else if is_config_value_configured(v, None) {
+            has_auth_header = true;
+        }
+    }
+    if !has_auth_header {
         None
+    } else if has_command {
+        Some("models_json_command")
+    } else {
+        Some("models_json_headers")
     }
 }

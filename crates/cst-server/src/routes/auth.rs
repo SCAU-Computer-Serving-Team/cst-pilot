@@ -408,10 +408,35 @@ pub async fn handle_auth_route(
                                     key_opt,
                                     move |interaction| {
                                         Box::pin(async move {
+                                            let existing_env = st
+                                                .host
+                                                .auth()
+                                                .runtime()
+                                                .credentials()
+                                                .read(&pid_task)
+                                                .await
+                                                .ok()
+                                                .flatten()
+                                                .and_then(|c| match c {
+                                                    pi_ai::Credential::ApiKey(api) => api.env,
+                                                    pi_ai::Credential::OAuth(_) => None,
+                                                });
+                                            let resolved_account = account_id_opt.or_else(|| {
+                                                pi_ai::get_provider_env(
+                                                    "CLOUDFLARE_ACCOUNT_ID",
+                                                    existing_env.as_ref(),
+                                                )
+                                            });
+                                            let resolved_gateway = gateway_id_opt.or_else(|| {
+                                                pi_ai::get_provider_env(
+                                                    "CLOUDFLARE_GATEWAY_ID",
+                                                    existing_env.as_ref(),
+                                                )
+                                            });
                                             let interaction = wrap_inline_text_prompts(
                                                 interaction,
-                                                account_id_opt,
-                                                gateway_id_opt,
+                                                resolved_account,
+                                                resolved_gateway,
                                             );
                                             let cancel_tok = interaction
                                                 .cancel_token
@@ -451,21 +476,29 @@ pub async fn handle_auth_route(
                                                             })
                                                             .await?,
                                                     );
+                                                    let orig_prompt = interaction.prompt.clone();
+                                                    let secret_used = Arc::new(Mutex::new(false));
                                                     AuthInteraction {
                                                         cancel_token: Some(cancel_tok.clone()),
                                                         prompt: Arc::new(move |q| {
-                                                            let secret = collected.clone();
-                                                            Box::pin(async move {
-                                                                if matches!(
-                                                                    q,
-                                                                    AuthPrompt::Secret { .. }
-                                                                ) {
-                                                                    Ok(secret.as_str().to_owned())
-                                                                } else {
-                                                                    Err("该模型服务需要其他登录信息"
-                                                                        .to_owned())
+                                                            if matches!(
+                                                                q,
+                                                                AuthPrompt::Secret { .. }
+                                                            ) {
+                                                                let mut used = secret_used
+                                                                    .lock()
+                                                                    .expect("secret_used lock");
+                                                                if !*used {
+                                                                    *used = true;
+                                                                    let secret = collected.clone();
+                                                                    return Box::pin(async move {
+                                                                        Ok(secret
+                                                                            .as_str()
+                                                                            .to_owned())
+                                                                    });
                                                                 }
-                                                            })
+                                                            }
+                                                            orig_prompt(q)
                                                         }),
                                                         notify: interaction.notify.clone(),
                                                     }

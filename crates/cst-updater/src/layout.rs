@@ -337,20 +337,22 @@ fn merge_catalog(old: &mut Value, next: &Value) {
             old.insert(provider.clone(), value.clone());
             continue;
         };
-        let replace_existing_models = existing.get("etag").is_none()
-            && value
-                .get("lastModified")
-                .and_then(Value::as_u64)
-                .is_some_and(|next_lm| {
-                    let existing_ts = existing
-                        .get("lastModified")
-                        .and_then(Value::as_u64)
-                        .into_iter()
-                        .chain(existing.get("checkedAt").and_then(Value::as_u64))
-                        .max()
-                        .unwrap_or(0);
-                    next_lm > existing_ts
-                });
+        if existing.get("etag").is_some() {
+            continue;
+        }
+        let replace_existing_models = value
+            .get("lastModified")
+            .and_then(Value::as_u64)
+            .is_some_and(|next_lm| {
+                let existing_ts = existing
+                    .get("lastModified")
+                    .and_then(Value::as_u64)
+                    .into_iter()
+                    .chain(existing.get("checkedAt").and_then(Value::as_u64))
+                    .max()
+                    .unwrap_or(0);
+                next_lm > existing_ts
+            });
         if let (Some(models), Some(extra)) = (
             existing.get_mut("models").and_then(Value::as_array_mut),
             value.get("models").and_then(Value::as_array),

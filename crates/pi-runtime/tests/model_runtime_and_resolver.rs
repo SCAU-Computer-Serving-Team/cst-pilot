@@ -807,7 +807,7 @@ async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_inter
         Some("acc_runtime_99")
     );
 
-    // P1-4 & P2-2: 仅靠 headers 认证的自定义服务可正常解析，且自定义服务可注册 openai-codex-responses 协议
+    // P0-1, P1-1 & P2-2: 仅靠 headers 认证的自定义服务被只读快照识别为已配置且可解析，普通自定义服务 env_only 为 false
     std::fs::write(
         &models_path,
         r#"{
@@ -817,6 +817,12 @@ async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_inter
                     "api": "openai-codex-responses",
                     "headers": { "Authorization": "Bearer hdr-only-tok" },
                     "models": [{ "id": "codex-proxy", "name": "Codex Proxy" }]
+                },
+                "custom-key-gw": {
+                    "baseUrl": "https://example.com/v1",
+                    "api": "openai-completions",
+                    "apiKey": "sk-custom-key",
+                    "models": [{ "id": "custom-chat", "name": "Custom Chat" }]
                 }
             }
         }"#,
@@ -829,6 +835,29 @@ async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_inter
     }))
     .await;
     assert_eq!(rt.get_error(), None);
+    assert!(
+        rt.has_configured_auth("hdr-only-gw"),
+        "headers-only custom provider must be marked configured in snapshot"
+    );
+    assert!(
+        rt.has_configured_auth("custom-key-gw"),
+        "apiKey custom provider must not be marked env_only"
+    );
+    let custom_prov = rt.models().get_provider("custom-key-gw").unwrap();
+    assert_eq!(
+        custom_prov.auth().api_key.as_ref().map(|a| a.env_only),
+        Some(false)
+    );
+    assert!(
+        rt.get_available_models()
+            .iter()
+            .any(|m| m.provider == "custom-key-gw" && m.id == "custom-chat")
+    );
+    assert!(
+        rt.get_available_models()
+            .iter()
+            .any(|m| m.provider == "hdr-only-gw" && m.id == "codex-proxy")
+    );
     let hdr_auth = rt
         .models()
         .get_auth("hdr-only-gw", None)

@@ -22,7 +22,7 @@ use crate::types::{
     UserContent, UserContentBlock,
 };
 
-pub const PI_AI_VERSION: &str = "1.5.0";
+pub const PI_AI_VERSION: &str = "1.6.0";
 pub const DEFAULT_MAX_RETRY_DELAY_MS: u64 = 60_000;
 pub const MIN_ANSWER_TOKENS: u64 = 1024;
 const CONTEXT_SAFETY_TOKENS: u64 = 4096;
@@ -463,6 +463,28 @@ pub fn inject_copilot_dynamic_headers(
     }
 }
 
+pub fn has_any_auth_header(headers: Option<&ProviderHeaders>) -> bool {
+    has_header(headers, "authorization")
+        || has_header(headers, "cf-aig-authorization")
+        || has_header(headers, "x-api-key")
+        || has_header(headers, "api-key")
+        || has_header(headers, "x-goog-api-key")
+}
+
+pub fn has_model_auth_header(headers: Option<&BTreeMap<String, String>>) -> bool {
+    let Some(map) = headers else {
+        return false;
+    };
+    map.iter().any(|(k, v)| {
+        (k.eq_ignore_ascii_case("authorization")
+            || k.eq_ignore_ascii_case("cf-aig-authorization")
+            || k.eq_ignore_ascii_case("x-api-key")
+            || k.eq_ignore_ascii_case("api-key")
+            || k.eq_ignore_ascii_case("x-goog-api-key"))
+            && !v.trim().is_empty()
+    })
+}
+
 pub fn require_client_api_key(
     provider: &str,
     api_key: Option<&str>,
@@ -473,7 +495,7 @@ pub fn require_client_api_key(
     {
         return Ok(key.to_owned());
     }
-    if has_header(headers, "authorization") || has_header(headers, "cf-aig-authorization") {
+    if has_any_auth_header(headers) {
         return Ok("unused".to_owned());
     }
     Err(format!("No API key for provider: {provider}"))

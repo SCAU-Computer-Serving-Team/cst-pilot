@@ -818,21 +818,34 @@ pub fn stream(
         let cancel_token = options.as_ref().and_then(|o| o.cancel_token.clone());
 
         let run: Result<(), String> = async {
-            let api_key = require_client_api_key(
-                &model.provider,
-                options.as_ref().and_then(|o| o.api_key.as_deref()),
-                options.as_ref().and_then(|o| o.headers.as_ref()),
-            )?;
+            let explicit_key = options
+                .as_ref()
+                .and_then(|o| o.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .map(str::to_owned);
+            let api_key =
+                if super::has_model_auth_header(model.headers.as_ref()) && explicit_key.is_none() {
+                    "unused".to_owned()
+                } else {
+                    require_client_api_key(
+                        &model.provider,
+                        explicit_key.as_deref(),
+                        options.as_ref().and_then(|o| o.headers.as_ref()),
+                    )?
+                };
 
+            let mut default_headers = vec![
+                ("content-type", "application/json"),
+                ("accept", "text/event-stream"),
+            ];
+            if explicit_key.is_some() {
+                default_headers.insert(0, ("x-goog-api-key", api_key.as_str()));
+            }
             let headers = build_header_map(
                 (&model.provider, &model.base_url),
                 options.as_ref().and_then(|o| o.identity.as_ref()),
                 options.as_ref().and_then(|o| o.session_id.as_deref()),
-                &[
-                    ("x-goog-api-key", &api_key),
-                    ("content-type", "application/json"),
-                    ("accept", "text/event-stream"),
-                ],
+                &default_headers,
                 model.headers.as_ref(),
                 options.as_ref().and_then(|o| o.headers.as_ref()),
             );

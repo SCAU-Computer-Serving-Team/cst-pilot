@@ -395,7 +395,10 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
     .unwrap();
     assert_eq!(merged["cstoa"]["etag"], "current-account");
     assert_eq!(merged["cstoa"]["lastModified"], 123);
-    assert_eq!(merged["cstoa"]["models"][0]["id"], "private");
+    assert_eq!(
+        merged["cstoa"]["models"],
+        json!([{"id":"private","maxTokens":9}])
+    );
     assert_eq!(
         merged["deepseek"]["models"],
         json!([{"id":"deepseek-flash","maxTokens":8},{"id":"added","maxTokens":3}])

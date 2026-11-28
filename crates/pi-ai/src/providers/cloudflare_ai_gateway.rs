@@ -82,9 +82,12 @@ pub fn cloudflare_ai_gateway_provider() -> Provider {
         }));
     let resolve_key = auth.resolve.clone();
     auth.resolve = Arc::new(move |credential, env| {
-        let mut merged = env.unwrap_or_default();
-        if let Some(stored_env) = credential.as_ref().and_then(|c| c.env.as_ref()) {
-            merged.extend(stored_env.clone());
+        let mut merged = credential
+            .as_ref()
+            .and_then(|c| c.env.clone())
+            .unwrap_or_default();
+        if let Some(req_env) = env {
+            merged.extend(req_env);
         }
         let Some(account_id) =
             get_provider_env(ACCOUNT, Some(&merged)).filter(|v| is_valid_cloudflare_segment(v))

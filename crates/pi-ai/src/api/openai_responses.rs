@@ -23,7 +23,13 @@ use crate::types::{
     UsageCost, UserContent, UserContentBlock, create_assistant_message_event_stream,
 };
 
-const OPENAI_TOOL_CALL_PROVIDERS: &[&str] = &["openai", "openai-codex", "opencode", "deepseek"];
+const OPENAI_TOOL_CALL_PROVIDERS: &[&str] = &[
+    "openai",
+    "openai-codex",
+    "opencode",
+    "opencode-go",
+    "deepseek",
+];
 const OPENAI_RESPONSES_MIN_OUTPUT_TOKENS: u64 = 16;
 
 fn is_chatgpt_sign_in(model: &Model, api_key: Option<&str>) -> bool {
@@ -1271,11 +1277,22 @@ pub fn stream(
         let cancel_token = options.as_ref().and_then(|o| o.cancel_token.clone());
 
         let run: Result<(), String> = async {
-            let api_key = require_client_api_key(
-                &model.provider,
-                options.as_ref().and_then(|o| o.api_key.as_deref()),
-                options.as_ref().and_then(|o| o.headers.as_ref()),
-            )?;
+            let explicit_key = options
+                .as_ref()
+                .and_then(|o| o.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .map(str::to_owned);
+            let api_key = if super::has_model_auth_header(model.headers.as_ref())
+                && explicit_key.is_none()
+            {
+                "unused".to_owned()
+            } else {
+                require_client_api_key(
+                    &model.provider,
+                    explicit_key.as_deref(),
+                    options.as_ref().and_then(|o| o.headers.as_ref()),
+                )?
+            };
 
             let cache_retention = resolve_cache_retention(
                 options.as_ref().and_then(|o| o.cache_retention),
@@ -1319,10 +1336,12 @@ pub fn stream(
 
             let auth_val = format!("Bearer {api_key}");
             let mut defaults = vec![
-                ("authorization", auth_val.as_str()),
                 ("content-type", "application/json"),
                 ("accept", "text/event-stream"),
             ];
+            if explicit_key.is_some() {
+                defaults.insert(0, ("authorization", auth_val.as_str()));
+            }
             let mut codex_session_id = None;
             let mut account_id = None;
             if is_codex {
