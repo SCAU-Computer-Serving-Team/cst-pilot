@@ -90,6 +90,10 @@ pub fn standard_chat_api_config() -> ProviderApiConfig {
         openai_responses_api(),
     );
     map.insert(
+        known_api::OPENAI_CODEX_RESPONSES.to_owned(),
+        openai_responses_api(),
+    );
+    map.insert(
         known_api::ANTHROPIC_MESSAGES.to_owned(),
         anthropic_messages_api(),
     );

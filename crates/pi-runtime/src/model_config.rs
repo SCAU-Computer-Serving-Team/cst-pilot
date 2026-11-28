@@ -871,44 +871,92 @@ pub fn compose_provider_with_model_config(
     // 合成认证与请求头解析
     if cfg.api_key.is_some() || cfg.headers.is_some() || cfg.auth_header == Some(true) {
         let base_auth = opts.auth.clone();
-        let cfg_key = cfg.api_key.clone();
+        let allows_models_json_api_key = base_auth.api_key.as_ref().is_some_and(|a| !a.env_only)
+            || (base_auth.api_key.is_none() && base_auth.oauth.is_none());
+        let cfg_key = cfg.api_key.clone().filter(|_| allows_models_json_api_key);
         let cfg_headers = cfg.headers.clone();
         let auth_header = cfg.auth_header.unwrap_or(false);
 
         let composed_oauth = base_auth.oauth.clone().map(|mut oauth| {
             if cfg_headers.is_some() || auth_header {
                 let orig_to_auth = oauth.to_auth.clone();
+                let orig_to_auth_async = oauth.to_auth_async.clone();
                 let headers_cfg = cfg_headers.clone();
                 let resolver_oauth = resolver.clone();
+                let apply_oauth_headers = Arc::new(
+                    move |mut model_auth: pi_ai::ModelAuth,
+                          env: Option<pi_ai::ProviderEnv>,
+                          cancel: Option<tokio_util::sync::CancellationToken>|
+                          -> Result<pi_ai::ModelAuth, String> {
+                        if let Some(h_map) = &headers_cfg
+                            && let Some(rm) = resolver_oauth.resolve_headers_or_throw(
+                                Some(h_map),
+                                env.as_ref(),
+                                ConfigValueSource::Global,
+                                cancel.as_ref(),
+                            )?
+                        {
+                            let ph: ProviderHeaders =
+                                rm.into_iter().map(|(k, v)| (k, Some(v))).collect();
+                            model_auth.headers =
+                                merge_provider_headers(model_auth.headers, Some(&ph));
+                        }
+                        if auth_header && let Some(key) = &model_auth.api_key {
+                            let mut bearer = ProviderHeaders::new();
+                            bearer.insert("Authorization".to_owned(), Some(format!("Bearer {key}")));
+                            model_auth.headers =
+                                merge_provider_headers(model_auth.headers, Some(&bearer));
+                        }
+                        Ok(model_auth)
+                    },
+                );
+                let sync_apply = apply_oauth_headers.clone();
+                let sync_orig = orig_to_auth.clone();
                 oauth.to_auth = Arc::new(move |cred| {
-                    let mut model_auth = orig_to_auth(cred)?;
-                    if let Some(h_map) = &headers_cfg
-                        && let Some(rm) = resolver_oauth.resolve_headers_or_throw(
-                            Some(h_map),
-                            None,
-                            ConfigValueSource::Global,
-                            None,
-                        )?
-                    {
-                        let ph: ProviderHeaders =
-                            rm.into_iter().map(|(k, v)| (k, Some(v))).collect();
-                        model_auth.headers = merge_provider_headers(model_auth.headers, Some(&ph));
-                    }
-                    if auth_header && let Some(key) = &model_auth.api_key {
-                        let mut bearer = ProviderHeaders::new();
-                        bearer.insert("Authorization".to_owned(), Some(format!("Bearer {key}")));
-                        model_auth.headers =
-                            merge_provider_headers(model_auth.headers, Some(&bearer));
-                    }
-                    Ok(model_auth)
+                    let model_auth = sync_orig(cred)?;
+                    sync_apply(model_auth, None, None)
                 });
+                oauth.to_auth_async = Some(Arc::new(move |cred, env, cancel| {
+                    let apply = apply_oauth_headers.clone();
+                    let orig_sync = orig_to_auth.clone();
+                    let orig_async = orig_to_auth_async.clone();
+                    Box::pin(async move {
+                        let base_model_auth = if let Some(f) = orig_async {
+                            f(cred, env.clone(), cancel.clone()).await?
+                        } else {
+                            orig_sync(cred)?
+                        };
+                        let cancel = cancel.map(|t| t.child_token()).unwrap_or_default();
+                        let _cancel_on_drop = cancel.clone().drop_guard();
+                        let worker_cancel = cancel.clone();
+                        let worker = tokio::task::spawn_blocking(move || {
+                            apply(base_model_auth, env, Some(worker_cancel))
+                        });
+                        tokio::select! { biased;
+                            _ = cancel.cancelled() => Err("Request was aborted".to_owned()),
+                            result = worker => result.map_err(|_| "Provider configuration resolution task failed".to_owned())?,
+                        }
+                    })
+                }));
             }
             oauth
         });
 
-        // 纯 OAuth 服务商在未配置 models.json `apiKey` 时不伪造 API Key 登录方式
-        let should_compose_api_key =
-            base_auth.api_key.is_some() || cfg_key.is_some() || composed_oauth.is_none();
+        // 纯 OAuth 服务商（如 openai-codex）始终不暴露或接受 API Key 认证
+        let should_compose_api_key = base_auth.api_key.is_some() || composed_oauth.is_none();
+        let has_explicit_auth_header_cfg = allows_models_json_api_key
+            && !matches!(
+                provider_id,
+                "cloudflare-workers-ai" | "cloudflare-ai-gateway"
+            )
+            && (base_provider.is_none()
+                || cfg_headers.as_ref().is_some_and(|m| {
+                    m.keys().any(|k| {
+                        k.eq_ignore_ascii_case("authorization")
+                            || k.eq_ignore_ascii_case("x-api-key")
+                            || k.eq_ignore_ascii_case("api-key")
+                    })
+                }));
         let composed_api_key = if should_compose_api_key {
             let resolver_clone = resolver.clone();
             let pid = provider_id.to_owned();
@@ -992,18 +1040,18 @@ pub fn compose_provider_with_model_config(
                         None
                     };
 
+                    if base_res.is_none() && !has_explicit_auth_header_cfg {
+                        return Ok(None);
+                    }
+
                     let env = base_res
                         .as_ref()
                         .and_then(|result| result.env.clone())
                         .or(env);
                     let final_api_key = base_res.as_ref().and_then(|r| r.auth.api_key.clone());
-                    let source = base_res.as_ref().and_then(|r| r.source.clone());
+                    let mut source = base_res.as_ref().and_then(|r| r.source.clone());
                     let mut resolved_headers: Option<ProviderHeaders> =
                         base_res.as_ref().and_then(|r| r.auth.headers.clone());
-
-                    if base_res.is_none() {
-                        return Ok(None);
-                    }
 
                     if let Some(h_map) = &cfg_headers {
                         let resolved_map = resolver_clone.resolve_headers_or_throw(
@@ -1027,6 +1075,9 @@ pub fn compose_provider_with_model_config(
 
                     if final_api_key.is_none() && resolved_headers.is_none() {
                         return Ok(None);
+                    }
+                    if source.is_none() && resolved_headers.is_some() {
+                        source = Some("models_json_headers".to_owned());
                     }
 
                     Ok(Some(AuthResult {

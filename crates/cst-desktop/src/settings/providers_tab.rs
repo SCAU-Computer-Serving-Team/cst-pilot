@@ -213,6 +213,8 @@ pub struct ProvidersTabView {
     provider_id_input: Entity<InputState>,
     provider_name_input: Entity<InputState>,
     base_url_input: Entity<InputState>,
+    account_id_input: Entity<InputState>,
+    gateway_id_input: Entity<InputState>,
     api_key_input: Entity<InputState>,
     protocol: CustomApiProtocol,
     protocol_dropdown_open: bool,
@@ -290,6 +292,10 @@ impl ProvidersTabView {
             cx.new(|cx| InputState::new(window, cx).placeholder("如 本地网关"));
         let base_url_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
+        let account_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Account ID"));
+        let gateway_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Gateway ID"));
         let api_key_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("输入 API Key")
@@ -373,6 +379,31 @@ impl ProvidersTabView {
                 _ => {}
             },
         ));
+        for cf_inp in [&account_id_input, &gateway_id_input] {
+            let cf_clone = cf_inp.clone();
+            subs.push(cx.subscribe_in(
+                cf_inp,
+                window,
+                move |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => {
+                        this.form_error = None;
+                        this.key_error = None;
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    InputEvent::PressEnter { .. }
+                        if !this.inline_edit_mode
+                            && this.active_provider_id.is_some()
+                            && !crate::sessions::input_is_composing(&cf_clone, window, cx) =>
+                    {
+                        this.save_builtin_api_key(window, cx);
+                    }
+                    _ => {}
+                },
+            ));
+        }
         subs.push(cx.subscribe_in(
             &api_key_input,
             window,
@@ -459,6 +490,8 @@ impl ProvidersTabView {
             provider_id_input,
             provider_name_input,
             base_url_input,
+            account_id_input,
+            gateway_id_input,
             api_key_input,
             protocol: CustomApiProtocol::OpenaiCompletions,
             protocol_dropdown_open: false,
@@ -539,6 +572,8 @@ impl ProvidersTabView {
             &self.provider_id_input,
             &self.provider_name_input,
             &self.base_url_input,
+            &self.account_id_input,
+            &self.gateway_id_input,
             &self.api_key_input,
             &self.inline_token_input,
         ] {
@@ -563,6 +598,8 @@ impl ProvidersTabView {
             &self.provider_id_input,
             &self.provider_name_input,
             &self.base_url_input,
+            &self.account_id_input,
+            &self.gateway_id_input,
             &self.api_key_input,
             &self.inline_token_input,
         ] {
@@ -1243,6 +1280,10 @@ impl ProvidersTabView {
             .update(cx, |i, cx| i.set_value(pname, window, cx));
         self.base_url_input
             .update(cx, |i, cx| i.set_value("", window, cx));
+        self.account_id_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
+        self.gateway_id_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
 
         if is_custom {
             self.loading = true;
@@ -1276,6 +1317,12 @@ impl ProvidersTabView {
             self.detail_kbd_active = from_keyboard;
             self.detail_last_pointer = from_keyboard.then(|| window.mouse_position());
             self.detail_list_focus.focus(window, cx);
+        } else if matches!(
+            provider_id.as_str(),
+            "cloudflare-workers-ai" | "cloudflare-ai-gateway"
+        ) {
+            self.account_id_input
+                .update(cx, |i, cx| i.focus(window, cx));
         } else {
             self.api_key_input.update(cx, |i, cx| i.focus(window, cx));
         }
@@ -1524,6 +1571,38 @@ impl ProvidersTabView {
         let Some(provider) = self.active_provider_id.clone() else {
             return;
         };
+        let is_cf_workers = provider == "cloudflare-workers-ai";
+        let is_cf_gateway = provider == "cloudflare-ai-gateway";
+        let already_configured = self
+            .client
+            .snapshot()
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider))
+            .and_then(|p| p.configured)
+            == Some(true);
+        let account_id = if is_cf_workers || is_cf_gateway {
+            let v = self.account_id_input.read(cx).value().trim().to_owned();
+            if v.is_empty() && !already_configured {
+                self.key_error = Some("请输入 Account ID。".into());
+                cx.notify();
+                return;
+            }
+            (!v.is_empty()).then_some(v)
+        } else {
+            None
+        };
+        let gateway_id = if is_cf_gateway {
+            let v = self.gateway_id_input.read(cx).value().trim().to_owned();
+            if v.is_empty() && !already_configured {
+                self.key_error = Some("请输入 Gateway ID。".into());
+                cx.notify();
+                return;
+            }
+            (!v.is_empty()).then_some(v)
+        } else {
+            None
+        };
         let raw_key = self.read_key(cx);
         if raw_key.is_empty() {
             self.key_error = Some("请输入要更新的 API Key。".into());
@@ -1531,7 +1610,12 @@ impl ProvidersTabView {
             return;
         }
         self.key_error = None;
-        let base_url = self.base_url_input.read(cx).value().trim().to_owned();
+        let base_url = if is_cf_workers || is_cf_gateway {
+            None
+        } else {
+            let b = self.base_url_input.read(cx).value().trim().to_owned();
+            (!b.is_empty()).then_some(b)
+        };
         self.saving = true;
         cx.notify();
 
@@ -1539,10 +1623,8 @@ impl ProvidersTabView {
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = client
-                .save_provider_api_key(
-                    provider,
-                    raw_key,
-                    (!base_url.is_empty()).then_some(base_url),
+                .save_provider_api_key_with_cloudflare(
+                    provider, raw_key, base_url, account_id, gateway_id,
                 )
                 .await;
             if res.is_ok() {
@@ -1558,11 +1640,19 @@ impl ProvidersTabView {
                 match res {
                     Ok(_) => {
                         this.clear_key(window, cx);
+                        this.account_id_input
+                            .update(cx, |i, cx| i.set_value("", window, cx));
+                        this.gateway_id_input
+                            .update(cx, |i, cx| i.set_value("", window, cx));
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
                     }
-                    Err(ClientError::BadRequest { .. }) => {
-                        this.key_error = Some("无法保存凭据，请检查 API Key 和服务地址。".into());
+                    Err(ClientError::BadRequest { message, .. }) => {
+                        this.key_error = Some(if message.is_empty() {
+                            "凭据格式无效，请检查后重试。".into()
+                        } else {
+                            message.into()
+                        });
                     }
                     Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
                         "保存凭据失败，请重试。".into(),
@@ -2594,11 +2684,24 @@ impl Render for ProvidersTabView {
                 .read(cx)
                 .focus_handle(cx)
                 .is_focused(window);
+            let acc_focused = self
+                .account_id_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            let gw_focused = self
+                .gateway_id_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
             let key_focused = self
                 .api_key_input
                 .read(cx)
                 .focus_handle(cx)
                 .is_focused(window);
+            let is_cf_workers = pid_owned == "cloudflare-workers-ai";
+            let is_cf_gateway = pid_owned == "cloudflare-ai-gateway";
+            let is_cloudflare = is_cf_workers || is_cf_gateway;
 
             let mut model_rows = div().w_full().flex().flex_col();
             if catalog_models.is_empty() {
@@ -2938,7 +3041,79 @@ impl Render for ProvidersTabView {
                         .w_full()
                         .flex()
                         .flex_col()
-                        .child(
+                        .children(is_cloudflare.then(|| {
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(if acc_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(if acc_focused {
+                                            palette.accent_ink
+                                        } else {
+                                            palette.text_secondary
+                                        })
+                                        .child("Account ID"),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.account_id_input)
+                                            .accessibility_id("providers-accountid-input")
+                                            .aria_label("Account ID")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                )
+                        }))
+                        .children(is_cf_gateway.then(|| {
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(if gw_focused {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_subtle
+                                })
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(if gw_focused {
+                                            palette.accent_ink
+                                        } else {
+                                            palette.text_secondary
+                                        })
+                                        .child("Gateway ID"),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.gateway_id_input)
+                                            .accessibility_id("providers-gatewayid-input")
+                                            .aria_label("Gateway ID")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                )
+                        }))
+                        .children((!is_cloudflare).then(|| {
                             div()
                                 .w_full()
                                 .h(px(52.0))
@@ -2972,8 +3147,8 @@ impl Render for ProvidersTabView {
                                             .focus_bordered(false)
                                             .p_0(),
                                     ),
-                                ),
-                        )
+                                )
+                        }))
                         .child(
                             div()
                                 .w_full()

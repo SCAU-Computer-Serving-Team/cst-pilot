@@ -460,6 +460,8 @@ impl ModelRuntime {
             }
 
             if !is_configured
+                && (auth.api_key.as_ref().is_some_and(|a| !a.env_only)
+                    || (auth.api_key.is_none() && auth.oauth.is_none()))
                 && let Some(p_cfg) = cfg.get_provider(pid)
                 && let Some(cfg_src) = has_configured_models_json_auth(p_cfg)
             {
@@ -798,18 +800,25 @@ impl ModelRuntime {
             }
             _ => {}
         }
-        let raw_key = self
-            .config
-            .read()
-            .expect("config lock")
-            .get_provider(provider_id)
-            .and_then(|p| p.api_key.clone());
-        if let Some(key) = raw_key {
-            return self
-                .resolver
-                .resolve_or_throw_async(key, "provider API key", env, ConfigValueSource::Global)
-                .await
-                .map(Some);
+        let allow_models_json_key = allow_stored_api_key
+            || self
+                .models
+                .get_provider(provider_id)
+                .is_none_or(|p| p.auth().api_key.is_none() && p.auth().oauth.is_none());
+        if allow_models_json_key {
+            let raw_key = self
+                .config
+                .read()
+                .expect("config lock")
+                .get_provider(provider_id)
+                .and_then(|p| p.api_key.clone());
+            if let Some(key) = raw_key {
+                return self
+                    .resolver
+                    .resolve_or_throw_async(key, "provider API key", env, ConfigValueSource::Global)
+                    .await
+                    .map(Some);
+            }
         }
         if api_auth_meta.is_none() {
             return Ok(None);
@@ -933,31 +942,20 @@ fn is_valid_cloudflare_segment(id: &str) -> bool {
 
 fn has_required_cloudflare_ids(
     pid: &str,
-    provider_models: &[Model],
+    _provider_models: &[Model],
     stored_env: Option<&BTreeMap<String, String>>,
 ) -> bool {
-    if !matches!(pid, "cloudflare-workers-ai" | "cloudflare-ai-gateway") {
-        return true;
+    match pid {
+        "cloudflare-workers-ai" => pi_ai::get_provider_env("CLOUDFLARE_ACCOUNT_ID", stored_env)
+            .is_some_and(|v| is_valid_cloudflare_segment(&v)),
+        "cloudflare-ai-gateway" => {
+            pi_ai::get_provider_env("CLOUDFLARE_ACCOUNT_ID", stored_env)
+                .is_some_and(|v| is_valid_cloudflare_segment(&v))
+                && pi_ai::get_provider_env("CLOUDFLARE_GATEWAY_ID", stored_env)
+                    .is_some_and(|v| is_valid_cloudflare_segment(&v))
+        }
+        _ => true,
     }
-    let needs_account = provider_models
-        .iter()
-        .any(|m| m.base_url.contains("{CLOUDFLARE_ACCOUNT_ID}"));
-    let needs_gateway = provider_models
-        .iter()
-        .any(|m| m.base_url.contains("{CLOUDFLARE_GATEWAY_ID}"));
-    if needs_account
-        && !pi_ai::get_provider_env("CLOUDFLARE_ACCOUNT_ID", stored_env)
-            .is_some_and(|v| is_valid_cloudflare_segment(&v))
-    {
-        return false;
-    }
-    if needs_gateway
-        && !pi_ai::get_provider_env("CLOUDFLARE_GATEWAY_ID", stored_env)
-            .is_some_and(|v| is_valid_cloudflare_segment(&v))
-    {
-        return false;
-    }
-    true
 }
 
 fn error_event_stream(

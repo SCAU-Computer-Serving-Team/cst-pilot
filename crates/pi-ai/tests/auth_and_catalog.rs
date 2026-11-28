@@ -259,6 +259,7 @@ async fn credential_priority_and_oauth_refresh_preserve_stored_token_on_failure(
         refresh: Arc::new(|_cred| {
             Box::pin(async move { Err("upstream auth server 503".to_owned()) })
         }),
+        to_auth_async: None,
         to_auth: Arc::new(|cred| {
             Ok(ModelAuth {
                 api_key: Some(cred.access),
@@ -988,6 +989,7 @@ async fn per_provider_credential_locks_and_cancellable_auth_prep_work() {
                 std::future::pending::<Result<OAuthCredential, String>>().await
             })
         }),
+        to_auth_async: None,
         to_auth: Arc::new(|c| {
             Ok(ModelAuth {
                 api_key: Some(c.access),

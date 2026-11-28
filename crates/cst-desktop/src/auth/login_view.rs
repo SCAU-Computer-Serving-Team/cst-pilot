@@ -65,6 +65,8 @@ pub struct LoginView {
     selected_provider_id: String,
     api_key_input: Entity<InputState>,
     base_url_input: Entity<InputState>,
+    account_id_input: Entity<InputState>,
+    gateway_id_input: Entity<InputState>,
     api_key_error: Option<SharedString>,
     provider_dropdown_open: bool,
     provider_trigger_focus: gpui::FocusHandle,
@@ -90,23 +92,32 @@ impl LoginView {
         });
         let base_url_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
+        let account_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Account ID"));
+        let gateway_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Gateway ID"));
 
-        let subscriptions = [&api_key_input, &base_url_input]
-            .into_iter()
-            .map(|input| {
-                cx.subscribe(input, |this, _, event: &InputEvent, cx| match event {
-                    InputEvent::Change => {
-                        if this.api_key_error.take().is_some() {
-                            cx.notify();
-                        }
+        let subscriptions = [
+            &api_key_input,
+            &base_url_input,
+            &account_id_input,
+            &gateway_id_input,
+        ]
+        .into_iter()
+        .map(|input| {
+            cx.subscribe(input, |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    if this.api_key_error.take().is_some() {
+                        cx.notify();
                     }
-                    InputEvent::Focus => {
-                        this.dismiss_dropdowns_on_outside_click(cx);
-                    }
-                    _ => {}
-                })
+                }
+                InputEvent::Focus => {
+                    this.dismiss_dropdowns_on_outside_click(cx);
+                }
+                _ => {}
             })
-            .collect();
+        })
+        .collect();
 
         Self {
             client,
@@ -127,6 +138,8 @@ impl LoginView {
             selected_provider_id: "deepseek".into(),
             api_key_input,
             base_url_input,
+            account_id_input,
+            gateway_id_input,
             api_key_error: None,
             provider_dropdown_open: false,
             provider_trigger_focus: cx.focus_handle().tab_stop(true),
@@ -186,6 +199,8 @@ impl LoginView {
         self.api_key_error = None;
         let key = self.api_key_input.downgrade();
         let url = self.base_url_input.downgrade();
+        let acc = self.account_id_input.downgrade();
+        let gw = self.gateway_id_input.downgrade();
         let window = self.window;
         cx.spawn(async move |_, cx| {
             let _ = window.update(cx, |_, window, cx| {
@@ -194,6 +209,8 @@ impl LoginView {
                     input.set_masked(true, window, cx);
                 });
                 let _ = url.update(cx, |input, cx| input.set_value("", window, cx));
+                let _ = acc.update(cx, |input, cx| input.set_value("", window, cx));
+                let _ = gw.update(cx, |input, cx| input.set_value("", window, cx));
             });
         })
         .detach();
@@ -211,8 +228,16 @@ impl LoginView {
         if self.tab != LoginMethodTab::ApiKey || self.provider_dropdown_open {
             return false;
         }
-        self.api_key_input
-            .update(cx, |inp, cx| inp.focus(window, cx));
+        if matches!(
+            self.selected_provider_id.as_str(),
+            "cloudflare-workers-ai" | "cloudflare-ai-gateway"
+        ) {
+            self.account_id_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+        } else {
+            self.api_key_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+        }
         cx.notify();
         true
     }
@@ -537,6 +562,10 @@ impl LoginView {
             });
             self.base_url_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
+            self.account_id_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.gateway_id_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
             self.api_key_error = None;
         }
         self.dismiss_dropdown(window, cx);
@@ -546,6 +575,31 @@ impl LoginView {
         if self.saving_key || !self.active || self.tab != LoginMethodTab::ApiKey {
             return;
         }
+        let provider = self.selected_provider_id.clone();
+        let is_cf_workers = provider == "cloudflare-workers-ai";
+        let is_cf_gateway = provider == "cloudflare-ai-gateway";
+        let account_id = if is_cf_workers || is_cf_gateway {
+            let v = self.account_id_input.read(cx).value().trim().to_owned();
+            if v.is_empty() {
+                self.api_key_error = Some("请输入 Account ID。".into());
+                cx.notify();
+                return;
+            }
+            Some(v)
+        } else {
+            None
+        };
+        let gateway_id = if is_cf_gateway {
+            let v = self.gateway_id_input.read(cx).value().trim().to_owned();
+            if v.is_empty() {
+                self.api_key_error = Some("请输入 Gateway ID。".into());
+                cx.notify();
+                return;
+            }
+            Some(v)
+        } else {
+            None
+        };
         let text = Zeroizing::new(self.api_key_input.read(cx).text().to_string());
         let raw_key = Zeroizing::new(text.trim().to_owned());
         if raw_key.is_empty() {
@@ -555,11 +609,12 @@ impl LoginView {
         }
         self.dismiss_dropdown(window, cx);
         self.api_key_error = None;
-        let base_url = {
+        let base_url = if is_cf_workers || is_cf_gateway {
+            None
+        } else {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
             (!b.is_empty()).then_some(b)
         };
-        let provider = self.selected_provider_id.clone();
         self.saving_key = true;
         cx.notify();
 
@@ -567,7 +622,9 @@ impl LoginView {
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = client
-                .save_provider_api_key(provider, raw_key, base_url)
+                .save_provider_api_key_with_cloudflare(
+                    provider, raw_key, base_url, account_id, gateway_id,
+                )
                 .await;
             if res.is_ok() {
                 let _ = client.refresh_globals().await;
@@ -583,11 +640,18 @@ impl LoginView {
                     Ok(_) => {
                         this.api_key_input
                             .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.account_id_input
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.gateway_id_input
+                            .update(cx, |input, cx| input.set_value("", window, cx));
                         cx.emit(LoginViewEvent::CredentialsSavedReturn);
                     }
-                    Err(ClientError::BadRequest { .. }) => {
-                        this.api_key_error =
-                            Some("无法保存凭据，请检查 API Key 和服务地址。".into());
+                    Err(ClientError::BadRequest { message, .. }) => {
+                        this.api_key_error = Some(if message.is_empty() {
+                            "凭据格式无效，请检查后重试。".into()
+                        } else {
+                            message.into()
+                        });
                     }
                     Err(_) => cx.emit(LoginViewEvent::ErrorMessage(
                         "保存凭据失败，请重试。".into(),
@@ -1086,6 +1150,10 @@ impl Render for LoginView {
                     )
                 });
 
+                let is_cf_workers = self.selected_provider_id == "cloudflare-workers-ai";
+                let is_cf_gateway = self.selected_provider_id == "cloudflare-ai-gateway";
+                let is_cloudflare = is_cf_workers || is_cf_gateway;
+
                 div()
                     .w_full()
                     .flex()
@@ -1165,6 +1233,76 @@ impl Render for LoginView {
                                     )),
                             ),
                     )
+                    .children(is_cloudflare.then(|| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::TIGHT)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child("Account ID"),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(36.0))
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.account_id_input)
+                                            .accessibility_id("login-accountid-input")
+                                            .disabled(self.saving_key)
+                                            .aria_label("Account ID")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            )
+                    }))
+                    .children(is_cf_gateway.then(|| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::TIGHT)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child("Gateway ID"),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(36.0))
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.gateway_id_input)
+                                            .accessibility_id("login-gatewayid-input")
+                                            .disabled(self.saving_key)
+                                            .aria_label("Gateway ID")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            )
+                    }))
                     .child(
                         div()
                             .w_full()
@@ -1214,7 +1352,7 @@ impl Render for LoginView {
                                     .child(err_msg)
                             })),
                     )
-                    .child(
+                    .children((!is_cloudflare).then(|| {
                         div()
                             .w_full()
                             .flex()
@@ -1247,8 +1385,8 @@ impl Render for LoginView {
                                             .w_full()
                                             .h_full(),
                                     ),
-                            ),
-                    )
+                            )
+                    }))
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("login-apikey-save-btn")

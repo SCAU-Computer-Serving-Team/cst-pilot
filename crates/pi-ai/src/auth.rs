@@ -576,6 +576,15 @@ pub type OAuthRefreshFn = Arc<
     dyn Fn(OAuthCredential) -> BoxFuture<'static, Result<OAuthCredential, String>> + Send + Sync,
 >;
 pub type OAuthToAuthFn = Arc<dyn Fn(OAuthCredential) -> Result<ModelAuth, String> + Send + Sync>;
+pub type OAuthAsyncToAuthFn = Arc<
+    dyn Fn(
+            OAuthCredential,
+            Option<ProviderEnv>,
+            Option<CancellationToken>,
+        ) -> BoxFuture<'static, Result<ModelAuth, String>>
+        + Send
+        + Sync,
+>;
 pub type OAuthLoginFn = Arc<
     dyn Fn(
             AuthInteraction,
@@ -803,6 +812,7 @@ pub struct OAuthAuth {
     pub is_subscription: bool,
     pub refresh: OAuthRefreshFn,
     pub to_auth: OAuthToAuthFn,
+    pub to_auth_async: Option<OAuthAsyncToAuthFn>,
     pub login_fn: Option<OAuthLoginFn>,
 }
 
@@ -1035,6 +1045,22 @@ impl OAuthAuth {
         login::cancellable(interaction, login_fn(interaction.clone(), options.cloned())).await
     }
 
+    pub async fn derive_auth(
+        &self,
+        cred: OAuthCredential,
+        env: Option<ProviderEnv>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<ModelAuth, String> {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Err("Request was aborted".to_owned());
+        }
+        if let Some(to_auth_async) = &self.to_auth_async {
+            to_auth_async(cred, env, cancel.cloned()).await
+        } else {
+            (self.to_auth)(cred)
+        }
+    }
+
     pub fn bearer(name: impl Into<String>, is_subscription: bool) -> Self {
         Self {
             name: name.into(),
@@ -1082,6 +1108,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1139,6 +1166,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1191,6 +1219,7 @@ impl OAuthAuth {
                     Ok(refreshed)
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1256,6 +1285,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 let account_id = cred
                     .extra
@@ -1326,6 +1356,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: None,
@@ -1386,6 +1417,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1412,6 +1444,7 @@ impl OAuthAuth {
                     Ok(cred)
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1430,6 +1463,7 @@ impl OAuthAuth {
                 Box::pin(login::copilot(interaction, options))
             })),
             refresh: Arc::new(|cred| Box::pin(login::refresh_copilot(cred, false))),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 let enterprise = cred
                     .extra
@@ -1740,12 +1774,15 @@ pub async fn resolve_provider_auth_cancellable(
                     oauth_cred
                 };
 
-                let model_auth = (oauth_auth.to_auth)(active_cred).map_err(|e| {
-                    ModelsError::new(
-                        ModelsErrorCode::OAuth,
-                        format!("OAuth auth derivation failed for {provider_id}: {e}"),
-                    )
-                })?;
+                let model_auth = oauth_auth
+                    .derive_auth(active_cred, override_env, cancel_token)
+                    .await
+                    .map_err(|e| {
+                        ModelsError::new(
+                            ModelsErrorCode::OAuth,
+                            format!("OAuth auth derivation failed for {provider_id}: {e}"),
+                        )
+                    })?;
 
                 return Ok(Some(AuthResult {
                     auth: model_auth,

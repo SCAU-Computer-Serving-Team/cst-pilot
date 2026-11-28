@@ -671,25 +671,76 @@ async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_inter
         Some("yes")
     );
 
-    // 即使 models.json 显式给 openai-codex 配了 apiKey，也必须标记 env_only=true（不开放交互式密钥登录）
+    // 即使 models.json 显式给 openai-codex 配了 apiKey，也必须保持 api_key: None（纯 OAuth，不得绕过登录限制）
     std::fs::write(
         &models_path,
-        r#"{"providers":{"openai-codex":{"apiKey":"literal-cfg-key"}}}"#,
+        r#"{"providers":{"openai-codex":{"apiKey":"literal-cfg-key"},"github-copilot":{"apiKey":"literal-copilot-key","headers":{"X-Copilot-Req":"$PER_REQ_VAL"}}}}"#,
     )
     .unwrap();
     rt.refresh(Some(pi_ai::ModelsRefreshOptions {
         allow_network: Some(false),
-        providers: Some(vec!["openai-codex".into()]),
+        providers: Some(vec!["openai-codex".into(), "github-copilot".into()]),
         force: Some(false),
     }))
     .await;
     let codex_with_key = rt.models().get_provider("openai-codex").unwrap();
+    assert!(codex_with_key.auth().api_key.is_none());
+    assert!(!rt.has_configured_auth("openai-codex"));
     assert!(
-        codex_with_key
-            .auth()
-            .api_key
+        rt.models()
+            .get_auth("openai-codex", None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Copilot 同样忽略 models.json 的 apiKey，且 OAuth 派生请求头可解析单次请求传入的环境变量
+    assert!(
+        rt.models()
+            .get_auth("github-copilot", None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    rt.credentials()
+        .modify(
+            "github-copilot",
+            Box::new(|_| {
+                Box::pin(async {
+                    Ok(Some(pi_ai::Credential::OAuth(pi_ai::OAuthCredential {
+                        access: "copilot-oauth-tok".into(),
+                        refresh: "copilot-oauth-ref".into(),
+                        expires: pi_ai::now_ms() + 3_600_000,
+                        extra: std::collections::BTreeMap::new(),
+                    })))
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    let copilot_req_auth = rt
+        .models()
+        .get_auth(
+            "github-copilot",
+            Some(&pi_ai::AuthResolutionOverrides {
+                api_key: None,
+                env: Some(std::collections::BTreeMap::from([(
+                    "PER_REQ_VAL".into(),
+                    "req-ok".into(),
+                )])),
+                min_oauth_validity_ms: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .expect("OAuth header resolution must receive per-request env");
+    assert_eq!(
+        copilot_req_auth
+            .auth
+            .headers
             .as_ref()
-            .is_some_and(|a| a.env_only)
+            .and_then(|h| h.get("X-Copilot-Req"))
+            .and_then(|v| v.as_deref()),
+        Some("req-ok")
     );
 
     // 3. 登录 Cloudflare Workers AI 保存密钥 + Account ID 后立即可用，且每个内置对话服务商的默认模型均存在
@@ -732,6 +783,73 @@ async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_inter
             .map(String::as_str),
         Some("acc_runtime_99")
     );
+    // P1-1: set_runtime_api_key 运行时换密钥后仍保留底层已存的 Cloudflare Account ID
+    rt.set_runtime_api_key("cloudflare-workers-ai", "cf-runtime-rotated-token")
+        .await
+        .unwrap();
+    assert!(rt.has_configured_auth("cloudflare-workers-ai"));
+    let cf_after_runtime_key = rt
+        .models()
+        .get_auth("cloudflare-workers-ai", None)
+        .await
+        .unwrap()
+        .expect("set_runtime_api_key must retain stored Cloudflare Account ID");
+    assert_eq!(
+        cf_after_runtime_key.auth.api_key.as_deref(),
+        Some("cf-runtime-rotated-token")
+    );
+    assert_eq!(
+        cf_after_runtime_key
+            .env
+            .as_ref()
+            .and_then(|e| e.get("CLOUDFLARE_ACCOUNT_ID"))
+            .map(String::as_str),
+        Some("acc_runtime_99")
+    );
+
+    // P1-4 & P2-2: 仅靠 headers 认证的自定义服务可正常解析，且自定义服务可注册 openai-codex-responses 协议
+    std::fs::write(
+        &models_path,
+        r#"{
+            "providers": {
+                "hdr-only-gw": {
+                    "baseUrl": "https://example.com/v1",
+                    "api": "openai-codex-responses",
+                    "headers": { "Authorization": "Bearer hdr-only-tok" },
+                    "models": [{ "id": "codex-proxy", "name": "Codex Proxy" }]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    rt.refresh(Some(pi_ai::ModelsRefreshOptions {
+        allow_network: Some(false),
+        providers: None,
+        force: Some(false),
+    }))
+    .await;
+    assert_eq!(rt.get_error(), None);
+    let hdr_auth = rt
+        .models()
+        .get_auth("hdr-only-gw", None)
+        .await
+        .unwrap()
+        .expect("headers-only custom provider must resolve auth");
+    assert_eq!(
+        hdr_auth
+            .auth
+            .headers
+            .as_ref()
+            .and_then(|h| h.get("Authorization"))
+            .and_then(|v| v.as_deref()),
+        Some("Bearer hdr-only-tok")
+    );
+    let hdr_prov = rt.models().get_provider("hdr-only-gw").unwrap();
+    if let Some(pi_ai::ProviderApiConfig::ByApi(api_map)) = hdr_prov.to_create_options().api {
+        assert!(api_map.contains_key(pi_ai::known_api::OPENAI_CODEX_RESPONSES));
+    } else {
+        panic!("expected ByApi map on custom provider");
+    }
 
     for prov in pi_runtime::DEFAULT_PROVIDER_PRIORITY {
         let def_id = pi_runtime::default_model_for_provider(prov)
