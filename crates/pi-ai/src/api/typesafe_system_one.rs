@@ -311,11 +311,19 @@ pub async fn classify(
         if model.api != known_classifier_api::TYPESAFE_SYSTEM_ONE {
             return Err(format!("Unsupported classifier API: {}", model.api));
         }
-        let api_key = require_client_api_key(
-            &model.provider,
-            options.and_then(|o| o.api_key.as_deref()),
-            options.and_then(|o| o.headers.as_ref()),
-        )?;
+        let explicit_key = options
+            .and_then(|o| o.api_key.as_deref())
+            .filter(|k| !k.is_empty());
+        let api_key =
+            if super::has_model_auth_header(model.headers.as_ref()) && explicit_key.is_none() {
+                "unused".to_owned()
+            } else {
+                require_client_api_key(
+                    &model.provider,
+                    explicit_key,
+                    options.and_then(|o| o.headers.as_ref()),
+                )?
+            };
 
         let (payload, need_opt_in_header) = build_wire_payload(model, context)?;
         let mut opt_headers: ProviderHeaders =
@@ -328,14 +336,15 @@ pub async fn classify(
         }
 
         let auth_header = format!("Bearer {api_key}");
+        let mut default_headers = vec![("content-type", "application/json")];
+        if explicit_key.is_some() {
+            default_headers.insert(0, ("authorization", auth_header.as_str()));
+        }
         let headers = build_header_map(
             (&model.provider, &model.base_url),
             options.and_then(|o| o.identity.as_ref()),
             None,
-            &[
-                ("authorization", &auth_header),
-                ("content-type", "application/json"),
-            ],
+            &default_headers,
             model.headers.as_ref(),
             Some(&opt_headers),
         );

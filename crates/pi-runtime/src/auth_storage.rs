@@ -885,10 +885,17 @@ impl CredentialStore for RuntimeCredentials {
     fn inspect(&self, provider_id: &str) -> Option<CredentialInspection> {
         if let Some(key) = self.runtime_api_key(provider_id) {
             let configured = !key.is_empty();
+            let base_env = self
+                .store
+                .inspect(provider_id)
+                .and_then(|s| match s.credential {
+                    Credential::ApiKey(api) => api.env,
+                    Credential::OAuth(_) => None,
+                });
             return Some(CredentialInspection {
                 credential: Credential::ApiKey(ApiKeyCredential {
                     key: Some(key),
-                    env: None,
+                    env: base_env,
                 }),
                 configured,
             });
@@ -901,10 +908,20 @@ impl CredentialStore for RuntimeCredentials {
         provider_id: &'a str,
     ) -> BoxFuture<'a, Result<Option<Credential>, String>> {
         if let Some(override_key) = self.runtime_api_key(provider_id) {
+            let store = self.store.clone();
             return Box::pin(async move {
+                let base_env = store
+                    .read(provider_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|c| match c {
+                        Credential::ApiKey(api) => api.env,
+                        Credential::OAuth(_) => None,
+                    });
                 Ok(Some(Credential::ApiKey(ApiKeyCredential {
                     key: Some(override_key),
-                    env: None,
+                    env: base_env,
                 })))
             });
         }

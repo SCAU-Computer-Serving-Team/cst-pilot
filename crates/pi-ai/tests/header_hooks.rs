@@ -192,7 +192,7 @@ async fn codex_sse_defaults_use_the_same_bounded_session_key_on_the_wire() {
     assert!(!headers.contains_key("session_id"));
     assert_eq!(headers["chatgpt-account-id"], "test-account");
     assert_eq!(headers["authorization"], format!("Bearer {token}"));
-    assert!(headers["user-agent"].starts_with("pi/1.5.0 ("));
+    assert!(headers["user-agent"].starts_with("pi/1.6.0 ("));
     assert_no_openrouter(&headers);
 
     options.cache_retention = Some(CacheRetention::None);
@@ -370,7 +370,7 @@ async fn anthropic_key_oauth_and_copilot_send_distinct_auth_and_feature_headers(
     assert_no_openrouter(&headers);
     assert_eq!(headers["x-api-key"], "sk-ant-api-fake");
     assert!(!headers.contains_key("authorization"));
-    assert!(headers["user-agent"].starts_with("pi/1.5.0 ("));
+    assert!(headers["user-agent"].starts_with("pi/1.6.0 ("));
     assert_eq!(body["thinking"]["type"], "enabled");
     assert!(body["tools"][0].get("eager_input_streaming").is_none());
     assert_eq!(
@@ -418,6 +418,84 @@ async fn anthropic_key_oauth_and_copilot_send_distinct_auth_and_feature_headers(
     assert!(body.get("system").is_none());
 
     options.headers = Some(BTreeMap::from([("ANTHROPIC-BETA".into(), None)]));
-    let (_, headers, _) = protocol_request(model, "", &context, &options).await;
+    let (_, headers, _) = protocol_request(model.clone(), "", &context, &options).await;
     assert!(!headers.contains_key("anthropic-beta"));
+
+    // Header-only auth on Anthropic & Google must not inject bogus placeholder keys
+    let hdr_only_opts = StreamOptions {
+        headers: Some(BTreeMap::from([(
+            "Authorization".into(),
+            Some("Bearer custom-proxy-token".into()),
+        )])),
+        ..Default::default()
+    };
+    let mut anth_proxy = model_for_test("custom-anth", known_api::ANTHROPIC_MESSAGES);
+    anth_proxy.headers = None;
+    let (_, headers, _) = protocol_request(anth_proxy, "", &context, &hdr_only_opts).await;
+    assert_eq!(headers["authorization"], "Bearer custom-proxy-token");
+    assert!(!headers.contains_key("x-api-key"));
+
+    let goog_proxy = model_for_test("custom-goog", known_api::GOOGLE_GENERATIVE_AI);
+    let (_, headers, _) = protocol_request(goog_proxy, "", &context, &hdr_only_opts).await;
+    assert_eq!(headers["authorization"], "Bearer custom-proxy-token");
+    assert!(!headers.contains_key("x-goog-api-key"));
+}
+
+#[test]
+fn openai_completions_compat_respects_reasoning_effort_templates_and_off_map() {
+    let context = TranscriptContext::default();
+
+    // 1. supports_reasoning_effort = false suppresses top-level reasoning_effort
+    let mut cf_model = model_for_test("cloudflare-ai-gateway", known_api::OPENAI_COMPLETIONS);
+    cf_model.reasoning = true;
+    cf_model.compat = Some(ProviderCompat {
+        supports_reasoning_effort: Some(false),
+        thinking_format: Some("chat-template".into()),
+        chat_template_kwargs: Some(BTreeMap::from([(
+            "enable_thinking".into(),
+            serde_json::json!({ "$var": "thinking.enabled" }),
+        )])),
+        ..Default::default()
+    });
+    let on_opts = StreamOptions {
+        reasoning_effort: Some(ThinkingLevel::High),
+        ..Default::default()
+    };
+    let on_body = pi_ai::api::openai_completions::build_completions_params(
+        &cf_model,
+        &context,
+        Some(&on_opts),
+    );
+    assert!(on_body.get("reasoning_effort").is_none());
+    assert_eq!(
+        on_body["chat_template_kwargs"]["enable_thinking"],
+        serde_json::json!(true)
+    );
+    let off_body =
+        pi_ai::api::openai_completions::build_completions_params(&cf_model, &context, None);
+    assert_eq!(
+        off_body["chat_template_kwargs"]["enable_thinking"],
+        serde_json::json!(false)
+    );
+
+    // 2. together & baseten formats + thinkingLevelMap.off
+    let mut together_model = model_for_test("together", known_api::OPENAI_COMPLETIONS);
+    together_model.reasoning = true;
+    let tg_on = pi_ai::api::openai_completions::build_completions_params(
+        &together_model,
+        &context,
+        Some(&on_opts),
+    );
+    assert_eq!(tg_on["reasoning"], serde_json::json!({ "enabled": true }));
+    assert!(tg_on.get("reasoning_effort").is_none());
+
+    let mut off_mapped_model = model_for_test("openai", known_api::OPENAI_COMPLETIONS);
+    off_mapped_model.reasoning = true;
+    off_mapped_model.thinking_level_map = Some(BTreeMap::from([(
+        pi_ai::ModelThinkingLevel::Off,
+        Some("none".to_owned()),
+    )]));
+    let off_mapped_body =
+        pi_ai::api::openai_completions::build_completions_params(&off_mapped_model, &context, None);
+    assert_eq!(off_mapped_body["reasoning_effort"], "none");
 }

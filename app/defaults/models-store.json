@@ -1,6 +1,6 @@
 {
   "deepseek": {
-    "lastModified": 1792068025000,
+    "lastModified": 1795996800000,
     "models": [
       {
         "id": "deepseek-flash",
@@ -30,7 +30,6 @@
         "maxTokens": 384000,
         "compat": {
           "supportsStore": false,
-          "supportsDeveloperRole": false,
           "maxTokensField": "max_tokens",
           "requiresReasoningContentOnAssistantMessages": true,
           "thinkingFormat": "deepseek",
@@ -55,13 +54,6 @@
         "baseUrl": "https://api.deepseek.com",
         "provider": "deepseek",
         "reasoning": true,
-        "thinkingLevelMap": {
-          "minimal": null,
-          "low": null,
-          "medium": null,
-          "high": "high",
-          "max": "max"
-        },
         "input": [
           "text"
         ],
@@ -75,12 +67,18 @@
         "maxTokens": 384000,
         "compat": {
           "supportsStore": false,
-          "supportsDeveloperRole": false,
           "maxTokensField": "max_tokens",
           "requiresReasoningContentOnAssistantMessages": true,
           "thinkingFormat": "deepseek",
           "supportsStrictMode": true,
           "supportsMidConvoSystemMessages": true
+        },
+        "thinkingLevelMap": {
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": "high",
+          "max": "max"
         },
         "type": "chat"
       }

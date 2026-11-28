@@ -1,6 +1,6 @@
 # Pi 通用核心规格
 
-`pi-core` 模块由 `crates/pi-ai`、`crates/pi-agent`、`crates/pi-session` 与 `crates/pi-runtime` 四个独立包组成。核心对齐上游 `earendil-works/pi`（`1.5.0`），提供可嵌入任意应用的通用大模型流式调用、工具编排循环、会话树管理与运行时服务。内部架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，公开编程接口见 [API.md](API.md)。
+`pi-core` 模块由 `crates/pi-ai`、`crates/pi-agent`、`crates/pi-session` 与 `crates/pi-runtime` 四个独立包组成。核心对齐上游 `earendil-works/pi`（`1.6.0`），提供可嵌入任意应用的通用大模型流式调用、工具编排循环、会话树管理与运行时服务。内部架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，公开编程接口见 [API.md](API.md)。
 
 ## 解耦与模块边界
 
@@ -8,15 +8,15 @@
 
 | 子包 | 职责范围 |
 |---|---|
-| `pi-ai` | 对接四大对话协议与分类器协议，内置 26 个常用模型服务商目录，管理凭据解析、OAuth 续期与 Token 计费 |
+| `pi-ai` | 对接流式对话协议与分类器协议，内置 38 个常用模型服务商目录，管理凭据解析、OAuth 续期与 Token 计费 |
 | `pi-agent` | 执行工具参数三阶段转换与 JSON Schema 预编译校验，驱动双层自动执行循环，调度串并行工具与插话／排队输入 |
 | `pi-session` | 管理 JSONL v3 会话追加树、双视图上下文投影、自动／手动压缩、分支总结、静态扩展注册与崩溃恢复状态表 |
 | `pi-runtime` | 提供设置与凭据存储、技能模板加载与 8 个内置编码工具。同步集成工具检索、MCP 客户端、QuickJS 代码沙箱、多模态图片归一化及无头运行入口 |
 
 ## 模型与协议规则
 
-1. **支持协议**：固定支持 `openai-responses`、`openai-completions`、`anthropic-messages`、`google-generative-ai` 四种流式对话协议及 `typesafe-system-one` 分类器协议。DeepSeek 默认使用官方 `openai-responses` 协议，同时兼容 `openai-completions`。
-2. **服务商范围**：内置中国大陆常用国产厂商、国际主流基座及常用聚合网关共 26 个 Provider ID，支持在运行期注册自定义服务商与模型覆盖配置。
+1. **支持协议**：固定支持 `openai-responses`（含 `openai-codex-responses`）、`openai-completions`、`anthropic-messages`、`google-generative-ai` 流式对话协议及 `typesafe-system-one` 分类器协议。DeepSeek 默认使用官方 `openai-completions` 协议。
+2. **服务商范围**：内置中国大陆常用国产厂商、国际主流基座及常用聚合网关共 38 个 Provider ID，支持在运行期注册自定义服务商与模型覆盖配置。
 3. **跨模型清洗**：切换模型或重放历史时自动转换思考块签名，并为未闭合的工具调用补齐错误结果，保证请求上下文合法。
 4. **凭据与目录保护**：OAuth 令牌在到期前 5 分钟自动续期。网络续期失败时保留已存储凭据，不清空用户登录态。动态目录刷新支持取消与发布代次校验，防止过期响应覆盖新目录。
 

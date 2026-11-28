@@ -1251,10 +1251,28 @@ impl ClientHandle {
         api_key: zeroize::Zeroizing<String>,
         base_url: Option<String>,
     ) -> Result<Value, ClientError> {
+        self.save_provider_api_key_with_cloudflare(provider_id, api_key, base_url, None, None)
+            .await
+    }
+
+    pub async fn save_provider_api_key_with_cloudflare(
+        &self,
+        provider_id: String,
+        api_key: zeroize::Zeroizing<String>,
+        base_url: Option<String>,
+        account_id: Option<String>,
+        gateway_id: Option<String>,
+    ) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move {
-            http.save_provider_api_key(&provider_id, api_key, base_url.as_deref())
-                .await
+            http.save_provider_api_key_with_cloudflare(
+                &provider_id,
+                api_key,
+                base_url.as_deref(),
+                account_id.as_deref(),
+                gateway_id.as_deref(),
+            )
+            .await
         })
         .await
     }

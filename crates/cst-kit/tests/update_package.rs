@@ -395,10 +395,34 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
     .unwrap();
     assert_eq!(merged["cstoa"]["etag"], "current-account");
     assert_eq!(merged["cstoa"]["lastModified"], 123);
-    assert_eq!(merged["cstoa"]["models"][0]["id"], "private");
+    assert_eq!(
+        merged["cstoa"]["models"],
+        json!([{"id":"private","maxTokens":9}])
+    );
     assert_eq!(
         merged["deepseek"]["models"],
         json!([{"id":"deepseek-flash","maxTokens":8},{"id":"added","maxTokens":3}])
+    );
+    let old_stamped = br#"{"cstoa":{"etag":"current-account","lastModified":123,"models":[{"id":"private","maxTokens":9}]},"deepseek":{"lastModified":1792068025000,"models":[{"id":"deepseek-flash","maxTokens":64000},{"id":"user-dyn","maxTokens":4096}]}}"#;
+    let next_stamped = br#"{"cstoa":{"etag":"preset","lastModified":999,"models":[{"id":"private","maxTokens":1}]},"deepseek":{"lastModified":1795996800000,"models":[{"id":"deepseek-flash","maxTokens":384000},{"id":"deepseek-v4-pro","maxTokens":384000}]}}"#;
+    let upgraded: Value = serde_json::from_slice(
+        &layout::merge_defaults(
+            "data/config/models-store.json",
+            Some(old_stamped),
+            next_stamped,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(upgraded["cstoa"]["models"][0]["maxTokens"], 9);
+    assert_eq!(upgraded["deepseek"]["lastModified"], 1795996800000u64);
+    assert_eq!(
+        upgraded["deepseek"]["models"],
+        json!([
+            {"id":"deepseek-flash","maxTokens":384000},
+            {"id":"user-dyn","maxTokens":4096},
+            {"id":"deepseek-v4-pro","maxTokens":384000}
+        ])
     );
     assert!(layout::merge_defaults("data/config/auth.json", None, next).is_err());
     assert!(

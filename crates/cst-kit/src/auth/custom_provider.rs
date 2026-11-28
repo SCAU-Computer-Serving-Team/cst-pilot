@@ -12,6 +12,7 @@ use super::{AuthRuntime, oa::validate_base};
 pub enum CustomApi {
     OpenaiCompletions,
     OpenaiResponses,
+    OpenaiCodexResponses,
     AnthropicMessages,
     GoogleGenerativeAi,
 }

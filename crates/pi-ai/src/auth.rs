@@ -488,8 +488,19 @@ pub fn get_api_key_env_vars(provider: &str) -> &'static [&'static str] {
         "zai" => &["ZAI_API_KEY"],
         "minimax-cn" => &["MINIMAX_CN_API_KEY"],
         "minimax" => &["MINIMAX_API_KEY"],
-        "qwen-token-plan-cn" | "qwen-token-plan-individual-cn" => &["QWEN_TOKEN_PLAN_CN_API_KEY"],
-        "qwen-token-plan" | "qwen-token-plan-individual" => &["QWEN_TOKEN_PLAN_API_KEY"],
+        "qwen-token-plan" => &["QWEN_TOKEN_PLAN_TEAM_API_KEY", "QWEN_TOKEN_PLAN_API_KEY"],
+        "qwen-token-plan-cn" => &[
+            "QWEN_TOKEN_PLAN_TEAM_CN_API_KEY",
+            "QWEN_TOKEN_PLAN_CN_API_KEY",
+        ],
+        "qwen-token-plan-individual" => &[
+            "QWEN_TOKEN_PLAN_INDIVIDUAL_API_KEY",
+            "QWEN_TOKEN_PLAN_API_KEY",
+        ],
+        "qwen-token-plan-individual-cn" => &[
+            "QWEN_TOKEN_PLAN_INDIVIDUAL_CN_API_KEY",
+            "QWEN_TOKEN_PLAN_CN_API_KEY",
+        ],
         "xiaomi-token-plan-cn" => &["XIAOMI_TOKEN_PLAN_CN_API_KEY"],
         "xiaomi-token-plan-ams" => &["XIAOMI_TOKEN_PLAN_AMS_API_KEY"],
         "xiaomi-token-plan-sgp" => &["XIAOMI_TOKEN_PLAN_SGP_API_KEY"],
@@ -497,6 +508,7 @@ pub fn get_api_key_env_vars(provider: &str) -> &'static [&'static str] {
         "ant-ling" => &["ANT_LING_API_KEY"],
         "baseten" => &["BASETEN_API_KEY"],
         "cerebras" => &["CEREBRAS_API_KEY"],
+        "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"],
         "cloudflare-ai-gateway" => &["CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_GATEWAY_API_KEY"],
         "fireworks" => &["FIREWORKS_API_KEY"],
         "groq" => &["GROQ_API_KEY"],
@@ -564,6 +576,15 @@ pub type OAuthRefreshFn = Arc<
     dyn Fn(OAuthCredential) -> BoxFuture<'static, Result<OAuthCredential, String>> + Send + Sync,
 >;
 pub type OAuthToAuthFn = Arc<dyn Fn(OAuthCredential) -> Result<ModelAuth, String> + Send + Sync>;
+pub type OAuthAsyncToAuthFn = Arc<
+    dyn Fn(
+            OAuthCredential,
+            Option<ProviderEnv>,
+            Option<CancellationToken>,
+        ) -> BoxFuture<'static, Result<ModelAuth, String>>
+        + Send
+        + Sync,
+>;
 pub type OAuthLoginFn = Arc<
     dyn Fn(
             AuthInteraction,
@@ -590,6 +611,9 @@ pub struct ApiKeyAuth {
     pub resolve_async: Option<ApiKeyAsyncResolverFn>,
     /// Pure declaration for read-only availability; no resolver execution required.
     pub configured_without_credentials: bool,
+    /// True when the provider only accepts environment-variable tokens (e.g. `COPILOT_GITHUB_TOKEN`)
+    /// and must not offer interactive API key login in UI/CLI.
+    pub env_only: bool,
     pub login_fn: Option<ApiKeyLoginFn>,
 }
 
@@ -620,6 +644,7 @@ impl ApiKeyAuth {
             login_fn: None,
             resolve_async: None,
             configured_without_credentials: false,
+            env_only: false,
             resolve: Arc::new(move |cred, env| {
                 if let Some(c) = &cred
                     && let Some(key) = &c.key
@@ -685,6 +710,34 @@ impl ApiKeyAuth {
         }
     }
 
+    pub fn env_only(name: impl Into<String>, provider_id: impl Into<String>) -> Self {
+        let provider_id = provider_id.into();
+        Self {
+            name: name.into(),
+            login_fn: None,
+            resolve_async: None,
+            configured_without_credentials: false,
+            env_only: true,
+            resolve: Arc::new(move |_cred, env| {
+                if let Some(found_vars) = find_env_keys(&provider_id, env.as_ref())
+                    && let Some(first_var) = found_vars.first()
+                    && let Some(val) = get_provider_env(first_var, env.as_ref())
+                {
+                    return Ok(Some(AuthResult {
+                        auth: ModelAuth {
+                            api_key: Some(val),
+                            headers: None,
+                            base_url: None,
+                        },
+                        env,
+                        source: Some(first_var.clone()),
+                    }));
+                }
+                Ok(None)
+            }),
+        }
+    }
+
     pub fn keyless(name: impl Into<String>, placeholder_key: impl Into<String>) -> Self {
         let key = placeholder_key.into();
         Self {
@@ -692,6 +745,7 @@ impl ApiKeyAuth {
             login_fn: None,
             resolve_async: None,
             configured_without_credentials: true,
+            env_only: false,
             resolve: Arc::new(move |cred, env| {
                 let api_key = cred
                     .as_ref()
@@ -719,6 +773,12 @@ impl ApiKeyAuth {
         let login = async {
             if let Some(login_fn) = &self.login_fn {
                 return login_fn(interaction.clone()).await;
+            }
+            if self.env_only {
+                return Err(format!(
+                    "{} only supports environment variable configuration",
+                    self.name
+                ));
             }
             self.login_default(interaction).await
         };
@@ -752,6 +812,7 @@ pub struct OAuthAuth {
     pub is_subscription: bool,
     pub refresh: OAuthRefreshFn,
     pub to_auth: OAuthToAuthFn,
+    pub to_auth_async: Option<OAuthAsyncToAuthFn>,
     pub login_fn: Option<OAuthLoginFn>,
 }
 
@@ -984,6 +1045,22 @@ impl OAuthAuth {
         login::cancellable(interaction, login_fn(interaction.clone(), options.cloned())).await
     }
 
+    pub async fn derive_auth(
+        &self,
+        cred: OAuthCredential,
+        env: Option<ProviderEnv>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<ModelAuth, String> {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Err("Request was aborted".to_owned());
+        }
+        if let Some(to_auth_async) = &self.to_auth_async {
+            to_auth_async(cred, env, cancel.cloned()).await
+        } else {
+            (self.to_auth)(cred)
+        }
+    }
+
     pub fn bearer(name: impl Into<String>, is_subscription: bool) -> Self {
         Self {
             name: name.into(),
@@ -1031,6 +1108,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1088,6 +1166,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1140,6 +1219,7 @@ impl OAuthAuth {
                     Ok(refreshed)
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1205,6 +1285,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 let account_id = cred
                     .extra
@@ -1275,6 +1356,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: None,
@@ -1335,6 +1417,7 @@ impl OAuthAuth {
                     })
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1361,6 +1444,7 @@ impl OAuthAuth {
                     Ok(cred)
                 })
             }),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 Ok(ModelAuth {
                     api_key: Some(cred.access),
@@ -1379,6 +1463,7 @@ impl OAuthAuth {
                 Box::pin(login::copilot(interaction, options))
             })),
             refresh: Arc::new(|cred| Box::pin(login::refresh_copilot(cred, false))),
+            to_auth_async: None,
             to_auth: Arc::new(|cred| {
                 let enterprise = cred
                     .extra
@@ -1590,12 +1675,35 @@ pub async fn resolve_provider_auth_cancellable(
 
     if let Some(explicit_key) = overrides.and_then(|o| o.api_key.clone())
         && let Some(api_key_auth) = &auth.api_key
+        && !api_key_auth.env_only
     {
+        let stored_env = match cancel_token {
+            Some(token) => tokio::select! {
+                _ = token.cancelled() => {
+                    return Err(ModelsError::new(ModelsErrorCode::Auth, "Request was aborted"));
+                }
+                res = credentials.read(provider_id) => res.ok().flatten(),
+            },
+            None => credentials.read(provider_id).await.ok().flatten(),
+        }
+        .and_then(|cred| match cred {
+            Credential::ApiKey(api) => api.env,
+            Credential::OAuth(_) => None,
+        });
+        let merged_env = match (stored_env, override_env) {
+            (Some(mut base), Some(ov)) => {
+                base.extend(ov);
+                Some(base)
+            }
+            (Some(base), None) => Some(base),
+            (None, Some(ov)) => Some(ov),
+            (None, None) => None,
+        };
         return api_key_auth
             .resolve_for_request(
                 Some(ApiKeyCredential {
                     key: Some(explicit_key),
-                    env: override_env,
+                    env: merged_env,
                 }),
                 None,
                 cancel_token,
@@ -1666,12 +1774,15 @@ pub async fn resolve_provider_auth_cancellable(
                     oauth_cred
                 };
 
-                let model_auth = (oauth_auth.to_auth)(active_cred).map_err(|e| {
-                    ModelsError::new(
-                        ModelsErrorCode::OAuth,
-                        format!("OAuth auth derivation failed for {provider_id}: {e}"),
-                    )
-                })?;
+                let model_auth = oauth_auth
+                    .derive_auth(active_cred, override_env, cancel_token)
+                    .await
+                    .map_err(|e| {
+                        ModelsError::new(
+                            ModelsErrorCode::OAuth,
+                            format!("OAuth auth derivation failed for {provider_id}: {e}"),
+                        )
+                    })?;
 
                 return Ok(Some(AuthResult {
                     auth: model_auth,
@@ -1683,20 +1794,22 @@ pub async fn resolve_provider_auth_cancellable(
                 let Some(api_key_auth) = &auth.api_key else {
                     return Ok(None);
                 };
-                if let Some(ov_env) = override_env {
-                    let mut merged = api_cred.env.unwrap_or_default();
-                    merged.extend(ov_env);
-                    api_cred.env = Some(merged);
+                if !api_key_auth.env_only {
+                    if let Some(ov_env) = override_env {
+                        let mut merged = api_cred.env.unwrap_or_default();
+                        merged.extend(ov_env);
+                        api_cred.env = Some(merged);
+                    }
+                    return api_key_auth
+                        .resolve_for_request(Some(api_cred), None, cancel_token)
+                        .await
+                        .map_err(|e| {
+                            ModelsError::new(
+                                ModelsErrorCode::Auth,
+                                format!("API key auth failed for provider {provider_id}: {e}"),
+                            )
+                        });
                 }
-                return api_key_auth
-                    .resolve_for_request(Some(api_cred), None, cancel_token)
-                    .await
-                    .map_err(|e| {
-                        ModelsError::new(
-                            ModelsErrorCode::Auth,
-                            format!("API key auth failed for provider {provider_id}: {e}"),
-                        )
-                    });
             }
         }
     }

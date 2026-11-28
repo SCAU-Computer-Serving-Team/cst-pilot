@@ -74,6 +74,8 @@ pub fn convert_completions_messages(model: &Model, context: &TranscriptContext) 
         .unwrap_or(model.provider == "openai");
     let requires_assistant_after_tool =
         compat.requires_assistant_after_tool_result.unwrap_or(false);
+    let requires_non_null_assistant_content =
+        compat.requires_non_null_assistant_content.unwrap_or(false);
     let requires_thinking_as_text = compat.requires_thinking_as_text.unwrap_or(false);
     let requires_reasoning_content = compat
         .requires_reasoning_content_on_assistant_messages
@@ -169,7 +171,7 @@ pub fn convert_completions_messages(model: &Model, context: &TranscriptContext) 
                 assistant_obj.insert("role".to_owned(), Value::String("assistant".to_owned()));
                 assistant_obj.insert(
                     "content".to_owned(),
-                    if requires_assistant_after_tool {
+                    if requires_assistant_after_tool || requires_non_null_assistant_content {
                         Value::String(String::new())
                     } else {
                         Value::Null
@@ -482,59 +484,175 @@ pub fn build_completions_params(
     }
 
     let req_effort = options.and_then(|o| o.reasoning_effort);
+    let thinking_budget = resolve_clamped_thinking_budget(model, options, &params);
     if model.reasoning {
-        let thinking_format =
-            compat
-                .thinking_format
-                .as_deref()
-                .unwrap_or(match model.provider.as_str() {
-                    "deepseek" => "deepseek",
-                    "zai" | "zai-coding-cn" => "zai",
-                    "qwen-token-plan-cn" | "qwen-token-plan" | "qwen-token-plan-individual" => {
-                        "qwen"
-                    }
-                    "openrouter" => "openrouter",
-                    "ant-ling" => "ant-ling",
-                    _ => "openai",
-                });
-
-        if let Some(level) = req_effort {
+        let supports_reasoning_effort = compat
+            .supports_reasoning_effort
+            .unwrap_or_else(|| detect_default_supports_reasoning_effort(model));
+        let thinking_format = compat
+            .thinking_format
+            .as_deref()
+            .unwrap_or_else(|| detect_default_thinking_format(model));
+        let mapped_effort = req_effort.map(|level| {
             let model_level = ModelThinkingLevel::from(level);
-            let mapped_effort = model
+            model
                 .thinking_level_map
                 .as_ref()
                 .and_then(|m| m.get(&model_level))
                 .and_then(|v| v.clone())
-                .unwrap_or_else(|| level.as_str().to_owned());
+                .unwrap_or_else(|| level.as_str().to_owned())
+        });
+        let off_entry = model
+            .thinking_level_map
+            .as_ref()
+            .and_then(|m| m.get(&ModelThinkingLevel::Off));
+        let off_is_disabled = off_entry == Some(&None);
+        let off_mapped = off_entry.and_then(|v| v.clone());
 
-            match thinking_format {
-                "deepseek" => {
-                    params.insert("thinking".to_owned(), json!({ "type": "enabled" }));
-                    params.insert("reasoning_effort".to_owned(), Value::String(mapped_effort));
-                }
-                "zai" => {
-                    params.insert("thinking".to_owned(), json!({ "type": "enabled" }));
-                }
-                "qwen" => {
-                    params.insert("enable_thinking".to_owned(), Value::Bool(true));
-                }
-                "openrouter" | "ant-ling" => {
-                    params.insert("reasoning".to_owned(), json!({ "effort": mapped_effort }));
-                }
-                _ => {
-                    params.insert("reasoning_effort".to_owned(), Value::String(mapped_effort));
-                }
-            }
-        } else {
-            match thinking_format {
-                "deepseek" | "zai" => {
+        match thinking_format {
+            "zai" => {
+                if let Some(effort) = mapped_effort {
+                    params.insert(
+                        "thinking".to_owned(),
+                        json!({ "type": "enabled", "clear_thinking": false }),
+                    );
+                    if supports_reasoning_effort {
+                        params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                    }
+                } else {
                     params.insert("thinking".to_owned(), json!({ "type": "disabled" }));
                 }
-                "qwen" => {
-                    params.insert("enable_thinking".to_owned(), Value::Bool(false));
-                }
-                _ => {}
             }
+            "qwen" => {
+                params.insert(
+                    "enable_thinking".to_owned(),
+                    Value::Bool(req_effort.is_some()),
+                );
+                if let Some(effort) = mapped_effort
+                    && supports_reasoning_effort
+                {
+                    params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                }
+            }
+            "qwen-chat-template" => {
+                params.insert(
+                    "chat_template_kwargs".to_owned(),
+                    json!({
+                        "enable_thinking": req_effort.is_some(),
+                        "preserve_thinking": true,
+                    }),
+                );
+            }
+            "chat-template" => {
+                if let Some(ref raw_kwargs) = compat.chat_template_kwargs
+                    && let Some(kwargs) =
+                        build_chat_template_values(model, req_effort, raw_kwargs, thinking_budget)
+                {
+                    params.insert("chat_template_kwargs".to_owned(), Value::Object(kwargs));
+                }
+            }
+            "baseten" => {
+                if let Some(ref raw_args) = compat.chat_template_args
+                    && let Some(args) =
+                        build_chat_template_values(model, req_effort, raw_args, thinking_budget)
+                {
+                    params.insert("chat_template_args".to_owned(), Value::Object(args));
+                }
+                if supports_reasoning_effort {
+                    if let Some(effort) = mapped_effort {
+                        params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                    } else if let Some(off_val) = off_mapped {
+                        params.insert("reasoning_effort".to_owned(), Value::String(off_val));
+                    }
+                }
+            }
+            "deepseek" => {
+                if let Some(effort) = mapped_effort {
+                    params.insert("thinking".to_owned(), json!({ "type": "enabled" }));
+                    if supports_reasoning_effort {
+                        params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                    }
+                } else if !off_is_disabled {
+                    params.insert("thinking".to_owned(), json!({ "type": "disabled" }));
+                }
+            }
+            "openrouter" => {
+                if let Some(effort) = mapped_effort {
+                    params.insert("reasoning".to_owned(), json!({ "effort": effort }));
+                } else if !off_is_disabled {
+                    let effort = off_mapped.unwrap_or_else(|| "none".to_owned());
+                    params.insert("reasoning".to_owned(), json!({ "effort": effort }));
+                }
+            }
+            "ant-ling" => {
+                if let Some(level) = req_effort {
+                    let model_level = ModelThinkingLevel::from(level);
+                    if let Some(Some(effort)) = model
+                        .thinking_level_map
+                        .as_ref()
+                        .and_then(|m| m.get(&model_level))
+                    {
+                        params.insert("reasoning".to_owned(), json!({ "effort": effort }));
+                    }
+                }
+            }
+            "together" => {
+                params.insert(
+                    "reasoning".to_owned(),
+                    json!({ "enabled": req_effort.is_some() }),
+                );
+                if let Some(effort) = mapped_effort
+                    && supports_reasoning_effort
+                {
+                    params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                }
+            }
+            "string-thinking" => {
+                if let Some(effort) = mapped_effort {
+                    params.insert("thinking".to_owned(), Value::String(effort));
+                } else if !off_is_disabled {
+                    let val = off_mapped.unwrap_or_else(|| "none".to_owned());
+                    params.insert("thinking".to_owned(), Value::String(val));
+                }
+            }
+            _ => {
+                if supports_reasoning_effort {
+                    if let Some(effort) = mapped_effort {
+                        params.insert("reasoning_effort".to_owned(), Value::String(effort));
+                    } else if let Some(off_val) = off_mapped {
+                        params.insert("reasoning_effort".to_owned(), Value::String(off_val));
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(budget_field) = resolve_thinking_token_budget_field(&compat)
+        && let Some(budget) = thinking_budget
+    {
+        params.insert(budget_field.to_owned(), Value::from(budget));
+    }
+
+    if let Some(ref routing) = compat.open_router_routing
+        && routing.as_object().is_some_and(|m| !m.is_empty())
+    {
+        params.insert("provider".to_owned(), routing.clone());
+    }
+    if let Some(ref routing) = compat.vercel_gateway_routing
+        && let Some(obj) = routing.as_object()
+    {
+        let mut gw = Map::new();
+        if let Some(only) = obj.get("only") {
+            gw.insert("only".to_owned(), only.clone());
+        }
+        if let Some(order) = obj.get("order") {
+            gw.insert("order".to_owned(), order.clone());
+        }
+        if !gw.is_empty() {
+            params.insert(
+                "providerOptions".to_owned(),
+                json!({ "gateway": Value::Object(gw) }),
+            );
         }
     }
 
@@ -552,6 +670,150 @@ pub fn build_completions_params(
     }
 
     Value::Object(params)
+}
+
+fn detect_default_supports_reasoning_effort(model: &Model) -> bool {
+    let p = model.provider.as_str();
+    let u = model.base_url.as_str();
+    let is_grok = p == "xai" || u.contains("api.x.ai");
+    let is_zai = p == "zai"
+        || p == "zai-coding-cn"
+        || u.contains("api.z.ai")
+        || u.contains("open.bigmodel.cn");
+    let is_moonshot = p == "moonshotai" || p == "moonshotai-cn" || u.contains("api.moonshot.");
+    let is_together =
+        p == "together" || u.contains("api.together.ai") || u.contains("api.together.xyz");
+    let is_cf_gateway = p == "cloudflare-ai-gateway" || u.contains("gateway.ai.cloudflare.com");
+    let is_nvidia = p == "nvidia" || u.contains("integrate.api.nvidia.com");
+    let is_ant_ling = p == "ant-ling" || u.contains("api.ant-ling.com");
+    !(is_grok || is_zai || is_moonshot || is_together || is_cf_gateway || is_nvidia || is_ant_ling)
+}
+
+fn detect_default_thinking_format(model: &Model) -> &'static str {
+    let p = model.provider.as_str();
+    let u = model.base_url.as_str();
+    let lower_u = u.to_ascii_lowercase();
+    if p == "deepseek" || lower_u.contains("deepseek.com") {
+        "deepseek"
+    } else if p == "zai"
+        || p == "zai-coding-cn"
+        || u.contains("api.z.ai")
+        || u.contains("open.bigmodel.cn")
+    {
+        "zai"
+    } else if matches!(
+        p,
+        "qwen-token-plan-cn"
+            | "qwen-token-plan"
+            | "qwen-token-plan-individual"
+            | "qwen-token-plan-individual-cn"
+    ) {
+        "qwen"
+    } else if p == "together" || u.contains("api.together.ai") || u.contains("api.together.xyz") {
+        "together"
+    } else if p == "ant-ling" || u.contains("api.ant-ling.com") {
+        "ant-ling"
+    } else if p == "openrouter" || u.contains("openrouter.ai") {
+        "openrouter"
+    } else {
+        "openai"
+    }
+}
+
+fn resolve_thinking_token_budget_field(compat: &ProviderCompat) -> Option<&'static str> {
+    if let Some(ref field) = compat.thinking_token_budget_field {
+        return Some(match field {
+            crate::types::ThinkingTokenBudgetField::ThinkingTokenBudget => "thinking_token_budget",
+            crate::types::ThinkingTokenBudgetField::ThinkingBudget => "thinking_budget",
+            crate::types::ThinkingTokenBudgetField::ThinkingBudgetTokens => {
+                "thinking_budget_tokens"
+            }
+        });
+    }
+    if compat.supports_thinking_token_budget == Some(true) {
+        return Some("thinking_token_budget");
+    }
+    None
+}
+
+fn resolve_clamped_thinking_budget(
+    model: &Model,
+    options: Option<&StreamOptions>,
+    params: &Map<String, Value>,
+) -> Option<u64> {
+    let level = options.and_then(|o| o.reasoning_effort)?;
+    if !model.reasoning {
+        return None;
+    }
+    let ceiling = params
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| params.get("max_completion_tokens").and_then(Value::as_u64))
+        .unwrap_or(model.max_tokens);
+    let raw =
+        super::thinking_budget_for_level(level, options.and_then(|o| o.thinking_budgets.as_ref()));
+    let clamped = raw.min(ceiling.saturating_sub(super::MIN_ANSWER_TOKENS));
+    (clamped > 0).then_some(clamped)
+}
+
+fn build_chat_template_values(
+    model: &Model,
+    req_effort: Option<crate::types::ThinkingLevel>,
+    values: &BTreeMap<String, Value>,
+    thinking_budget: Option<u64>,
+) -> Option<Map<String, Value>> {
+    let mut out = Map::new();
+    for (key, val) in values {
+        if let Some(resolved) =
+            resolve_chat_template_kwarg_value(model, req_effort, val, thinking_budget)
+        {
+            out.insert(key.clone(), resolved);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+fn resolve_chat_template_kwarg_value(
+    model: &Model,
+    req_effort: Option<crate::types::ThinkingLevel>,
+    val: &Value,
+    thinking_budget: Option<u64>,
+) -> Option<Value> {
+    let Some(obj) = val.as_object() else {
+        return match val {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Some(val.clone()),
+            _ => None,
+        };
+    };
+    if req_effort.is_none() && obj.get("omitWhenOff").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    match obj.get("$var").and_then(Value::as_str) {
+        Some("thinking.enabled") => Some(Value::Bool(req_effort.is_some())),
+        Some("thinking.budget") => thinking_budget.map(Value::from),
+        Some("thinking.effort") => {
+            if let Some(level) = req_effort {
+                let model_level = ModelThinkingLevel::from(level);
+                match model
+                    .thinking_level_map
+                    .as_ref()
+                    .and_then(|m| m.get(&model_level))
+                {
+                    Some(Some(mapped)) => Some(Value::String(mapped.clone())),
+                    Some(None) => None,
+                    None => Some(Value::String(level.as_str().to_owned())),
+                }
+            } else {
+                model
+                    .thinking_level_map
+                    .as_ref()
+                    .and_then(|m| m.get(&ModelThinkingLevel::Off))
+                    .and_then(|v| v.clone())
+                    .map(Value::String)
+            }
+        }
+        _ => None,
+    }
 }
 
 fn is_openai_reasoning_detail(val: &Value) -> bool {
@@ -1121,11 +1383,21 @@ pub fn stream(
         let cancel_token = options.as_ref().and_then(|o| o.cancel_token.clone());
 
         let run: Result<(), String> = async {
-            let api_key = require_client_api_key(
-                &model.provider,
-                options.as_ref().and_then(|o| o.api_key.as_deref()),
-                options.as_ref().and_then(|o| o.headers.as_ref()),
-            )?;
+            let explicit_key = options
+                .as_ref()
+                .and_then(|o| o.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .map(str::to_owned);
+            let api_key =
+                if super::has_model_auth_header(model.headers.as_ref()) && explicit_key.is_none() {
+                    "unused".to_owned()
+                } else {
+                    require_client_api_key(
+                        &model.provider,
+                        explicit_key.as_deref(),
+                        options.as_ref().and_then(|o| o.headers.as_ref()),
+                    )?
+                };
 
             let mut opt_headers: ProviderHeaders = options
                 .as_ref()
@@ -1134,15 +1406,18 @@ pub fn stream(
             inject_copilot_dynamic_headers(&model, context.messages(), &mut opt_headers);
 
             let auth_val = format!("Bearer {api_key}");
+            let mut default_headers = vec![
+                ("content-type", "application/json"),
+                ("accept", "text/event-stream"),
+            ];
+            if explicit_key.is_some() {
+                default_headers.insert(0, ("authorization", auth_val.as_str()));
+            }
             let headers = build_header_map(
                 (&model.provider, &model.base_url),
                 options.as_ref().and_then(|o| o.identity.as_ref()),
                 options.as_ref().and_then(|o| o.session_id.as_deref()),
-                &[
-                    ("authorization", &auth_val),
-                    ("content-type", "application/json"),
-                    ("accept", "text/event-stream"),
-                ],
+                &default_headers,
                 model.headers.as_ref(),
                 Some(&opt_headers),
             );

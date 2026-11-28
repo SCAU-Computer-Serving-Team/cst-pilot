@@ -274,6 +274,7 @@ pub fn with_virtual_models(
             login_fn: None,
             resolve_async: None,
             configured_without_credentials: false,
+            env_only: true,
             resolve: Arc::new(|_cred, _opts| {
                 Ok(Some(AuthResult {
                     auth: Default::default(),

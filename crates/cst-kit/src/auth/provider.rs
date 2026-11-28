@@ -26,6 +26,7 @@ pub(crate) fn create(
         name: "CSTOA APIKEY".into(),
         resolve_async: None,
         configured_without_credentials: false,
+        env_only: false,
         resolve: Arc::new(move |credential, _| {
             Ok(credential
                 .and_then(|c| c.key)
@@ -94,6 +95,7 @@ pub(crate) fn create(
             let client = refresh_client.clone();
             Box::pin(async move { client.refresh(credential, CancellationToken::new()).await })
         }),
+        to_auth_async: None,
         to_auth: Arc::new(move |credential| {
             let base_url = to_auth_client.model_base(&Credential::OAuth(credential.clone()));
             Ok(ModelAuth {

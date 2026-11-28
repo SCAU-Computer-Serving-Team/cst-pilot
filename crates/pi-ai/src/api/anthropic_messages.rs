@@ -984,15 +984,27 @@ pub fn stream(
         let cancel_token = options.as_ref().and_then(|o| o.cancel_token.clone());
 
         let run: Result<(), String> = async {
-            let api_key = require_client_api_key(
-                &model.provider,
-                options.as_ref().and_then(|o| o.api_key.as_deref()),
-                options.as_ref().and_then(|o| o.headers.as_ref()),
-            )?;
+            let explicit_key = options
+                .as_ref()
+                .and_then(|o| o.api_key.as_deref())
+                .filter(|k| !k.is_empty())
+                .map(str::to_owned);
+            let api_key =
+                if super::has_model_auth_header(model.headers.as_ref()) && explicit_key.is_none() {
+                    "unused".to_owned()
+                } else {
+                    require_client_api_key(
+                        &model.provider,
+                        explicit_key.as_deref(),
+                        options.as_ref().and_then(|o| o.headers.as_ref()),
+                    )?
+                };
 
             let mut effective_options = options.unwrap_or_default();
-            effective_options.api_key = Some(api_key.clone());
-            let is_oauth = is_anthropic_oauth(&model, Some(&api_key));
+            if explicit_key.is_some() {
+                effective_options.api_key = Some(api_key.clone());
+            }
+            let is_oauth = explicit_key.is_some() && is_anthropic_oauth(&model, Some(&api_key));
             let is_bearer = is_oauth || model.provider == "github-copilot";
             let bearer_val = format!("Bearer {api_key}");
             let claude_cli_ua = format!("claude-cli/{CLAUDE_CODE_VERSION}");
@@ -1003,10 +1015,12 @@ pub fn stream(
                 ("accept", "text/event-stream"),
                 ("anthropic-dangerous-direct-browser-access", "true"),
             ];
-            if is_bearer {
-                default_headers.push(("authorization", &bearer_val));
-            } else {
-                default_headers.push(("x-api-key", &api_key));
+            if explicit_key.is_some() {
+                if is_bearer {
+                    default_headers.push(("authorization", &bearer_val));
+                } else {
+                    default_headers.push(("x-api-key", &api_key));
+                }
             }
             if is_oauth {
                 default_headers.push(("user-agent", &claude_cli_ua));

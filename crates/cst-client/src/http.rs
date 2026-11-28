@@ -1416,17 +1416,35 @@ impl AppHttpClient {
         api_key: zeroize::Zeroizing<String>,
         base_url: Option<&str>,
     ) -> Result<Value, ClientError> {
+        self.save_provider_api_key_with_cloudflare(provider_id, api_key, base_url, None, None)
+            .await
+    }
+
+    pub async fn save_provider_api_key_with_cloudflare(
+        &self,
+        provider_id: &str,
+        api_key: zeroize::Zeroizing<String>,
+        base_url: Option<&str>,
+        account_id: Option<&str>,
+        gateway_id: Option<&str>,
+    ) -> Result<Value, ClientError> {
         let pid = encode_segment(provider_id);
         #[derive(serde::Serialize)]
         struct ApiKeyBody<'a> {
             key: &'a str,
             #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none")]
             base_url: Option<&'a str>,
+            #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
+            account_id: Option<&'a str>,
+            #[serde(rename = "gatewayId", skip_serializing_if = "Option::is_none")]
+            gateway_id: Option<&'a str>,
         }
 
         let body = secret_json_body(&ApiKeyBody {
             key: api_key.as_str(),
             base_url: base_url.filter(|s| !s.trim().is_empty()),
+            account_id: account_id.map(str::trim).filter(|s| !s.is_empty()),
+            gateway_id: gateway_id.map(str::trim).filter(|s| !s.is_empty()),
         })?;
         drop(api_key);
         self.request_json_body(

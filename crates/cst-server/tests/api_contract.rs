@@ -2107,5 +2107,117 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
         .unwrap();
     assert_eq!(put_resp.status().as_u16(), 200);
 
+    // 6. Pi 1.6.0 服务商契约校验：隐藏 typesafe、禁止 Codex/Copilot 交互式密钥登录、支持 Cloudflare 多字段 PUT 与密钥轮换
+    let list_json: Value = client
+        .get(format!("{}/api/auth", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let provs = list_json["providers"].as_array().unwrap();
+    assert!(!provs.iter().any(|p| p["id"] == "typesafe"));
+    let codex_row = provs.iter().find(|p| p["id"] == "openai-codex").unwrap();
+    assert_eq!(codex_row["supportsApiKey"], false);
+    assert_eq!(codex_row["supportsOAuth"], true);
+    let copilot_row = provs.iter().find(|p| p["id"] == "github-copilot").unwrap();
+    assert_eq!(copilot_row["supportsApiKey"], false);
+    assert_eq!(copilot_row["supportsOAuth"], true);
+
+    for blocked in ["openai-codex", "github-copilot"] {
+        let resp = client
+            .put(format!("{}/api/auth/{blocked}/api-key", server.base_url()))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", format!("blocked-{blocked}"))
+            .json(&json!({ "key": "should-fail" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 400);
+    }
+
+    let missing_acc = client
+        .put(format!(
+            "{}/api/auth/cloudflare-workers-ai/api-key",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "cf-workers-missing-acc")
+        .json(&json!({ "key": "cf-tok-1" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_acc.status().as_u16(), 400);
+
+    let ok_workers = client
+        .put(format!(
+            "{}/api/auth/cloudflare-workers-ai/api-key",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "cf-workers-ok")
+        .json(&json!({ "key": "cf-tok-1", "accountId": "acc_srv_01" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_workers.status().as_u16(), 200);
+
+    let rotate_workers = client
+        .put(format!(
+            "{}/api/auth/cloudflare-workers-ai/api-key",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "cf-workers-rotate")
+        .json(&json!({ "key": "cf-tok-2" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rotate_workers.status().as_u16(), 200);
+
+    let ok_gateway = client
+        .put(format!(
+            "{}/api/auth/cloudflare-ai-gateway/api-key",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "cf-gateway-ok")
+        .json(&json!({
+            "key": "cf-gw-tok",
+            "accountId": "acc_gw_01",
+            "gatewayId": "gw_main_01"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_gateway.status().as_u16(), 200);
+
+    let list_after: Value = client
+        .get(format!("{}/api/auth", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let provs_after = list_after["providers"].as_array().unwrap();
+    for cf_id in ["cloudflare-workers-ai", "cloudflare-ai-gateway"] {
+        let row = provs_after.iter().find(|p| p["id"] == cf_id).unwrap();
+        assert_eq!(row["configured"], true, "{cf_id} must report configured");
+    }
+
     server.shutdown().await;
 }
