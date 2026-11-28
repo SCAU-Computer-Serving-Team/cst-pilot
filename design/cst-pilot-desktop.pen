@@ -18869,6 +18869,7 @@
                                   "name": "分组 · 当前会话命令",
                                   "width": "fill_container",
                                   "layout": "vertical",
+                                  "gap": "$space-tight",
                                   "children": [
                                     {
                                       "type": "frame",
@@ -18914,7 +18915,7 @@
                                       "id": "r8Rek",
                                       "name": "条目 · export",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "fill": "$bg-item-active",
                                       "cornerRadius": "$radius-control",
                                       "padding": [
@@ -18995,7 +18996,7 @@
                                       "id": "l36aKo",
                                       "name": "条目 · tree",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19075,7 +19076,7 @@
                                       "id": "T8apJN",
                                       "name": "条目 · compact",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19155,7 +19156,7 @@
                                       "id": "FNcBW",
                                       "name": "条目 · fork",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19246,6 +19247,7 @@
                                   "name": "分组 · 常见导航",
                                   "width": "fill_container",
                                   "layout": "vertical",
+                                  "gap": "$space-tight",
                                   "children": [
                                     {
                                       "type": "frame",
@@ -19291,7 +19293,7 @@
                                       "id": "b1YxV6",
                                       "name": "条目 · 新建对话",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19371,7 +19373,7 @@
                                       "id": "ByB5R",
                                       "name": "条目 · 打开全部会话",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19431,7 +19433,7 @@
                                       "id": "Qps1z",
                                       "name": "条目 · 切换侧边栏显示",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19511,7 +19513,7 @@
                                       "id": "H5s5ey",
                                       "name": "条目 · 打开设置",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -19591,7 +19593,7 @@
                                       "id": "VIE4H",
                                       "name": "条目 · 打开网页端",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -24978,6 +24980,7 @@
                                   "name": "分组 · 指定会话",
                                   "width": "fill_container",
                                   "layout": "vertical",
+                                  "gap": "$space-tight",
                                   "children": [
                                     {
                                       "type": "frame",
@@ -25023,7 +25026,7 @@
                                       "id": "UOOzy",
                                       "name": "条目 · C 盘空间与硬盘信息",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "fill": "$bg-item-active",
                                       "cornerRadius": "$radius-control",
                                       "padding": [
@@ -25120,7 +25123,7 @@
                                       "id": "L5Kx1v",
                                       "name": "条目 · D 盘微信与容器缓存迁移核对",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -25191,7 +25194,7 @@
                                       "id": "YEWD6",
                                       "name": "条目 · 风扇狂转还降频",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -25262,7 +25265,7 @@
                                       "id": "pjNGy",
                                       "name": "条目 · 开机要等三分钟",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -25344,6 +25347,7 @@
                                   "name": "分组 · 近期导出",
                                   "width": "fill_container",
                                   "layout": "vertical",
+                                  "gap": "$space-tight",
                                   "children": [
                                     {
                                       "type": "frame",
@@ -25389,7 +25393,7 @@
                                       "id": "ay74O",
                                       "name": "条目 · C 盘空间与硬盘信息",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -25471,7 +25475,7 @@
                                       "id": "W9QlYf",
                                       "name": "条目 · D 盘微信与容器缓存迁移核对",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,
@@ -25553,7 +25557,7 @@
                                       "id": "gyX8E",
                                       "name": "条目 · 风扇狂转还降频",
                                       "width": "fill_container",
-                                      "height": 36,
+                                      "height": 40,
                                       "cornerRadius": "$radius-control",
                                       "padding": [
                                         0,

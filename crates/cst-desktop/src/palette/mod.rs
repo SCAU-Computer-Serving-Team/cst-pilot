@@ -686,15 +686,16 @@ impl Render for CommandPaletteModal {
 
         let mut list = div()
             .id("command-palette-list")
+            .test_support()
             .track_scroll(&self.scroll_handle)
             .relative()
             .w_full()
-            .max_h(px(380.0))
+            .max_h(px(432.0))
             .overflow_y_scroll()
             .p(space::SM)
             .flex()
             .flex_col()
-            .gap(space::MICRO);
+            .gap(space::XS);
 
         if entries.is_empty() {
             list = list.child(
@@ -715,6 +716,7 @@ impl Render for CommandPaletteModal {
                         list = list.child(
                             div()
                                 .w_full()
+                                .flex_shrink_0()
                                 .py(space::XS)
                                 .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
                         );
@@ -723,7 +725,8 @@ impl Render for CommandPaletteModal {
                     list = list.child(
                         apply_scale(div(), scale::CAPTION)
                             .w_full()
-                            .h(px(24.0))
+                            .h(height::INLINE)
+                            .flex_shrink_0()
                             .px(space::MD)
                             .flex()
                             .items_center()
@@ -782,7 +785,8 @@ impl Render for CommandPaletteModal {
                     .test_support()
                     .a11y_listitem(row_id, entry.title.clone(), is_sel)
                     .w_full()
-                    .h(px(36.0))
+                    .h(height::FIELD)
+                    .flex_shrink_0()
                     .px(space::MD)
                     .rounded(radius::CONTROL)
                     .bg(if is_sel {
@@ -861,7 +865,7 @@ impl Render for CommandPaletteModal {
             .test_support()
             .a11y_dialog("command-palette-modal", self.mode.dialog_label())
             .w(layout::PALETTE_MODAL_WIDTH)
-            .max_h(px(460.0))
+            .max_h(px(480.0))
             .rounded(radius::ROW)
             .border_1()
             .border_color(palette.border_hairline)
@@ -885,6 +889,7 @@ impl Render for CommandPaletteModal {
                         div()
                             .w_full()
                             .h(px(48.0))
+                            .flex_shrink_0()
                             .px(space::LG)
                             .border_b_1()
                             .border_color(palette.border_subtle)
