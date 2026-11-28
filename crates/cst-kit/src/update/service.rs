@@ -911,19 +911,26 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
 
     let clean_data = cst_os::strip_windows_verbatim_prefix(kit_layout.data_dir());
     let full = clean_data.join("config");
+    if !full.is_absolute() || !full.has_root() {
+        return Err("数据目录必须是绝对路径。".into());
+    }
     let mut anchor = PathBuf::new();
+    let mut saw_root_dir = false;
     let mut rel_target = PathBuf::new();
     for comp in full.components() {
         match comp {
             Component::Prefix(p) => anchor.push(p.as_os_str()),
-            Component::RootDir => anchor.push(comp.as_os_str()),
+            Component::RootDir => {
+                saw_root_dir = true;
+                anchor.push(comp.as_os_str());
+            }
             Component::Normal(part) => rel_target.push(part),
             Component::CurDir | Component::ParentDir => {
                 return Err("配置目录路径无效。".into());
             }
         }
     }
-    if anchor.as_os_str().is_empty() {
+    if !saw_root_dir || anchor.as_os_str().is_empty() {
         return Err("数据目录必须是绝对路径。".into());
     }
 
@@ -1136,6 +1143,13 @@ mod tests {
 
         #[cfg(windows)]
         {
+            // Drive-relative path (`C:rel`) must be rejected instead of resolving against CWD
+            let drive_rel = cst_os::KitLayout::with_data_dir(&dir, "C:rel-cst-data").unwrap();
+            assert!(
+                resolve_update_allow_tun(&drive_rel).is_err(),
+                "drive-relative data_dir must be rejected"
+            );
+
             // Unprivileged NTFS directory junction on ancestor or config file path is rejected
             let j_target = ext_base.join("real-target");
             std::fs::create_dir_all(j_target.join("config")).unwrap();

@@ -727,7 +727,6 @@ pub fn try_open_read_in_pinned_dir(
 ) -> Result<Option<(File, FileIdentity, u64)>, String> {
     #[cfg(windows)]
     {
-        let _ = fallback_path;
         let file = match nt_open_relative_no_reparse(parent_dir, file_name, false) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -740,6 +739,17 @@ pub fn try_open_read_in_pinned_dir(
             return Err("已打开句柄不是普通文件。".into());
         }
         let opened_id = FileIdentity::from_file(&file)?;
+        if !fallback_path.as_os_str().is_empty() {
+            let lmeta =
+                fs::symlink_metadata(fallback_path).map_err(|e| io_error("复核文件链接状态", e))?;
+            if is_reparse_or_symlink(&lmeta) || !lmeta.is_file() {
+                return Err("目标路径包含链接、重解析点或非普通文件。".into());
+            }
+            let path_id = FileIdentity::from_path(fallback_path)?;
+            if opened_id != path_id {
+                return Err("打开期间文件真实身份发生变化。".into());
+            }
+        }
         Ok(Some((file, opened_id, fmeta.len())))
     }
     #[cfg(not(windows))]

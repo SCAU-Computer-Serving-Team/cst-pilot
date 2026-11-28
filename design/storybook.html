@@ -6815,14 +6815,13 @@ const STORIES = [
       const line = stageEl.querySelector("#vp-line");
       const demoBody = stageEl.querySelector("#vp-hairline-demo");
 
+      let recentStagePointer = null;
       let lastStagePointer = null;
-      function setStageKbdActive(on, seedEvent = null) {
+      function setStageKbdActive(on) {
         if (on) {
           stageWrap?.setAttribute("data-kbd-active", "true");
           bar?.setAttribute("data-kbd-active", "true");
-          if (seedEvent && typeof seedEvent.clientX === "number") {
-            lastStagePointer = { x: seedEvent.clientX, y: seedEvent.clientY };
-          }
+          lastStagePointer = recentStagePointer ? { ...recentStagePointer } : null;
         } else {
           stageWrap?.removeAttribute("data-kbd-active");
           bar?.removeAttribute("data-kbd-active");
@@ -6888,6 +6887,7 @@ const STORIES = [
         });
       });
       stageWrap?.addEventListener("mousemove", (e) => {
+        recentStagePointer = { x: e.clientX, y: e.clientY };
         if (!stageWrap.hasAttribute("data-kbd-active")) return;
         if (!lastStagePointer) {
           lastStagePointer = { x: e.clientX, y: e.clientY };
