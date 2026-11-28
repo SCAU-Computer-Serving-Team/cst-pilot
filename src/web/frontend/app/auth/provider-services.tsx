@@ -32,6 +32,36 @@ export function ProviderServices({
 		const links = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>(".settings-service-row a") ?? [])];
 		if (!links.length) return;
 		const cur = Math.max(0, links.indexOf(document.activeElement as HTMLAnchorElement));
+		if (
+			cur === 0 &&
+			event.key === "ArrowUp" &&
+			!event.defaultPrevented &&
+			!event.nativeEvent.isComposing &&
+			event.keyCode !== 229 &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRef.current?.closest<HTMLElement>(".settings-route");
+			if (route) {
+				const focusables = [
+					...route.querySelectorAll<HTMLElement>(
+						'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+					),
+				];
+				const pos = focusables.indexOf(links[0]);
+				const prev =
+					pos > 0 ? focusables[pos - 1] : document.querySelector<HTMLElement>(".settings-nav-link.is-current");
+				if (prev) {
+					event.preventDefault();
+					setActiveId(null);
+					setKbdActive(false);
+					prev.focus();
+					return;
+				}
+			}
+		}
 		const nextIdx = resolveListNavKey(
 			{
 				key: event.key,

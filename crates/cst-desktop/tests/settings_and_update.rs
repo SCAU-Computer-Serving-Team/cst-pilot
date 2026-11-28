@@ -2061,6 +2061,14 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
             "Ctrl+, must focus VPWAF tabbar for keyboard navigation"
         );
     });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("kbd-dyn-ind-settings-tabbar").is_none(),
+            "VPWAF top tabbar must never render a 4-corner or rail keyboard indicator"
+        );
+    })
+    .unwrap();
 
     // D1: Top-level Esc on Settings navigates back to previous route
     press(cx, "escape");

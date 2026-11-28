@@ -145,8 +145,11 @@ impl UpdateService {
                 (Some(client), launcher, "尚未检查更新。")
             }
             UpdateOptions::Compiled => {
-                let is_dev = cst_os::KitLayout::new(&root).is_ok_and(|k| k.is_dev_workspace());
-                if is_dev {
+                if cst_updater::manifest::compiled_manifest_url().is_err()
+                    || super::manifest::ReleaseKey::compiled().is_err()
+                {
+                    (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。")
+                } else if cst_os::KitLayout::new(&root).is_ok_and(|k| k.is_dev_workspace()) {
                     (None, Arc::new(NativeLauncher), "仅发行版支持")
                 } else {
                     match compiled_client(&root) {
@@ -155,7 +158,7 @@ impl UpdateService {
                             Arc::new(NativeLauncher),
                             "尚未检查更新。",
                         ),
-                        Err(_) => (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。"),
+                        Err(_) => (None, Arc::new(NativeLauncher), "本地配置异常"),
                     }
                 }
             }
@@ -408,7 +411,8 @@ impl UpdateService {
                 Ok(self.status())
             }
             Err(err) => {
-                let kind = if err.is_manual_upgrade_required() {
+                let manual = err.is_manual_upgrade_required();
+                let kind = if manual {
                     "manual_upgrade_required"
                 } else {
                     "check_failed"
@@ -418,6 +422,13 @@ impl UpdateService {
                     state.status.downloaded_bytes = None;
                     state.status.operation_id = None;
                     state.status.error_kind = Some(kind.to_owned());
+                    if manual {
+                        state.release = None;
+                        state.package = None;
+                        state.status.version = None;
+                        state.status.archive_bytes = None;
+                        state.status.release_notes = None;
+                    }
                 }
                 let message = err.ui_message(false);
                 self.publish(Phase::Failed, &message);
@@ -561,7 +572,8 @@ impl UpdateService {
                 Err("升级准备已取消。".into())
             }
             Err(err) => {
-                let kind = if err.is_manual_upgrade_required() {
+                let manual = err.is_manual_upgrade_required();
+                let kind = if manual {
                     "manual_upgrade_required"
                 } else {
                     "download_failed"
@@ -572,6 +584,13 @@ impl UpdateService {
                     state.status.operation_id = None;
                     state.status.downloaded_bytes = None;
                     state.status.error_kind = Some(kind.to_owned());
+                    if manual {
+                        state.release = None;
+                        state.package = None;
+                        state.status.version = None;
+                        state.status.archive_bytes = None;
+                        state.status.release_notes = None;
+                    }
                 }
                 let message = err.ui_message(true);
                 self.publish(Phase::Failed, &message);
@@ -846,8 +865,10 @@ pub fn compiled_update_key_fingerprint() -> Result<String, String> {
 }
 
 fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, String> {
-    if !kit_layout.config_dir().exists() {
-        return Ok(true);
+    match std::fs::symlink_metadata(kit_layout.config_dir()) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(_) => return Err("配置目录状态无法读取。".into()),
+        Ok(_) => {}
     }
     let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
         (Storage::new(kit_layout.root())?, r.join("config"))
@@ -870,15 +891,22 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
     let Some(obj) = value.as_object() else {
         return Ok(false);
     };
-    match obj.get("ssrf") {
-        None => Ok(true),
-        Some(ssrf) => match ssrf.as_object().and_then(|s| s.get("allowRanges")) {
-            None => Ok(true),
-            Some(ranges) => Ok(ranges
-                .as_array()
-                .is_some_and(|arr| arr.iter().any(|v| v == "198.18.0.0/15"))),
-        },
+    let Some(ssrf_val) = obj.get("ssrf") else {
+        return Ok(true);
+    };
+    let Some(ssrf_obj) = ssrf_val.as_object() else {
+        return Ok(false);
+    };
+    let Some(ranges_val) = ssrf_obj.get("allowRanges") else {
+        return Ok(true);
+    };
+    let Some(arr) = ranges_val.as_array() else {
+        return Ok(false);
+    };
+    if arr.iter().any(|v| v.as_str() != Some("198.18.0.0/15")) {
+        return Ok(false);
     }
+    Ok(!arr.is_empty())
 }
 
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
@@ -978,9 +1006,18 @@ mod tests {
         .unwrap();
         assert!(!resolve_update_allow_tun(&layout).unwrap());
 
-        // Malformed JSON fails closed
-        std::fs::write(cfg_dir.join("web-search.json"), b"{bad").unwrap();
-        assert!(!resolve_update_allow_tun(&layout).unwrap());
+        // Non-object ssrf, non-array allowRanges, or disallowed extra CIDRs all fail closed
+        for invalid in [
+            r#"{"version":2,"ssrf":null}"#,
+            r#"{"version":2,"ssrf":[]}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":null}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":[123]}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":["198.18.0.0/15","10.0.0.0/8"]}}"#,
+            "{bad",
+        ] {
+            std::fs::write(cfg_dir.join("web-search.json"), invalid.as_bytes()).unwrap();
+            assert!(!resolve_update_allow_tun(&layout).unwrap(), "{invalid}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

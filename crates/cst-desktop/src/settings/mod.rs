@@ -1005,8 +1005,14 @@ impl Render for SettingsView {
                     .flex()
                     .items_center()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.tab_kbd_active = false;
-                        this.set_category(cat, cx);
+                        let was_kbd = std::mem::replace(&mut this.tab_kbd_active, false);
+                        if this.category == cat {
+                            if was_kbd {
+                                cx.notify();
+                            }
+                        } else {
+                            this.set_category(cat, cx);
+                        }
                     }))
                     .child(text_el)
                     .children((active && !tabs_measured).then(|| {

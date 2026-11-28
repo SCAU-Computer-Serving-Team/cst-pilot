@@ -200,7 +200,7 @@ fn decode_http_body_supports_utf8_and_gb18030_while_rejecting_binary() {
 }
 
 #[tokio::test]
-async fn allow_tun_accepts_dual_stack_fake_ip_while_rejecting_mixed_rebinding() {
+async fn allow_tun_strips_companion_ula_and_never_connects_to_private_v6() {
     struct ListDns(Vec<SocketAddr>);
     impl DnsResolver for ListDns {
         fn resolve(&self, _: String, _: u16) -> BoxFuture<'_, Result<Vec<SocketAddr>, String>> {
@@ -212,54 +212,120 @@ async fn allow_tun_accepts_dual_stack_fake_ip_while_rejecting_mixed_rebinding() 
     let tun_policy = NetworkPolicy { allow_tun: true };
     let strict_policy = NetworkPolicy { allow_tun: false };
 
-    for fake_v6 in ["[fc00::1234]:443", "[fdfe:dcba:9876::1]:443"] {
-        let client_ok = SafeHttpClient::with_resolver(
-            tun_policy.clone(),
-            Arc::new(ListDns(vec![
-                "198.18.1.205:443".parse().unwrap(),
-                fake_v6.parse().unwrap(),
-            ])),
-        );
-        let (_, resolved) = client_ok
-            .resolve_target("https://www.cstoa.top/api/agent/releases/latest")
-            .await
-            .expect("dual-stack TUN fake-ip must pass when allow_tun is true");
-        assert_eq!(resolved.len(), 2);
+    // Prefix boundaries and IPv4-mapped IPv6 checks
+    assert!(
+        strict_policy
+            .validate_ip("198.17.255.255".parse().unwrap())
+            .is_ok()
+    );
+    assert!(
+        strict_policy
+            .validate_ip("198.20.0.0".parse().unwrap())
+            .is_ok()
+    );
+    assert!(
+        strict_policy
+            .validate_ip("198.18.0.0".parse().unwrap())
+            .is_err()
+    );
+    assert!(
+        strict_policy
+            .validate_ip("198.19.255.255".parse().unwrap())
+            .is_err()
+    );
+    assert!(
+        tun_policy
+            .validate_ip("198.18.0.0".parse().unwrap())
+            .is_ok()
+    );
+    assert!(
+        tun_policy
+            .validate_ip("198.19.255.255".parse().unwrap())
+            .is_ok()
+    );
+    assert!(
+        tun_policy
+            .validate_ip("::ffff:198.18.1.205".parse().unwrap())
+            .is_ok()
+    );
+    assert!(
+        strict_policy
+            .validate_ip("::ffff:198.18.1.205".parse().unwrap())
+            .is_err()
+    );
+    assert!(
+        tun_policy
+            .validate_ip("::ffff:127.0.0.1".parse().unwrap())
+            .is_err()
+    );
 
-        let client_blocked = SafeHttpClient::with_resolver(
-            strict_policy.clone(),
-            Arc::new(ListDns(vec![fake_v6.parse().unwrap()])),
+    // ULA IPv6 literals and ULA-only DNS records are ALWAYS rejected even when allow_tun is true
+    for ula_lit in ["https://[fc00::1234]/x", "https://[fdfe:dcba:9876::1]/x"] {
+        assert!(tun_policy.validate_url(ula_lit).is_err(), "{ula_lit}");
+    }
+    for ula_only in [
+        "[fc00::1234]:443",
+        "[fdfe:dcba:9876::1]:443",
+        "[fd12:3456::1]:443",
+    ] {
+        let client_ula_only = SafeHttpClient::with_resolver(
+            tun_policy.clone(),
+            Arc::new(ListDns(vec![ula_only.parse().unwrap()])),
         );
         assert!(
-            client_blocked
+            client_ula_only
                 .resolve_target("https://www.cstoa.top/api/agent/releases/latest")
                 .await
-                .is_err()
+                .is_err(),
+            "{ula_only}"
         );
     }
 
-    // Custom ULA companion paired with 198.18.0.0/15 filters to the validated TUN v4 socket
-    let custom_ula = SafeHttpClient::with_resolver(
-        tun_policy.clone(),
-        Arc::new(ListDns(vec![
+    // Dual-stack TUN DNS (`198.18.0.0/15` + ULA Fake-IPv6) strips all ULA addresses before connecting
+    let connector = Arc::new(MockConnector {
+        replies: Mutex::new(VecDeque::from([HttpHop {
+            status: 200,
+            location: None,
+            body: "ok".into(),
+        }])),
+        calls: Mutex::new(Vec::new()),
+    });
+    let dual_stack_client = SafeHttpClient {
+        policy: tun_policy.clone(),
+        resolver: Arc::new(ListDns(vec![
             "198.18.1.205:443".parse().unwrap(),
-            "[fd12:3456::1]:443".parse().unwrap(),
+            "[fc00::1234]:443".parse().unwrap(),
+            "[fdfe:dcba:9876::1]:443".parse().unwrap(),
         ])),
-    );
-    let (_, filtered) = custom_ula
-        .resolve_target("https://www.cstoa.top/api/agent/releases/latest")
+        connector: connector.clone(),
+    };
+    let resp = dual_stack_client
+        .request(
+            HttpRequest {
+                url: "https://www.cstoa.top/api/agent/releases/latest".into(),
+                ..get()
+            },
+            CancellationToken::new(),
+        )
         .await
-        .unwrap();
-    assert_eq!(
-        filtered,
-        vec!["198.18.1.205:443".parse::<SocketAddr>().unwrap()]
-    );
+        .expect("dual-stack TUN fake-ip must succeed via 198.18.0.0/15 only");
+    assert_eq!(resp.status, 200);
+    {
+        let calls = connector.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            vec!["198.18.1.205:443".parse::<SocketAddr>().unwrap()]
+        );
+    }
 
-    // Mixed public + ULA or TUN + loopback must still be rejected as a whole
+    // Mixed public + ULA or TUN + loopback/mapped-loopback must still be rejected as a whole
     for rebind in [
+        vec!["8.8.8.8:443", "[fc00::1234]:443"],
         vec!["8.8.8.8:443", "[fd12:3456::1]:443"],
         vec!["198.18.1.205:443", "127.0.0.1:443"],
         vec!["198.18.1.205:443", "[::1]:443"],
+        vec!["198.18.1.205:443", "[::ffff:127.0.0.1]:443"],
     ] {
         let bad = SafeHttpClient::with_resolver(
             tun_policy.clone(),

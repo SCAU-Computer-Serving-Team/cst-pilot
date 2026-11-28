@@ -44,6 +44,45 @@ export function DefaultModelPicker({
 		closePopover();
 		setMissingKey(null);
 	}, [shell?.appActive, closePopover]);
+	useEffect(() => {
+		const el = triggerRef.current;
+		if (!el) return;
+		function onTriggerKeyDown(event: KeyboardEvent) {
+			if (open || event.isComposing || event.keyCode === 229) return;
+			if (event.altKey && event.key === "ArrowDown") {
+				event.preventDefault();
+				event.stopPropagation();
+				setOpen(true);
+				return;
+			}
+			if (
+				!event.altKey &&
+				!event.ctrlKey &&
+				!event.metaKey &&
+				!event.shiftKey &&
+				(event.key === "ArrowUp" || event.key === "ArrowDown")
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				if (event.key === "ArrowUp") {
+					document.querySelector<HTMLElement>(".settings-nav-link.is-current")?.focus();
+				} else {
+					const route = el?.closest<HTMLElement>(".settings-route");
+					const focusables = route
+						? [
+								...route.querySelectorAll<HTMLElement>(
+									'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+								),
+							]
+						: [];
+					const idx = el ? focusables.indexOf(el) : -1;
+					if (idx >= 0) focusables[idx + 1]?.focus();
+				}
+			}
+		}
+		el.addEventListener("keydown", onTriggerKeyDown, true);
+		return () => el.removeEventListener("keydown", onTriggerKeyDown, true);
+	}, [open]);
 	const needle = query.trim().toLocaleLowerCase();
 	const ordered = [
 		model,

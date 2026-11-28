@@ -6794,7 +6794,7 @@ const STORIES = [
         <div style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
           <div class="settings-tabs-bar" id="vp-bar" data-pen-id="VPWAF" role="tablist">
             ${tabs.map((t, i) => `
-              <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};transition:color var(--fast) var(--ease-out);">
+              <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" tabindex="${i === activeIdx ? 0 : -1}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};outline:none;box-shadow:none;transition:color var(--fast) var(--ease-out);">
                 ${t}
               </button>
             `).join("")}
@@ -6808,11 +6808,12 @@ const STORIES = [
       const line = stageEl.querySelector("#vp-line");
       const demoBody = stageEl.querySelector("#vp-hairline-demo");
 
-      function syncTabs() {
+      function syncTabs(focusActive = false) {
         const btns = bar.querySelectorAll(".vp-tab-btn");
         btns.forEach((b, i) => {
           const on = i === activeIdx;
           b.setAttribute("aria-selected", String(on));
+          b.setAttribute("tabindex", on ? "0" : "-1");
           b.style.fontWeight = on ? "600" : "400";
           b.style.color = on ? "var(--text-primary)" : "var(--text-secondary)";
         });
@@ -6820,8 +6821,32 @@ const STORIES = [
         if (curBtn) {
           line.style.width = `${curBtn.offsetWidth}px`;
           line.style.transform = `translateX(${curBtn.offsetLeft}px)`;
+          if (focusActive) curBtn.focus();
         }
         if (demoBody) demoBody.innerHTML = tabRowsHtml[activeIdx];
+      }
+
+      function requestSwitchTab(next, triggerEl, viaKbd = false) {
+        if (next === activeIdx || next < 0 || next >= tabs.length) return;
+        const go = () => {
+          activeIdx = next;
+          syncTabs(viaKbd);
+          logAction("设置导航 VPWAF", `${viaKbd ? "方向键" : "点击"}滑至「${tabs[next]}」`);
+        };
+        if (dirty) {
+          openAlertDialog({
+            title: "放弃未保存的模型修改？",
+            desc: "切换分类将丢失当前正在编辑的新增模型行。",
+            confirmText: "放弃并切换",
+            cancelText: "继续编辑",
+            danger: true,
+            defaultSafeFocus: true,
+            triggerEl,
+            onConfirm: () => { dirty = false; controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false"; go(); }
+          });
+        } else {
+          go();
+        }
       }
 
       controlsEl.querySelector("#vp-dirty-chk").addEventListener("click", (e) => {
@@ -6830,25 +6855,19 @@ const STORIES = [
       });
 
       bar.querySelectorAll(".vp-tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const next = Number(btn.dataset.idx);
-          if (next === activeIdx) return;
-          const go = () => { activeIdx = next; syncTabs(); logAction("设置导航 VPWAF", `滑至「${tabs[next]}」`); };
-          if (dirty) {
-            openAlertDialog({
-              title: "放弃未保存的模型修改？",
-              desc: "切换分类将丢失当前正在编辑的新增模型行。",
-              confirmText: "放弃并切换",
-              cancelText: "继续编辑",
-              danger: true,
-              defaultSafeFocus: true,
-              triggerEl: btn,
-              onConfirm: () => { dirty = false; controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false"; go(); }
-            });
-          } else {
-            go();
-          }
-        });
+        btn.addEventListener("click", () => requestSwitchTab(Number(btn.dataset.idx), btn, false));
+      });
+      bar.addEventListener("keydown", (e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        let next = null;
+        if (e.key === "ArrowLeft") next = Math.max(0, activeIdx - 1);
+        else if (e.key === "ArrowRight") next = Math.min(tabs.length - 1, activeIdx + 1);
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = tabs.length - 1;
+        if (next !== null) {
+          e.preventDefault();
+          requestSwitchTab(next, bar.querySelectorAll(".vp-tab-btn")[activeIdx], true);
+        }
       });
 
       requestAnimationFrame(syncTabs);

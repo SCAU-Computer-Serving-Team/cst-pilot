@@ -253,6 +253,25 @@ export default function ModelPreferences() {
 			void save((current) => toggleModel(current.enabled, current.models.map(fullId), id));
 			return;
 		}
+		if (
+			idx === 0 &&
+			event.key === "ArrowUp" &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const searchInput = listRoot.current
+				?.closest(".settings-section")
+				?.querySelector<HTMLElement>("input:not(:disabled)");
+			if (searchInput) {
+				event.preventDefault();
+				setFocusedRowId(null);
+				setKbdActive(false);
+				searchInput.focus();
+				return;
+			}
+		}
 		const nextIdx = resolveListNavKey(
 			{
 				key: event.key,

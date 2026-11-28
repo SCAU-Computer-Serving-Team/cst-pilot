@@ -31,6 +31,7 @@ export default function Settings() {
 		});
 	}
 	const navRef = useRef<HTMLElement>(null);
+	const pagesRef = useRef<HTMLDivElement>(null);
 	const routeRef = useRef<HTMLDivElement>(null);
 	const [navKbdActive, setNavKbdActive] = useState(false);
 	const clearNavKbd = useCallback(() => setNavKbdActive(false), []);
@@ -42,9 +43,10 @@ export default function Settings() {
 		if (!links.length) return;
 		const currentIdx = Math.max(0, links.indexOf(document.activeElement as HTMLElement));
 		if (event.key === "ArrowDown" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-			const first = routeRef.current?.querySelector<HTMLElement>(
-				'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-			);
+			const first =
+				routeRef.current?.querySelector<HTMLElement>(
+					'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+				) ?? routeRef.current?.querySelector<HTMLElement>(".settings-shortcuts-pane");
 			if (first) {
 				event.preventDefault();
 				setNavKbdActive(false);
@@ -78,6 +80,54 @@ export default function Settings() {
 			}
 		}
 	}
+
+	useEffect(() => {
+		const pagesEl = pagesRef.current;
+		if (!pagesEl) return;
+		function onRouteKeyDown(event: KeyboardEvent) {
+			const routeEl = routeRef.current;
+			if (
+				!routeEl ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				event.key !== "ArrowUp" ||
+				event.altKey ||
+				event.ctrlKey ||
+				event.metaKey ||
+				event.shiftKey
+			) {
+				return;
+			}
+			const active = document.activeElement as HTMLElement | null;
+			if (!active || !routeEl.contains(active)) return;
+			if (active.closest('[role="dialog"], [data-slot="popover"]')) return;
+			if (active.tagName === "TEXTAREA" || active.tagName === "SELECT") return;
+			if (active instanceof HTMLInputElement) {
+				if ((active.selectionStart ?? 0) !== 0 || (active.selectionEnd ?? 0) !== 0) return;
+			}
+			const isShortcutsPane = active.classList.contains("settings-shortcuts-pane");
+			if (isShortcutsPane) {
+				const scroller = active.closest<HTMLElement>(".settings-scroll");
+				if (scroller && scroller.scrollTop > 0) return;
+			} else {
+				const focusables = [
+					...routeEl.querySelectorAll<HTMLElement>(
+						'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+					),
+				];
+				if (focusables[0] !== active) return;
+			}
+			const currentTab = navRef.current?.querySelector<HTMLElement>(".settings-nav-link.is-current");
+			if (currentTab) {
+				event.preventDefault();
+				setNavKbdActive(true);
+				currentTab.focus();
+			}
+		}
+		pagesEl.addEventListener("keydown", onRouteKeyDown);
+		return () => pagesEl.removeEventListener("keydown", onRouteKeyDown);
+	}, []);
 
 	useEffect(() => {
 		void preloadSettings();
@@ -114,7 +164,7 @@ export default function Settings() {
 			</header>
 			<SettingsFeedback>
 				<div className="settings-scroll">
-					<div className="settings-content settings-pages">
+					<div className="settings-content settings-pages" ref={pagesRef}>
 						<nav
 							ref={navRef}
 							className="settings-nav"
@@ -127,22 +177,28 @@ export default function Settings() {
 								}
 							}}
 						>
-							{tabs.map((tab) => (
-								<SettingsLink
-									key={tab.to}
-									to={tab.to}
-									aria-current={activePath === tab.to ? "page" : undefined}
-									className={`settings-nav-link${activePath === tab.to ? " is-current" : ""}`}
-									prefetch="render"
-									onFocus={(event) => {
-										if (event.currentTarget.matches(":focus-visible")) setNavKbdActive(true);
-									}}
-									onClick={() => setNavKbdActive(false)}
-								>
-									{tab.label}
-									{activePath === tab.to && <span className="settings-nav-indicator" aria-hidden="true" />}
-								</SettingsLink>
-							))}
+							{tabs.map((tab) => {
+								const isCurrent = activePath === tab.to;
+								return (
+									<SettingsLink
+										key={tab.to}
+										to={tab.to}
+										tabIndex={isCurrent ? 0 : -1}
+										aria-current={isCurrent ? "page" : undefined}
+										className={`settings-nav-link${isCurrent ? " is-current" : ""}`}
+										prefetch="render"
+										onFocus={(event) => {
+											if (event.currentTarget.matches(":focus-visible")) setNavKbdActive(true);
+										}}
+										onClick={(event) => {
+											if (event.detail > 0) setNavKbdActive(false);
+										}}
+									>
+										{tab.label}
+										{isCurrent && <span className="settings-nav-indicator" aria-hidden="true" />}
+									</SettingsLink>
+								);
+							})}
 						</nav>
 						<div className="settings-route" key={pathname} ref={routeRef}>
 							<Outlet />

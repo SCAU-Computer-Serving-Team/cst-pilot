@@ -87,11 +87,11 @@ pub fn render_general_tab(
                 .filter(|s| !s.is_empty())
                 .map(|msg| match msg {
                     "此宿主已关闭升级检查。" => "宿主已禁用",
-                    "当前构建未启用在线更新。" => "未配置编译期更新源",
+                    "当前构建未启用在线更新。" => "未配置更新源",
                     other => other,
                 })
-                .unwrap_or("未配置编译期更新源");
-            ("未启用自动更新".into(), detail.to_owned().into())
+                .unwrap_or("未配置更新源");
+            ("未启用更新".into(), detail.to_owned().into())
         }
         UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验签名发布清单".into()),
         UpdatePhaseDto::Current => {
@@ -145,7 +145,7 @@ pub fn render_general_tab(
         ),
         UpdatePhaseDto::Failed => {
             let title = match error_kind {
-                Some("manual_upgrade_required") => "需下载完整发行包",
+                Some("manual_upgrade_required") => "需重新下载",
                 Some("download_failed") => "下载更新失败",
                 _ => "更新检查失败",
             };
