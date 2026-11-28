@@ -40,6 +40,7 @@ pub enum UpdateError {
         retry_after_secs: Option<u64>,
     },
     BelowMinUpgradable,
+    InvalidLocalVersion,
     InsufficientDiskSpace,
     VerificationFailed {
         stage: &'static str,
@@ -51,7 +52,7 @@ pub enum UpdateError {
 
 impl UpdateError {
     pub fn is_manual_upgrade_required(&self) -> bool {
-        matches!(self, Self::BelowMinUpgradable)
+        matches!(self, Self::BelowMinUpgradable | Self::InvalidLocalVersion)
     }
 
     pub fn ui_message(&self, is_download: bool) -> String {
@@ -80,6 +81,7 @@ impl UpdateError {
             }
             Self::ServiceUnavailable { .. } => "更新服务暂时不可用，请稍后重试".into(),
             Self::BelowMinUpgradable => "当前版本过旧，无法原位升级，请重新下载完整便携包".into(),
+            Self::InvalidLocalVersion => "版本文件异常，请重新下载便携包".into(),
             Self::InsufficientDiskSpace => "工具包所在磁盘空间不足，请清理后重试".into(),
             Self::VerificationFailed { .. } => {
                 "更新包安全校验未通过，已停止升级，当前程序不受影响".into()
@@ -128,6 +130,7 @@ impl UpdateError {
                 retry_after_secs,
             } => format!("http_{status}(code={code:?}, retry_after={retry_after_secs:?})"),
             Self::BelowMinUpgradable => "below_min_upgradable_version".into(),
+            Self::InvalidLocalVersion => "invalid_local_version".into(),
             Self::InsufficientDiskSpace => "insufficient_disk_space".into(),
             Self::VerificationFailed { stage } => format!("verification_failed(stage={stage})"),
             Self::DisallowedAddress => "disallowed_address".into(),
@@ -410,6 +413,7 @@ impl Fetcher for NativeFetcher {
                         .map_err(|e| classify_resolve_error(&e))?;
                     let host = url.host_str().ok_or(UpdateError::DisallowedAddress)?;
                     let client = reqwest::Client::builder()
+                        .user_agent("cst-pilot")
                         .no_proxy()
                         .redirect(reqwest::redirect::Policy::none())
                         .connect_timeout(Duration::from_secs(10))

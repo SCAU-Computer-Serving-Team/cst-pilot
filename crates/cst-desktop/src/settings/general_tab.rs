@@ -81,7 +81,18 @@ pub fn render_general_tab(
         phase == UpdatePhaseDto::Failed && error_kind == Some("manual_upgrade_required");
 
     let (status_title, status_detail): (SharedString, SharedString) = match phase {
-        UpdatePhaseDto::Unavailable => ("未启用自动更新".into(), "未配置编译期更新源".into()),
+        UpdatePhaseDto::Unavailable => {
+            let detail = update_state
+                .map(|u| u.status.message.trim())
+                .filter(|s| !s.is_empty())
+                .map(|msg| match msg {
+                    "此宿主已关闭升级检查。" => "宿主已禁用",
+                    "当前构建未启用在线更新。" => "未配置编译期更新源",
+                    other => other,
+                })
+                .unwrap_or("未配置编译期更新源");
+            ("未启用自动更新".into(), detail.to_owned().into())
+        }
         UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验签名发布清单".into()),
         UpdatePhaseDto::Current => {
             let detail = update_state

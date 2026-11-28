@@ -47,7 +47,7 @@ impl NetworkPolicy {
                 if let Some(v4) = ip.to_ipv4_mapped() {
                     public_v4(v4, self.allow_tun)
                 } else {
-                    public_v6(ip)
+                    public_v6(ip, self.allow_tun)
                 }
             }
         };
@@ -59,11 +59,27 @@ impl NetworkPolicy {
     }
 }
 
+fn tun_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, _, _] = ip.octets();
+    a == 198 && (b == 18 || b == 19)
+}
+
+fn tun_v6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    // Standard Mihomo / Clash / Sing-box Fake-IPv6 ranges (`fc00::/18` and `fdfe:dcba:9876::/48`).
+    (segments[0] == 0xfc00 && (segments[1] & 0xc000) == 0)
+        || (segments[0] == 0xfdfe && segments[1] == 0xdcba && segments[2] == 0x9876)
+}
+
+fn ula_v6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
 fn public_v4(ip: Ipv4Addr, allow_tun: bool) -> bool {
-    let [a, b, c, _] = ip.octets();
-    if a == 198 && (b == 18 || b == 19) {
+    if tun_v4(ip) {
         return allow_tun;
     }
+    let [a, b, c, _] = ip.octets();
     !(a == 0
         || a == 10
         || a == 127
@@ -78,7 +94,10 @@ fn public_v4(ip: Ipv4Addr, allow_tun: bool) -> bool {
         || (a == 203 && b == 0 && c == 113))
 }
 
-fn public_v6(ip: Ipv6Addr) -> bool {
+fn public_v6(ip: Ipv6Addr, allow_tun: bool) -> bool {
+    if tun_v6(ip) {
+        return allow_tun;
+    }
     let segments = ip.segments();
     // Only global unicast. This also excludes loopback, link-local, ULA,
     // multicast, IPv4-compatible addresses and NAT64 local translation ranges.
@@ -159,6 +178,26 @@ impl SafeHttpClient {
             Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
             Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
             Host::Domain(host) => self.resolver.resolve(host.into(), port).await?,
+        };
+        if addresses.is_empty() {
+            return Err("域名没有可用地址。".into());
+        }
+        // When dual-stack TUN returns `198.18.0.0/15` alongside a custom ULA Fake-IPv6 (`fd00::/8`),
+        // strip the non-routed ULA companion while still rejecting mixed public/private answers.
+        let addresses = if self.policy.allow_tun
+            && addresses.iter().any(|a| match a.ip() {
+                IpAddr::V4(v4) => tun_v4(v4),
+                IpAddr::V6(v6) => v6.to_ipv4_mapped().is_some_and(tun_v4),
+            }) && addresses.iter().all(|a| {
+            self.policy.validate_ip(a.ip()).is_ok()
+                || matches!(a.ip(), IpAddr::V6(v6) if v6.to_ipv4_mapped().is_none() && ula_v6(v6))
+        }) {
+            addresses
+                .into_iter()
+                .filter(|a| self.policy.validate_ip(a.ip()).is_ok())
+                .collect::<Vec<_>>()
+        } else {
+            addresses
         };
         if addresses.is_empty() {
             return Err("域名没有可用地址。".into());

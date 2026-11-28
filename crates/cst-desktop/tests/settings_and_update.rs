@@ -2058,7 +2058,7 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         );
         assert!(
             sv.is_tab_kbd_active(),
-            "Ctrl+, must activate VPWAF keyboard indicator"
+            "Ctrl+, must focus VPWAF tabbar for keyboard navigation"
         );
     });
 

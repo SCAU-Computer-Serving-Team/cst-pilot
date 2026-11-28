@@ -144,14 +144,21 @@ impl UpdateService {
             UpdateOptions::Trusted { client, launcher } => {
                 (Some(client), launcher, "尚未检查更新。")
             }
-            UpdateOptions::Compiled => match compiled_client(&root) {
-                Ok(client) => (
-                    Some(Arc::new(client)),
-                    Arc::new(NativeLauncher),
-                    "尚未检查更新。",
-                ),
-                Err(_) => (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。"),
-            },
+            UpdateOptions::Compiled => {
+                let is_dev = cst_os::KitLayout::new(&root).is_ok_and(|k| k.is_dev_workspace());
+                if is_dev {
+                    (None, Arc::new(NativeLauncher), "仅发行版支持")
+                } else {
+                    match compiled_client(&root) {
+                        Ok(client) => (
+                            Some(Arc::new(client)),
+                            Arc::new(NativeLauncher),
+                            "尚未检查更新。",
+                        ),
+                        Err(_) => (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。"),
+                    }
+                }
+            }
         };
         let service = Arc::new(Self {
             gate,
@@ -353,7 +360,8 @@ impl UpdateService {
         }
         self.publish(Phase::Checking, "正在检查更新。");
         let result = async {
-            let current = layout::read_version(&self.root).map_err(|_| UpdateError::Other)?;
+            let current =
+                layout::read_version(&self.root).map_err(|_| UpdateError::InvalidLocalVersion)?;
             client.check_detailed(&current, cancel).await
         }
         .await;
@@ -837,34 +845,47 @@ pub fn compiled_update_key_fingerprint() -> Result<String, String> {
     Ok(key.fingerprint())
 }
 
+fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, String> {
+    if !kit_layout.config_dir().exists() {
+        return Ok(true);
+    }
+    let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
+        (Storage::new(kit_layout.root())?, r.join("config"))
+    } else {
+        (
+            Storage::new(kit_layout.data_dir())?,
+            PathBuf::from("config"),
+        )
+    };
+    let _cfg = storage.pin_directory(&rel, false)?;
+    let Some(bytes) =
+        storage.read_limited(&storage.root.join(&rel).join("web-search.json"), 64 * 1024)?
+    else {
+        return Ok(true);
+    };
+    let trimmed = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    let Ok(value) = parse_strict_json(trimmed) else {
+        return Ok(false);
+    };
+    let Some(obj) = value.as_object() else {
+        return Ok(false);
+    };
+    match obj.get("ssrf") {
+        None => Ok(true),
+        Some(ssrf) => match ssrf.as_object().and_then(|s| s.get("allowRanges")) {
+            None => Ok(true),
+            Some(ranges) => Ok(ranges
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|v| v == "198.18.0.0/15"))),
+        },
+    }
+}
+
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
     let source = cst_updater::manifest::compiled_manifest_url()?;
     let key = super::manifest::ReleaseKey::compiled()?;
     let kit_layout = cst_os::KitLayout::new(root)?;
-    let allow_tun = if kit_layout.config_dir().exists() {
-        let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
-            (Storage::new(kit_layout.root())?, r.join("config"))
-        } else {
-            (
-                Storage::new(kit_layout.data_dir())?,
-                PathBuf::from("config"),
-            )
-        };
-        let _cfg = storage.pin_directory(&rel, false)?;
-        storage
-            .read_limited(&storage.root.join(&rel).join("web-search.json"), 64 * 1024)?
-            .and_then(|bytes| parse_strict_json(&bytes).ok())
-            .and_then(|value| {
-                value
-                    .get("ssrf")?
-                    .get("allowRanges")?
-                    .as_array()
-                    .map(|ranges| ranges.iter().any(|v| v == "198.18.0.0/15"))
-            })
-            .unwrap_or(false)
-    } else {
-        false
-    };
+    let allow_tun = resolve_update_allow_tun(&kit_layout)?;
     UpdateClient::with_fetcher(
         source.as_str(),
         key,
@@ -904,5 +925,62 @@ mod tests {
             let fp = compiled_update_key_fingerprint().expect("compiled update root must be valid");
             assert_eq!(fp.len(), 16);
         }
+    }
+
+    fn temp_test_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "cst-update-svc-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn compiled_mode_marks_dev_workspace_unavailable_without_startup_check() {
+        let dir = temp_test_dir("dev-ws");
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"dev\"\n").unwrap();
+        let gate = ActivityGate::new();
+        let svc = UpdateService::new(&dir, "https://www.cstoa.top", gate, UpdateOptions::Compiled)
+            .unwrap();
+        let st = svc.status();
+        assert_eq!(st.phase, Phase::Unavailable);
+        assert_eq!(st.message, "仅发行版支持");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_update_allow_tun_defaults_true_and_respects_explicit_override() {
+        let dir = temp_test_dir("allow-tun");
+        let data_dir = dir.join("data");
+        let layout = cst_os::KitLayout::with_data_dir(&dir, &data_dir).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        let cfg_dir = layout.config_dir();
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // UTF-8 BOM + omitted ssrf defaults to true
+        let mut bom_json = vec![0xEF, 0xBB, 0xBF];
+        bom_json.extend_from_slice(br#"{"version":2}"#);
+        std::fs::write(cfg_dir.join("web-search.json"), bom_json).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // Explicit empty allowRanges disables TUN
+        std::fs::write(
+            cfg_dir.join("web-search.json"),
+            br#"{"version":2,"ssrf":{"allowRanges":[]}}"#,
+        )
+        .unwrap();
+        assert!(!resolve_update_allow_tun(&layout).unwrap());
+
+        // Malformed JSON fails closed
+        std::fs::write(cfg_dir.join("web-search.json"), b"{bad").unwrap();
+        assert!(!resolve_update_allow_tun(&layout).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -5,7 +5,7 @@ import { Outlet, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { SettingsFeedback, SettingsLink } from "../settings/settings-frame";
 import { invalidateSetting, preloadSettings, settingsPaths } from "../settings/settings-resource-cache";
-import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { usePointerMutex } from "../shell/kbd-focus";
 import { resolveToolbarNavKey } from "../shell/keyboard-navigation";
 import { SidebarHeaderToggle } from "../shell/workspace-shell-context";
 
@@ -30,11 +30,8 @@ export default function Settings() {
 			direction: index < 0 || navigation.index < 0 ? 0 : Math.sign(index - navigation.index),
 		});
 	}
-	const kbdStyle = useKeyboardFocusStyle();
 	const navRef = useRef<HTMLElement>(null);
-	const navItemRefs = useRef<Map<string, HTMLElement>>(new Map());
 	const routeRef = useRef<HTMLDivElement>(null);
-	const [focusedTabId, setFocusedTabId] = useState<string | null>(null);
 	const [navKbdActive, setNavKbdActive] = useState(false);
 	const clearNavKbd = useCallback(() => setNavKbdActive(false), []);
 	usePointerMutex(navKbdActive, clearNavKbd);
@@ -74,7 +71,6 @@ export default function Settings() {
 			setNavKbdActive(true);
 			const targetTab = tabs[nextIdx];
 			if (targetTab) {
-				setFocusedTabId(targetTab.to);
 				links[nextIdx]?.focus();
 				if (targetTab.to !== activePath) {
 					void navigate(targetTab.to, { viewTransition: true });
@@ -123,11 +119,10 @@ export default function Settings() {
 							ref={navRef}
 							className="settings-nav"
 							aria-label="设置分类"
-							data-kbd-active={navKbdActive && focusedTabId !== null ? "true" : undefined}
+							data-kbd-active={navKbdActive ? "true" : undefined}
 							onKeyDown={handleNavKeyDown}
 							onBlur={(event) => {
 								if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-									setFocusedTabId(null);
 									setNavKbdActive(false);
 								}
 							}}
@@ -136,15 +131,10 @@ export default function Settings() {
 								<SettingsLink
 									key={tab.to}
 									to={tab.to}
-									ref={(node) => {
-										if (node) navItemRefs.current.set(tab.to, node);
-										else navItemRefs.current.delete(tab.to);
-									}}
 									aria-current={activePath === tab.to ? "page" : undefined}
 									className={`settings-nav-link${activePath === tab.to ? " is-current" : ""}`}
 									prefetch="render"
 									onFocus={(event) => {
-										setFocusedTabId(tab.to);
 										if (event.currentTarget.matches(":focus-visible")) setNavKbdActive(true);
 									}}
 									onClick={() => setNavKbdActive(false)}
@@ -153,14 +143,6 @@ export default function Settings() {
 									{activePath === tab.to && <span className="settings-nav-indicator" aria-hidden="true" />}
 								</SettingsLink>
 							))}
-							<KbdFocusOverlay
-								containerRef={navRef}
-								itemRefs={navItemRefs}
-								targetId={navKbdActive ? focusedTabId : null}
-								style={kbdStyle}
-								railPlacement="bottom"
-								bracketOutset={3}
-							/>
 						</nav>
 						<div className="settings-route" key={pathname} ref={routeRef}>
 							<Outlet />
