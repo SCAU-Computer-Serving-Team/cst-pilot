@@ -26,6 +26,7 @@ pub(crate) fn create(
         name: "CSTOA APIKEY".into(),
         resolve_async: None,
         configured_without_credentials: false,
+        env_only: false,
         resolve: Arc::new(move |credential, _| {
             Ok(credential
                 .and_then(|c| c.key)

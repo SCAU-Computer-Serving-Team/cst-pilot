@@ -74,6 +74,8 @@ pub fn convert_completions_messages(model: &Model, context: &TranscriptContext) 
         .unwrap_or(model.provider == "openai");
     let requires_assistant_after_tool =
         compat.requires_assistant_after_tool_result.unwrap_or(false);
+    let requires_non_null_assistant_content =
+        compat.requires_non_null_assistant_content.unwrap_or(false);
     let requires_thinking_as_text = compat.requires_thinking_as_text.unwrap_or(false);
     let requires_reasoning_content = compat
         .requires_reasoning_content_on_assistant_messages
@@ -169,7 +171,7 @@ pub fn convert_completions_messages(model: &Model, context: &TranscriptContext) 
                 assistant_obj.insert("role".to_owned(), Value::String("assistant".to_owned()));
                 assistant_obj.insert(
                     "content".to_owned(),
-                    if requires_assistant_after_tool {
+                    if requires_assistant_after_tool || requires_non_null_assistant_content {
                         Value::String(String::new())
                     } else {
                         Value::Null
@@ -490,9 +492,10 @@ pub fn build_completions_params(
                 .unwrap_or(match model.provider.as_str() {
                     "deepseek" => "deepseek",
                     "zai" | "zai-coding-cn" => "zai",
-                    "qwen-token-plan-cn" | "qwen-token-plan" | "qwen-token-plan-individual" => {
-                        "qwen"
-                    }
+                    "qwen-token-plan-cn"
+                    | "qwen-token-plan"
+                    | "qwen-token-plan-individual"
+                    | "qwen-token-plan-individual-cn" => "qwen",
                     "openrouter" => "openrouter",
                     "ant-ling" => "ant-ling",
                     _ => "openai",

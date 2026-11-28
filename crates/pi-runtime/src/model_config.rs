@@ -286,6 +286,7 @@ fn valid_api(api: &str) -> bool {
         api,
         pi_ai::known_api::OPENAI_COMPLETIONS
             | pi_ai::known_api::OPENAI_RESPONSES
+            | pi_ai::known_api::OPENAI_CODEX_RESPONSES
             | pi_ai::known_api::ANTHROPIC_MESSAGES
             | pi_ai::known_api::GOOGLE_GENERATIVE_AI
     )
@@ -993,12 +994,14 @@ pub fn compose_provider_with_model_config(
             .api_key
             .as_ref()
             .is_some_and(|auth| auth.configured_without_credentials);
+        let env_only = opts.auth.api_key.as_ref().is_some_and(|auth| auth.env_only);
         opts.auth = ProviderAuth {
             api_key: Some(ApiKeyAuth {
                 name: opts.name.clone().unwrap_or_else(|| provider_id.to_owned()),
                 resolve: resolve_fn,
                 resolve_async: Some(resolve_async),
                 configured_without_credentials: keyless,
+                env_only,
                 login_fn: opts.auth.api_key.and_then(|a| a.login_fn),
             }),
             oauth: opts.auth.oauth,

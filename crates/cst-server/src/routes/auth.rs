@@ -53,6 +53,10 @@ pub async fn handle_auth_route(
             .models()
             .get_providers()
             .into_iter()
+            .filter(|p| {
+                let pid = p.id();
+                pid == "cstoa" || custom_ids.contains(pid) || !p.get_models().is_empty()
+            })
             .map(|p| {
                 let pid = p.id();
                 let configured = runtime.has_configured_auth(pid);
@@ -60,7 +64,7 @@ pub async fn handle_auth_route(
                     .iter()
                     .find(|c| c.provider_id == pid)
                     .map(|c| auth_type_str(c.auth_type));
-                let supports_api_key = p.auth().api_key.is_some();
+                let supports_api_key = p.auth().api_key.as_ref().is_some_and(|a| !a.env_only);
                 let supports_oauth = p.auth().oauth.is_some();
                 json!({
                     "id": pid,
@@ -279,7 +283,7 @@ pub async fn handle_auth_route(
                         .is_some_and(|p| p.auth().oauth.is_some()),
                     AuthType::ApiKey => provider_meta
                         .as_ref()
-                        .is_some_and(|p| p.auth().api_key.is_some()),
+                        .is_some_and(|p| p.auth().api_key.as_ref().is_some_and(|a| !a.env_only)),
                 };
                 if !supported {
                     return Err(ApiError::new(
@@ -612,7 +616,12 @@ pub async fn handle_auth_route(
                 };
 
                 if action == "api-key" && *method == Method::PUT {
-                    if provider_meta.auth().api_key.is_none() {
+                    if provider_meta
+                        .auth()
+                        .api_key
+                        .as_ref()
+                        .is_none_or(|a| a.env_only)
+                    {
                         return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_request",

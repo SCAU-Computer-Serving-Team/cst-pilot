@@ -19,9 +19,10 @@ pub type ProviderEnv = BTreeMap<String, String>;
 pub type ProviderHeaders = BTreeMap<String, Option<String>>;
 pub type SamplingParams = BTreeMap<String, Value>;
 
-/// 已知的四大对话协议标识常量。
+/// 已知的流式对话协议标识常量。
 pub mod known_api {
     pub const OPENAI_RESPONSES: &str = "openai-responses";
+    pub const OPENAI_CODEX_RESPONSES: &str = "openai-codex-responses";
     pub const OPENAI_COMPLETIONS: &str = "openai-completions";
     pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
     pub const GOOGLE_GENERATIVE_AI: &str = "google-generative-ai";
@@ -262,6 +263,8 @@ pub struct ProviderCompat {
     pub requires_tool_result_name: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_assistant_after_tool_result: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_non_null_assistant_content: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_thinking_as_text: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

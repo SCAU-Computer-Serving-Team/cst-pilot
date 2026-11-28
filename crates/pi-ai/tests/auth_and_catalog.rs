@@ -23,9 +23,9 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[test]
-fn all_37_builtin_providers_load_and_reject_contradictory_model_types() {
+fn all_38_builtin_providers_load_and_reject_contradictory_model_types() {
     let providers = builtin_providers();
-    assert_eq!(providers.len(), 37);
+    assert_eq!(providers.len(), 38);
 
     let models = builtin_models(None);
     let all = models.get_all_models(None);
@@ -79,6 +79,34 @@ fn all_37_builtin_providers_load_and_reject_contradictory_model_types() {
         .get_classifier_model("typesafe", "jev-latest")
         .expect("typesafe/jev-latest classifier must exist");
     assert_eq!(jev.api, known_classifier_api::TYPESAFE_SYSTEM_ONE);
+
+    // 1.6.0 alignment checks:
+    // - openai-codex is OAuth-only (`api_key: None`)
+    let codex = models.get_provider("openai-codex").unwrap();
+    assert!(codex.auth().api_key.is_none());
+    assert!(codex.auth().oauth.is_some());
+
+    // - github-copilot API key is env-only (`COPILOT_GITHUB_TOKEN`)
+    let copilot = models.get_provider("github-copilot").unwrap();
+    assert!(copilot.auth().api_key.as_ref().is_some_and(|a| a.env_only));
+    assert!(copilot.auth().oauth.is_some());
+
+    // - cloudflare-workers-ai is registered and requires account ID in auth resolution
+    let workers_ai = models.get_provider("cloudflare-workers-ai").unwrap();
+    assert!(!workers_ai.get_models().is_empty());
+
+    // - qwen per-plan env vars precede regional fallback
+    assert_eq!(
+        pi_ai::get_api_key_env_vars("qwen-token-plan"),
+        &["QWEN_TOKEN_PLAN_TEAM_API_KEY", "QWEN_TOKEN_PLAN_API_KEY"]
+    );
+    assert_eq!(
+        pi_ai::get_api_key_env_vars("qwen-token-plan-individual-cn"),
+        &[
+            "QWEN_TOKEN_PLAN_INDIVIDUAL_CN_API_KEY",
+            "QWEN_TOKEN_PLAN_CN_API_KEY"
+        ]
+    );
 }
 
 #[test]
@@ -467,6 +495,7 @@ async fn provider_endpoint_headers_and_classifier_auth_headers_are_applied() {
         login_fn: None,
         resolve_async: None,
         configured_without_credentials: true,
+        env_only: false,
         resolve: Arc::new(|_, _| {
             Ok(Some(AuthResult {
                 auth: ModelAuth {

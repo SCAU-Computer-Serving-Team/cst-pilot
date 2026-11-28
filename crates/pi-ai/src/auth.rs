@@ -488,8 +488,19 @@ pub fn get_api_key_env_vars(provider: &str) -> &'static [&'static str] {
         "zai" => &["ZAI_API_KEY"],
         "minimax-cn" => &["MINIMAX_CN_API_KEY"],
         "minimax" => &["MINIMAX_API_KEY"],
-        "qwen-token-plan-cn" | "qwen-token-plan-individual-cn" => &["QWEN_TOKEN_PLAN_CN_API_KEY"],
-        "qwen-token-plan" | "qwen-token-plan-individual" => &["QWEN_TOKEN_PLAN_API_KEY"],
+        "qwen-token-plan" => &["QWEN_TOKEN_PLAN_TEAM_API_KEY", "QWEN_TOKEN_PLAN_API_KEY"],
+        "qwen-token-plan-cn" => &[
+            "QWEN_TOKEN_PLAN_TEAM_CN_API_KEY",
+            "QWEN_TOKEN_PLAN_CN_API_KEY",
+        ],
+        "qwen-token-plan-individual" => &[
+            "QWEN_TOKEN_PLAN_INDIVIDUAL_API_KEY",
+            "QWEN_TOKEN_PLAN_API_KEY",
+        ],
+        "qwen-token-plan-individual-cn" => &[
+            "QWEN_TOKEN_PLAN_INDIVIDUAL_CN_API_KEY",
+            "QWEN_TOKEN_PLAN_CN_API_KEY",
+        ],
         "xiaomi-token-plan-cn" => &["XIAOMI_TOKEN_PLAN_CN_API_KEY"],
         "xiaomi-token-plan-ams" => &["XIAOMI_TOKEN_PLAN_AMS_API_KEY"],
         "xiaomi-token-plan-sgp" => &["XIAOMI_TOKEN_PLAN_SGP_API_KEY"],
@@ -497,6 +508,7 @@ pub fn get_api_key_env_vars(provider: &str) -> &'static [&'static str] {
         "ant-ling" => &["ANT_LING_API_KEY"],
         "baseten" => &["BASETEN_API_KEY"],
         "cerebras" => &["CEREBRAS_API_KEY"],
+        "cloudflare-workers-ai" => &["CLOUDFLARE_API_KEY"],
         "cloudflare-ai-gateway" => &["CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_GATEWAY_API_KEY"],
         "fireworks" => &["FIREWORKS_API_KEY"],
         "groq" => &["GROQ_API_KEY"],
@@ -590,6 +602,9 @@ pub struct ApiKeyAuth {
     pub resolve_async: Option<ApiKeyAsyncResolverFn>,
     /// Pure declaration for read-only availability; no resolver execution required.
     pub configured_without_credentials: bool,
+    /// True when the provider only accepts environment-variable tokens (e.g. `COPILOT_GITHUB_TOKEN`)
+    /// and must not offer interactive API key login in UI/CLI.
+    pub env_only: bool,
     pub login_fn: Option<ApiKeyLoginFn>,
 }
 
@@ -620,6 +635,7 @@ impl ApiKeyAuth {
             login_fn: None,
             resolve_async: None,
             configured_without_credentials: false,
+            env_only: false,
             resolve: Arc::new(move |cred, env| {
                 if let Some(c) = &cred
                     && let Some(key) = &c.key
@@ -685,6 +701,12 @@ impl ApiKeyAuth {
         }
     }
 
+    pub fn env_only(name: impl Into<String>, provider_id: impl Into<String>) -> Self {
+        let mut auth = Self::from_env(name, provider_id);
+        auth.env_only = true;
+        auth
+    }
+
     pub fn keyless(name: impl Into<String>, placeholder_key: impl Into<String>) -> Self {
         let key = placeholder_key.into();
         Self {
@@ -692,6 +714,7 @@ impl ApiKeyAuth {
             login_fn: None,
             resolve_async: None,
             configured_without_credentials: true,
+            env_only: false,
             resolve: Arc::new(move |cred, env| {
                 let api_key = cred
                     .as_ref()
@@ -719,6 +742,12 @@ impl ApiKeyAuth {
         let login = async {
             if let Some(login_fn) = &self.login_fn {
                 return login_fn(interaction.clone()).await;
+            }
+            if self.env_only {
+                return Err(format!(
+                    "{} only supports environment variable configuration",
+                    self.name
+                ));
             }
             self.login_default(interaction).await
         };
