@@ -62,6 +62,32 @@ export function ProviderServices({
 				}
 			}
 		}
+		if (
+			cur + 1 >= links.length &&
+			event.key === "ArrowDown" &&
+			!event.defaultPrevented &&
+			!event.nativeEvent.isComposing &&
+			event.keyCode !== 229 &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRef.current?.closest<HTMLElement>(".settings-route");
+			const lastLink = links[links.length - 1];
+			if (route && lastLink) {
+				const focusables = querySettingsRouteStops(route);
+				const pos = focusables.indexOf(lastLink);
+				const nextStop = pos >= 0 ? focusables[pos + 1] : undefined;
+				if (nextStop) {
+					event.preventDefault();
+					setActiveId(null);
+					setKbdActive(false);
+					nextStop.focus();
+					return;
+				}
+			}
+		}
 		const nextIdx = resolveListNavKey(
 			{
 				key: event.key,
