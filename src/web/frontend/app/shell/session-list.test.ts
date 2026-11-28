@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { filterRecentSessions, groupSessions, orderedSessions, RECENT_SESSION_LIMIT } from "./session-list.ts";
+import {
+	displaySessionTitle,
+	filterRecentSessions,
+	groupSessions,
+	orderedSessions,
+	RECENT_SESSION_LIMIT,
+} from "./session-list.ts";
 
 test("会话按更新时间倒序，同时间保持顺序，不改动来源", () => {
 	const rows = [
@@ -80,4 +86,12 @@ test("侧栏搜索按更新时间倒序、忽略大小写匹配空标题为新�
 		filterRecentSessions(rows, "", 2).map((row) => row.id),
 		["b", "d"],
 	);
+});
+
+test("displaySessionTitle 兼容缺省、null 与空白标题且不抛异常", () => {
+	assert.equal(displaySessionTitle(undefined), "新对话");
+	assert.equal(displaySessionTitle(null), "新对话");
+	assert.equal(displaySessionTitle(""), "新对话");
+	assert.equal(displaySessionTitle("   "), "新对话");
+	assert.equal(displaySessionTitle("  磁盘清理排查  "), "磁盘清理排查");
 });

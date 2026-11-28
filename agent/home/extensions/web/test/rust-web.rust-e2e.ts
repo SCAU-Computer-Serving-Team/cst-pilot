@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { BrowserProbe, freePort } from "./browser.ts";
-import { configureTestModel, startRustWebServer, testRoot } from "./support.ts";
+import { configureTestModel, resolveWebStaticDir, startRustWebServer, testRoot } from "./support.ts";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 type PollExportJob = { status: string; files: { name: string; bytes: number; url: string }[]; error?: unknown };
 
 test(
@@ -88,11 +85,11 @@ test(
 		});
 		await new Promise<void>((resolve) => llmServer.listen(llmPort, "127.0.0.1", resolve));
 
-		const home = join(kitRoot, "agent", "home");
-		await mkdir(home, { recursive: true });
-		await configureTestModel(home, `http://127.0.0.1:${llmPort}/v1`);
+		const configDir = join(kitRoot, "data", "config");
+		await mkdir(configDir, { recursive: true });
+		await configureTestModel(configDir, `http://127.0.0.1:${llmPort}/v1`);
 		await writeFile(
-			join(home, "models.json"),
+			join(configDir, "models.json"),
 			JSON.stringify({
 				providers: {
 					"test-probe": {
@@ -214,7 +211,7 @@ test(
 			assert.equal(missingSubJson.error?.sessionId, "deleted-e2e-session");
 
 			// Observe the compiled SharedWorker against the real Rust backend, including the 32/33 boundary.
-			const workerAsset = (await readdir(join(repoRoot, "agent/home/extensions/web/static/assets"))).find((name) =>
+			const workerAsset = (await readdir(join(resolveWebStaticDir(), "assets"))).find((name) =>
 				/^event-stream-worker-.*\.js$/.test(name),
 			);
 			assert.ok(workerAsset, "构建产物包含 SharedWorker");
@@ -395,7 +392,7 @@ test(
 					},
 				}),
 			];
-			const blSessionPath = join(home, "sessions", `2026-11-10_${blSessionId}.jsonl`);
+			const blSessionPath = join(server.sessionsDir, `2026-11-10_${blSessionId}.jsonl`);
 			await writeFile(blSessionPath, `${blEntries.join("\n")}\n`);
 			const blResponse = await fetch(`${origin}/api/sessions/${blSessionId}`);
 			assert.equal(blResponse.status, 200);
@@ -487,9 +484,11 @@ test(
 	async () => {
 		const root = await mkdtemp(join(await testRoot(), "rust-web-cards-perf-"));
 		const kitRoot = join(root, "kit");
-		const home = join(kitRoot, "agent", "home");
-		await mkdir(join(home, "sessions"), { recursive: true });
-		await configureTestModel(home);
+		const configDir = join(kitRoot, "data", "config");
+		const sessionsDir = join(kitRoot, "data", "sessions");
+		await mkdir(configDir, { recursive: true });
+		await mkdir(sessionsDir, { recursive: true });
+		await configureTestModel(configDir);
 
 		// 1. Seed a session with special tool cards (`sys overview`, `runbook`, `web_search`) + a 500-paragraph long session
 		const cardsSessionId = "special-cards-e2e";
@@ -618,7 +617,7 @@ test(
 				},
 			}),
 		];
-		await writeFile(join(home, "sessions", `2026-11-10_${cardsSessionId}.jsonl`), `${cardsLines.join("\n")}\n`);
+		await writeFile(join(sessionsDir, `2026-11-10_${cardsSessionId}.jsonl`), `${cardsLines.join("\n")}\n`);
 
 		const longSessionId = "long-500-paragraphs";
 		const paragraphs = Array.from(
@@ -664,10 +663,10 @@ test(
 				},
 			}),
 		];
-		await writeFile(join(home, "sessions", `2026-11-10_${longSessionId}.jsonl`), `${longLines.join("\n")}\n`);
+		await writeFile(join(sessionsDir, `2026-11-10_${longSessionId}.jsonl`), `${longLines.join("\n")}\n`);
 
 		let server: Awaited<ReturnType<typeof startRustWebServer>> | undefined;
-		let appModeChild: ChildProcess | undefined;
+		let appServer: Awaited<ReturnType<typeof startRustWebServer>> | undefined;
 		let browser: BrowserProbe | undefined;
 		try {
 			server = await startRustWebServer({ kitRoot });
@@ -716,37 +715,9 @@ test(
 
 			// Verify AppActive standby UI when cst-server runs in default desktop/AppActive mode
 			const appKitRoot = join(root, "app-mode-kit");
-			const appHome = join(appKitRoot, "agent", "home");
-			await mkdir(join(appHome, "sessions"), { recursive: true });
-			await cp(join(repoRoot, "agent/home/APPEND_SYSTEM.md"), join(appHome, "APPEND_SYSTEM.md"));
-			await cp(join(repoRoot, "agent/home/skills"), join(appHome, "skills"), { recursive: true });
-			await mkdir(join(appHome, "extensions/web"), { recursive: true });
-			await symlink(
-				join(repoRoot, "agent/home/extensions/web/static"),
-				join(appHome, "extensions/web/static"),
-				"junction",
-			);
-			await configureTestModel(appHome);
+			appServer = await startRustWebServer({ kitRoot: appKitRoot, standaloneWeb: false });
 
-			const appPort = await freePort();
-			const bin = join(repoRoot, "target", "debug", process.platform === "win32" ? "cst-server.exe" : "cst-server");
-			appModeChild = spawn(bin, ["--port", String(appPort), "--kit-root", appKitRoot, "--cwd", appKitRoot], {
-				cwd: appKitRoot,
-				stdio: "ignore",
-				windowsHide: true,
-			});
-			const appOrigin = `http://127.0.0.1:${appPort}`;
-			for (let i = 0; i < 100; i++) {
-				try {
-					const r = await fetch(`${appOrigin}/api/health`, { signal: AbortSignal.timeout(300) });
-					if (r.ok) break;
-				} catch {
-					/* wait */
-				}
-				await new Promise((r) => setTimeout(r, 40));
-			}
-
-			await browser.navigate(`${appOrigin}/`);
+			await browser.navigate(`${appServer.url}/`);
 			await browser.until(
 				`document.body.innerText.includes("软件端正在使用中") && document.body.innerText.includes("Web 界面处于待机状态")`,
 				"AppActive 通道待机提示横幅呈现",
@@ -754,9 +725,7 @@ test(
 		} finally {
 			await browser?.close();
 			await server?.close();
-			if (appModeChild && appModeChild.exitCode === null) {
-				appModeChild.kill();
-			}
+			await appServer?.close();
 			await rm(root, { recursive: true, force: true }).catch(() => undefined);
 		}
 	},

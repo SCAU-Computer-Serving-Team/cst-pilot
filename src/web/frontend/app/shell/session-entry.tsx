@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Link } from "react-router";
 import type { SessionItem } from "./session-actions";
+import { displaySessionTitle } from "./session-list";
 
 const LONG_PRESS_MS = 450;
 const MOVE_TOLERANCE_PX = 10;
@@ -118,7 +119,7 @@ export function SessionEntry({
 		}
 	}
 
-	const title = session.title.trim() || "新对话";
+	const title = displaySessionTitle(session.title);
 	return (
 		<div
 			ref={rowRef}

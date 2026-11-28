@@ -784,9 +784,13 @@ try {
 
         # --- P2-2: Switch settings tabs and check the legacy TUI option ---
         if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-settings-btn' -TimeoutMs 2500)) {
-            throw 'P2-2: 无法打开设置页。'
+            throw 'P2-2: 无法展开左下角账号与设置菜单。'
         }
         Start-Sleep -Milliseconds 120
+        if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'account-menu-settings-btn' -TimeoutMs 2500)) {
+            throw 'P2-2: 无法从菜单进入设置页。'
+        }
+        Start-Sleep -Milliseconds 180
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         foreach ($tabId in @('settings-tab-providers', 'settings-tab-preferences', 'settings-tab-shortcuts', 'settings-tab-general')) {
             if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId $tabId -TimeoutMs 2500)) {
