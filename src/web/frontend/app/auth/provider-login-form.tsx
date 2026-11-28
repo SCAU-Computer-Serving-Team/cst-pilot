@@ -24,7 +24,15 @@ function inferEndpointMode(item: ProviderStatus | undefined): ProviderEndpointMo
 	if (!item) return "single";
 	if (item.endpointMode) return item.endpointMode;
 	if (item.custom) return "custom";
-	if (item.id === "cstoa" || item.id === "openai-codex" || item.id === "github-copilot") return "managed_oauth";
+	if (
+		item.id === "cstoa" ||
+		item.id === "openai-codex" ||
+		item.id === "github-copilot" ||
+		item.id === "google-gemini-cli" ||
+		item.id === "google-antigravity"
+	) {
+		return "managed_oauth";
+	}
 	if (item.id === "cloudflare-workers-ai" || item.id === "cloudflare-ai-gateway") return "cloudflare_template";
 	if (item.id === "opencode-go" || item.id === "opencode" || item.id === "openrouter" || item.id === "fireworks") {
 		return "multi_endpoint";

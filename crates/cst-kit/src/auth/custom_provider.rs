@@ -153,40 +153,198 @@ fn reserved(id: &str) -> bool {
     id == "cstoa" || pi_ai::builtin_providers().iter().any(|p| p.id() == id)
 }
 
-pub fn classify_builtin_endpoint_mode(provider_id: &str) -> ProviderEndpointMode {
-    match provider_id {
-        "cstoa" | "openai-codex" | "github-copilot" => ProviderEndpointMode::ManagedOauth,
-        "cloudflare-workers-ai" | "cloudflare-ai-gateway" => {
-            ProviderEndpointMode::CloudflareTemplate
-        }
-        "opencode-go" | "opencode" | "openrouter" | "fireworks" => {
-            ProviderEndpointMode::MultiEndpoint
-        }
-        _ => ProviderEndpointMode::Single,
-    }
+struct BuiltinProviderCatalogInfo {
+    mode: ProviderEndpointMode,
+    default_base_url: Option<String>,
+    first_base_url: Option<String>,
+    model_ids: BTreeSet<String>,
 }
 
-fn default_builtin_base_urls() -> &'static BTreeMap<String, String> {
-    static DEFAULTS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
-    DEFAULTS.get_or_init(|| {
+fn builtin_catalog_info() -> &'static BTreeMap<String, BuiltinProviderCatalogInfo> {
+    static INFO: OnceLock<BTreeMap<String, BuiltinProviderCatalogInfo>> = OnceLock::new();
+    INFO.get_or_init(|| {
         let mut map = BTreeMap::new();
+        map.insert(
+            "cstoa".to_owned(),
+            BuiltinProviderCatalogInfo {
+                mode: ProviderEndpointMode::ManagedOauth,
+                default_base_url: None,
+                first_base_url: None,
+                model_ids: BTreeSet::new(),
+            },
+        );
         for p in pi_ai::builtin_providers() {
             let pid = p.id().to_owned();
-            if classify_builtin_endpoint_mode(&pid) == ProviderEndpointMode::Single
-                && let Some(first) = p.get_models().into_iter().next()
-                && !first.base_url.is_empty()
+            let models = p.get_models();
+            let first_base_url = models
+                .iter()
+                .map(|m| m.base_url.trim())
+                .find(|u| !u.is_empty())
+                .map(str::to_owned);
+            let distinct_urls: BTreeSet<String> = models
+                .iter()
+                .map(|m| normalize_endpoint_compare(&m.base_url))
+                .filter(|u| !u.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let model_ids: BTreeSet<String> = models.into_iter().map(|m| m.id).collect();
+            let auth = p.auth();
+            let is_managed_oauth = matches!(
+                pid.as_str(),
+                "openai-codex" | "github-copilot" | "google-gemini-cli" | "google-antigravity"
+            ) || (auth.oauth.is_some()
+                && auth.api_key.as_ref().is_none_or(|a| a.env_only));
+            let mode = if matches!(
+                pid.as_str(),
+                "cloudflare-workers-ai" | "cloudflare-ai-gateway"
+            ) {
+                ProviderEndpointMode::CloudflareTemplate
+            } else if is_managed_oauth {
+                ProviderEndpointMode::ManagedOauth
+            } else if matches!(
+                pid.as_str(),
+                "opencode-go" | "opencode" | "openrouter" | "fireworks"
+            ) || distinct_urls.len() > 1
             {
-                map.insert(pid, first.base_url);
-            }
+                ProviderEndpointMode::MultiEndpoint
+            } else {
+                ProviderEndpointMode::Single
+            };
+            let default_base_url = (mode == ProviderEndpointMode::Single)
+                .then(|| first_base_url.clone())
+                .flatten();
+            map.insert(
+                pid,
+                BuiltinProviderCatalogInfo {
+                    mode,
+                    default_base_url,
+                    first_base_url,
+                    model_ids,
+                },
+            );
         }
         map
     })
 }
 
-pub fn default_builtin_base_url(provider_id: &str) -> Option<&'static str> {
-    default_builtin_base_urls()
+pub fn classify_builtin_endpoint_mode(provider_id: &str) -> ProviderEndpointMode {
+    builtin_catalog_info()
         .get(provider_id)
-        .map(String::as_str)
+        .map(|i| i.mode)
+        .unwrap_or(ProviderEndpointMode::Single)
+}
+
+pub fn default_builtin_base_url(provider_id: &str) -> Option<&'static str> {
+    builtin_catalog_info()
+        .get(provider_id)
+        .and_then(|i| i.default_base_url.as_deref())
+}
+
+fn legacy_subprovider_ids(provider_id: &str) -> &'static [&'static str] {
+    match provider_id {
+        "opencode" => &["opencode-openai", "opencode-responses"],
+        "opencode-go" => &["opencode-go-google"],
+        _ => &[],
+    }
+}
+
+fn entry_has_base_url_override(entry: Option<&Value>) -> bool {
+    let Some(obj) = entry.and_then(Value::as_object) else {
+        return false;
+    };
+    if obj
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        return true;
+    }
+    obj.get("models")
+        .and_then(Value::as_array)
+        .is_some_and(|arr| {
+            arr.iter().any(|item| {
+                item.as_object()
+                    .and_then(|m| m.get("baseUrl"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| !s.trim().is_empty())
+            })
+        })
+}
+
+fn strip_entry_base_url_overrides(entry: Option<&Value>, provider_id: &str) -> Option<Value> {
+    let mut next_obj = entry
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    next_obj.remove("baseUrl");
+    let builtin_ids = builtin_catalog_info()
+        .get(provider_id)
+        .map(|i| &i.model_ids);
+    let default_url = default_builtin_base_url(provider_id);
+    if let Some(models) = next_obj.get_mut("models").and_then(Value::as_array_mut) {
+        for item in models {
+            let Some(m_obj) = item.as_object_mut() else {
+                continue;
+            };
+            if !m_obj.contains_key("baseUrl") {
+                continue;
+            }
+            let is_builtin_model = m_obj
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|mid| builtin_ids.is_some_and(|set| set.contains(mid)));
+            if is_builtin_model || default_url.is_none() {
+                m_obj.remove("baseUrl");
+            } else if let Some(def) = default_url {
+                m_obj.insert("baseUrl".to_owned(), json!(def));
+            }
+        }
+    }
+    (!next_obj.is_empty()).then_some(Value::Object(next_obj))
+}
+
+type EntrySnapshotMap = BTreeMap<String, Option<Value>>;
+
+fn clear_provider_and_legacy_overrides(
+    value: &mut Value,
+    provider_id: &str,
+) -> (EntrySnapshotMap, EntrySnapshotMap, bool) {
+    let mut previous_map = BTreeMap::new();
+    let mut committed_map = BTreeMap::new();
+    let mut touched_subkeys = false;
+
+    let prev_main = value["providers"].get(provider_id).cloned();
+    let next_main = strip_entry_base_url_overrides(prev_main.as_ref(), provider_id);
+    if let Some(ref next_val) = next_main {
+        value["providers"][provider_id] = next_val.clone();
+    } else {
+        value["providers"]
+            .as_object_mut()
+            .expect("validated")
+            .remove(provider_id);
+    }
+    previous_map.insert(provider_id.to_owned(), prev_main);
+    committed_map.insert(provider_id.to_owned(), next_main);
+
+    for &sub_id in legacy_subprovider_ids(provider_id) {
+        let Some(prev_sub) = value["providers"].get(sub_id).cloned() else {
+            continue;
+        };
+        touched_subkeys = true;
+        let next_sub = strip_entry_base_url_overrides(Some(&prev_sub), sub_id);
+        if let Some(ref next_val) = next_sub {
+            value["providers"][sub_id] = next_val.clone();
+        } else {
+            value["providers"]
+                .as_object_mut()
+                .expect("validated")
+                .remove(sub_id);
+        }
+        previous_map.insert(sub_id.to_owned(), Some(prev_sub));
+        committed_map.insert(sub_id.to_owned(), next_sub);
+    }
+
+    (previous_map, committed_map, touched_subkeys)
 }
 
 fn normalize_endpoint_compare(url: &str) -> &str {
@@ -454,9 +612,10 @@ impl AuthRuntime {
                 .read("models.json")
                 .map_err(CustomProviderError::config_unavailable)?,
         )?;
+        let providers_obj = value["providers"].as_object().expect("validated");
         let mut out = BTreeMap::new();
-        for (id, entry) in value["providers"].as_object().expect("validated") {
-            if !is_custom(entry)
+        for (id, entry) in providers_obj {
+            if (reserved(id) || !is_custom(entry))
                 && let Some(url) = entry
                     .get("baseUrl")
                     .and_then(Value::as_str)
@@ -464,6 +623,22 @@ impl AuthRuntime {
                     .filter(|s| !s.is_empty())
             {
                 out.insert(id.clone(), url.to_owned());
+            }
+        }
+        for parent in ["opencode", "opencode-go"] {
+            if !out.contains_key(parent) {
+                for &sub_id in legacy_subprovider_ids(parent) {
+                    if let Some(url) = providers_obj
+                        .get(sub_id)
+                        .and_then(|e| e.get("baseUrl"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        out.insert(parent.to_owned(), url.to_owned());
+                        break;
+                    }
+                }
             }
         }
         Ok(out)
@@ -490,21 +665,34 @@ impl AuthRuntime {
         let default_base_url = (mode == ProviderEndpointMode::Single)
             .then(|| default_builtin_base_url(provider_id).map(str::to_owned))
             .flatten();
-        let cf_acc = stored_env
-            .and_then(|e| e.get("CLOUDFLARE_ACCOUNT_ID"))
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty());
-        let cf_gw = stored_env
-            .and_then(|e| e.get("CLOUDFLARE_GATEWAY_ID"))
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty());
+        let configured_base_url = configured_base_url.filter(|cfg| {
+            mode != ProviderEndpointMode::Single
+                || default_base_url.as_deref().is_none_or(|def| {
+                    normalize_endpoint_compare(def) != normalize_endpoint_compare(cfg)
+                })
+        });
+        let (cf_acc, cf_gw) = if mode == ProviderEndpointMode::CloudflareTemplate {
+            (
+                pi_ai::get_provider_env("CLOUDFLARE_ACCOUNT_ID", stored_env)
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+                pi_ai::get_provider_env("CLOUDFLARE_GATEWAY_ID", stored_env)
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty()),
+            )
+        } else {
+            (None, None)
+        };
         let endpoint_summary = match mode {
             ProviderEndpointMode::MultiEndpoint => match provider_id {
                 "opencode-go" => Some("opencode.ai/inference/go/*".to_owned()),
                 "opencode" => Some("opencode.ai/inference/*".to_owned()),
                 "openrouter" => Some("openrouter.ai/api/*".to_owned()),
                 "fireworks" => Some("api.fireworks.ai/inference/*".to_owned()),
-                _ => None,
+                _ => builtin_catalog_info()
+                    .get(provider_id)
+                    .and_then(|i| i.first_base_url.as_deref())
+                    .map(strip_url_scheme_and_slash),
             },
             ProviderEndpointMode::CloudflareTemplate => match provider_id {
                 "cloudflare-workers-ai" => {
@@ -528,7 +716,14 @@ impl AuthRuntime {
                 ),
                 "openai-codex" => Some("chatgpt.com/backend-api".to_owned()),
                 "github-copilot" => Some("api.individual.githubcopilot.com".to_owned()),
-                _ => None,
+                "google-gemini-cli" => Some("cloudcode-pa.googleapis.com".to_owned()),
+                "google-antigravity" => {
+                    Some("daily-cloudcode-pa.sandbox.googleapis.com".to_owned())
+                }
+                _ => builtin_catalog_info()
+                    .get(provider_id)
+                    .and_then(|i| i.first_base_url.as_deref())
+                    .map(strip_url_scheme_and_slash),
             },
             ProviderEndpointMode::Single | ProviderEndpointMode::Custom => None,
         };
@@ -639,30 +834,18 @@ impl AuthRuntime {
         if previous.as_ref().is_some_and(|v| !v.is_object()) {
             return Err(CustomProviderError::invalid("请求的 Provider 配置无效"));
         }
-        if matches_default && previous.as_ref().and_then(|v| v.get("baseUrl")).is_none() {
+        let has_legacy_subkeys = legacy_subprovider_ids(provider_id)
+            .iter()
+            .any(|sub| value["providers"].get(*sub).is_some());
+        if matches_default && !entry_has_base_url_override(previous.as_ref()) && !has_legacy_subkeys
+        {
             drop(tx);
             let output = login().await.map_err(CustomProviderError::invalid)?;
             self.invalidate_account();
             return Ok(output);
         }
-        let committed_opt = if matches_default {
-            let mut next_obj = previous
-                .as_ref()
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
-            next_obj.remove("baseUrl");
-            if next_obj.is_empty() {
-                value["providers"]
-                    .as_object_mut()
-                    .expect("validated")
-                    .remove(provider_id);
-                None
-            } else {
-                let next_val = Value::Object(next_obj);
-                value["providers"][provider_id] = next_val.clone();
-                Some(next_val)
-            }
+        let (previous_map, committed_map, touched_subkeys) = if matches_default {
+            clear_provider_and_legacy_overrides(&mut value, provider_id)
         } else {
             let mut updated = previous.clone().unwrap_or_else(|| json!({}));
             updated["baseUrl"] = json!(endpoint);
@@ -677,7 +860,11 @@ impl AuthRuntime {
                 }
             }
             value["providers"][provider_id] = updated.clone();
-            Some(updated)
+            let mut prev_m = BTreeMap::new();
+            prev_m.insert(provider_id.to_owned(), previous);
+            let mut comm_m = BTreeMap::new();
+            comm_m.insert(provider_id.to_owned(), Some(updated));
+            (prev_m, comm_m, false)
         };
         tx.write("models.json", &value)
             .map_err(CustomProviderError::config_unavailable)?;
@@ -685,7 +872,7 @@ impl AuthRuntime {
         let refreshed = self
             .runtime
             .refresh(Some(ModelsRefreshOptions {
-                providers: Some(vec![provider_id.into()]),
+                providers: (!touched_subkeys).then(|| vec![provider_id.into()]),
                 allow_network: Some(false),
                 force: Some(false),
             }))
@@ -696,12 +883,26 @@ impl AuthRuntime {
             .into_iter()
             .filter(|m| m.provider == provider_id)
             .collect();
-        let endpoint_ok = self.runtime.get_error().is_none()
+        let default_restored = if matches_default
+            && classify_builtin_endpoint_mode(provider_id) == ProviderEndpointMode::Single
+            && let Some(def) = default_builtin_base_url(provider_id)
+        {
+            provider_models
+                .iter()
+                .all(|m| normalize_endpoint_compare(&m.base_url) == normalize_endpoint_compare(def))
+        } else {
+            true
+        };
+        let endpoint_ok = self.runtime.get_provider_error(provider_id).is_none()
             && !refreshed.errors.contains_key(provider_id)
             && !provider_models.is_empty()
-            && (matches_default || provider_models.iter().all(|m| m.base_url == endpoint));
+            && if matches_default {
+                default_restored
+            } else {
+                provider_models.iter().all(|m| m.base_url == endpoint)
+            };
         if !endpoint_ok {
-            self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
+            self.rollback_entries(provider_id, &committed_map, &previous_map, touched_subkeys)
                 .await
                 .map_err(CustomProviderError::config_unavailable)?;
             return Err(CustomProviderError::invalid(
@@ -714,7 +915,7 @@ impl AuthRuntime {
                 Ok(output)
             }
             Err(err) => {
-                self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
+                self.rollback_entries(provider_id, &committed_map, &previous_map, touched_subkeys)
                     .await
                     .map_err(CustomProviderError::config_unavailable)?;
                 Err(CustomProviderError::invalid(err))
@@ -766,26 +967,8 @@ impl AuthRuntime {
                 "自定义服务请通过自定义配置接口修改地址。",
             ));
         }
-        let committed_opt = match normalized_set {
-            None => {
-                let mut next_obj = previous
-                    .as_ref()
-                    .and_then(Value::as_object)
-                    .cloned()
-                    .unwrap_or_default();
-                next_obj.remove("baseUrl");
-                if next_obj.is_empty() {
-                    value["providers"]
-                        .as_object_mut()
-                        .expect("validated")
-                        .remove(provider_id);
-                    None
-                } else {
-                    let next_val = Value::Object(next_obj);
-                    value["providers"][provider_id] = next_val.clone();
-                    Some(next_val)
-                }
-            }
+        let (previous_map, committed_map, touched_subkeys) = match normalized_set {
+            None => clear_provider_and_legacy_overrides(&mut value, provider_id),
             Some(ref endpoint) => {
                 let mut updated = previous.clone().unwrap_or_else(|| json!({}));
                 updated["baseUrl"] = json!(endpoint);
@@ -800,7 +983,11 @@ impl AuthRuntime {
                     }
                 }
                 value["providers"][provider_id] = updated.clone();
-                Some(updated)
+                let mut prev_m = BTreeMap::new();
+                prev_m.insert(provider_id.to_owned(), previous);
+                let mut comm_m = BTreeMap::new();
+                comm_m.insert(provider_id.to_owned(), Some(updated));
+                (prev_m, comm_m, false)
             }
         };
         tx.write("models.json", &value)
@@ -809,7 +996,7 @@ impl AuthRuntime {
         let refreshed = self
             .runtime
             .refresh(Some(ModelsRefreshOptions {
-                providers: Some(vec![provider_id.into()]),
+                providers: (!touched_subkeys).then(|| vec![provider_id.into()]),
                 allow_network: Some(false),
                 force: Some(false),
             }))
@@ -820,14 +1007,26 @@ impl AuthRuntime {
             .into_iter()
             .filter(|m| m.provider == provider_id)
             .collect();
-        let endpoint_ok = self.runtime.get_error().is_none()
+        let url_verified = match normalized_set {
+            Some(ref ep) => provider_models.iter().all(|m| &m.base_url == ep),
+            None => {
+                if classify_builtin_endpoint_mode(provider_id) == ProviderEndpointMode::Single
+                    && let Some(def) = default_builtin_base_url(provider_id)
+                {
+                    provider_models.iter().all(|m| {
+                        normalize_endpoint_compare(&m.base_url) == normalize_endpoint_compare(def)
+                    })
+                } else {
+                    true
+                }
+            }
+        };
+        let endpoint_ok = self.runtime.get_provider_error(provider_id).is_none()
             && !refreshed.errors.contains_key(provider_id)
             && (provider_id == "cstoa" || !provider_models.is_empty())
-            && normalized_set
-                .as_ref()
-                .is_none_or(|ep| provider_models.iter().all(|m| &m.base_url == ep));
+            && url_verified;
         if !endpoint_ok {
-            self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
+            self.rollback_entries(provider_id, &committed_map, &previous_map, touched_subkeys)
                 .await
                 .map_err(CustomProviderError::config_unavailable)?;
             return Err(CustomProviderError::invalid(
@@ -846,8 +1045,8 @@ impl AuthRuntime {
                 force: Some(false),
             }))
             .await;
-        self.runtime.get_error().is_none()
-            && result.errors.is_empty()
+        self.runtime.get_provider_error(id).is_none()
+            && !result.errors.contains_key(id)
             && (!require_models
                 || self
                     .runtime
@@ -861,21 +1060,52 @@ impl AuthRuntime {
         committed: Option<&Value>,
         previous: Option<&Value>,
     ) -> Result<(), String> {
+        let mut comm_m = BTreeMap::new();
+        comm_m.insert(id.to_owned(), committed.cloned());
+        let mut prev_m = BTreeMap::new();
+        prev_m.insert(id.to_owned(), previous.cloned());
+        self.rollback_entries(id, &comm_m, &prev_m, false).await
+    }
+    async fn rollback_entries(
+        &self,
+        id: &str,
+        committed: &EntrySnapshotMap,
+        previous: &EntrySnapshotMap,
+        full_refresh: bool,
+    ) -> Result<(), String> {
         let tx = self.files.transaction().await?;
         let mut value = config(Some(tx.read("models.json")?)).map_err(legacy_error_string)?;
-        if value["providers"].get(id) == committed {
-            if let Some(previous) = previous {
-                value["providers"][id] = previous.clone();
-            } else {
-                value["providers"]
-                    .as_object_mut()
-                    .expect("validated")
-                    .remove(id);
+        let mut wrote = false;
+        for (key, comm_val) in committed {
+            if value["providers"].get(key) == comm_val.as_ref() {
+                if let Some(Some(prev_val)) = previous.get(key) {
+                    value["providers"][key] = prev_val.clone();
+                } else {
+                    value["providers"]
+                        .as_object_mut()
+                        .expect("validated")
+                        .remove(key);
+                }
+                wrote = true;
             }
+        }
+        if wrote {
             tx.write("models.json", &value)?;
         }
         drop(tx);
-        let _ = self.reload_custom(id, previous.is_some()).await;
+        if full_refresh {
+            let _ = self
+                .runtime
+                .refresh(Some(ModelsRefreshOptions {
+                    providers: None,
+                    allow_network: Some(false),
+                    force: Some(false),
+                }))
+                .await;
+        } else {
+            let req_models = previous.get(id).and_then(Option::as_ref).is_some();
+            let _ = self.reload_custom(id, req_models).await;
+        }
         Ok(())
     }
 }

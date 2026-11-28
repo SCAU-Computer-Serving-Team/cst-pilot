@@ -451,6 +451,32 @@ impl ProvidersTabView {
                 _ => {}
             },
         ));
+        subs.push(cx.subscribe_in(
+            &oauth_prompt_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.form_error = None;
+                    this.key_error = None;
+                    cx.notify();
+                }
+                InputEvent::Focus => {
+                    this.dismiss_click_outside_dropdowns(cx);
+                }
+                InputEvent::PressEnter { .. }
+                    if !this.inline_edit_mode
+                        && this.active_provider_id.is_some()
+                        && !crate::sessions::input_is_composing(
+                            &this.oauth_prompt_input,
+                            window,
+                            cx,
+                        ) =>
+                {
+                    this.submit_builtin_oauth_prompt(window, cx);
+                }
+                _ => {}
+            },
+        ));
 
         let protocol_trigger_focus = cx.focus_handle().tab_stop(true);
         let back_btn_focus = cx.focus_handle().tab_stop(true);
@@ -616,6 +642,7 @@ impl ProvidersTabView {
             &self.gateway_id_input,
             &self.api_key_input,
             &self.inline_token_input,
+            &self.oauth_prompt_input,
         ] {
             if crate::sessions::input_is_composing(inp, window, cx) {
                 return true;
@@ -642,6 +669,7 @@ impl ProvidersTabView {
             &self.gateway_id_input,
             &self.api_key_input,
             &self.inline_token_input,
+            &self.oauth_prompt_input,
         ] {
             crate::sessions::consume_composing_escape(inp, window, cx);
         }
@@ -670,6 +698,7 @@ impl ProvidersTabView {
     pub fn open_new_custom_provider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.page_slide.start(1.0, cx);
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
+        self.cancel_builtin_oauth_if_pending(cx);
         self.reset_form();
         self.creating_new_custom = true;
         self.inline_edit_mode = true;
@@ -694,6 +723,7 @@ impl ProvidersTabView {
 
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.providers_expanded = false;
+        self.cancel_builtin_oauth_if_pending(cx);
         self.reset_form();
         let key = self.api_key_input.downgrade();
         let window = self.window;
@@ -716,6 +746,7 @@ impl ProvidersTabView {
         cx: &mut Context<Self>,
     ) {
         self.page_slide.start(-1.0, cx);
+        self.cancel_builtin_oauth_if_pending(cx);
         self.reset_form();
         self.clear_key(window, cx);
         self.list_selected_idx = self.return_focus_idx;
@@ -842,6 +873,7 @@ impl ProvidersTabView {
         };
         self.page_slide.start(1.0, cx);
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
+        self.cancel_builtin_oauth_if_pending(cx);
         self.reset_form();
         self.adding_provider = true;
         self.providers_expanded = false;
@@ -1108,6 +1140,25 @@ impl ProvidersTabView {
         cx.notify();
     }
 
+    fn cancel_builtin_oauth_if_pending(&mut self, cx: &mut Context<Self>) {
+        if !self.oauth_pending {
+            return;
+        }
+        self.generation += 1;
+        self.oauth_pending = false;
+        self.oauth_code_hint = None;
+        self.oauth_prompt_id = None;
+        let flow_id = self.oauth_flow_id.take();
+        if let Some(pid) = self.active_provider_id.clone() {
+            let client = self.client.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = client.cancel_auth_flow(pid, "oauth".into(), flow_id).await;
+                })
+                .detach();
+        }
+    }
+
     fn reset_form(&mut self) {
         self.generation += 1;
         self.loading = false;
@@ -1341,6 +1392,7 @@ impl ProvidersTabView {
 
         self.page_slide.start(1.0, cx);
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
+        self.cancel_builtin_oauth_if_pending(cx);
         self.reset_form();
         self.endpoint_saving = false;
         self.auth_method_oauth = use_oauth;
@@ -1603,6 +1655,13 @@ impl ProvidersTabView {
         let Some(provider) = self.active_provider_id.clone() else {
             return;
         };
+        let snap = self.client.snapshot();
+        let entry = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider));
+        let has_cred = entry.is_some_and(|p| p.auth_type.is_some() || p.requires_login);
+        let has_url_override = entry.is_some_and(|p| p.configured_base_url.is_some());
         self.saving = true;
         self.key_error = None;
         cx.notify();
@@ -1614,7 +1673,16 @@ impl ProvidersTabView {
             let custom = revision.is_some();
             let res = match revision {
                 Some(revision) => client.delete_custom_provider(provider, revision).await,
-                None => client.logout_provider(provider).await,
+                None => {
+                    let mut r = Ok(Value::Null);
+                    if has_cred {
+                        r = client.logout_provider(provider.clone()).await;
+                    }
+                    if r.is_ok() && has_url_override {
+                        r = client.patch_provider_endpoint(provider, None).await;
+                    }
+                    r
+                }
             };
             if res.is_ok() {
                 let _ = client.refresh_globals().await;
@@ -1767,7 +1835,7 @@ impl ProvidersTabView {
                             this.oauth_code_hint = None;
                             this.oauth_prompt_id = None;
                             cx.emit(ProvidersTabEvent::CredentialsSaved);
-                            cx.emit(ProvidersTabEvent::Notice("账号已授权。".into()));
+                            cx.emit(ProvidersTabEvent::Notice("账号已授权".into()));
                             cx.notify();
                         }
                     });
@@ -1778,7 +1846,7 @@ impl ProvidersTabView {
                         .get("error")
                         .and_then(Value::as_str)
                         .filter(|s| !s.is_empty())
-                        .unwrap_or("授权未完成。")
+                        .unwrap_or("授权未完成")
                         .to_owned();
                     let _ = weak.update(cx, |this, cx| {
                         if this.generation == generation {
@@ -1896,24 +1964,39 @@ impl ProvidersTabView {
         cx.notify();
         let generation = self.generation;
         let client = self.client.clone();
+        let provider_for_ui = provider.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = client.patch_provider_endpoint(provider, payload_url).await;
             if res.is_ok() {
                 let _ = client.refresh_globals().await;
                 let _ = client.refresh_models(None).await;
             }
-            let _ = weak.update_in(cx, |this, _window, cx| {
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.endpoint_saving = false;
                 if this.generation != generation {
                     return;
                 }
                 match res {
                     Ok(_) => {
-                        cx.emit(ProvidersTabEvent::Notice("服务地址已保存。".into()));
+                        let effective_url = this
+                            .client
+                            .snapshot()
+                            .auth_providers
+                            .as_ref()
+                            .and_then(|list| list.iter().find(|p| p.id == provider_for_ui))
+                            .and_then(|p| {
+                                p.configured_base_url
+                                    .clone()
+                                    .or_else(|| p.default_base_url.clone())
+                            })
+                            .unwrap_or_default();
+                        this.base_url_input
+                            .update(cx, |i, cx| i.set_value(effective_url, window, cx));
+                        cx.emit(ProvidersTabEvent::Notice("地址已保存".into()));
                     }
                     Err(ClientError::BadRequest { message, .. }) => {
                         this.key_error = Some(if message.is_empty() {
-                            "服务地址无效。".into()
+                            "地址无效".into()
                         } else {
                             message.into()
                         });
@@ -1948,7 +2031,7 @@ impl ProvidersTabView {
         let account_id = if is_cf_workers || is_cf_gateway {
             let v = self.account_id_input.read(cx).value().trim().to_owned();
             if v.is_empty() && !already_configured {
-                self.key_error = Some("请输入 Account ID。".into());
+                self.key_error = Some("缺少 Account ID".into());
                 cx.notify();
                 return;
             }
@@ -1959,7 +2042,7 @@ impl ProvidersTabView {
         let gateway_id = if is_cf_gateway {
             let v = self.gateway_id_input.read(cx).value().trim().to_owned();
             if v.is_empty() && !already_configured {
-                self.key_error = Some("请输入 Gateway ID。".into());
+                self.key_error = Some("缺少 Gateway ID".into());
                 cx.notify();
                 return;
             }
@@ -1989,7 +2072,11 @@ impl ProvidersTabView {
                 "multi_endpoint"
             } else if matches!(
                 provider.as_str(),
-                "cstoa" | "openai-codex" | "github-copilot"
+                "cstoa"
+                    | "openai-codex"
+                    | "github-copilot"
+                    | "google-gemini-cli"
+                    | "google-antigravity"
             ) {
                 "managed_oauth"
             } else {
@@ -2019,6 +2106,7 @@ impl ProvidersTabView {
 
         let generation = self.generation;
         let client = self.client.clone();
+        let provider_for_ui = provider.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = client
                 .save_provider_api_key_with_cloudflare(
@@ -2038,6 +2126,20 @@ impl ProvidersTabView {
                 match res {
                     Ok(_) => {
                         this.clear_key(window, cx);
+                        let effective_url = this
+                            .client
+                            .snapshot()
+                            .auth_providers
+                            .as_ref()
+                            .and_then(|list| list.iter().find(|p| p.id == provider_for_ui))
+                            .and_then(|p| {
+                                p.configured_base_url
+                                    .clone()
+                                    .or_else(|| p.default_base_url.clone())
+                            })
+                            .unwrap_or_default();
+                        this.base_url_input
+                            .update(cx, |i, cx| i.set_value(effective_url, window, cx));
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
                     }
@@ -3005,7 +3107,11 @@ impl Render for ProvidersTabView {
                         "multi_endpoint"
                     } else if matches!(
                         pid_owned.as_str(),
-                        "cstoa" | "openai-codex" | "github-copilot"
+                        "cstoa"
+                            | "openai-codex"
+                            | "github-copilot"
+                            | "google-gemini-cli"
+                            | "google-antigravity"
                     ) {
                         "managed_oauth"
                     } else {
@@ -3428,7 +3534,7 @@ impl Render for ProvidersTabView {
                                     this.detail_last_pointer = Some(w.mouse_position());
                                     this.toggle_builtin_model_enabled(fid.clone(), cx);
                                 }
-                                Some(DetailTarget::RemoveCredentials) if is_configured => {
+                                Some(DetailTarget::RemoveCredentials) if can_remove => {
                                     this.open_remove_confirm(w, cx);
                                 }
                                 _ => {}
@@ -3644,6 +3750,7 @@ impl Render for ProvidersTabView {
                                                     }
                                                 })
                                                 .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.cancel_builtin_oauth_if_pending(cx);
                                                     this.auth_method_oauth = false;
                                                     this.key_error = None;
                                                     cx.notify();

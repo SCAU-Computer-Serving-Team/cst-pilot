@@ -294,6 +294,26 @@ impl ModelRuntime {
         None
     }
 
+    pub fn get_provider_error(&self, provider: &str) -> Option<String> {
+        if let Some(cfg_err) = self.config.read().expect("config lock").get_error() {
+            return Some(cfg_err.to_owned());
+        }
+        if let Some(comp_err) = self
+            .composition_errors
+            .read()
+            .expect("comp errors lock")
+            .get(provider)
+        {
+            return Some(comp_err.clone());
+        }
+        if let Some(ref fa) = self.file_auth
+            && let Some(auth_err) = fa.last_error()
+        {
+            return Some(auth_err);
+        }
+        None
+    }
+
     /// 绑定会话的 `ExtensionRunner`（共享同一个 `Arc<Models>`，并在目录变更锁释放后同步快照）。
     pub fn bind_extension_runner(&self, runner: &ExtensionRunner) {
         let _lifecycle = self
@@ -393,7 +413,17 @@ impl ModelRuntime {
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    errors.insert(pid.clone(), err);
+                    let is_retired_builtin_override = base.is_none()
+                        && matches!(
+                            pid.as_str(),
+                            "opencode-openai" | "opencode-responses" | "opencode-go-google"
+                        )
+                        && prov_cfg
+                            .as_ref()
+                            .is_some_and(|c| c.api.is_none() || c.models.is_none());
+                    if !is_retired_builtin_override {
+                        errors.insert(pid.clone(), err);
+                    }
                     if let Some(b) = base {
                         self.models.set_provider(b.clone());
                     }

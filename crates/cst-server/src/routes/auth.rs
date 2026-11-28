@@ -155,6 +155,12 @@ pub async fn handle_auth_route(
                         .await
                         .map_err(ApiError::from)?;
                     let pid = saved.get("id").and_then(Value::as_str).unwrap_or("");
+                    state
+                        .pool
+                        .invalid_auth
+                        .lock()
+                        .expect("invalid_auth lock")
+                        .remove(pid);
                     state.pool.global_events.publish(
                         "state",
                         &json!({ "type": "auth_changed", "providerId": pid }),
@@ -240,6 +246,12 @@ pub async fn handle_auth_route(
                             .delete_custom_provider_checked(&pid_owned, &revision)
                             .await
                             .map_err(ApiError::from)?;
+                        state
+                            .pool
+                            .invalid_auth
+                            .lock()
+                            .expect("invalid_auth lock")
+                            .remove(&pid_owned);
                         state.pool.global_events.publish(
                             "state",
                             &json!({ "type": "auth_changed", "providerId": pid_owned }),
@@ -775,6 +787,11 @@ pub async fn handle_auth_route(
                                     )
                                     .await
                                     .map_err(ApiError::from)?;
+                                st.pool
+                                    .invalid_auth
+                                    .lock()
+                                    .expect("invalid_auth lock")
+                                    .remove(&pid_owned);
                                 st.pool.global_events.publish(
                                     "state",
                                     &json!({ "type": "auth_changed", "providerId": pid_owned }),
@@ -980,6 +997,7 @@ pub async fn handle_auth_route(
                                     }))
                                 };
 
+                                let had_base_url = base_url_opt.is_some();
                                 let resp_val = if let Some(ref base) = base_url_opt {
                                     let _cfg_guard = st.locks.lock("auth-config:all").await;
                                     if st.pool.has_running_session_for_provider(&pid_owned).await {
@@ -1021,6 +1039,15 @@ pub async fn handle_auth_route(
                                         "providerId": pid_owned,
                                     }),
                                 );
+                                if had_base_url {
+                                    st.pool.global_events.publish(
+                                        "state",
+                                        &json!({
+                                            "type": "models_changed",
+                                            "providerId": pid_owned,
+                                        }),
+                                    );
+                                }
                                 Ok(resp_val)
                             },
                         )

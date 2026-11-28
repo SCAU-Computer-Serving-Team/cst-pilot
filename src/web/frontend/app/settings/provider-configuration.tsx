@@ -25,7 +25,13 @@ const trimSlash = (url: string) => url.trim().replace(/\/+$/, "");
 function inferEndpointMode(provider: ProviderStatus): ProviderEndpointMode {
 	if (provider.endpointMode) return provider.endpointMode;
 	if (provider.custom) return "custom";
-	if (provider.id === "cstoa" || provider.id === "openai-codex" || provider.id === "github-copilot") {
+	if (
+		provider.id === "cstoa" ||
+		provider.id === "openai-codex" ||
+		provider.id === "github-copilot" ||
+		provider.id === "google-gemini-cli" ||
+		provider.id === "google-antigravity"
+	) {
 		return "managed_oauth";
 	}
 	if (provider.id === "cloudflare-workers-ai" || provider.id === "cloudflare-ai-gateway") {
@@ -118,6 +124,8 @@ export function ProviderConfigurationForm({
 	);
 	const pending = oauth || !!flow;
 	const isConnected = Boolean(provider.type || provider.configured) && !provider.requiresLogin;
+	const hasApiKey =
+		(provider.type === "api_key" || (!provider.type && Boolean(provider.configured))) && !provider.requiresLogin;
 	const canRemove = Boolean(provider.type || provider.requiresLogin || provider.configuredBaseUrl);
 
 	const allModels = modelsResource.data?.models ?? [];
@@ -178,7 +186,7 @@ export function ProviderConfigurationForm({
 	async function updateEndpoint(nextUrl: string | null) {
 		if (endpointBusy || removing || pending) return;
 		if (nextUrl !== null && !validateCustomUrl(nextUrl)) {
-			setError("服务地址须使用 HTTPS 或本机 HTTP。");
+			setError("仅限 HTTPS");
 			return;
 		}
 		setEndpointBusy(true);
@@ -186,8 +194,9 @@ export function ProviderConfigurationForm({
 		try {
 			await patchProviderEndpoint(provider.id, nextUrl);
 			if (mounted.current) {
-				if (nextUrl === null) {
-					setBaseUrl(provider.defaultBaseUrl ?? "");
+				const defUrl = provider.defaultBaseUrl ?? "";
+				if (nextUrl === null || (defUrl && trimSlash(nextUrl) === trimSlash(defUrl))) {
+					setBaseUrl(defUrl);
 				}
 				feedback();
 				await onRefresh();
@@ -195,7 +204,7 @@ export function ProviderConfigurationForm({
 			}
 		} catch (cause) {
 			if (mounted.current) {
-				setError(cause instanceof Error ? cause.message : "保存地址失败，请重试。");
+				setError(cause instanceof Error ? cause.message : "保存失败");
 			}
 		} finally {
 			if (mounted.current) setEndpointBusy(false);
@@ -212,7 +221,7 @@ export function ProviderConfigurationForm({
 			const changedFromDefault = trimmed !== "" && trimSlash(trimmed) !== trimSlash(defaultUrl);
 			if (changedFromDefault) {
 				if (!validateCustomUrl(trimmed)) {
-					setError("服务地址须使用 HTTPS 或本机 HTTP。");
+					setError("仅限 HTTPS");
 					return;
 				}
 				body.baseUrl = trimmed;
@@ -273,7 +282,7 @@ export function ProviderConfigurationForm({
 			if (mounted.current) setRemoving(false);
 		}
 	}
-	const showKeyEditor = method === "api_key" && !flow && (!isConnected || editingKey);
+	const showKeyEditor = method === "api_key" && !flow && (!hasApiKey || editingKey);
 	const defaultUrl = provider.defaultBaseUrl ?? "";
 	const trimmedUrl = baseUrl.trim();
 	const urlDiffersFromDefault =
@@ -463,7 +472,7 @@ export function ProviderConfigurationForm({
 						</TextField>
 					</div>
 				)}
-				{isConnected && method === "api_key" && !editingKey && !flow && (
+				{hasApiKey && method === "api_key" && !editingKey && !flow && (
 					<div className="settings-flat-row">
 						<div className="settings-row-inline">
 							<span className="settings-custom-field-label">API 密钥</span>
@@ -535,7 +544,7 @@ export function ProviderConfigurationForm({
 									>
 										{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
 									</button>
-									{isConnected && (
+									{hasApiKey && (
 										<button
 											type="button"
 											className="settings-inline-action"

@@ -106,12 +106,11 @@ impl LoginView {
         let gateway_id_input = cx.new(|cx| InputState::new(window, cx).placeholder("Gateway ID"));
         let oauth_prompt_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入授权码"));
 
-        let subscriptions = [
+        let mut subscriptions: Vec<Subscription> = [
             &api_key_input,
             &base_url_input,
             &account_id_input,
             &gateway_id_input,
-            &oauth_prompt_input,
         ]
         .into_iter()
         .map(|input| {
@@ -128,6 +127,32 @@ impl LoginView {
             })
         })
         .collect();
+        subscriptions.push(cx.subscribe_in(
+            &oauth_prompt_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    let cleared_key = this.api_key_error.take().is_some();
+                    let cleared_oauth = this.oauth_error.take().is_some();
+                    if cleared_key || cleared_oauth {
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus => {
+                    this.dismiss_dropdowns_on_outside_click(cx);
+                }
+                InputEvent::PressEnter { .. }
+                    if !crate::sessions::input_is_composing(
+                        &this.oauth_prompt_input,
+                        window,
+                        cx,
+                    ) =>
+                {
+                    this.submit_oauth_prompt(window, cx);
+                }
+                _ => {}
+            },
+        ));
 
         Self {
             client,
@@ -214,6 +239,17 @@ impl LoginView {
         }
         self.generation += 1;
         self.reset_qr(cx);
+        if self.oauth_pending
+            && let Some(pid) = self.oauth_active_provider.take()
+        {
+            let fid = self.oauth_flow_id.take();
+            let client = self.client.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = client.cancel_auth_flow(pid, "oauth".into(), fid).await;
+                })
+                .detach();
+        }
         self.tab = tab;
         self.provider_dropdown_open = false;
         self.api_key_error = None;
@@ -674,7 +710,7 @@ impl LoginView {
                         .get("error")
                         .and_then(Value::as_str)
                         .filter(|s| !s.is_empty())
-                        .unwrap_or("授权未完成。")
+                        .unwrap_or("授权未完成")
                         .to_owned();
                     let _ = weak.update(cx, |this, cx| {
                         if this.generation == generation {
@@ -940,7 +976,11 @@ impl LoginView {
                 "multi_endpoint"
             } else if matches!(
                 provider.as_str(),
-                "cstoa" | "openai-codex" | "github-copilot"
+                "cstoa"
+                    | "openai-codex"
+                    | "github-copilot"
+                    | "google-gemini-cli"
+                    | "google-antigravity"
             ) {
                 "managed_oauth"
             } else {
@@ -1680,7 +1720,11 @@ impl Render for LoginView {
                             "multi_endpoint"
                         } else if matches!(
                             self.selected_provider_id.as_str(),
-                            "cstoa" | "openai-codex" | "github-copilot"
+                            "cstoa"
+                                | "openai-codex"
+                                | "github-copilot"
+                                | "google-gemini-cli"
+                                | "google-antigravity"
                         ) {
                             "managed_oauth"
                         } else {

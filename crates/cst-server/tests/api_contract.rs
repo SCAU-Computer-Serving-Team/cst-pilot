@@ -2243,13 +2243,27 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
     assert_eq!(oc_go_row["endpointSummary"], "opencode.ai/inference/go/*");
     assert_eq!(codex_row["endpointMode"], "managed_oauth");
     assert_eq!(codex_row["endpointSummary"], "chatgpt.com/backend-api");
+    let copilot_after = provs_after
+        .iter()
+        .find(|p| p["id"] == "github-copilot")
+        .unwrap();
+    assert_eq!(copilot_after["endpointMode"], "managed_oauth");
+    assert_eq!(copilot_after["defaultBaseUrl"], Value::Null);
+    assert_eq!(
+        copilot_after["endpointSummary"],
+        "api.individual.githubcopilot.com"
+    );
+    let cstoa_after = provs_after.iter().find(|p| p["id"] == "cstoa").unwrap();
+    assert_eq!(cstoa_after["endpointMode"], "managed_oauth");
 
-    // 多协议与模板服务禁止写入单地址覆写
+    // 多协议、模板与托管授权服务禁止写入单地址覆写
     for reject_ep in [
         "opencode-go",
         "openrouter",
         "cloudflare-workers-ai",
         "openai-codex",
+        "github-copilot",
+        "cstoa",
     ] {
         let bad_patch = client
             .patch(format!(
@@ -2267,7 +2281,61 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
         assert_eq!(bad_patch.status().as_u16(), 400);
     }
 
-    // 单地址服务可独立保存自定义地址，且设为官方默认或 null 时清除 models.json 覆写
+    // 遗留 opencode-* 子键与 models[*].baseUrl 既能被识别，不会级联阻塞其他服务，且恢复默认后彻底清除
+    fs::create_dir_all(fixture.root.join("data/config")).unwrap();
+    fs::write(
+        fixture.root.join("data/config/models.json"),
+        serde_json::to_vec(&json!({
+            "providers": {
+                "opencode-openai": {
+                    "baseUrl": "https://legacy-oc.example.com/v1"
+                },
+                "deepseek": {
+                    "baseUrl": "https://api.deepseek.com/",
+                    "models": [
+                        {
+                            "id": "deepseek-chat",
+                            "baseUrl": "https://stale-model-proxy.example.com/v1"
+                        }
+                    ]
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let refresh_legacy = client
+        .post(format!("{}/api/models/refresh", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "refresh-legacy-subkey")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refresh_legacy.status().as_u16(), 200);
+
+    let list_legacy: Value = client
+        .get(format!("{}/api/auth", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let provs_legacy = list_legacy["providers"].as_array().unwrap();
+    let oc_legacy = provs_legacy.iter().find(|p| p["id"] == "opencode").unwrap();
+    assert_eq!(
+        oc_legacy["configuredBaseUrl"],
+        "https://legacy-oc.example.com/v1"
+    );
+    // deepseek 顶层 baseUrl 虽等于默认地址（带尾斜杠），应归一化为 Null
+    let ds_legacy = provs_legacy.iter().find(|p| p["id"] == "deepseek").unwrap();
+    assert_eq!(ds_legacy["configuredBaseUrl"], Value::Null);
+
+    // 单地址服务在存在无关 opencode-openai 孤立子键时仍可正常保存自定义地址，恢复默认同时清理 models[*].baseUrl
     let set_ds_ep = client
         .patch(format!("{}/api/auth/deepseek/endpoint", server.base_url()))
         .header("Host", &host_header)
@@ -2298,6 +2366,25 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
     assert_eq!(reset_ds_ep.status().as_u16(), 200);
     let reset_ds_json: Value = reset_ds_ep.json().await.unwrap();
     assert_eq!(reset_ds_json["configuredBaseUrl"], Value::Null);
+
+    let reset_oc_ep = client
+        .patch(format!("{}/api/auth/opencode/endpoint", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "reset-oc-ep")
+        .json(&json!({ "baseUrl": null }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reset_oc_ep.status().as_u16(), 200);
+    let models_disk: Value =
+        serde_json::from_slice(&fs::read(fixture.root.join("data/config/models.json")).unwrap())
+            .unwrap();
+    assert!(
+        models_disk["providers"].get("opencode-openai").is_none(),
+        "resetting opencode must clear legacy opencode-openai subkey"
+    );
 
     server.shutdown().await;
 }
