@@ -237,7 +237,7 @@ async fn custom_provider_saved_headers_reach_the_kit_session_request() {
     assert_eq!(headers["x-provider-test"], "provider");
     assert_eq!(headers["x-model-test"], "model");
     assert_eq!(headers["x-level"], "model");
-    assert!(headers["user-agent"].starts_with("pi/1.5.0 ("));
+    assert!(headers["user-agent"].starts_with("pi/1.6.0 ("));
     for name in [
         "x-openrouter-title",
         "http-referer",
