@@ -202,7 +202,13 @@ impl Network {
             ),
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-            ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
+            ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+            ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+            ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+            (
+                "app/licenses/puppeteer-LICENSE.txt".into(),
+                b"Apache-2.0".to_vec(),
+            ),
             (
                 "app/fonts/SourceHanSansCN-VF.otf".into(),
                 mock_sfnt(b"OTTO"),
@@ -538,32 +544,53 @@ async fn launched_handoff_rejects_future_prompts_tools_configuration_and_new_ses
     assert_eq!(fs::read(f.0.join("cst-pilot.exe")).unwrap(), b"old main");
 }
 #[tokio::test]
-async fn missing_compiled_key_keeps_sdk_usable_and_has_no_update_storage() {
-    if option_env!("CST_UPDATE_PUBLIC_KEY").is_some()
-        && option_env!("CST_UPDATE_MANIFEST_URL").is_some()
-    {
-        return;
-    }
+async fn disabled_and_offline_compiled_options_keep_sdk_usable_and_have_no_update_storage() {
     let f = Fixture::new();
     let kit = Kit::new(&f.0).unwrap();
-    let service = UpdateService::new(
+    let disabled_service = UpdateService::new(
         &f.0,
         "https://www.cstoa.top",
         kit.activity_gate().clone(),
-        UpdateOptions::Compiled,
+        UpdateOptions::Disabled,
     )
     .unwrap();
-    assert_eq!(service.status().phase, Phase::Unavailable);
-    assert_eq!(service.status().message, "当前构建未启用在线更新。");
+    assert_eq!(disabled_service.status().phase, Phase::Unavailable);
+    assert_eq!(disabled_service.status().message, "此宿主已关闭升级检查。");
     assert_eq!(
-        service
+        disabled_service
             .check_for_app(CancellationToken::new())
             .await
             .unwrap()
             .phase,
         Phase::Unavailable
     );
-    assert!(service.check(CancellationToken::new()).await.is_err());
+    assert!(
+        disabled_service
+            .check(CancellationToken::new())
+            .await
+            .is_err()
+    );
+
+    if cst_os::is_offline_env_enabled() {
+        let compiled_service = UpdateService::new(
+            &f.0,
+            "https://www.cstoa.top",
+            kit.activity_gate().clone(),
+            UpdateOptions::Compiled,
+        )
+        .unwrap();
+        if cst_kit::update::service::compiled_update_key_fingerprint().is_ok() {
+            assert_eq!(compiled_service.status().phase, Phase::Idle);
+            assert_eq!(compiled_service.status().message, "尚未检查更新。");
+        } else {
+            assert_eq!(compiled_service.status().phase, Phase::Unavailable);
+            assert_eq!(
+                compiled_service.status().message,
+                "当前构建未启用在线更新。"
+            );
+        }
+    }
+
     assert!(!f.0.join(".state/update").exists());
     let sdk = f
         .sdk(Network::new(), Arc::new(Launcher::default()), None)

@@ -17,8 +17,193 @@ pub const MAX_FILES: usize = 100_000;
 pub const MANIFEST_DOMAIN: &[u8] = b"cst-pilot-release-manifest-v1\n";
 pub const SUMS_DOMAIN: &[u8] = b"cst-pilot-release-sums-v1\n";
 
+/// Built-in official stable update manifest endpoint (`https://www.cstoa.top`).
+pub const OFFICIAL_MANIFEST_URL: &str = "https://www.cstoa.top/api/agent/releases/latest";
+/// Built-in official beta update manifest endpoint (`https://www.cstoa.top`).
+pub const OFFICIAL_BETA_MANIFEST_URL: &str = "https://www.cstoa.top/api/agent/releases/beta";
+/// Built-in official 32-byte Ed25519 release verifying public key (44-char canonical Base64).
+pub const OFFICIAL_PUBLIC_KEY_B64: &str = "DWWitg4ipNgyWT/Yvpukel2sxQzP9plFgnv++do188E=";
+/// Expected 16-char lowercase hex SHA-256 prefix of [`OFFICIAL_PUBLIC_KEY_B64`].
+pub const OFFICIAL_PUBLIC_KEY_FINGERPRINT: &str = "146afb5bf759af97";
+
+/// Delimited marker prefix embedded into compiled binaries for zero-execution static inspection.
+pub const UPDATE_ROOT_MARKER_PREFIX: &[u8] = b"CST_UPDATE_ROOT_V1\n";
+/// Maximum byte length of a compiled-in manifest URL embedded in [`COMPILED_UPDATE_ROOT_MARKER`].
+pub const MAX_COMPILED_MANIFEST_URL_BYTES: usize = 200;
+/// Maximum byte length of a compiled-in public key string embedded in [`COMPILED_UPDATE_ROOT_MARKER`].
+pub const MAX_COMPILED_PUBLIC_KEY_BYTES: usize = 88;
+
+const COMPILED_MANIFEST_URL_RAW: &str = match option_env!("CST_UPDATE_MANIFEST_URL") {
+    Some(v) => v,
+    None => OFFICIAL_MANIFEST_URL,
+};
+
+const COMPILED_PUBLIC_KEY_RAW: &str = match option_env!("CST_UPDATE_PUBLIC_KEY") {
+    Some(v) => v,
+    None => OFFICIAL_PUBLIC_KEY_B64,
+};
+
+const fn trim_ascii_bytes(bytes: &[u8]) -> &[u8] {
+    let mut start = 0usize;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let mut out_len = end - start;
+    let mut slice = bytes;
+    let mut s = 0usize;
+    while s < start {
+        if let Some((_, rest)) = slice.split_first() {
+            slice = rest;
+        }
+        s += 1;
+    }
+    while slice.len() > out_len {
+        if let Some((_, head)) = slice.split_last() {
+            slice = head;
+        } else {
+            out_len = 0;
+        }
+    }
+    slice
+}
+
+const fn is_disabled_bytes(trimmed: &[u8]) -> bool {
+    matches!(
+        trimmed.len(),
+        8 if trimmed[0].eq_ignore_ascii_case(&b'd')
+            && trimmed[1].eq_ignore_ascii_case(&b'i')
+            && trimmed[2].eq_ignore_ascii_case(&b's')
+            && trimmed[3].eq_ignore_ascii_case(&b'a')
+            && trimmed[4].eq_ignore_ascii_case(&b'b')
+            && trimmed[5].eq_ignore_ascii_case(&b'l')
+            && trimmed[6].eq_ignore_ascii_case(&b'e')
+            && trimmed[7].eq_ignore_ascii_case(&b'd')
+    ) || matches!(
+        trimmed.len(),
+        4 if trimmed[0].eq_ignore_ascii_case(&b'n')
+            && trimmed[1].eq_ignore_ascii_case(&b'o')
+            && trimmed[2].eq_ignore_ascii_case(&b'n')
+            && trimmed[3].eq_ignore_ascii_case(&b'e')
+    ) || matches!(
+        trimmed.len(),
+        3 if trimmed[0].eq_ignore_ascii_case(&b'o')
+            && trimmed[1].eq_ignore_ascii_case(&b'f')
+            && trimmed[2].eq_ignore_ascii_case(&b'f')
+    )
+}
+
+const fn assert_printable_ascii_token(bytes: &[u8]) {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b <= 0x20 || b >= 0x7f {
+            panic!(
+                "CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY must not contain whitespace or control bytes"
+            );
+        }
+        i += 1;
+    }
+}
+
+const fn build_update_root_marker(url: &str, key: &str) -> [u8; 320] {
+    let mut out = [0u8; 320];
+    let prefix = UPDATE_ROOT_MARKER_PREFIX;
+    let u_trim = trim_ascii_bytes(url.as_bytes());
+    let k_trim = trim_ascii_bytes(key.as_bytes());
+    let disabled = is_disabled_bytes(u_trim) || is_disabled_bytes(k_trim);
+    let url_b: &[u8] = if disabled {
+        b"disabled"
+    } else if u_trim.is_empty() {
+        OFFICIAL_MANIFEST_URL.as_bytes()
+    } else {
+        u_trim
+    };
+    let key_b: &[u8] = if disabled {
+        b"disabled"
+    } else if k_trim.is_empty() {
+        OFFICIAL_PUBLIC_KEY_B64.as_bytes()
+    } else {
+        k_trim
+    };
+    if url_b.len() > MAX_COMPILED_MANIFEST_URL_BYTES || key_b.len() > MAX_COMPILED_PUBLIC_KEY_BYTES
+    {
+        panic!("CST_UPDATE_MANIFEST_URL / CST_UPDATE_PUBLIC_KEY exceeds static marker capacity");
+    }
+    if !disabled
+        && (url_b.len() <= 8
+            || url_b[0] != b'h'
+            || url_b[1] != b't'
+            || url_b[2] != b't'
+            || url_b[3] != b'p'
+            || url_b[4] != b's'
+            || url_b[5] != b':'
+            || url_b[6] != b'/'
+            || url_b[7] != b'/'
+            || !(url_b[8].is_ascii_alphanumeric() || (url_b[8] == b'[' && url_b.len() > 10)))
+    {
+        panic!("CST_UPDATE_MANIFEST_URL must start with https://<host>");
+    }
+    assert_printable_ascii_token(url_b);
+    assert_printable_ascii_token(key_b);
+    let mut idx = 0;
+    let mut i = 0;
+    while i < prefix.len() {
+        out[idx] = prefix[i];
+        idx += 1;
+        i += 1;
+    }
+    i = 0;
+    while i < url_b.len() {
+        out[idx] = url_b[i];
+        idx += 1;
+        i += 1;
+    }
+    out[idx] = b'\n';
+    idx += 1;
+    i = 0;
+    while i < key_b.len() {
+        out[idx] = key_b[i];
+        idx += 1;
+        i += 1;
+    }
+    out[idx] = b'\n';
+    out
+}
+
+#[used]
+static COMPILED_UPDATE_ROOT_MARKER: [u8; 320] =
+    build_update_root_marker(COMPILED_MANIFEST_URL_RAW, COMPILED_PUBLIC_KEY_RAW);
+
+/// Formats the exact byte sequence embedded in `.rdata` for a `(manifest_url, public_key_b64)` pair.
+pub fn format_update_root_marker(manifest_url: &str, public_key_b64: &str) -> Vec<u8> {
+    let mut v = Vec::with_capacity(
+        UPDATE_ROOT_MARKER_PREFIX.len() + manifest_url.len() + public_key_b64.len() + 2,
+    );
+    v.extend_from_slice(UPDATE_ROOT_MARKER_PREFIX);
+    v.extend_from_slice(manifest_url.as_bytes());
+    v.push(b'\n');
+    v.extend_from_slice(public_key_b64.as_bytes());
+    v.push(b'\n');
+    v
+}
+
+/// Returns `true` when a compile-time update configuration value explicitly disables online updates.
+pub fn is_disabled_update_sentinel(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "disabled" | "none" | "off"
+    )
+}
+
 /// Pure offline HTTPS release URL validation shared by `cst-updater` and `cst-kit`.
 pub fn validate_release_url(text: &str) -> Result<Url, String> {
+    if text.is_empty() || text.len() > 2048 || !text.bytes().all(|b| (0x21..=0x7e).contains(&b)) {
+        return Err("URL 包含空白、控制字符或长度超出限制。".into());
+    }
     let url = Url::parse(text).map_err(|_| "URL 无效。")?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host().is_none()
@@ -100,17 +285,55 @@ impl ReleaseKey {
         Ok(Self(key))
     }
 
-    pub fn compiled() -> Result<Self, String> {
-        let raw = option_env!("CST_UPDATE_PUBLIC_KEY")
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or("当前构建未配置官方升级公钥。")?;
-        let bytes = STANDARD.decode(raw).map_err(|_| "构建中的升级公钥无效。")?;
+    pub fn official() -> Result<Self, String> {
+        let bytes = STANDARD
+            .decode(OFFICIAL_PUBLIC_KEY_B64)
+            .map_err(|_| "内置官方升级公钥无效。".to_owned())?;
         Self::from_bytes(
             bytes
                 .as_slice()
                 .try_into()
-                .map_err(|_| "构建中的升级公钥无效。")?,
+                .map_err(|_| "内置官方升级公钥无效。".to_owned())?,
+        )
+    }
+
+    /// Resolves the verifying key from compile-time environment values, falling back to
+    /// [`OFFICIAL_PUBLIC_KEY_B64`] when unset, and failing closed when either variable is a
+    /// disabled sentinel (`disabled` / `none` / `off`).
+    pub fn compiled_from_opt(
+        manifest_url_env: Option<&str>,
+        public_key_env: Option<&str>,
+    ) -> Result<Self, String> {
+        if manifest_url_env.is_some_and(is_disabled_update_sentinel)
+            || public_key_env.is_some_and(is_disabled_update_sentinel)
+        {
+            return Err("当前构建未启用在线更新。".into());
+        }
+        if let Some(raw) = public_key_env.map(str::trim).filter(|s| !s.is_empty()) {
+            if raw.len() > MAX_COMPILED_PUBLIC_KEY_BYTES
+                || !raw.bytes().all(|b| (0x21..=0x7e).contains(&b))
+            {
+                return Err("构建中的升级公钥长度或字符无效。".into());
+            }
+            let bytes = STANDARD.decode(raw).map_err(|_| "构建中的升级公钥无效。")?;
+            if STANDARD.encode(&bytes) != raw {
+                return Err("构建中的升级公钥必须为标准 Base64 编码。".into());
+            }
+            return Self::from_bytes(
+                bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| "构建中的升级公钥无效。")?,
+            );
+        }
+        Self::official()
+    }
+
+    pub fn compiled() -> Result<Self, String> {
+        let _ = std::hint::black_box(&COMPILED_UPDATE_ROOT_MARKER);
+        Self::compiled_from_opt(
+            option_env!("CST_UPDATE_MANIFEST_URL"),
+            option_env!("CST_UPDATE_PUBLIC_KEY"),
         )
     }
 
@@ -292,4 +515,80 @@ pub(crate) fn parse_sums(text: &str) -> Result<BTreeMap<String, String>, String>
         return Err("文件校验清单为空。".into());
     }
     Ok(sums)
+}
+
+/// Resolves the manifest URL from compile-time environment values, falling back to
+/// [`OFFICIAL_MANIFEST_URL`] when unset, and failing closed when either variable is a
+/// disabled sentinel (`disabled` / `none` / `off`).
+pub fn resolve_compiled_manifest_url_from_opt(
+    manifest_url_env: Option<&str>,
+    public_key_env: Option<&str>,
+) -> Result<Url, String> {
+    if manifest_url_env.is_some_and(is_disabled_update_sentinel)
+        || public_key_env.is_some_and(is_disabled_update_sentinel)
+    {
+        return Err("当前构建未启用在线更新。".into());
+    }
+    let effective = manifest_url_env
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(OFFICIAL_MANIFEST_URL);
+    if effective.len() > MAX_COMPILED_MANIFEST_URL_BYTES {
+        return Err("升级源地址超出编译期标记容量上限。".into());
+    }
+    let parsed = validate_release_url(effective)?;
+    if parsed.as_str() != effective {
+        return Err("升级源地址必须为已规范化的标准 HTTPS URL。".into());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("升级源地址不允许包含查询参数或片段。".into());
+    }
+    Ok(parsed)
+}
+
+pub fn compiled_manifest_url() -> Result<Url, String> {
+    resolve_compiled_manifest_url_from_opt(
+        option_env!("CST_UPDATE_MANIFEST_URL"),
+        option_env!("CST_UPDATE_PUBLIC_KEY"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn official_trust_root_constants_are_canonical_and_match_fingerprint() {
+        let key = ReleaseKey::official().expect("official release key must be valid");
+        assert_eq!(key.fingerprint(), OFFICIAL_PUBLIC_KEY_FINGERPRINT);
+
+        let default_key = ReleaseKey::compiled_from_opt(None, None).expect("default compiled key");
+        assert_eq!(default_key.fingerprint(), OFFICIAL_PUBLIC_KEY_FINGERPRINT);
+
+        let default_url =
+            resolve_compiled_manifest_url_from_opt(None, None).expect("default compiled url");
+        assert_eq!(default_url.as_str(), OFFICIAL_MANIFEST_URL);
+
+        let beta_url =
+            resolve_compiled_manifest_url_from_opt(Some(OFFICIAL_BETA_MANIFEST_URL), None)
+                .expect("beta url override");
+        assert_eq!(beta_url.as_str(), OFFICIAL_BETA_MANIFEST_URL);
+    }
+
+    #[test]
+    fn disabled_sentinels_and_query_urls_fail_closed_symmetrically() {
+        for sentinel in ["disabled", "DISABLED", " none ", "off"] {
+            assert!(ReleaseKey::compiled_from_opt(Some(sentinel), None).is_err());
+            assert!(ReleaseKey::compiled_from_opt(None, Some(sentinel)).is_err());
+            assert!(resolve_compiled_manifest_url_from_opt(Some(sentinel), None).is_err());
+            assert!(resolve_compiled_manifest_url_from_opt(None, Some(sentinel)).is_err());
+        }
+        assert!(
+            resolve_compiled_manifest_url_from_opt(
+                Some("https://www.cstoa.top/api/agent/releases/latest?ch=beta"),
+                None,
+            )
+            .is_err()
+        );
+    }
 }

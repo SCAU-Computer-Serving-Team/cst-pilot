@@ -76,6 +76,16 @@ impl TestKitDir {
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
+        fs::write(
+            root.join("data/config/telemetry.json"),
+            br#"{"enabled":false,"endpoint":"https://telemetry.invalid/v1/events"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("data/config/settings.json"),
+            br#"{"enableInstallTelemetry":false}"#,
+        )
+        .unwrap();
         Self(root)
     }
 }
@@ -776,63 +786,147 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     use tokio_util::sync::CancellationToken;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
-    // 1. Default `UpdateOptions::Compiled` without compile-time env vars -> Phase::Unavailable (200)
+    // Run the entire update routes test in a scrubbed child process so even an inherited absolute
+    // `CST_PILOT_DATA_DIR` / `CST_PILOT_ROOT` / `PI_CODING_AGENT_DIR` in the developer shell can
+    // never redirect `Kit::new` or `AuthRuntime::create` to real user data or live telemetry.
+    const ISOLATED_ENV_MARKER: &str = "CST_TEST_ISOLATED_UPDATE_ROUTES_SUBPROC";
+    if std::env::var_os(ISOLATED_ENV_MARKER).is_none() {
+        let iso_holder = TestKitDir::new();
+        let fake_home = iso_holder.0.join(".state/home");
+        let fake_tmp = iso_holder.0.join(".state/tmp");
+        fs::create_dir_all(&fake_home).unwrap();
+        fs::create_dir_all(&fake_tmp).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "app_update_routes_check_prepare_cancel_and_launch_guards",
+                "--nocapture",
+            ])
+            .env(ISOLATED_ENV_MARKER, "1")
+            .env_remove("CST_PILOT_ROOT")
+            .env_remove("CST_PILOT_DATA_DIR")
+            .env_remove("PI_CODING_AGENT_DIR")
+            .env("USERPROFILE", &fake_home)
+            .env("APPDATA", &fake_home)
+            .env("LOCALAPPDATA", &fake_home)
+            .env("HOME", &fake_home)
+            .env("TEMP", &fake_tmp)
+            .env("TMP", &fake_tmp)
+            .status()
+            .expect("spawn isolated update routes test subprocess");
+        assert!(status.success(), "isolated update routes subprocess failed");
+        return;
+    }
+
+    struct KillOnDropChild(std::process::Child);
+    impl Drop for KillOnDropChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    // 1. Verify isolated child `cst-server` processes honor `--standalone-web` (`UpdateOptions::Disabled`
+    //    -> `Phase::Unavailable`), `--offline`, `--sanitize-env --offline`, `CST_OFFLINE=1`, and
+    //    `PI_OFFLINE=1` end-to-end without touching real user data (`CST_PILOT_DATA_DIR` scrubbed),
+    //    production telemetry, or external update endpoints.
     {
-        let fixture = TestKitDir::new();
-        fs::write(fixture.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
-        let oa = OaClient::with_transport(
-            "https://oa.example",
-            Arc::new(CountingOaTransport::default()),
-            Arc::new(cst_kit::auth::oa::SystemClock),
-        )
-        .unwrap();
-        let kit = Kit::new(&fixture.0).unwrap();
-        let auth = AuthRuntime::create(&fixture.0, Channel::Gui, oa)
-            .await
-            .unwrap();
-        let host = KitHost::new(
-            kit,
-            auth,
-            TelemetryOptions::default(),
-            UpdateOptions::Compiled,
-        )
-        .await
-        .unwrap();
-        let mut cfg = ServerConfig::new(&fixture.0);
-        cfg.port = Some(0);
-        cfg.acquire_instance_lock = false;
-        cfg.mode_config.standalone_web = true;
-        let server = RunningServer::start(host, cfg).await.unwrap();
-        let host_header = format!("127.0.0.1:{}", server.port());
         let client = reqwest::Client::new();
-
-        let status_resp: Value = client
-            .get(format!("{}/api/app/update/status", server.base_url()))
-            .header("Host", &host_header)
-            .header("X-CST-Client", "app")
-            .header("Authorization", format!("Bearer {}", server.app_token()))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(status_resp["status"]["phase"], "unavailable");
-        assert_eq!(status_resp["status"]["message"], "当前构建未启用在线更新。");
-
-        let check_resp = client
-            .post(format!("{}/api/app/update/check", server.base_url()))
-            .header("Host", &host_header)
-            .header("X-CST-Client", "app")
-            .header("Authorization", format!("Bearer {}", server.app_token()))
-            .json(&json!({}))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(check_resp.status(), 200);
-        let check_json: Value = check_resp.json().await.unwrap();
-        assert_eq!(check_json["phase"], "unavailable");
-        server.shutdown().await;
+        let server_exe = env!("CARGO_BIN_EXE_cst-server");
+        let expected_compiled_offline =
+            if cst_kit::update::service::compiled_update_key_fingerprint().is_ok() {
+                "idle"
+            } else {
+                "unavailable"
+            };
+        for (extra_args, cst_off, pi_off, expected_phase, check_unavailable_post) in [
+            (
+                &["--offline"][..],
+                "0",
+                "0",
+                expected_compiled_offline,
+                false,
+            ),
+            #[cfg(windows)]
+            (
+                &["--sanitize-env", "--offline"][..],
+                "0",
+                "0",
+                expected_compiled_offline,
+                false,
+            ),
+            (&[][..], "1", "0", expected_compiled_offline, false),
+            (&[][..], "0", "1", expected_compiled_offline, false),
+            (&["--standalone-web"][..], "1", "0", "unavailable", true),
+        ] {
+            let child_kit = TestKitDir::new();
+            fs::write(child_kit.0.join("VERSION"), "cst-pilot v0.8.0\n").unwrap();
+            let tmp_sub = child_kit.0.join(".state/tmp");
+            let fake_home = child_kit.0.join(".state/home");
+            fs::create_dir_all(&tmp_sub).unwrap();
+            fs::create_dir_all(&fake_home).unwrap();
+            let mut cmd = std::process::Command::new(server_exe);
+            cmd.args(["--kit-root"])
+                .arg(&child_kit.0)
+                .args(["--port", "0"])
+                .args(extra_args)
+                .env_remove("CST_PILOT_ROOT")
+                .env_remove("CST_PILOT_DATA_DIR")
+                .env_remove("PI_CODING_AGENT_DIR")
+                .env("USERPROFILE", &fake_home)
+                .env("APPDATA", &fake_home)
+                .env("LOCALAPPDATA", &fake_home)
+                .env("HOME", &fake_home)
+                .env("CST_OFFLINE", cst_off)
+                .env("PI_OFFLINE", pi_off)
+                .env("CST_ALLOW_UNELEVATED", "1")
+                .env("TEMP", &tmp_sub)
+                .env("TMP", &tmp_sub)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let _child_guard = KillOnDropChild(cmd.spawn().unwrap());
+            let disc_path = child_kit.0.join(".state/server.json");
+            let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while !disc_path.is_file() && std::time::Instant::now() < wait_deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            }
+            assert!(
+                disc_path.is_file(),
+                "cst-server child must publish server.json"
+            );
+            let disc: Value = serde_json::from_slice(&fs::read(&disc_path).unwrap()).unwrap();
+            let port = disc["port"].as_u64().unwrap();
+            let app_tok = disc["token"].as_str().unwrap();
+            let host_hdr = format!("127.0.0.1:{port}");
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            let st: Value = client
+                .get(format!("http://127.0.0.1:{port}/api/app/update/status"))
+                .header("Host", &host_hdr)
+                .header("X-CST-Client", "app")
+                .header("Authorization", format!("Bearer {app_tok}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(st["status"]["phase"], expected_phase);
+            if check_unavailable_post {
+                assert_eq!(st["status"]["message"], "此宿主已关闭升级检查。");
+                let check_resp = client
+                    .post(format!("http://127.0.0.1:{port}/api/app/update/check"))
+                    .header("Host", &host_hdr)
+                    .header("X-CST-Client", "app")
+                    .header("Authorization", format!("Bearer {app_tok}"))
+                    .json(&json!({}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(check_resp.status(), 200);
+                let check_json: Value = check_resp.json().await.unwrap();
+                assert_eq!(check_json["phase"], "unavailable");
+            }
+        }
     }
 
     // 2. Trusted signed release: check -> prepare + cancel -> prepare -> launch validation & handoff
@@ -909,7 +1003,13 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-        ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
+        ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+        ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+        ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+        (
+            "app/licenses/puppeteer-LICENSE.txt".into(),
+            b"Apache-2.0".to_vec(),
+        ),
         ("cst-pilot.exe".into(), b"new-pilot-bin".to_vec()),
         ("app/cst-server.exe".into(), b"new-server-bin".to_vec()),
         ("app/cst-updater.exe".into(), b"new-updater-bin".to_vec()),
@@ -1158,16 +1258,18 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let dummy_pilot = fixture.0.join("cst-pilot.exe");
     fs::copy(env!("CARGO_BIN_EXE_cst-server"), &dummy_pilot).unwrap();
     let dummy_agent_kit = TestKitDir::new();
-    let mut child = std::process::Command::new(&dummy_pilot)
-        .arg("--standalone-web")
-        .arg("--port")
-        .arg("0")
-        .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .expect("spawn dummy cst-pilot.exe");
-    let child_identity = ProcessIdentity::capture(child.id())
+    let child_guard = KillOnDropChild(
+        std::process::Command::new(&dummy_pilot)
+            .arg("--standalone-web")
+            .arg("--port")
+            .arg("0")
+            .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn dummy cst-pilot.exe"),
+    );
+    let child_identity = ProcessIdentity::capture(child_guard.0.id())
         .unwrap()
         .expect("child identity alive");
 
@@ -1234,8 +1336,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     assert_eq!(launch_val["receipt"]["updaterPid"], 42424);
     assert_eq!(*launcher.launched.lock().unwrap(), Some(42424));
 
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(child_guard);
     drop(sse_stream);
     server.shutdown().await;
 }

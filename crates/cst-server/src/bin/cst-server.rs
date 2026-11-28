@@ -10,6 +10,13 @@ use cst_kit::update::service::UpdateOptions;
 use cst_kit::{Kit, KitHost};
 use cst_server::{RunningServer, ServerConfig};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OfflineCliMode {
+    Inherit,
+    ForceOffline,
+    ForceOnline,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct CliArgs {
     health_check: bool,
@@ -17,6 +24,7 @@ struct CliArgs {
     standalone_web: bool,
     open_browser: bool,
     sanitize_env: bool,
+    offline_mode: OfflineCliMode,
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
@@ -36,6 +44,8 @@ where
     let mut standalone_web = false;
     let mut open_browser = false;
     let mut sanitize_env = false;
+    let mut force_offline = false;
+    let mut force_online = false;
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
@@ -49,6 +59,8 @@ where
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
             "--sanitize-env" => sanitize_env = true,
+            "--offline" => force_offline = true,
+            "--online" => force_online = true,
             "--port" => {
                 let val = iter.next().ok_or("`--port` 缺少端口号参数")?;
                 port = Some(val.parse::<u16>().map_err(|_| "`--port` 端口号格式无效")?);
@@ -69,9 +81,17 @@ where
         }
     }
 
+    if force_offline && force_online {
+        return Err("`--offline` 与 `--online` 不能同时指定".to_owned());
+    }
     if open_browser && !standalone_web {
         return Err("`--open-browser` 需配合 `--standalone-web` 使用".to_owned());
     }
+    let offline_mode = match (force_offline, force_online) {
+        (true, false) => OfflineCliMode::ForceOffline,
+        (false, true) => OfflineCliMode::ForceOnline,
+        _ => OfflineCliMode::Inherit,
+    };
 
     Ok(CliArgs {
         health_check,
@@ -79,6 +99,7 @@ where
         standalone_web,
         open_browser,
         sanitize_env,
+        offline_mode,
         port,
         kit_root,
         cwd,
@@ -104,9 +125,24 @@ fn resolve_default_kit_root() -> Result<PathBuf, String> {
     cst_os::resolve_kit_root()
 }
 
+fn resolve_effective_offline_state(
+    offline_mode: OfflineCliMode,
+    cst_offline: Option<&str>,
+    pi_offline: Option<&str>,
+) -> bool {
+    match offline_mode {
+        OfflineCliMode::ForceOffline => true,
+        OfflineCliMode::ForceOnline => false,
+        OfflineCliMode::Inherit => cst_os::is_offline_env_values(cst_offline, pi_offline),
+    }
+}
+
 /// Sanitizes the current single-threaded process environment when launched via `ShellExecuteExW("runas")`
 /// (before spawning any Tokio worker threads), matching `cst_client::apply_portable_sanitized_env`.
-fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String> {
+fn sanitize_current_process_env(
+    kit_root: &std::path::Path,
+    offline_mode: OfflineCliMode,
+) -> Result<(), String> {
     let canonical = kit_root
         .canonicalize()
         .map_err(|e| format!("无法读取工具包根目录 {}：{e}", kit_root.display()))?;
@@ -153,6 +189,10 @@ fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String
         "PROCESSOR_ARCHITECTURE",
     ];
 
+    let cur_cst = std::env::var("CST_OFFLINE").ok();
+    let cur_pi = std::env::var("PI_OFFLINE").ok();
+    let caller_offline =
+        resolve_effective_offline_state(offline_mode, cur_cst.as_deref(), cur_pi.as_deref());
     let existing_keys: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     // SAFETY: Called strictly at single-threaded `fn main()` entry before building the Tokio runtime.
     unsafe {
@@ -174,7 +214,9 @@ fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String
         std::env::set_var("TEMP", &tmp_dir);
         std::env::set_var("TMP", &tmp_dir);
         std::env::set_var("CST_PILOT_ROOT", &clean_root);
-        std::env::set_var("CST_OFFLINE", "1");
+        if caller_offline {
+            std::env::set_var("CST_OFFLINE", "1");
+        }
     }
     let _ = std::env::set_current_dir(&clean_root);
     Ok(())
@@ -225,12 +267,29 @@ fn main() -> ExitCode {
         }
     };
 
-    if args.sanitize_env
-        && let Err(msg) = sanitize_current_process_env(&kit_root)
-    {
-        let _ = writeln!(std::io::stderr(), "{msg}");
-        let _ = std::io::stderr().flush();
-        return ExitCode::FAILURE;
+    if args.sanitize_env {
+        if let Err(msg) = sanitize_current_process_env(&kit_root, args.offline_mode) {
+            let _ = writeln!(std::io::stderr(), "{msg}");
+            let _ = std::io::stderr().flush();
+            return ExitCode::FAILURE;
+        }
+    } else {
+        match args.offline_mode {
+            OfflineCliMode::ForceOffline => {
+                // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
+                unsafe {
+                    std::env::set_var("CST_OFFLINE", "1");
+                }
+            }
+            OfflineCliMode::ForceOnline => {
+                // SAFETY: Single-threaded `fn main()` entry before building the Tokio runtime.
+                unsafe {
+                    std::env::remove_var("CST_OFFLINE");
+                    std::env::remove_var("PI_OFFLINE");
+                }
+            }
+            OfflineCliMode::Inherit => {}
+        }
     }
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
@@ -299,14 +358,12 @@ async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
         }
     };
 
-    let host = match KitHost::new(
-        kit,
-        auth,
-        TelemetryOptions::default(),
-        UpdateOptions::Compiled,
-    )
-    .await
-    {
+    let update_options = if args.standalone_web {
+        UpdateOptions::Disabled
+    } else {
+        UpdateOptions::Compiled
+    };
+    let host = match KitHost::new(kit, auth, TelemetryOptions::default(), update_options).await {
         Ok(h) => h,
         Err(msg) => {
             let _ = writeln!(std::io::stderr(), "{msg}");
@@ -396,5 +453,104 @@ mod tests {
         let parsed =
             parse_args_from(["--key-fingerprint"].into_iter().map(str::to_owned)).expect("valid");
         assert!(parsed.key_fingerprint);
+    }
+
+    #[test]
+    fn parse_offline_and_online_flags_reject_conflict() {
+        let off = parse_args_from(["--offline"].into_iter().map(str::to_owned)).expect("offline");
+        assert_eq!(off.offline_mode, super::OfflineCliMode::ForceOffline);
+
+        let on = parse_args_from(["--online"].into_iter().map(str::to_owned)).expect("online");
+        assert_eq!(on.offline_mode, super::OfflineCliMode::ForceOnline);
+
+        assert!(parse_args_from(["--offline", "--online"].into_iter().map(str::to_owned)).is_err());
+
+        assert!(super::resolve_effective_offline_state(
+            super::OfflineCliMode::ForceOffline,
+            Some("0"),
+            Some("0"),
+        ));
+        assert!(!super::resolve_effective_offline_state(
+            super::OfflineCliMode::ForceOnline,
+            Some("1"),
+            Some("1"),
+        ));
+        assert!(super::resolve_effective_offline_state(
+            super::OfflineCliMode::Inherit,
+            None,
+            Some("1"),
+        ));
+        assert!(!super::resolve_effective_offline_state(
+            super::OfflineCliMode::Inherit,
+            Some("0"),
+            Some("0"),
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sanitize_env_child_process_honors_online_and_offline_overrides() {
+        const CHILD_MODE_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_MODE";
+        const CHILD_DIR_ENV: &str = "CST_SERVER_TEST_SANITIZE_PROBE_DIR";
+        if let Ok(mode_str) = std::env::var(CHILD_MODE_ENV) {
+            let dir = std::path::PathBuf::from(
+                std::env::var_os(CHILD_DIR_ENV).expect("missing probe dir env"),
+            );
+            let mode = match mode_str.as_str() {
+                "online" => super::OfflineCliMode::ForceOnline,
+                "offline" => super::OfflineCliMode::ForceOffline,
+                _ => super::OfflineCliMode::Inherit,
+            };
+            super::sanitize_current_process_env(&dir, mode).unwrap();
+            let _ = std::env::set_current_dir(std::env::temp_dir());
+            assert!(std::env::var_os("PI_OFFLINE").is_none());
+            match mode_str.as_str() {
+                "online" => {
+                    assert!(std::env::var_os("CST_OFFLINE").is_none());
+                    assert!(!cst_os::is_offline_env_enabled());
+                }
+                "offline" | "inherit" => {
+                    assert_eq!(std::env::var("CST_OFFLINE").as_deref(), Ok("1"));
+                    assert!(cst_os::is_offline_env_enabled());
+                }
+                other => panic!("unexpected probe mode: {other}"),
+            }
+            return;
+        }
+
+        let exe = std::env::current_exe().expect("test binary path");
+        for (mode, cst_off, pi_off) in [
+            ("online", "1", "1"),
+            ("offline", "0", "0"),
+            ("inherit", "0", "1"),
+        ] {
+            let probe_dir = std::env::temp_dir().join(format!(
+                "cst-server-sanitize-probe-{}-{mode}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&probe_dir);
+            std::fs::create_dir_all(&probe_dir).expect("create probe dir");
+            let status = std::process::Command::new(&exe)
+                .args([
+                    "--exact",
+                    "tests::sanitize_env_child_process_honors_online_and_offline_overrides",
+                    "--nocapture",
+                ])
+                .env(CHILD_MODE_ENV, mode)
+                .env(CHILD_DIR_ENV, &probe_dir)
+                .env("CST_OFFLINE", cst_off)
+                .env("PI_OFFLINE", pi_off)
+                .status()
+                .expect("spawn child probe");
+            let _ = std::fs::remove_dir_all(&probe_dir);
+            assert!(
+                status.success(),
+                "child sanitize probe failed for mode={mode}"
+            );
+            assert!(
+                !probe_dir.exists(),
+                "probe_dir must be cleaned up after child exit"
+            );
+        }
     }
 }

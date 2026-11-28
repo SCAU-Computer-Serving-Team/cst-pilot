@@ -21,6 +21,13 @@ pub const REQUIRED_FONT_FILES: &[&str] = &[
     "app/fonts/JetBrainsMono-OFL.txt",
 ];
 
+pub const REQUIRED_APP_LICENSES: &[&str] = &[
+    "app/licenses/MPL-2.0.txt",
+    "app/licenses/ntfs-ng-LICENSE.txt",
+    "app/licenses/pi-LICENSE.txt",
+    "app/licenses/puppeteer-LICENSE.txt",
+];
+
 pub const DEFAULT_CONFIG_FILES: &[&str] = &[
     "app/defaults/models-store.json",
     "app/defaults/telemetry.json",
@@ -145,6 +152,16 @@ pub fn classify(path: &str) -> Result<Area, String> {
                 | "test"
                 | "tests"
                 | "obj"
+                | "sessions"
+                | "plans"
+                | "inbox"
+                | "exports"
+                | "artifacts"
+                | "outbox"
+                | "session-exports"
+                | "command-plans"
+                | "fff"
+                | "npm"
                 | ".env"
                 | "auth.json"
                 | "models.json"
@@ -174,7 +191,20 @@ pub fn classify(path: &str) -> Result<Area, String> {
             | "LICENSE"
             | "THIRD-PARTY-NOTICES.md"
     );
-    if root_file || path.starts_with("app/") || (!path.contains('/') && lower.ends_with(".dll")) {
+    let app_allowed = if let Some(rest) = path.strip_prefix("app/") {
+        !rest.contains('/')
+            || matches!(
+                path,
+                "app/telemetry/timserver_1.crt" | "app/telemetry/currency.json"
+            )
+            || matches!(
+                rest.split('/').next().unwrap_or(""),
+                "defaults" | "docs" | "fonts" | "licenses" | "prompts" | "skills" | "tools"
+            )
+    } else {
+        false
+    };
+    if root_file || app_allowed || (!path.contains('/') && lower.ends_with(".dll")) {
         Ok(Area::Program)
     } else {
         Err("升级包含程序白名单外的路径，用户数据不可随包替换。".into())
@@ -190,6 +220,52 @@ pub(crate) fn reject_retired_release_path(path: &str) -> Result<(), String> {
                 .is_some_and(|rest| rest.starts_with('/'))
     }) {
         return Err("发行包包含已移除的组件路径。".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_release_dir_path(path: &str) -> Result<(), String> {
+    safe_path(path)?;
+    reject_retired_release_path(path)?;
+    let lower = path.to_lowercase();
+    if lower.split('/').any(|p| {
+        matches!(
+            p,
+            ".state"
+                | ".git"
+                | ".cache"
+                | "node-compile-cache"
+                | "target"
+                | "src"
+                | "test"
+                | "tests"
+                | "obj"
+                | "sessions"
+                | "plans"
+                | "inbox"
+                | "exports"
+                | "artifacts"
+                | "outbox"
+                | "session-exports"
+                | "command-plans"
+                | "fff"
+                | "npm"
+                | ".env"
+                | "agents.md"
+        ) || p.starts_with(".env.")
+    }) {
+        return Err("发行目录包含运行状态或开发路径。".into());
+    }
+    let allowed = path == "app"
+        || path == "app/telemetry"
+        || path.strip_prefix("app/").is_some_and(|rest| {
+            matches!(
+                rest.split('/').next().unwrap_or(""),
+                "defaults" | "docs" | "fonts" | "licenses" | "prompts" | "skills" | "tools"
+            )
+        });
+    if !allowed {
+        return Err("发行目录包含程序白名单外的子目录。".into());
     }
     Ok(())
 }
@@ -330,14 +406,50 @@ pub fn validate_metadata(
             return Err("升级包缺少维护技能。".into());
         }
     }
-    if !files.keys().any(|p| p.starts_with("app/licenses/")) {
-        return Err("升级包缺少第三方许可目录。".into());
+    for req_lic in REQUIRED_APP_LICENSES {
+        if !files.contains_key(*req_lic) {
+            return Err("升级包缺少必需的第三方许可文件。".into());
+        }
     }
     if read_version(root)? != target {
         return Err("升级包 VERSION 与签名清单不一致。".into());
     }
     let storage = Storage::new(root)?;
     let _pin = storage.pin_directory(Path::new("app"), false)?;
+    for non_empty_lic in [
+        "LICENSE",
+        "THIRD-PARTY-NOTICES.md",
+        "app/fonts/LICENSE.txt",
+        "app/fonts/JetBrainsMono-OFL.txt",
+    ] {
+        let lic_bytes = storage
+            .read_limited(&root.join(non_empty_lic), 512 * 1024)?
+            .ok_or("升级包缺少开源许可文件。")?;
+        if lic_bytes.is_empty() {
+            return Err("升级包开源许可文件不能为空。".into());
+        }
+    }
+    for (lic_path, _) in files.iter().filter(|(p, _)| p.starts_with("app/licenses/")) {
+        let lic_bytes = storage
+            .read_limited(&root.join(lic_path), 512 * 1024)?
+            .ok_or("升级包缺少第三方许可文件。")?;
+        if lic_bytes.is_empty() {
+            return Err("升级包第三方许可文件不能为空。".into());
+        }
+    }
+    let _defaults_pin = storage.pin_directory(Path::new("app/defaults"), false)?;
+    for default_cfg in DEFAULT_CONFIG_FILES {
+        let cfg_bytes = storage
+            .read_limited(&root.join(default_cfg), 8 * 1024 * 1024)?
+            .ok_or("升级包缺少默认配置模板。")?;
+        let trimmed = cfg_bytes
+            .strip_prefix(&[0xef, 0xbb, 0xbf])
+            .unwrap_or(&cfg_bytes);
+        let parsed = crate::json::parse(trimmed)?;
+        if !parsed.is_object() {
+            return Err("升级包默认配置模板必须为 JSON 对象。".into());
+        }
+    }
     let bytes = storage
         .read_limited(&root.join(BUILD_INFO_PATH), 64 * 1024)?
         .ok_or("升级包缺少构建信息。")?;

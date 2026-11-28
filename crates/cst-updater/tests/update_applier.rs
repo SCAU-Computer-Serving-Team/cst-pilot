@@ -154,7 +154,13 @@ fn files() -> BTreeMap<String, Vec<u8>> {
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"license notices".to_vec()),
-        ("app/licenses/mock.txt".into(), b"mock third party".to_vec()),
+        ("app/licenses/MPL-2.0.txt".into(), b"MPL-2.0".to_vec()),
+        ("app/licenses/ntfs-ng-LICENSE.txt".into(), b"MIT".to_vec()),
+        ("app/licenses/pi-LICENSE.txt".into(), b"MIT".to_vec()),
+        (
+            "app/licenses/puppeteer-LICENSE.txt".into(),
+            b"Apache-2.0".to_vec(),
+        ),
         ("app/new-only.txt".into(), b"new resource".to_vec()),
         (
             "app/fonts/SourceHanSansCN-VF.otf".into(),
@@ -952,15 +958,29 @@ fn independent_updater_help_and_missing_compiled_key_do_not_touch_a_kit() {
             .status
             .success()
     );
-    if ReleaseKey::compiled().is_err() {
-        let result = std::process::Command::new(exe)
-            .arg("--root")
-            .arg(&f.root)
-            .arg("--recover")
-            .output()
-            .unwrap();
-        assert!(!result.status.success());
-        assert!(String::from_utf8_lossy(&result.stderr).contains("未配置官方升级公钥"));
+    match ReleaseKey::compiled() {
+        Ok(compiled) => {
+            let probe = std::process::Command::new(exe)
+                .arg("--key-fingerprint")
+                .output()
+                .unwrap();
+            assert!(probe.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&probe.stdout).trim(),
+                compiled.fingerprint()
+            );
+        }
+        Err(_) => {
+            let result = std::process::Command::new(exe)
+                .arg("--root")
+                .arg(&f.root)
+                .arg("--recover")
+                .output()
+                .unwrap();
+            assert!(!result.status.success());
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert!(stderr.contains("未配置官方升级公钥") || stderr.contains("未启用在线更新"));
+        }
     }
     assert_eq!(old, f.old_program());
     assert!(!f.root.join(".state/update").exists());

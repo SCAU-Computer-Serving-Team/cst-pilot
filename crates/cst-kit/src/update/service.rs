@@ -138,6 +138,7 @@ impl UpdateService {
     ) -> Result<Arc<Self>, String> {
         let root_state = crate::kit::root_state_for(root)?;
         let root = root.canonicalize().map_err(|_| "工具包目录无法读取。")?;
+        let is_compiled_mode = matches!(options, UpdateOptions::Compiled);
         let (client, launcher, message): (_, Arc<dyn HandoffLauncher>, _) = match options {
             UpdateOptions::Disabled => (None, Arc::new(NativeLauncher), "此宿主已关闭升级检查。"),
             UpdateOptions::Trusted { client, launcher } => {
@@ -183,7 +184,11 @@ impl UpdateService {
             sessions: root_state.update_sessions.clone(),
             stop: CancellationToken::new(),
         });
-        if service.client.is_some() {
+        if should_spawn_startup_check(
+            service.client.is_some(),
+            is_compiled_mode,
+            cst_os::is_offline_env_enabled(),
+        ) {
             let service = service.clone();
             tokio::spawn(async move {
                 let _ = service.check_inner(service.stop.child_token(), true).await;
@@ -827,21 +832,13 @@ pub fn startup_check(root: &Path) -> Result<(), String> {
 
 /// Validates compiled-in update manifest URL and public key, returning the 16-hex key fingerprint.
 pub fn compiled_update_key_fingerprint() -> Result<String, String> {
-    let raw_url = option_env!("CST_UPDATE_MANIFEST_URL")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("当前构建未启用在线更新。")?;
-    let _ = cst_updater::manifest::validate_release_url(raw_url)?;
+    let _ = cst_updater::manifest::compiled_manifest_url()?;
     let key = super::manifest::ReleaseKey::compiled()?;
     Ok(key.fingerprint())
 }
 
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
-    let raw_url = option_env!("CST_UPDATE_MANIFEST_URL")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("当前构建未启用在线更新。")?;
-    let source = cst_updater::manifest::validate_release_url(raw_url)?;
+    let source = cst_updater::manifest::compiled_manifest_url()?;
     let key = super::manifest::ReleaseKey::compiled()?;
     let kit_layout = cst_os::KitLayout::new(root)?;
     let allow_tun = if kit_layout.config_dir().exists() {
@@ -875,4 +872,37 @@ fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
             crate::tools::ssrf::NetworkPolicy { allow_tun },
         )),
     )
+}
+
+fn should_spawn_startup_check(has_client: bool, is_compiled_mode: bool, offline_env: bool) -> bool {
+    has_client && !(is_compiled_mode && offline_env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_check_gate_skips_compiled_mode_only_when_offline() {
+        assert!(!should_spawn_startup_check(false, true, false));
+        assert!(!should_spawn_startup_check(false, false, false));
+        assert!(should_spawn_startup_check(true, true, false));
+        assert!(!should_spawn_startup_check(true, true, true));
+        assert!(should_spawn_startup_check(true, false, false));
+        assert!(should_spawn_startup_check(true, false, true));
+    }
+
+    #[test]
+    fn default_compiled_fingerprint_resolves_when_not_disabled() {
+        if option_env!("CST_UPDATE_MANIFEST_URL")
+            .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+            || option_env!("CST_UPDATE_PUBLIC_KEY")
+                .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+        {
+            assert!(compiled_update_key_fingerprint().is_err());
+        } else {
+            let fp = compiled_update_key_fingerprint().expect("compiled update root must be valid");
+            assert_eq!(fp.len(), 16);
+        }
+    }
 }
