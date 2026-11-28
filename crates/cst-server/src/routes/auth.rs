@@ -314,7 +314,9 @@ pub async fn handle_auth_route(
 
                 if action == "start" {
                     if (auth_type == AuthType::OAuth && !obj.is_empty())
-                        || obj.keys().any(|k| !matches!(k.as_str(), "key" | "baseUrl"))
+                        || obj.keys().any(|k| {
+                            !matches!(k.as_str(), "key" | "baseUrl" | "accountId" | "gatewayId")
+                        })
                     {
                         return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
@@ -338,6 +340,32 @@ pub async fn handle_auth_route(
                     let base_url_opt = match obj.get("baseUrl") {
                         None => None,
                         Some(Value::String(u)) => Some(u.clone()),
+                        _ => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "请求的登录参数无效",
+                            ));
+                        }
+                    };
+                    let account_id_opt = match obj.get("accountId") {
+                        None => None,
+                        Some(Value::String(v)) if !v.trim().is_empty() && v.len() <= 256 => {
+                            Some(v.trim().to_owned())
+                        }
+                        _ => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "请求的登录参数无效",
+                            ));
+                        }
+                    };
+                    let gateway_id_opt = match obj.get("gatewayId") {
+                        None => None,
+                        Some(Value::String(v)) if !v.trim().is_empty() && v.len() <= 256 => {
+                            Some(v.trim().to_owned())
+                        }
                         _ => {
                             return Err(ApiError::new(
                                 StatusCode::BAD_REQUEST,
@@ -380,6 +408,11 @@ pub async fn handle_auth_route(
                                     key_opt,
                                     move |interaction| {
                                         Box::pin(async move {
+                                            let interaction = wrap_inline_text_prompts(
+                                                interaction,
+                                                account_id_opt,
+                                                gateway_id_opt,
+                                            );
                                             let cancel_tok = interaction
                                                 .cancel_token
                                                 .clone()
@@ -636,7 +669,9 @@ pub async fn handle_auth_route(
                             "请求的密钥或 BaseURL 格式无效",
                         ));
                     };
-                    if obj.keys().any(|k| !matches!(k.as_str(), "key" | "baseUrl")) {
+                    if obj.keys().any(|k| {
+                        !matches!(k.as_str(), "key" | "baseUrl" | "accountId" | "gatewayId")
+                    }) {
                         return Err(ApiError::new(
                             StatusCode::BAD_REQUEST,
                             "invalid_request",
@@ -666,6 +701,32 @@ pub async fn handle_auth_route(
                             ));
                         }
                     };
+                    let account_id_opt = match obj.get("accountId") {
+                        None => None,
+                        Some(Value::String(v)) if !v.trim().is_empty() && v.len() <= 256 => {
+                            Some(v.trim().to_owned())
+                        }
+                        _ => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "请求的密钥或 BaseURL 格式无效",
+                            ));
+                        }
+                    };
+                    let gateway_id_opt = match obj.get("gatewayId") {
+                        None => None,
+                        Some(Value::String(v)) if !v.trim().is_empty() && v.len() <= 256 => {
+                            Some(v.trim().to_owned())
+                        }
+                        _ => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "请求的密钥或 BaseURL 格式无效",
+                            ));
+                        }
+                    };
 
                     let pid_owned = provider_id.to_owned();
                     let st = state.clone();
@@ -682,27 +743,84 @@ pub async fn handle_auth_route(
                                 // keeping consistent lock hierarchy (`auth:<provider>` -> `auth-config:all`).
                                 st.oauth_flows.cancel_and_wait(&pid_owned).await;
 
+                                let existing_env = st
+                                    .host
+                                    .auth()
+                                    .runtime()
+                                    .credentials()
+                                    .read(&pid_owned)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|c| match c {
+                                        pi_ai::Credential::ApiKey(api) => api.env,
+                                        pi_ai::Credential::OAuth(_) => None,
+                                    });
+                                let resolved_account = account_id_opt.or_else(|| {
+                                    pi_ai::get_provider_env(
+                                        "CLOUDFLARE_ACCOUNT_ID",
+                                        existing_env.as_ref(),
+                                    )
+                                });
+                                let resolved_gateway = gateway_id_opt.or_else(|| {
+                                    pi_ai::get_provider_env(
+                                        "CLOUDFLARE_GATEWAY_ID",
+                                        existing_env.as_ref(),
+                                    )
+                                });
+
                                 let login_action = || async {
-                                    let prompts = Arc::new(Mutex::new(0usize));
+                                    let secret_used = Arc::new(Mutex::new(false));
+                                    let account_slot = Arc::new(Mutex::new(resolved_account));
+                                    let gateway_slot = Arc::new(Mutex::new(resolved_gateway));
                                     let secret = key_secret.clone();
                                     let interaction = AuthInteraction::new(
                                         Arc::new(move |question| {
-                                            let mut count = prompts.lock().expect("prompts lock");
-                                            *count += 1;
-                                            let n = *count;
+                                            let secret_used = secret_used.clone();
+                                            let account_slot = account_slot.clone();
+                                            let gateway_slot = gateway_slot.clone();
                                             let secret = secret.clone();
                                             Box::pin(async move {
-                                                if n != 1
-                                                    || !matches!(
-                                                        question,
-                                                        AuthPrompt::Secret { .. }
-                                                    )
-                                                {
-                                                    return Err(
-                                                        "该模型服务需要其他登录信息".to_owned()
-                                                    );
+                                                match question {
+                                                    AuthPrompt::Secret { .. } => {
+                                                        let mut used = secret_used
+                                                            .lock()
+                                                            .expect("secret_used lock");
+                                                        if *used {
+                                                            return Err(
+                                                                "该模型服务需要其他登录信息"
+                                                                    .to_owned(),
+                                                            );
+                                                        }
+                                                        *used = true;
+                                                        Ok(secret.as_str().to_owned())
+                                                    }
+                                                    AuthPrompt::Text { message, .. } => {
+                                                        let lower = message.to_ascii_lowercase();
+                                                        if lower.contains("account id")
+                                                            && let Some(val) = account_slot
+                                                                .lock()
+                                                                .expect("account_slot lock")
+                                                                .take()
+                                                        {
+                                                            return Ok(val);
+                                                        }
+                                                        if lower.contains("gateway id")
+                                                            && let Some(val) = gateway_slot
+                                                                .lock()
+                                                                .expect("gateway_slot lock")
+                                                                .take()
+                                                        {
+                                                            return Ok(val);
+                                                        }
+                                                        Err("缺少必填的 Account ID 或 Gateway ID"
+                                                            .to_owned())
+                                                    }
+                                                    AuthPrompt::Select { .. }
+                                                    | AuthPrompt::ManualCode { .. } => {
+                                                        Err("该模型服务需要其他登录信息".to_owned())
+                                                    }
                                                 }
-                                                Ok(secret.as_str().to_owned())
                                             })
                                         }),
                                         Arc::new(|_| {}),
@@ -815,4 +933,37 @@ pub async fn handle_auth_route(
     }
 
     Ok(None)
+}
+
+fn wrap_inline_text_prompts(
+    interaction: AuthInteraction,
+    account_id: Option<String>,
+    gateway_id: Option<String>,
+) -> AuthInteraction {
+    if account_id.is_none() && gateway_id.is_none() {
+        return interaction;
+    }
+    let account_slot = Arc::new(Mutex::new(account_id));
+    let gateway_slot = Arc::new(Mutex::new(gateway_id));
+    let orig_prompt = interaction.prompt.clone();
+    AuthInteraction {
+        cancel_token: interaction.cancel_token,
+        prompt: Arc::new(move |question| {
+            if let AuthPrompt::Text { ref message, .. } = question {
+                let lower = message.to_ascii_lowercase();
+                if lower.contains("account id")
+                    && let Some(val) = account_slot.lock().expect("account_slot lock").take()
+                {
+                    return Box::pin(async move { Ok(val) });
+                }
+                if lower.contains("gateway id")
+                    && let Some(val) = gateway_slot.lock().expect("gateway_slot lock").take()
+                {
+                    return Box::pin(async move { Ok(val) });
+                }
+            }
+            orig_prompt(question)
+        }),
+        notify: interaction.notify,
+    }
 }

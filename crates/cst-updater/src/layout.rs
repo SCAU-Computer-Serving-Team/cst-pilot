@@ -337,19 +337,44 @@ fn merge_catalog(old: &mut Value, next: &Value) {
             old.insert(provider.clone(), value.clone());
             continue;
         };
+        let replace_existing_models = existing.get("etag").is_none()
+            && value
+                .get("lastModified")
+                .and_then(Value::as_u64)
+                .is_some_and(|next_lm| {
+                    let existing_ts = existing
+                        .get("lastModified")
+                        .and_then(Value::as_u64)
+                        .into_iter()
+                        .chain(existing.get("checkedAt").and_then(Value::as_u64))
+                        .max()
+                        .unwrap_or(0);
+                    next_lm > existing_ts
+                });
         if let (Some(models), Some(extra)) = (
             existing.get_mut("models").and_then(Value::as_array_mut),
             value.get("models").and_then(Value::as_array),
         ) {
             for model in extra {
-                if let Some(id) = model.get("id").and_then(Value::as_str)
-                    && !models
-                        .iter()
-                        .any(|m| m.get("id").and_then(Value::as_str) == Some(id))
-                {
-                    models.push(model.clone());
+                if let Some(id) = model.get("id").and_then(Value::as_str) {
+                    if let Some(slot) = models
+                        .iter_mut()
+                        .find(|m| m.get("id").and_then(Value::as_str) == Some(id))
+                    {
+                        if replace_existing_models {
+                            *slot = model.clone();
+                        }
+                    } else {
+                        models.push(model.clone());
+                    }
                 }
             }
+        }
+        if replace_existing_models
+            && let Some(next_lm) = value.get("lastModified").cloned()
+            && let Some(obj) = existing.as_object_mut()
+        {
+            obj.insert("lastModified".to_owned(), next_lm);
         }
         merge_object(existing, value);
     }

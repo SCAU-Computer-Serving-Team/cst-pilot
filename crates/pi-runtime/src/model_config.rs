@@ -868,143 +868,215 @@ pub fn compose_provider_with_model_config(
         }
     }
 
-    // 合成認證与请求头解析
+    // 合成认证与请求头解析
     if cfg.api_key.is_some() || cfg.headers.is_some() || cfg.auth_header == Some(true) {
         let base_auth = opts.auth.clone();
         let cfg_key = cfg.api_key.clone();
         let cfg_headers = cfg.headers.clone();
         let auth_header = cfg.auth_header.unwrap_or(false);
-        let resolver_clone = resolver.clone();
-        let pid = provider_id.to_owned();
 
-        let resolve_composed = Arc::new(
-            move |cred: Option<pi_ai::ApiKeyCredential>,
-                  env: Option<pi_ai::ProviderEnv>,
-                  cancel: Option<tokio_util::sync::CancellationToken>| {
-                // 1. 优先尝试存储凭据或运行时覆盖凭据
-                let base_res = if let Some(ref api_auth) = base_auth.api_key {
-                    (api_auth.resolve)(cred.clone(), env.clone())?
-                } else if base_auth.oauth.is_some() {
-                    if let Some(c) = &cred
-                        && let Some(k) = &c.key
-                        && !k.is_empty()
+        let composed_oauth = base_auth.oauth.clone().map(|mut oauth| {
+            if cfg_headers.is_some() || auth_header {
+                let orig_to_auth = oauth.to_auth.clone();
+                let headers_cfg = cfg_headers.clone();
+                let resolver_oauth = resolver.clone();
+                oauth.to_auth = Arc::new(move |cred| {
+                    let mut model_auth = orig_to_auth(cred)?;
+                    if let Some(h_map) = &headers_cfg
+                        && let Some(rm) = resolver_oauth.resolve_headers_or_throw(
+                            Some(h_map),
+                            None,
+                            ConfigValueSource::Global,
+                            None,
+                        )?
                     {
-                        Some(AuthResult {
-                            auth: pi_ai::ModelAuth {
-                                api_key: Some(k.clone()),
-                                headers: None,
-                                base_url: None,
-                            },
-                            env: c.env.clone(),
-                            source: Some("stored".to_owned()),
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let env = base_res
-                    .as_ref()
-                    .and_then(|result| result.env.clone())
-                    .or(env);
-                let mut final_api_key = base_res.as_ref().and_then(|r| r.auth.api_key.clone());
-                let mut source = base_res.as_ref().and_then(|r| r.source.clone());
-
-                if final_api_key.is_none()
-                    && let Some(raw_cfg_key) = &cfg_key
-                {
-                    let resolved_key = resolver_clone.resolve_or_throw(
-                        raw_cfg_key,
-                        &format!("API key for provider \"{pid}\""),
-                        env.as_ref(),
-                        ConfigValueSource::Global,
-                        cancel.as_ref(),
-                    )?;
-                    final_api_key = Some(resolved_key);
-                    source = Some(if is_command_config_value(raw_cfg_key) {
-                        "models_json_command".to_owned()
-                    } else {
-                        "models_json_key".to_owned()
-                    });
-                }
-
-                let mut resolved_headers: Option<ProviderHeaders> =
-                    base_res.as_ref().and_then(|r| r.auth.headers.clone());
-
-                if let Some(h_map) = &cfg_headers {
-                    let resolved_map = resolver_clone.resolve_headers_or_throw(
-                        Some(h_map),
-                        env.as_ref(),
-                        ConfigValueSource::Global,
-                        cancel.as_ref(),
-                    )?;
-                    if let Some(rm) = resolved_map {
                         let ph: ProviderHeaders =
                             rm.into_iter().map(|(k, v)| (k, Some(v))).collect();
-                        resolved_headers = merge_provider_headers(resolved_headers, Some(&ph));
+                        model_auth.headers = merge_provider_headers(model_auth.headers, Some(&ph));
                     }
-                }
-
-                if auth_header && let Some(key) = &final_api_key {
-                    let mut bearer = ProviderHeaders::new();
-                    bearer.insert("Authorization".to_owned(), Some(format!("Bearer {key}")));
-                    resolved_headers = merge_provider_headers(resolved_headers, Some(&bearer));
-                }
-
-                if final_api_key.is_none() && resolved_headers.is_none() {
-                    return Ok(None);
-                }
-
-                Ok(Some(AuthResult {
-                    auth: pi_ai::ModelAuth {
-                        api_key: final_api_key,
-                        headers: resolved_headers,
-                        base_url: base_res.and_then(|r| r.auth.base_url),
-                    },
-                    env,
-                    source,
-                }))
-            },
-        );
-
-        let sync_resolver = resolve_composed.clone();
-        let resolve_fn: pi_ai::ApiKeyResolverFn =
-            Arc::new(move |credential, env| sync_resolver(credential, env, None));
-        let resolve_async: pi_ai::ApiKeyAsyncResolverFn = Arc::new(
-            move |credential, env, cancel| {
-                let resolve = resolve_composed.clone();
-                Box::pin(async move {
-                    let cancel = cancel.map(|token| token.child_token()).unwrap_or_default();
-                    let _cancel_on_drop = cancel.clone().drop_guard();
-                    let worker_cancel = cancel.clone();
-                    let worker = tokio::task::spawn_blocking(move || {
-                        resolve(credential, env, Some(worker_cancel))
-                    });
-                    tokio::select! { biased;
-                        _ = cancel.cancelled() => Err("Request was aborted".to_owned()),
-                        result = worker => result.map_err(|_| "Provider configuration resolution task failed".to_owned())?,
+                    if auth_header && let Some(key) = &model_auth.api_key {
+                        let mut bearer = ProviderHeaders::new();
+                        bearer.insert("Authorization".to_owned(), Some(format!("Bearer {key}")));
+                        model_auth.headers =
+                            merge_provider_headers(model_auth.headers, Some(&bearer));
                     }
-                })
-            },
-        );
-        let keyless = opts
-            .auth
-            .api_key
-            .as_ref()
-            .is_some_and(|auth| auth.configured_without_credentials);
-        let env_only = opts.auth.api_key.as_ref().is_some_and(|auth| auth.env_only);
-        opts.auth = ProviderAuth {
-            api_key: Some(ApiKeyAuth {
+                    Ok(model_auth)
+                });
+            }
+            oauth
+        });
+
+        // 纯 OAuth 服务商在未配置 models.json `apiKey` 时不伪造 API Key 登录方式
+        let should_compose_api_key =
+            base_auth.api_key.is_some() || cfg_key.is_some() || composed_oauth.is_none();
+        let composed_api_key = if should_compose_api_key {
+            let resolver_clone = resolver.clone();
+            let pid = provider_id.to_owned();
+            let base_api_auth = base_auth.api_key.clone();
+            let keyless = base_api_auth
+                .as_ref()
+                .is_some_and(|auth| auth.configured_without_credentials);
+            let env_only = base_api_auth.as_ref().is_none_or(|auth| auth.env_only);
+            let login_fn = base_api_auth.as_ref().and_then(|a| a.login_fn.clone());
+
+            let resolve_composed = Arc::new(
+                move |cred: Option<pi_ai::ApiKeyCredential>,
+                      env: Option<pi_ai::ProviderEnv>,
+                      cancel: Option<tokio_util::sync::CancellationToken>| {
+                    let has_cred_key = cred
+                        .as_ref()
+                        .and_then(|c| c.key.as_ref())
+                        .is_some_and(|k| !k.is_empty());
+
+                    let base_res = if has_cred_key
+                        && let Some(ref api_auth) = base_api_auth
+                        && !api_auth.env_only
+                    {
+                        (api_auth.resolve)(cred.clone(), env.clone())?
+                    } else if let Some(raw_cfg_key) = &cfg_key {
+                        let merged_env =
+                            match (cred.as_ref().and_then(|c| c.env.clone()), env.clone()) {
+                                (Some(mut a), Some(b)) => {
+                                    a.extend(b);
+                                    Some(a)
+                                }
+                                (Some(a), None) => Some(a),
+                                (None, Some(b)) => Some(b),
+                                (None, None) => None,
+                            };
+                        let resolved_key = resolver_clone.resolve_or_throw(
+                            raw_cfg_key,
+                            &format!("API key for provider \"{pid}\""),
+                            merged_env.as_ref(),
+                            ConfigValueSource::Global,
+                            cancel.as_ref(),
+                        )?;
+                        let cfg_source = Some(if is_command_config_value(raw_cfg_key) {
+                            "models_json_command".to_owned()
+                        } else {
+                            "models_json_key".to_owned()
+                        });
+                        if let Some(ref api_auth) = base_api_auth
+                            && !api_auth.env_only
+                        {
+                            (api_auth.resolve)(
+                                Some(pi_ai::ApiKeyCredential {
+                                    key: Some(resolved_key),
+                                    env: cred.as_ref().and_then(|c| c.env.clone()),
+                                }),
+                                env.clone(),
+                            )?
+                            .map(|mut r| {
+                                r.source = cfg_source;
+                                r
+                            })
+                        } else {
+                            Some(AuthResult {
+                                auth: pi_ai::ModelAuth {
+                                    api_key: Some(resolved_key),
+                                    headers: None,
+                                    base_url: None,
+                                },
+                                env: merged_env,
+                                source: cfg_source,
+                            })
+                        }
+                    } else if let Some(ref api_auth) = base_api_auth {
+                        let effective_cred = if api_auth.env_only {
+                            None
+                        } else {
+                            cred.clone()
+                        };
+                        (api_auth.resolve)(effective_cred, env.clone())?
+                    } else {
+                        None
+                    };
+
+                    let env = base_res
+                        .as_ref()
+                        .and_then(|result| result.env.clone())
+                        .or(env);
+                    let final_api_key = base_res.as_ref().and_then(|r| r.auth.api_key.clone());
+                    let source = base_res.as_ref().and_then(|r| r.source.clone());
+                    let mut resolved_headers: Option<ProviderHeaders> =
+                        base_res.as_ref().and_then(|r| r.auth.headers.clone());
+
+                    if base_res.is_none() {
+                        return Ok(None);
+                    }
+
+                    if let Some(h_map) = &cfg_headers {
+                        let resolved_map = resolver_clone.resolve_headers_or_throw(
+                            Some(h_map),
+                            env.as_ref(),
+                            ConfigValueSource::Global,
+                            cancel.as_ref(),
+                        )?;
+                        if let Some(rm) = resolved_map {
+                            let ph: ProviderHeaders =
+                                rm.into_iter().map(|(k, v)| (k, Some(v))).collect();
+                            resolved_headers = merge_provider_headers(resolved_headers, Some(&ph));
+                        }
+                    }
+
+                    if auth_header && let Some(key) = &final_api_key {
+                        let mut bearer = ProviderHeaders::new();
+                        bearer.insert("Authorization".to_owned(), Some(format!("Bearer {key}")));
+                        resolved_headers = merge_provider_headers(resolved_headers, Some(&bearer));
+                    }
+
+                    if final_api_key.is_none() && resolved_headers.is_none() {
+                        return Ok(None);
+                    }
+
+                    Ok(Some(AuthResult {
+                        auth: pi_ai::ModelAuth {
+                            api_key: final_api_key,
+                            headers: resolved_headers,
+                            base_url: base_res.and_then(|r| r.auth.base_url),
+                        },
+                        env,
+                        source,
+                    }))
+                },
+            );
+
+            let sync_resolver = resolve_composed.clone();
+            let resolve_fn: pi_ai::ApiKeyResolverFn =
+                Arc::new(move |credential, env| sync_resolver(credential, env, None));
+            let resolve_async: pi_ai::ApiKeyAsyncResolverFn = Arc::new(
+                move |credential, env, cancel| {
+                    let resolve = resolve_composed.clone();
+                    Box::pin(async move {
+                        let cancel = cancel.map(|token| token.child_token()).unwrap_or_default();
+                        let _cancel_on_drop = cancel.clone().drop_guard();
+                        let worker_cancel = cancel.clone();
+                        let worker = tokio::task::spawn_blocking(move || {
+                            resolve(credential, env, Some(worker_cancel))
+                        });
+                        tokio::select! { biased;
+                            _ = cancel.cancelled() => Err("Request was aborted".to_owned()),
+                            result = worker => result.map_err(|_| "Provider configuration resolution task failed".to_owned())?,
+                        }
+                    })
+                },
+            );
+
+            Some(ApiKeyAuth {
                 name: opts.name.clone().unwrap_or_else(|| provider_id.to_owned()),
                 resolve: resolve_fn,
                 resolve_async: Some(resolve_async),
                 configured_without_credentials: keyless,
                 env_only,
-                login_fn: opts.auth.api_key.and_then(|a| a.login_fn),
-            }),
-            oauth: opts.auth.oauth,
+                login_fn,
+            })
+        } else {
+            None
+        };
+
+        opts.auth = ProviderAuth {
+            api_key: composed_api_key,
+            oauth: composed_oauth,
         };
     }
 

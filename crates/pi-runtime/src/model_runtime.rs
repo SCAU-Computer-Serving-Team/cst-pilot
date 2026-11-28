@@ -422,21 +422,40 @@ impl ModelRuntime {
         let provider_ids = self.models.get_providers();
         for provider in &provider_ids {
             let pid = provider.id();
+            let provider_models: Vec<Model> =
+                all.iter().filter(|m| m.provider == pid).cloned().collect();
             let mut is_configured = false;
             let mut source: Option<String> = None;
             let mut auth_type = AuthType::ApiKey;
 
             let inspection = self.credentials.inspect(pid);
+            let is_runtime_key = self.credentials.has_runtime_api_key(pid);
+            if inspection.is_some() && !is_runtime_key {
+                stored_providers.insert(pid.to_owned());
+            }
+
+            let auth = provider.auth();
+            let stored_env = inspection.as_ref().and_then(|s| match &s.credential {
+                Credential::ApiKey(api) if auth.api_key.as_ref().is_some_and(|a| !a.env_only) => {
+                    api.env.as_ref()
+                }
+                _ => None,
+            });
+
             if let Some(stored) = &inspection {
-                is_configured = stored.configured;
-                auth_type = stored.credential.auth_type();
-                if self.credentials.has_runtime_api_key(pid) {
-                    source = Some("runtime".to_owned());
-                } else {
-                    stored_providers.insert(pid.to_owned());
-                    if is_configured {
-                        source = Some("stored".to_owned());
+                let stored_allowed = match &stored.credential {
+                    Credential::OAuth(_) => {
+                        auth.oauth.is_some() || !self.default_builtins.contains_key(pid)
                     }
+                    Credential::ApiKey(_) => {
+                        auth.api_key.as_ref().is_some_and(|a| !a.env_only)
+                            || !self.default_builtins.contains_key(pid)
+                    }
+                };
+                if stored.configured && stored_allowed {
+                    is_configured = true;
+                    auth_type = stored.credential.auth_type();
+                    source = Some(if is_runtime_key { "runtime" } else { "stored" }.to_owned());
                 }
             }
 
@@ -445,32 +464,44 @@ impl ModelRuntime {
                 && let Some(cfg_src) = has_configured_models_json_auth(p_cfg)
             {
                 is_configured = true;
+                auth_type = AuthType::ApiKey;
                 source = Some(cfg_src.to_owned());
             }
 
-            if !is_configured && pi_ai::get_env_api_key(pid, None).is_some() {
+            if !is_configured
+                && (auth.api_key.is_some() || !self.default_builtins.contains_key(pid))
+                && (pi_ai::get_env_api_key(pid, stored_env).is_some()
+                    || (pid == "anthropic"
+                        && pi_ai::get_provider_env("ANTHROPIC_AUTH_TOKEN", stored_env).is_some()))
+            {
                 is_configured = true;
+                auth_type = AuthType::ApiKey;
                 source = Some("environment".to_owned());
             }
 
-            if !is_configured {
-                let auth = provider.auth();
-                if (auth.api_key.is_none() && auth.oauth.is_none())
+            if !is_configured
+                && ((auth.api_key.is_none() && auth.oauth.is_none())
                     || auth
                         .api_key
                         .as_ref()
-                        .is_some_and(|auth| auth.configured_without_credentials)
-                {
-                    is_configured = true;
-                    source = Some("none".to_owned());
-                }
+                        .is_some_and(|a| a.configured_without_credentials))
+            {
+                is_configured = true;
+                auth_type = AuthType::ApiKey;
+                source = Some("none".to_owned());
+            }
+
+            if is_configured
+                && auth_type == AuthType::ApiKey
+                && !has_required_cloudflare_ids(pid, &provider_models, stored_env)
+            {
+                is_configured = false;
+                source = None;
             }
 
             if is_configured {
                 configured_providers.insert(pid.to_owned());
                 auth_map.insert(pid.to_owned(), AuthCheck { source, auth_type });
-                let provider_models: Vec<Model> =
-                    all.iter().filter(|m| m.provider == pid).cloned().collect();
                 for model in provider.filter_chat_models(
                     &provider_models,
                     inspection.as_ref().map(|s| &s.credential),
@@ -753,14 +784,19 @@ impl ModelRuntime {
         provider_id: &str,
         env: Option<BTreeMap<String, String>>,
     ) -> Result<Option<String>, String> {
+        let api_auth_meta = self
+            .models
+            .get_provider(provider_id)
+            .and_then(|p| p.auth().api_key.clone());
+        let allow_stored_api_key = api_auth_meta.as_ref().is_some_and(|a| !a.env_only);
         match self.credentials.read(provider_id).await? {
             Some(Credential::OAuth(_)) => return Ok(None),
-            Some(Credential::ApiKey(api)) => {
+            Some(Credential::ApiKey(api)) if allow_stored_api_key => {
                 if let Some(key) = api.key.filter(|key| !key.is_empty()) {
                     return Ok(Some(key));
                 }
             }
-            None => {}
+            _ => {}
         }
         let raw_key = self
             .config
@@ -775,6 +811,9 @@ impl ModelRuntime {
                 .await
                 .map(Some);
         }
+        if api_auth_meta.is_none() {
+            return Ok(None);
+        }
         Ok(pi_ai::get_env_api_key(provider_id, env.as_ref()))
     }
 
@@ -788,15 +827,8 @@ impl ModelRuntime {
     ) -> Result<(Model, Option<ProviderHeaders>, Option<String>), RequestPreparationError> {
         let prepare = async {
             let (model, headers) = self
-                .prepare_model_and_headers_for_request(model, headers, env.clone())
+                .prepare_model_and_headers_for_request(model, headers, env)
                 .await?;
-            let api_key = match api_key {
-                Some(key) => Some(key),
-                None => {
-                    self.resolve_request_api_key_with_env(&model.provider, env)
-                        .await?
-                }
-            };
             Ok((model, headers, api_key))
         };
         if let Some(cancel) = cancel {
@@ -890,6 +922,42 @@ impl From<String> for RequestPreparationError {
     fn from(message: String) -> Self {
         Self::Failed(message)
     }
+}
+
+fn is_valid_cloudflare_segment(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn has_required_cloudflare_ids(
+    pid: &str,
+    provider_models: &[Model],
+    stored_env: Option<&BTreeMap<String, String>>,
+) -> bool {
+    if !matches!(pid, "cloudflare-workers-ai" | "cloudflare-ai-gateway") {
+        return true;
+    }
+    let needs_account = provider_models
+        .iter()
+        .any(|m| m.base_url.contains("{CLOUDFLARE_ACCOUNT_ID}"));
+    let needs_gateway = provider_models
+        .iter()
+        .any(|m| m.base_url.contains("{CLOUDFLARE_GATEWAY_ID}"));
+    if needs_account
+        && !pi_ai::get_provider_env("CLOUDFLARE_ACCOUNT_ID", stored_env)
+            .is_some_and(|v| is_valid_cloudflare_segment(&v))
+    {
+        return false;
+    }
+    if needs_gateway
+        && !pi_ai::get_provider_env("CLOUDFLARE_GATEWAY_ID", stored_env)
+            .is_some_and(|v| is_valid_cloudflare_segment(&v))
+    {
+        return false;
+    }
+    true
 }
 
 fn error_event_stream(

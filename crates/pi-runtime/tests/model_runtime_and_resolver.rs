@@ -612,3 +612,135 @@ async fn login_logout_are_serialized_and_sync_failure_keeps_committed_secret_red
     assert!(!rt.has_configured_auth("mock"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn cloudflare_requires_saved_ids_and_codex_models_json_never_reopens_interactive_api_key() {
+    let dir = std::env::temp_dir().join(format!("cf-and-codex-{}", uuid_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let auth_path = dir.join("auth.json");
+    let models_path = dir.join("models.json");
+
+    // 1. Cloudflare Workers AI 仅有密钥而缺少 Account ID 时不得被视为已配置
+    std::fs::write(
+        &auth_path,
+        r#"{"cloudflare-workers-ai":{"type":"api_key","key":"cf-only-key"}}"#,
+    )
+    .unwrap();
+    // 2. models.json 为 openai-codex 配置 headers 时不得伪造交互式 API Key 登录
+    std::fs::write(
+        &models_path,
+        r#"{"providers":{"openai-codex":{"headers":{"X-Codex-Custom":"yes"}}}}"#,
+    )
+    .unwrap();
+
+    let rt = ModelRuntime::create(CreateModelRuntimeOptions {
+        include_builtins: Some(true),
+        refresh_on_create: Some(false),
+        auth_path: Some(auth_path.clone()),
+        models_path: Some(models_path.clone()),
+        ..Default::default()
+    })
+    .await;
+
+    assert!(!rt.has_configured_auth("cloudflare-workers-ai"));
+    assert!(
+        rt.get_available_models()
+            .iter()
+            .all(|m| m.provider != "cloudflare-workers-ai")
+    );
+
+    let codex = rt.models().get_provider("openai-codex").unwrap();
+    assert!(
+        codex.auth().api_key.is_none(),
+        "headers-only models.json on openai-codex must not fabricate ApiKeyAuth"
+    );
+    let oauth_to_auth = &codex.auth().oauth.as_ref().unwrap().to_auth;
+    let derived = oauth_to_auth(pi_ai::OAuthCredential {
+        access: "acc-tok".into(),
+        refresh: "ref-tok".into(),
+        expires: pi_ai::now_ms() + 60_000,
+        extra: std::collections::BTreeMap::new(),
+    })
+    .unwrap();
+    assert_eq!(
+        derived
+            .headers
+            .as_ref()
+            .and_then(|h| h.get("X-Codex-Custom"))
+            .and_then(|v| v.as_deref()),
+        Some("yes")
+    );
+
+    // 即使 models.json 显式给 openai-codex 配了 apiKey，也必须标记 env_only=true（不开放交互式密钥登录）
+    std::fs::write(
+        &models_path,
+        r#"{"providers":{"openai-codex":{"apiKey":"literal-cfg-key"}}}"#,
+    )
+    .unwrap();
+    rt.refresh(Some(pi_ai::ModelsRefreshOptions {
+        allow_network: Some(false),
+        providers: Some(vec!["openai-codex".into()]),
+        force: Some(false),
+    }))
+    .await;
+    let codex_with_key = rt.models().get_provider("openai-codex").unwrap();
+    assert!(
+        codex_with_key
+            .auth()
+            .api_key
+            .as_ref()
+            .is_some_and(|a| a.env_only)
+    );
+
+    // 3. 登录 Cloudflare Workers AI 保存密钥 + Account ID 后立即可用，且每个内置对话服务商的默认模型均存在
+    let prompts = std::sync::Mutex::new(0usize);
+    let cf_interaction = AuthInteraction::new(
+        Arc::new(move |_| {
+            let mut n = prompts.lock().unwrap();
+            *n += 1;
+            let step = *n;
+            Box::pin(async move {
+                if step == 1 {
+                    Ok("cf-real-token".to_owned())
+                } else {
+                    Ok("acc_runtime_99".to_owned())
+                }
+            })
+        }),
+        Arc::new(|_| {}),
+    );
+    rt.login(
+        "cloudflare-workers-ai",
+        AuthType::ApiKey,
+        cf_interaction,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(rt.has_configured_auth("cloudflare-workers-ai"));
+    let cf_resolved = rt
+        .models()
+        .get_auth("cloudflare-workers-ai", None)
+        .await
+        .unwrap()
+        .expect("saved Cloudflare credential must resolve");
+    assert_eq!(
+        cf_resolved
+            .env
+            .as_ref()
+            .and_then(|e| e.get("CLOUDFLARE_ACCOUNT_ID"))
+            .map(String::as_str),
+        Some("acc_runtime_99")
+    );
+
+    for prov in pi_runtime::DEFAULT_PROVIDER_PRIORITY {
+        let def_id = pi_runtime::default_model_for_provider(prov)
+            .unwrap_or_else(|| panic!("missing default model mapping for {prov}"));
+        assert!(
+            rt.get_model(prov, def_id).is_some(),
+            "default model {prov}/{def_id} missing from catalog"
+        );
+    }
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

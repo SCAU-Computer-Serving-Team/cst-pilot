@@ -1122,9 +1122,7 @@ impl Models {
         }
 
         let mut req_options = options.cloned().unwrap_or_default();
-        if req_options.api_key.is_none() {
-            req_options.api_key = resolution.auth.api_key;
-        }
+        req_options.api_key = resolution.auth.api_key;
 
         let model_hdrs = static_headers_to_provider_headers(model.headers.as_ref());
         let with_model = merge_provider_headers(provider.headers().cloned(), model_hdrs.as_ref());
@@ -1371,9 +1369,7 @@ impl Models {
         }
 
         let mut req_options = options.cloned().unwrap_or_default();
-        if req_options.api_key.is_none() {
-            req_options.api_key = resolution.auth.api_key;
-        }
+        req_options.api_key = resolution.auth.api_key;
 
         let model_hdrs = static_headers_to_provider_headers(model.headers.as_ref());
         let with_model = merge_provider_headers(provider.headers().cloned(), model_hdrs.as_ref());

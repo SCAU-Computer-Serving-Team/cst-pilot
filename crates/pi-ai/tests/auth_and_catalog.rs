@@ -80,6 +80,27 @@ fn all_38_builtin_providers_load_and_reject_contradictory_model_types() {
         .expect("typesafe/jev-latest classifier must exist");
     assert_eq!(jev.api, known_classifier_api::TYPESAFE_SYSTEM_ONE);
 
+    // 验证全部 38 份内置目录中保留的每个分类器均使用已注册实现的分类器协议
+    for p in &providers {
+        let clf_map = p.to_create_options().classifiers.unwrap_or_default();
+        for clf in p.get_classifiers() {
+            assert_eq!(
+                clf.api,
+                known_classifier_api::TYPESAFE_SYSTEM_ONE,
+                "provider {} classifier {} uses unsupported api {}",
+                p.id(),
+                clf.id,
+                clf.api
+            );
+            assert!(
+                clf_map.contains_key(&clf.api),
+                "provider {} missing classifier implementation for {}",
+                p.id(),
+                clf.api
+            );
+        }
+    }
+
     // 1.6.0 alignment checks:
     // - openai-codex is OAuth-only (`api_key: None`)
     let codex = models.get_provider("openai-codex").unwrap();
@@ -1126,5 +1147,83 @@ async fn concurrent_dynamic_refresh_and_generation_guard_work() {
         copilot
             .filter_chat_models(&copilot.get_models(), Some(&empty_cred))
             .is_empty()
+    );
+
+    // P1-5: github-copilot `env_only` 忽略已存 api_key 凭据与显式覆盖密钥，仅采信环境变量
+    let store = Arc::new(InMemoryCredentialStore::new());
+    store
+        .modify(
+            "github-copilot",
+            Box::new(|_| {
+                Box::pin(async {
+                    Ok(Some(Credential::ApiKey(ApiKeyCredential {
+                        key: Some("stale-stored-key".to_owned()),
+                        env: None,
+                    })))
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    let models_copilot = builtin_models(Some(CreateModelsOptions {
+        credentials: Some(store.clone()),
+        models_store: None,
+        identity: None,
+    }));
+    let explicit_override = AuthResolutionOverrides {
+        api_key: Some("explicit-override-key".to_owned()),
+        env: Some(BTreeMap::from([(
+            "COPILOT_GITHUB_TOKEN".to_owned(),
+            "env-copilot-token".to_owned(),
+        )])),
+        min_oauth_validity_ms: None,
+    };
+    let copilot_auth = models_copilot
+        .get_auth("github-copilot", Some(&explicit_override))
+        .await
+        .unwrap()
+        .expect("COPILOT_GITHUB_TOKEN must resolve");
+    assert_eq!(
+        copilot_auth.auth.api_key.as_deref(),
+        Some("env-copilot-token")
+    );
+    assert_eq!(copilot_auth.source.as_deref(), Some("COPILOT_GITHUB_TOKEN"));
+
+    // P1-1: Cloudflare 显式密钥覆盖仍保留已存凭据中的 Account ID / Gateway ID
+    store
+        .modify(
+            "cloudflare-workers-ai",
+            Box::new(|_| {
+                Box::pin(async {
+                    Ok(Some(Credential::ApiKey(ApiKeyCredential {
+                        key: Some("stored-cf-key".to_owned()),
+                        env: Some(BTreeMap::from([(
+                            "CLOUDFLARE_ACCOUNT_ID".to_owned(),
+                            "acc_saved_42".to_owned(),
+                        )])),
+                    })))
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    let cf_override = AuthResolutionOverrides {
+        api_key: Some("rotated-cf-key".to_owned()),
+        env: None,
+        min_oauth_validity_ms: None,
+    };
+    let cf_auth = models_copilot
+        .get_auth("cloudflare-workers-ai", Some(&cf_override))
+        .await
+        .unwrap()
+        .expect("stored account ID must survive explicit key override");
+    assert_eq!(cf_auth.auth.api_key.as_deref(), Some("rotated-cf-key"));
+    assert_eq!(
+        cf_auth
+            .env
+            .as_ref()
+            .and_then(|m| m.get("CLOUDFLARE_ACCOUNT_ID"))
+            .map(String::as_str),
+        Some("acc_saved_42")
     );
 }

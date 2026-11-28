@@ -702,9 +702,31 @@ impl ApiKeyAuth {
     }
 
     pub fn env_only(name: impl Into<String>, provider_id: impl Into<String>) -> Self {
-        let mut auth = Self::from_env(name, provider_id);
-        auth.env_only = true;
-        auth
+        let provider_id = provider_id.into();
+        Self {
+            name: name.into(),
+            login_fn: None,
+            resolve_async: None,
+            configured_without_credentials: false,
+            env_only: true,
+            resolve: Arc::new(move |_cred, env| {
+                if let Some(found_vars) = find_env_keys(&provider_id, env.as_ref())
+                    && let Some(first_var) = found_vars.first()
+                    && let Some(val) = get_provider_env(first_var, env.as_ref())
+                {
+                    return Ok(Some(AuthResult {
+                        auth: ModelAuth {
+                            api_key: Some(val),
+                            headers: None,
+                            base_url: None,
+                        },
+                        env,
+                        source: Some(first_var.clone()),
+                    }));
+                }
+                Ok(None)
+            }),
+        }
     }
 
     pub fn keyless(name: impl Into<String>, placeholder_key: impl Into<String>) -> Self {
@@ -1619,12 +1641,35 @@ pub async fn resolve_provider_auth_cancellable(
 
     if let Some(explicit_key) = overrides.and_then(|o| o.api_key.clone())
         && let Some(api_key_auth) = &auth.api_key
+        && !api_key_auth.env_only
     {
+        let stored_env = match cancel_token {
+            Some(token) => tokio::select! {
+                _ = token.cancelled() => {
+                    return Err(ModelsError::new(ModelsErrorCode::Auth, "Request was aborted"));
+                }
+                res = credentials.read(provider_id) => res.ok().flatten(),
+            },
+            None => credentials.read(provider_id).await.ok().flatten(),
+        }
+        .and_then(|cred| match cred {
+            Credential::ApiKey(api) => api.env,
+            Credential::OAuth(_) => None,
+        });
+        let merged_env = match (stored_env, override_env) {
+            (Some(mut base), Some(ov)) => {
+                base.extend(ov);
+                Some(base)
+            }
+            (Some(base), None) => Some(base),
+            (None, Some(ov)) => Some(ov),
+            (None, None) => None,
+        };
         return api_key_auth
             .resolve_for_request(
                 Some(ApiKeyCredential {
                     key: Some(explicit_key),
-                    env: override_env,
+                    env: merged_env,
                 }),
                 None,
                 cancel_token,
@@ -1712,20 +1757,22 @@ pub async fn resolve_provider_auth_cancellable(
                 let Some(api_key_auth) = &auth.api_key else {
                     return Ok(None);
                 };
-                if let Some(ov_env) = override_env {
-                    let mut merged = api_cred.env.unwrap_or_default();
-                    merged.extend(ov_env);
-                    api_cred.env = Some(merged);
+                if !api_key_auth.env_only {
+                    if let Some(ov_env) = override_env {
+                        let mut merged = api_cred.env.unwrap_or_default();
+                        merged.extend(ov_env);
+                        api_cred.env = Some(merged);
+                    }
+                    return api_key_auth
+                        .resolve_for_request(Some(api_cred), None, cancel_token)
+                        .await
+                        .map_err(|e| {
+                            ModelsError::new(
+                                ModelsErrorCode::Auth,
+                                format!("API key auth failed for provider {provider_id}: {e}"),
+                            )
+                        });
                 }
-                return api_key_auth
-                    .resolve_for_request(Some(api_cred), None, cancel_token)
-                    .await
-                    .map_err(|e| {
-                        ModelsError::new(
-                            ModelsErrorCode::Auth,
-                            format!("API key auth failed for provider {provider_id}: {e}"),
-                        )
-                    });
             }
         }
     }
