@@ -65,7 +65,9 @@ export function DefaultModelPicker({
 				event.preventDefault();
 				event.stopPropagation();
 				if (event.key === "ArrowUp") {
-					document.querySelector<HTMLElement>(".settings-nav-link.is-current")?.focus();
+					document
+						.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]')
+						?.focus();
 				} else {
 					const route = el?.closest<HTMLElement>(".settings-route");
 					const focusables = route

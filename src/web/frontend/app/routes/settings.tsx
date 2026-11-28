@@ -18,10 +18,12 @@ const tabs = [
 export default function Settings() {
 	const { pathname } = useLocation();
 	const navigate = useNavigate();
-	const activePath = ["/settings/add", "/settings/provider", "/settings/custom"].includes(pathname)
+	const cleanPath = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+	const activePath = ["/settings/add", "/settings/provider", "/settings/custom"].includes(cleanPath)
 		? "/settings"
-		: pathname;
+		: cleanPath;
 	const index = tabs.findIndex((tab) => tab.to === activePath);
+	const tabStopIdx = index >= 0 ? index : 1;
 	const [navigation, setNavigation] = useState({ pathname, index, direction: 0 });
 	if (navigation.pathname !== pathname) {
 		setNavigation({
@@ -91,7 +93,7 @@ export default function Settings() {
 				event.defaultPrevented ||
 				event.isComposing ||
 				event.keyCode === 229 ||
-				event.key !== "ArrowUp" ||
+				(event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
 				event.altKey ||
 				event.ctrlKey ||
 				event.metaKey ||
@@ -104,25 +106,52 @@ export default function Settings() {
 			if (active.closest('[role="dialog"], [data-slot="popover"]')) return;
 			if (active.tagName === "TEXTAREA" || active.tagName === "SELECT") return;
 			if (active instanceof HTMLInputElement) {
-				if ((active.selectionStart ?? 0) !== 0 || (active.selectionEnd ?? 0) !== 0) return;
+				if (event.key === "ArrowUp") {
+					if ((active.selectionStart ?? 0) !== 0 || (active.selectionEnd ?? 0) !== 0) return;
+				} else {
+					const end = active.value.length;
+					if ((active.selectionStart ?? 0) !== end || (active.selectionEnd ?? 0) !== end) return;
+				}
 			}
 			const isShortcutsPane = active.classList.contains("settings-shortcuts-pane");
 			if (isShortcutsPane) {
+				if (event.key === "ArrowDown") return;
 				const scroller = active.closest<HTMLElement>(".settings-scroll");
 				if (scroller && scroller.scrollTop > 0) return;
-			} else {
-				const focusables = [
-					...routeEl.querySelectorAll<HTMLElement>(
-						'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-					),
-				];
-				if (focusables[0] !== active) return;
+				const currentTab = navRef.current?.querySelector<HTMLElement>(
+					'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+				);
+				if (currentTab) {
+					event.preventDefault();
+					setNavKbdActive(true);
+					currentTab.focus();
+				}
+				return;
 			}
-			const currentTab = navRef.current?.querySelector<HTMLElement>(".settings-nav-link.is-current");
-			if (currentTab) {
+			const focusables = [
+				...routeEl.querySelectorAll<HTMLElement>(
+					'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+				),
+			];
+			const idx = focusables.indexOf(active);
+			if (idx < 0) return;
+			if (event.key === "ArrowUp") {
+				if (idx === 0) {
+					const currentTab = navRef.current?.querySelector<HTMLElement>(
+						'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+					);
+					if (currentTab) {
+						event.preventDefault();
+						setNavKbdActive(true);
+						currentTab.focus();
+					}
+				} else {
+					event.preventDefault();
+					focusables[idx - 1]?.focus();
+				}
+			} else if (idx + 1 < focusables.length) {
 				event.preventDefault();
-				setNavKbdActive(true);
-				currentTab.focus();
+				focusables[idx + 1]?.focus();
 			}
 		}
 		pagesEl.addEventListener("keydown", onRouteKeyDown);
@@ -177,13 +206,13 @@ export default function Settings() {
 								}
 							}}
 						>
-							{tabs.map((tab) => {
+							{tabs.map((tab, tabIdx) => {
 								const isCurrent = activePath === tab.to;
 								return (
 									<SettingsLink
 										key={tab.to}
 										to={tab.to}
-										tabIndex={isCurrent ? 0 : -1}
+										tabIndex={tabIdx === tabStopIdx ? 0 : -1}
 										aria-current={isCurrent ? "page" : undefined}
 										className={`settings-nav-link${isCurrent ? " is-current" : ""}`}
 										prefetch="render"

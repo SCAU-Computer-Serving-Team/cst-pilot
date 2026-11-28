@@ -2064,11 +2064,26 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(
-            window.try_find("kbd-dyn-ind-settings-tabbar").is_none(),
+            window.try_find("kbd-dyn-ind-settings-tabbar").is_none()
+                && window.try_find("kbd-dyn-active-settings-tabbar").is_none(),
             "VPWAF top tabbar must never render a 4-corner or rail keyboard indicator"
         );
     })
     .unwrap();
+
+    // Pointer click on already-active tab clears `is_tab_kbd_active`
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("settings-tab-General", cx);
+    })
+    .unwrap();
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert!(
+            !sv.is_tab_kbd_active(),
+            "Pointer click on active VPWAF tab must clear keyboard-active hover suppression"
+        );
+    });
 
     // D1: Top-level Esc on Settings navigates back to previous route
     press(cx, "escape");
@@ -2088,6 +2103,14 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         assert!(sv.is_general_kbd_active());
         assert_eq!(sv.general_row_index(), 0);
     });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("kbd-dyn-active-settings-general").is_some(),
+            "Subpage content must still render its gliding keyboard focus indicator"
+        );
+    })
+    .unwrap();
     press(cx, "end");
     cx.update(|cx| {
         assert_eq!(

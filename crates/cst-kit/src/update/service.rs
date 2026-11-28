@@ -324,7 +324,15 @@ impl UpdateService {
                 "升级下载或交接正在进行中。".into(),
             ));
         }
-        if self.state.lock().expect("update state").package.is_some() {
+        if self.state.lock().expect("update state").package.is_some()
+            && self.revalidate_local_version_for_staged().is_ok()
+        {
+            return Ok(self.status());
+        }
+        if self.status().phase == Phase::Failed
+            && self.status().error_kind.as_deref() == Some("manual_upgrade_required")
+            && layout::read_version(&self.root).is_err()
+        {
             return Ok(self.status());
         }
         let _ = self.run_check_locked(cancel).await;
@@ -349,9 +357,30 @@ impl UpdateService {
             return Err(self.status().message);
         }
         if self.state.lock().expect("update state").package.is_some() {
+            self.revalidate_local_version_for_staged()?;
             return Ok(self.status());
         }
         self.run_check_locked(cancel).await
+    }
+
+    fn revalidate_local_version_for_staged(&self) -> Result<(), String> {
+        if layout::read_version(&self.root).is_ok() {
+            return Ok(());
+        }
+        {
+            let mut state = self.state.lock().expect("update state");
+            state.package = None;
+            state.release = None;
+            state.status.version = None;
+            state.status.archive_bytes = None;
+            state.status.downloaded_bytes = None;
+            state.status.release_notes = None;
+            state.status.operation_id = None;
+            state.status.error_kind = Some("manual_upgrade_required".into());
+        }
+        let message = UpdateError::InvalidLocalVersion.ui_message(false);
+        self.publish(Phase::Failed, &message);
+        Err(message)
     }
 
     async fn run_check_locked(&self, cancel: CancellationToken) -> Result<UpdateStatus, String> {
@@ -511,6 +540,7 @@ impl UpdateService {
         let _activity = self.gate.enter()?;
         let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
         if self.state.lock().expect("update state").package.is_some() {
+            self.revalidate_local_version_for_staged()?;
             return Ok(self.status());
         }
         let release = self
@@ -642,7 +672,9 @@ impl UpdateService {
             let had_active = state.active_prepare.take().is_some();
             state.status.operation_id = None;
             state.status.downloaded_bytes = None;
-            state.status.error_kind = None;
+            if state.status.phase != Phase::Failed {
+                state.status.error_kind = None;
+            }
             (
                 state.release.is_some(),
                 had_stage || had_active || state.status.phase == Phase::Available,
@@ -865,18 +897,58 @@ pub fn compiled_update_key_fingerprint() -> Result<String, String> {
 }
 
 fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, String> {
-    match std::fs::symlink_metadata(kit_layout.config_dir()) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(_) => return Err("配置目录状态无法读取。".into()),
-        Ok(_) => {}
-    }
-    let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
-        (Storage::new(kit_layout.root())?, r.join("config"))
+    let (storage, rel) = if let Ok(data_rel) = kit_layout.data_dir().strip_prefix(kit_layout.root())
+    {
+        let storage = Storage::new(kit_layout.root())?;
+        let full_rel = data_rel.join("config");
+        let mut partial = PathBuf::new();
+        for component in full_rel.components() {
+            let std::path::Component::Normal(part) = component else {
+                return Err("配置目录路径无效。".into());
+            };
+            partial.push(part);
+            match std::fs::symlink_metadata(storage.root.join(&partial)) {
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+                Err(_) => return Err("配置目录状态无法读取。".into()),
+                Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                    return Err("配置目录不能为符号链接或文件。".into());
+                }
+                Ok(_) => {
+                    let _ = storage.pin_directory(&partial, false)?;
+                }
+            }
+        }
+        (storage, full_rel)
     } else {
-        (
-            Storage::new(kit_layout.data_dir())?,
-            PathBuf::from("config"),
-        )
+        match std::fs::symlink_metadata(kit_layout.data_dir()) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let Some(parent) = kit_layout.data_dir().parent() else {
+                    return Err("数据目录缺少父目录。".into());
+                };
+                let parent_meta =
+                    std::fs::metadata(parent).map_err(|_| "数据目录父路径无法读取。")?;
+                if !parent_meta.is_dir() {
+                    return Err("数据目录父路径不是目录。".into());
+                }
+                return Ok(true);
+            }
+            Err(_) => return Err("数据目录状态无法读取。".into()),
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err("数据目录不能为符号链接或文件。".into());
+            }
+            Ok(_) => {}
+        }
+        let storage = Storage::new(kit_layout.data_dir())?;
+        let rel = PathBuf::from("config");
+        match std::fs::symlink_metadata(storage.root.join(&rel)) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+            Err(_) => return Err("配置目录状态无法读取。".into()),
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err("配置目录不能为符号链接或文件。".into());
+            }
+            Ok(_) => {}
+        }
+        (storage, rel)
     };
     let _cfg = storage.pin_directory(&rel, false)?;
     let Some(bytes) =
@@ -977,7 +1049,15 @@ mod tests {
             .unwrap();
         let st = svc.status();
         assert_eq!(st.phase, Phase::Unavailable);
-        assert_eq!(st.message, "仅发行版支持");
+        if option_env!("CST_UPDATE_MANIFEST_URL")
+            .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+            || option_env!("CST_UPDATE_PUBLIC_KEY")
+                .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+        {
+            assert_eq!(st.message, "当前构建未启用在线更新。");
+        } else {
+            assert_eq!(st.message, "仅发行版支持");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -987,6 +1067,11 @@ mod tests {
         let data_dir = dir.join("data");
         let layout = cst_os::KitLayout::with_data_dir(&dir, &data_dir).unwrap();
         assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // Non-directory `data` path must reject instead of silently defaulting to true
+        std::fs::write(&data_dir, b"not-a-dir").unwrap();
+        assert!(resolve_update_allow_tun(&layout).is_err());
+        std::fs::remove_file(&data_dir).unwrap();
 
         let cfg_dir = layout.config_dir();
         std::fs::create_dir_all(&cfg_dir).unwrap();

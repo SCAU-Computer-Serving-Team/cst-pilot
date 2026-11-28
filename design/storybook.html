@@ -6821,16 +6821,16 @@ const STORIES = [
         if (curBtn) {
           line.style.width = `${curBtn.offsetWidth}px`;
           line.style.transform = `translateX(${curBtn.offsetLeft}px)`;
-          if (focusActive) curBtn.focus();
+          if (focusActive === true) curBtn.focus();
         }
         if (demoBody) demoBody.innerHTML = tabRowsHtml[activeIdx];
       }
 
       function requestSwitchTab(next, triggerEl, viaKbd = false) {
         if (next === activeIdx || next < 0 || next >= tabs.length) return;
-        const go = () => {
+        const go = (focusNow) => {
           activeIdx = next;
-          syncTabs(viaKbd);
+          syncTabs(focusNow);
           logAction("设置导航 VPWAF", `${viaKbd ? "方向键" : "点击"}滑至「${tabs[next]}」`);
         };
         if (dirty) {
@@ -6842,10 +6842,15 @@ const STORIES = [
             danger: true,
             defaultSafeFocus: true,
             triggerEl,
-            onConfirm: () => { dirty = false; controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false"; go(); }
+            onConfirm: () => {
+              dirty = false;
+              controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false";
+              go(false);
+              if (viaKbd) requestAnimationFrame(() => bar.querySelectorAll(".vp-tab-btn")[activeIdx]?.focus());
+            }
           });
         } else {
-          go();
+          go(viaKbd);
         }
       }
 
@@ -6855,10 +6860,24 @@ const STORIES = [
       });
 
       bar.querySelectorAll(".vp-tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => requestSwitchTab(Number(btn.dataset.idx), btn, false));
+        btn.addEventListener("click", (e) => {
+          if (e.detail > 0) bar.removeAttribute("data-kbd-active");
+          requestSwitchTab(Number(btn.dataset.idx), btn, false);
+        });
       });
+      bar.addEventListener("mousemove", () => bar.removeAttribute("data-kbd-active"));
       bar.addEventListener("keydown", (e) => {
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        if (e.key === "ArrowDown") {
+          const firstRow = demoBody?.querySelector(".settings-hairline-row");
+          if (firstRow) {
+            e.preventDefault();
+            bar.removeAttribute("data-kbd-active");
+            firstRow.setAttribute("tabindex", "0");
+            firstRow.focus();
+          }
+          return;
+        }
         let next = null;
         if (e.key === "ArrowLeft") next = Math.max(0, activeIdx - 1);
         else if (e.key === "ArrowRight") next = Math.min(tabs.length - 1, activeIdx + 1);
@@ -6866,11 +6885,19 @@ const STORIES = [
         else if (e.key === "End") next = tabs.length - 1;
         if (next !== null) {
           e.preventDefault();
+          bar.setAttribute("data-kbd-active", "true");
           requestSwitchTab(next, bar.querySelectorAll(".vp-tab-btn")[activeIdx], true);
         }
       });
+      demoBody?.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          bar.setAttribute("data-kbd-active", "true");
+          bar.querySelectorAll(".vp-tab-btn")[activeIdx]?.focus();
+        }
+      });
 
-      requestAnimationFrame(syncTabs);
+      requestAnimationFrame(() => syncTabs(false));
     },
     states: [
       { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },

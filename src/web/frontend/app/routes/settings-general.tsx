@@ -30,7 +30,9 @@ export default function GeneralSettings() {
 
 	function focusRow(rowIdx: number) {
 		if (rowIdx < 0) {
-			document.querySelector<HTMLElement>(".settings-nav-link.is-current")?.focus();
+			document
+				.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]')
+				?.focus();
 			return;
 		}
 		const rows = listRef.current?.querySelectorAll<HTMLElement>(".settings-flat-row");

@@ -319,13 +319,18 @@ async fn allow_tun_strips_companion_ula_and_never_connects_to_private_v6() {
         );
     }
 
-    // Mixed public + ULA or TUN + loopback/mapped-loopback must still be rejected as a whole
+    // Mixed public + ULA or TUN + loopback/mapped-loopback/non-ULA-v6 must still be rejected as a whole
     for rebind in [
         vec!["8.8.8.8:443", "[fc00::1234]:443"],
         vec!["8.8.8.8:443", "[fd12:3456::1]:443"],
         vec!["198.18.1.205:443", "127.0.0.1:443"],
         vec!["198.18.1.205:443", "[::1]:443"],
         vec!["198.18.1.205:443", "[::ffff:127.0.0.1]:443"],
+        vec![
+            "198.18.1.205:443",
+            "[fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:443",
+        ],
+        vec!["198.18.1.205:443", "[fe00::1]:443"],
     ] {
         let bad = SafeHttpClient::with_resolver(
             tun_policy.clone(),
@@ -337,6 +342,28 @@ async fn allow_tun_strips_companion_ula_and_never_connects_to_private_v6() {
             bad.resolve_target("https://rebind.example/x")
                 .await
                 .is_err()
+        );
+    }
+
+    // Exact ULA boundaries (`fc00::` and `fdff:ffff:...`) are stripped when paired with `198.18.0.0/15`
+    for edge_ula in [
+        "[fc00::]:443",
+        "[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:443",
+    ] {
+        let edge_client = SafeHttpClient::with_resolver(
+            tun_policy.clone(),
+            Arc::new(ListDns(vec![
+                "198.18.1.205:443".parse().unwrap(),
+                edge_ula.parse().unwrap(),
+            ])),
+        );
+        let (_, filtered) = edge_client
+            .resolve_target("https://www.cstoa.top/api/agent/releases/latest")
+            .await
+            .unwrap();
+        assert_eq!(
+            filtered,
+            vec!["198.18.1.205:443".parse::<SocketAddr>().unwrap()]
         );
     }
 }

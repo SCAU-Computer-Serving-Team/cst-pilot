@@ -87,19 +87,19 @@ pub fn render_general_tab(
                 .filter(|s| !s.is_empty())
                 .map(|msg| match msg {
                     "此宿主已关闭升级检查。" => "宿主已禁用",
-                    "当前构建未启用在线更新。" => "未配置更新源",
+                    "当前构建未启用在线更新。" => "构建已禁用",
                     other => other,
                 })
-                .unwrap_or("未配置更新源");
+                .unwrap_or("构建已禁用");
             ("未启用更新".into(), detail.to_owned().into())
         }
-        UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验签名发布清单".into()),
+        UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验清单".into()),
         UpdatePhaseDto::Current => {
             let detail = update_state
                 .map(|u| u.status.message.trim())
                 .filter(|s| !s.is_empty() && *s != "当前已是最新版本。" && *s != "当前已是最新版本")
                 .unwrap_or("");
-            ("当前已是最新版本".into(), detail.to_owned().into())
+            ("已是最新版本".into(), detail.to_owned().into())
         }
         UpdatePhaseDto::Available => {
             let target = update_state
@@ -138,11 +138,10 @@ pub fn render_general_tab(
             };
             (target.into(), detail.into())
         }
-        UpdatePhaseDto::Ready => ("更新包已就绪".into(), "校验通过，重启后完成升级".into()),
-        UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired => (
-            "正在重启完成更新…".into(),
-            "窗口即将自动重启并替换组件".into(),
-        ),
+        UpdatePhaseDto::Ready => ("更新包已就绪".into(), "重启后完成升级".into()),
+        UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired => {
+            ("正在重启升级…".into(), "即将自动重启".into())
+        }
         UpdatePhaseDto::Failed => {
             let title = match error_kind {
                 Some("manual_upgrade_required") => "需重新下载",

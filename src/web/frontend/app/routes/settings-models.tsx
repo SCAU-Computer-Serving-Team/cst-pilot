@@ -50,6 +50,43 @@ export default function ModelPreferences() {
 	useEffect(() => {
 		if (shell?.appActive) closeProviderPopover();
 	}, [shell?.appActive, closeProviderPopover]);
+	useEffect(() => {
+		const el = providerTriggerRef.current;
+		if (!el) return;
+		function onProviderTriggerKeyDown(event: KeyboardEvent) {
+			if (providerOpen || event.isComposing || event.keyCode === 229) return;
+			if (event.altKey && event.key === "ArrowDown") {
+				event.preventDefault();
+				event.stopPropagation();
+				setProviderOpen(true);
+				return;
+			}
+			if (
+				!event.altKey &&
+				!event.ctrlKey &&
+				!event.metaKey &&
+				!event.shiftKey &&
+				(event.key === "ArrowUp" || event.key === "ArrowDown")
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				const route = el?.closest<HTMLElement>(".settings-route");
+				const focusables = route
+					? [
+							...route.querySelectorAll<HTMLElement>(
+								'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+							),
+						]
+					: [];
+				const idx = el ? focusables.indexOf(el) : -1;
+				if (idx < 0) return;
+				const next = event.key === "ArrowUp" ? focusables[idx - 1] : focusables[idx + 1];
+				next?.focus();
+			}
+		}
+		el.addEventListener("keydown", onProviderTriggerKeyDown, true);
+		return () => el.removeEventListener("keydown", onProviderTriggerKeyDown, true);
+	}, [providerOpen]);
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);
@@ -261,14 +298,27 @@ export default function ModelPreferences() {
 			!event.metaKey &&
 			!event.shiftKey
 		) {
-			const searchInput = listRoot.current
-				?.closest(".settings-section")
-				?.querySelector<HTMLElement>("input:not(:disabled)");
-			if (searchInput) {
+			const route = listRoot.current?.closest<HTMLElement>(".settings-route");
+			const rowEl = listRoot.current?.querySelector<HTMLElement>(
+				`.settings-model[data-model-id="${CSS.escape(id)}"]`,
+			);
+			const focusables = route
+				? [
+						...route.querySelectorAll<HTMLElement>(
+							'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
+						),
+					]
+				: [];
+			const pos = rowEl ? focusables.indexOf(rowEl) : -1;
+			const prev =
+				pos > 0
+					? focusables[pos - 1]
+					: document.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]');
+			if (prev) {
 				event.preventDefault();
 				setFocusedRowId(null);
 				setKbdActive(false);
-				searchInput.focus();
+				prev.focus();
 				return;
 			}
 		}

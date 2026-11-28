@@ -11,7 +11,7 @@
 .settings-nav-link:hover, .settings-back:hover { color: var(--text-primary); }
 .settings-nav[data-kbd-active="true"] .settings-nav-link:not(.is-current):hover { color: var(--text-secondary); }
 .settings-back { transition: color var(--fast) var(--ease-out); }
-.settings-nav-link:focus-visible, .settings-shortcuts-pane:focus, .settings-shortcuts-pane:focus-visible { outline: none; }
+.settings-nav-link:focus, .settings-nav-link:focus-visible, .settings-shortcuts-pane:focus, .settings-shortcuts-pane:focus-visible { outline: none; box-shadow: none; }
 .settings-shortcuts-pane { display: flex; flex-direction: column; gap: 8px; }
 .settings-back:focus-visible, .settings-advanced-trigger:focus-visible { outline: none; border-radius: var(--radius-control); box-shadow: var(--focus-shadow); }
 

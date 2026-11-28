@@ -9,7 +9,10 @@ use gpui::{
     PathBuilder, Point, ScrollHandle, canvas, fill,
 };
 use gpui_kit::base::motion::{Transition, transition};
-use gpui_kit::{App, Hsla, IntoElement, Pixels, SharedString, Styled, Window, point, px, rgba};
+use gpui_kit::{
+    App, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, SharedString, Styled,
+    TestSupportExt, Window, div, point, px, rgba,
+};
 
 use crate::theme::{DesktopPalette, ResolvedTheme, motion};
 
@@ -912,7 +915,8 @@ pub fn render_gliding_control_indicator<const N: usize>(
     );
     let palette = *palette;
 
-    canvas(
+    let has_target = target.is_some();
+    let canvas_el = canvas(
         |_, _, _| (),
         move |container_bounds, _, window, cx| {
             let now = Instant::now();
@@ -1015,11 +1019,25 @@ pub fn render_gliding_control_indicator<const N: usize>(
             });
         },
     )
-    .absolute()
-    .top_0()
-    .left_0()
-    .size_full()
-    .into_any_element()
+    .size_full();
+
+    let mut wrap = div()
+        .id(SharedString::from(format!("kbd-ctrl-ind-{id_prefix}")))
+        .test_support()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .child(canvas_el);
+    if has_target {
+        wrap = wrap.child(
+            div()
+                .id(SharedString::from(format!("kbd-ctrl-active-{id_prefix}")))
+                .test_support()
+                .size(px(0.0)),
+        );
+    }
+    wrap.into_any_element()
 }
 
 /// Renders a `180ms ease-out` gliding keyboard focus indicator (`四角` or `游标`) over arbitrary
@@ -1041,7 +1059,8 @@ pub fn render_gliding_dynamic_indicator(
     );
     let palette = *palette;
 
-    canvas(
+    let has_target = target.is_some();
+    let canvas_el = canvas(
         |_, _, _| (),
         move |container_bounds, _, window, cx| {
             tracker.flush_pending_scroll(window);
@@ -1163,11 +1182,25 @@ pub fn render_gliding_dynamic_indicator(
             });
         },
     )
-    .absolute()
-    .top_0()
-    .left_0()
-    .size_full()
-    .into_any_element()
+    .size_full();
+
+    let mut wrap = div()
+        .id(SharedString::from(format!("kbd-dyn-ind-{id_prefix}")))
+        .test_support()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .child(canvas_el);
+    if has_target {
+        wrap = wrap.child(
+            div()
+                .id(SharedString::from(format!("kbd-dyn-active-{id_prefix}")))
+                .test_support()
+                .size(px(0.0)),
+        );
+    }
+    wrap.into_any_element()
 }
 
 /// Shared action callback stored by modal dialog action rows so both click and keyboard

@@ -52,7 +52,11 @@ export function ProviderServices({
 				];
 				const pos = focusables.indexOf(links[0]);
 				const prev =
-					pos > 0 ? focusables[pos - 1] : document.querySelector<HTMLElement>(".settings-nav-link.is-current");
+					pos > 0
+						? focusables[pos - 1]
+						: document.querySelector<HTMLElement>(
+								'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+							);
 				if (prev) {
 					event.preventDefault();
 					setActiveId(null);
