@@ -93,34 +93,43 @@ pub fn render_general_tab(
                 .unwrap_or("构建已禁用");
             ("未启用更新".into(), detail.to_owned().into())
         }
-        UpdatePhaseDto::Checking => ("正在检查更新…".into(), "正在核验清单".into()),
+        UpdatePhaseDto::Checking => ("检查更新中".into(), "核验清单".into()),
         UpdatePhaseDto::Current => {
             let detail = update_state
                 .map(|u| u.status.message.trim())
                 .filter(|s| !s.is_empty() && *s != "当前已是最新版本。" && *s != "当前已是最新版本")
+                .map(|msg| match msg {
+                    "暂未发布在线更新" => "暂无在线更新",
+                    other => other,
+                })
                 .unwrap_or("");
             ("已是最新版本".into(), detail.to_owned().into())
         }
         UpdatePhaseDto::Available => {
             let target = update_state
                 .and_then(|u| u.status.version.as_deref())
-                .unwrap_or("新版本");
-            (
-                format!("发现新版本 {target}").into(),
-                "可下载并重启升级".into(),
-            )
-        }
-        UpdatePhaseDto::Preparing => {
-            let target = update_state
-                .and_then(|u| u.status.version.as_deref())
+                .filter(|s| !s.is_empty())
                 .map(|v| {
                     if v.starts_with('v') || v.starts_with('V') {
-                        format!("正在下载 {v}")
+                        v.to_owned()
                     } else {
-                        format!("正在下载 v{v}")
+                        format!("v{v}")
                     }
                 })
-                .unwrap_or_else(|| "正在下载更新包".to_owned());
+                .unwrap_or_else(|| "可升级".to_owned());
+            ("发现新版本".into(), target.into())
+        }
+        UpdatePhaseDto::Preparing => {
+            let target_ver = update_state
+                .and_then(|u| u.status.version.as_deref())
+                .filter(|s| !s.is_empty())
+                .map(|v| {
+                    if v.starts_with('v') || v.starts_with('V') {
+                        v.to_owned()
+                    } else {
+                        format!("v{v}")
+                    }
+                });
             let dl = update_state.and_then(|u| u.status.downloaded_bytes);
             let tot = update_state.and_then(|u| u.status.archive_bytes);
             let detail = match (dl, tot, progress_ratio) {
@@ -134,13 +143,13 @@ pub fn render_general_tab(
                     format!("{} / {}", format_megabytes(d), format_megabytes(t))
                 }
                 (_, Some(t), _) => format!("总计 {}", format_megabytes(t)),
-                _ => "正在验签在线更新包…".to_owned(),
+                _ => target_ver.unwrap_or_else(|| "正在验签".to_owned()),
             };
-            (target.into(), detail.into())
+            ("正在下载".into(), detail.into())
         }
-        UpdatePhaseDto::Ready => ("更新包已就绪".into(), "重启后完成升级".into()),
+        UpdatePhaseDto::Ready => ("更新包已就绪".into(), "重启完成升级".into()),
         UpdatePhaseDto::Launching | UpdatePhaseDto::ExitRequired => {
-            ("正在重启升级…".into(), "即将自动重启".into())
+            ("正在重启".into(), "即将自动重启".into())
         }
         UpdatePhaseDto::Failed => {
             let title = match error_kind {
@@ -151,10 +160,10 @@ pub fn render_general_tab(
             let msg = update_state
                 .map(|u| u.status.message.as_str())
                 .filter(|s| !s.is_empty())
-                .unwrap_or("检查或下载更新失败");
+                .unwrap_or("检查更新失败");
             (title.into(), msg.to_owned().into())
         }
-        UpdatePhaseDto::Idle => ("检查签名更新".into(), "手动检查在线升级包".into()),
+        UpdatePhaseDto::Idle => ("在线更新".into(), "手动检查更新".into()),
     };
 
     let tr_update_btn = kbd.tracker.clone();

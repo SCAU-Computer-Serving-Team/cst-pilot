@@ -15,7 +15,12 @@ import type { Model } from "../data/web-state";
 import { DefaultModelPicker } from "../settings/default-model-picker";
 import { modelListRows } from "../settings/model-list";
 import { moveModel, normalizeScope, toggleModel } from "../settings/model-scope";
-import { SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
+import {
+	querySettingsRouteStops,
+	SettingsLoadState,
+	SettingsSection,
+	useSettingsFeedback,
+} from "../settings/settings-frame";
 import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
@@ -71,13 +76,7 @@ export default function ModelPreferences() {
 				event.preventDefault();
 				event.stopPropagation();
 				const route = el?.closest<HTMLElement>(".settings-route");
-				const focusables = route
-					? [
-							...route.querySelectorAll<HTMLElement>(
-								'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-							),
-						]
-					: [];
+				const focusables = querySettingsRouteStops(route);
 				const idx = el ? focusables.indexOf(el) : -1;
 				if (idx < 0) return;
 				const next = event.key === "ArrowUp" ? focusables[idx - 1] : focusables[idx + 1];
@@ -302,13 +301,7 @@ export default function ModelPreferences() {
 			const rowEl = listRoot.current?.querySelector<HTMLElement>(
 				`.settings-model[data-model-id="${CSS.escape(id)}"]`,
 			);
-			const focusables = route
-				? [
-						...route.querySelectorAll<HTMLElement>(
-							'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-						),
-					]
-				: [];
+			const focusables = querySettingsRouteStops(route);
 			const pos = rowEl ? focusables.indexOf(rowEl) : -1;
 			const prev =
 				pos > 0
@@ -321,6 +314,29 @@ export default function ModelPreferences() {
 				prev.focus();
 				return;
 			}
+		}
+		if (
+			idx + 1 >= listed.ids.length &&
+			event.key === "ArrowDown" &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRoot.current?.closest<HTMLElement>(".settings-route");
+			const rowEl = listRoot.current?.querySelector<HTMLElement>(
+				`.settings-model[data-model-id="${CSS.escape(id)}"]`,
+			);
+			const focusables = querySettingsRouteStops(route);
+			const pos = rowEl ? focusables.indexOf(rowEl) : -1;
+			const nextStop = pos >= 0 ? focusables[pos + 1] : undefined;
+			if (nextStop) {
+				event.preventDefault();
+				setFocusedRowId(null);
+				setKbdActive(false);
+				nextStop.focus();
+			}
+			return;
 		}
 		const nextIdx = resolveListNavKey(
 			{

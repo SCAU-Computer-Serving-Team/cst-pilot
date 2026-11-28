@@ -28,16 +28,20 @@ export default function GeneralSettings() {
 	const currentKbdStyle = normalizeKeyboardFocusStyle(state.data?.keyboardFocusStyle);
 	const listRef = useRef<HTMLElement>(null);
 
-	function focusRow(rowIdx: number) {
+	function focusRow(rowIdx: number): boolean {
 		if (rowIdx < 0) {
-			document
-				.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]')
-				?.focus();
-			return;
+			const navTab = document.querySelector<HTMLElement>(
+				'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+			);
+			if (!navTab) return false;
+			navTab.focus();
+			return true;
 		}
 		const rows = listRef.current?.querySelectorAll<HTMLElement>(".settings-flat-row");
 		const target = rows?.[rowIdx]?.querySelector<HTMLElement>('.settings-chip[tabindex="0"], .settings-chip');
-		target?.focus();
+		if (!target) return false;
+		target.focus();
+		return true;
 	}
 
 	async function updateTheme(value: string) {
@@ -124,9 +128,7 @@ export default function GeneralSettings() {
 							items={kbdFocusStyles}
 							busy={false}
 							onChange={(value) => void updateKbdStyle(value)}
-							onVerticalNav={(dir) => {
-								if (dir < 0) focusRow(0);
-							}}
+							onVerticalNav={(dir) => (dir < 0 ? focusRow(0) : false)}
 						/>
 					</div>
 				</section>

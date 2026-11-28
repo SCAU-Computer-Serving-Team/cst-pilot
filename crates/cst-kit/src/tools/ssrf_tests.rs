@@ -330,6 +330,7 @@ async fn allow_tun_strips_companion_ula_and_never_connects_to_private_v6() {
             "198.18.1.205:443",
             "[fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:443",
         ],
+        vec!["198.18.1.205:443", "[fe00::]:443"],
         vec!["198.18.1.205:443", "[fe00::1]:443"],
     ] {
         let bad = SafeHttpClient::with_resolver(

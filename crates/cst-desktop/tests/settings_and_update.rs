@@ -2065,23 +2065,37 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         window.render_frame(cx);
         assert!(
             window.try_find("kbd-dyn-ind-settings-tabbar").is_none()
-                && window.try_find("kbd-dyn-active-settings-tabbar").is_none(),
+                && window.try_find("kbd-dyn-active-settings-tabbar").is_none()
+                && window.try_find("kbd-ctrl-ind-settings-tabbar").is_none()
+                && window.try_find("kbd-ctrl-active-settings-tabbar").is_none(),
             "VPWAF top tabbar must never render a 4-corner or rail keyboard indicator"
         );
     })
     .unwrap();
 
-    // Pointer click on already-active tab clears `is_tab_kbd_active`
-    cx.update_window(win_handle, |_, window, cx| {
-        window.render_frame(cx);
-        window.click("settings-tab-General", cx);
-    })
-    .unwrap();
+    // Park pointer on `settings-tab-General`, re-activate VPWAF keyboard mode via Right/Left
+    // without moving the pointer, then click `settings-tab-General` in-place to prove `on_click`
+    // itself clears `is_tab_kbd_active` (independent of pointer-move delta).
+    click(cx, "settings-tab-General");
+    press(cx, "right");
+    press(cx, "left");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert_eq!(
+            sv.category(),
+            cst_desktop::settings::SettingsCategory::General
+        );
+        assert!(
+            sv.is_tab_kbd_active(),
+            "Right -> Left must restore keyboard-active state at the parked pointer position"
+        );
+    });
+    click(cx, "settings-tab-General");
     cx.update(|cx| {
         let sv = shell.read(cx).settings_view().read(cx);
         assert!(
             !sv.is_tab_kbd_active(),
-            "Pointer click on active VPWAF tab must clear keyboard-active hover suppression"
+            "In-place pointer click on active VPWAF tab must clear keyboard-active hover suppression"
         );
     });
 

@@ -10,6 +10,16 @@ import { loadSetting, settingReady } from "./settings-resource-cache";
 const Feedback = createContext<(message?: string, kind?: "success" | "warning") => void>(() => {});
 export const useSettingsFeedback = () => useContext(Feedback);
 
+const SETTINGS_ROUTE_STOP_SELECTOR =
+	'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])';
+
+export function querySettingsRouteStops(routeEl: ParentNode | null | undefined): HTMLElement[] {
+	if (!routeEl) return [];
+	return [...routeEl.querySelectorAll<HTMLElement>(SETTINGS_ROUTE_STOP_SELECTOR)].filter(
+		(el) => !el.hidden && !el.closest("[hidden]") && !el.parentElement?.closest('[role="option"]'),
+	);
+}
+
 function resourceForSettingsRoute(path: string): string | undefined {
 	if (path === "/settings/general") return "/api/settings";
 	if (path === "/settings/models") return "/api/models";

@@ -4,7 +4,7 @@ import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import type { ProviderStatus } from "../data/api";
 import { providerDescription } from "../settings/provider-list";
-import { SettingsLink } from "../settings/settings-frame";
+import { querySettingsRouteStops, SettingsLink } from "../settings/settings-frame";
 import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { resolveListNavKey } from "../shell/keyboard-navigation";
 import { configurationPath, initialLogin } from "./providers";
@@ -45,11 +45,7 @@ export function ProviderServices({
 		) {
 			const route = listRef.current?.closest<HTMLElement>(".settings-route");
 			if (route) {
-				const focusables = [
-					...route.querySelectorAll<HTMLElement>(
-						'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-					),
-				];
+				const focusables = querySettingsRouteStops(route);
 				const pos = focusables.indexOf(links[0]);
 				const prev =
 					pos > 0

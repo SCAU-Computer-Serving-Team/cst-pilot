@@ -494,23 +494,29 @@ impl UpdateService {
         if self.client.is_none() {
             return Err(UpdateControlError::NotAvailable(self.status().message));
         }
-        {
+        let staged = {
             let state = self.state.lock().expect("update state");
-            if state.package.is_some()
-                || matches!(
-                    state.status.phase,
-                    Phase::Preparing | Phase::Launching | Phase::ExitRequired
-                )
-            {
+            if matches!(
+                state.status.phase,
+                Phase::Preparing | Phase::Launching | Phase::ExitRequired
+            ) {
                 return Err(UpdateControlError::Busy(
                     "升级包已就绪或正在准备中。".into(),
                 ));
             }
-            if state.release.is_none() {
-                return Err(UpdateControlError::NotAvailable(
-                    "请先检查并确认存在新版本。".into(),
-                ));
-            }
+            state.package.is_some()
+        };
+        if staged {
+            self.revalidate_local_version_for_staged()
+                .map_err(UpdateControlError::Failed)?;
+            return Err(UpdateControlError::Busy(
+                "升级包已就绪或正在准备中。".into(),
+            ));
+        }
+        if self.state.lock().expect("update state").release.is_none() {
+            return Err(UpdateControlError::NotAvailable(
+                "请先检查并确认存在新版本。".into(),
+            ));
         }
         let op_id = uuid::Uuid::new_v4().to_string();
         let op_cancel = CancellationToken::new();
@@ -596,7 +602,7 @@ impl UpdateService {
                     state.status.error_kind = None;
                     state.release.is_some()
                 };
-                if has_release {
+                if has_release && self.revalidate_local_version_for_staged().is_ok() {
                     self.publish(Phase::Available, "已取消下载，可重新升级。");
                 }
                 Err("升级准备已取消。".into())
@@ -680,7 +686,10 @@ impl UpdateService {
                 had_stage || had_active || state.status.phase == Phase::Available,
             )
         };
-        if has_release && was_preparing_or_staged {
+        if has_release
+            && was_preparing_or_staged
+            && self.revalidate_local_version_for_staged().is_ok()
+        {
             self.publish(Phase::Available, "已取消下载，可重新升级。");
         }
         Ok(self.status())
@@ -897,65 +906,110 @@ pub fn compiled_update_key_fingerprint() -> Result<String, String> {
 }
 
 fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, String> {
-    let (storage, rel) = if let Ok(data_rel) = kit_layout.data_dir().strip_prefix(kit_layout.root())
-    {
-        let storage = Storage::new(kit_layout.root())?;
-        let full_rel = data_rel.join("config");
-        let mut partial = PathBuf::new();
-        for component in full_rel.components() {
-            let std::path::Component::Normal(part) = component else {
-                return Err("配置目录路径无效。".into());
-            };
-            partial.push(part);
-            match std::fs::symlink_metadata(storage.root.join(&partial)) {
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-                Err(_) => return Err("配置目录状态无法读取。".into()),
-                Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-                    return Err("配置目录不能为符号链接或文件。".into());
-                }
-                Ok(_) => {
-                    let _ = storage.pin_directory(&partial, false)?;
-                }
-            }
-        }
-        (storage, full_rel)
+    use std::io::Read as _;
+    use std::path::Component;
+
+    let clean_root = cst_os::strip_windows_verbatim_prefix(kit_layout.root());
+    let clean_data = cst_os::strip_windows_verbatim_prefix(kit_layout.data_dir());
+    let (anchor, rel_target) = if let Ok(rel) = clean_data.strip_prefix(&clean_root) {
+        (clean_root, rel.join("config"))
     } else {
-        match std::fs::symlink_metadata(kit_layout.data_dir()) {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                let Some(parent) = kit_layout.data_dir().parent() else {
-                    return Err("数据目录缺少父目录。".into());
-                };
-                let parent_meta =
-                    std::fs::metadata(parent).map_err(|_| "数据目录父路径无法读取。")?;
-                if !parent_meta.is_dir() {
-                    return Err("数据目录父路径不是目录。".into());
+        let full = clean_data.join("config");
+        let mut anchor = PathBuf::new();
+        let mut rel = PathBuf::new();
+        for comp in full.components() {
+            match comp {
+                Component::Prefix(p) => anchor.push(p.as_os_str()),
+                Component::RootDir => anchor.push(comp.as_os_str()),
+                Component::Normal(part) => rel.push(part),
+                Component::CurDir | Component::ParentDir => {
+                    return Err("配置目录路径无效。".into());
                 }
-                return Ok(true);
             }
-            Err(_) => return Err("数据目录状态无法读取。".into()),
-            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-                return Err("数据目录不能为符号链接或文件。".into());
-            }
-            Ok(_) => {}
         }
-        let storage = Storage::new(kit_layout.data_dir())?;
-        let rel = PathBuf::from("config");
-        match std::fs::symlink_metadata(storage.root.join(&rel)) {
+        if anchor.as_os_str().is_empty() {
+            return Err("数据目录必须是绝对路径。".into());
+        }
+        (anchor, rel)
+    };
+
+    let mut dir_handles = Vec::new();
+    let (root_handle, _) = cst_os::pin_directory_handle(&anchor)?;
+    dir_handles.push(root_handle);
+
+    let mut cur_path = anchor;
+    for comp in rel_target.components() {
+        let Component::Normal(part) = comp else {
+            return Err("配置目录路径无效。".into());
+        };
+        cur_path.push(part);
+        #[cfg(target_os = "linux")]
+        let probe_path = {
+            use std::os::unix::io::AsRawFd;
+            let parent_h = dir_handles.last().expect("anchor handle present");
+            PathBuf::from(format!("/proc/self/fd/{}", parent_h.as_raw_fd())).join(part)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let probe_path = cur_path.clone();
+
+        match std::fs::symlink_metadata(&probe_path) {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
             Err(_) => return Err("配置目录状态无法读取。".into()),
-            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            Ok(meta) if cst_os::is_reparse_or_symlink(&meta) || !meta.is_dir() => {
                 return Err("配置目录不能为符号链接或文件。".into());
             }
-            Ok(_) => {}
+            Ok(_) => {
+                let parent_h = dir_handles.last().expect("anchor handle present");
+                let (child_h, _) =
+                    cst_os::pin_child_directory_handle(parent_h, &cur_path, part, false)?;
+                dir_handles.push(child_h);
+            }
         }
-        (storage, rel)
+    }
+
+    let cfg_file_path = cur_path.join("web-search.json");
+    #[cfg(target_os = "linux")]
+    let cfg_probe_path = {
+        use std::os::unix::io::AsRawFd;
+        let cfg_dir_h = dir_handles.last().expect("config dir handle present");
+        PathBuf::from(format!("/proc/self/fd/{}", cfg_dir_h.as_raw_fd())).join("web-search.json")
     };
-    let _cfg = storage.pin_directory(&rel, false)?;
-    let Some(bytes) =
-        storage.read_limited(&storage.root.join(&rel).join("web-search.json"), 64 * 1024)?
-    else {
-        return Ok(true);
-    };
+    #[cfg(not(target_os = "linux"))]
+    let cfg_probe_path = cfg_file_path.clone();
+
+    match std::fs::symlink_metadata(&cfg_probe_path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(_) => return Err("联网检索配置状态无法读取。".into()),
+        Ok(meta) if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() => {
+            return Err("联网检索配置不能为符号链接或非普通文件。".into());
+        }
+        Ok(_) => {}
+    }
+
+    let cfg_dir_h = dir_handles.last().expect("config dir handle present");
+    let (opened, _, len) = cst_os::open_read_in_pinned_dir(
+        cfg_dir_h,
+        &cfg_file_path,
+        std::ffi::OsStr::new("web-search.json"),
+    )?;
+    if cst_os::link_count(&opened)? != 1 {
+        return Err("联网检索配置不能是硬链接文件。".into());
+    }
+    let max_bytes = crate::tools::web_access::MAX_CONFIG_BYTES;
+    if len > max_bytes as u64 {
+        return Ok(false);
+    }
+    let mut bytes = Vec::new();
+    if opened
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > max_bytes
+    {
+        return Ok(false);
+    }
+    drop(dir_handles);
+
     let trimmed = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
     let Ok(value) = parse_strict_json(trimmed) else {
         return Ok(false);
@@ -963,22 +1017,15 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
     let Some(obj) = value.as_object() else {
         return Ok(false);
     };
-    let Some(ssrf_val) = obj.get("ssrf") else {
-        return Ok(true);
-    };
-    let Some(ssrf_obj) = ssrf_val.as_object() else {
-        return Ok(false);
-    };
-    let Some(ranges_val) = ssrf_obj.get("allowRanges") else {
-        return Ok(true);
-    };
-    let Some(arr) = ranges_val.as_array() else {
-        return Ok(false);
-    };
-    if arr.iter().any(|v| v.as_str() != Some("198.18.0.0/15")) {
-        return Ok(false);
+    for section in ["ssrf", "defaults", "providers"] {
+        if obj.get(section).is_some_and(|v| !v.is_object()) {
+            return Ok(false);
+        }
     }
-    Ok(!arr.is_empty())
+    let Ok(cfg) = crate::tools::web_access::WebSearchConfig::from_json_value(value) else {
+        return Ok(false);
+    };
+    Ok(cfg.ssrf.allow_ranges.iter().any(|r| r == "198.18.0.0/15"))
 }
 
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
@@ -1091,18 +1138,32 @@ mod tests {
         .unwrap();
         assert!(!resolve_update_allow_tun(&layout).unwrap());
 
-        // Non-object ssrf, non-array allowRanges, or disallowed extra CIDRs all fail closed
+        // Non-object ssrf, invalid sibling fields, legacy empty ssrf, or extra CIDRs all fail closed
         for invalid in [
             r#"{"version":2,"ssrf":null}"#,
             r#"{"version":2,"ssrf":[]}"#,
             r#"{"version":2,"ssrf":{"allowRanges":null}}"#,
             r#"{"version":2,"ssrf":{"allowRanges":[123]}}"#,
+            r#"{"version":2,"ssrf":{"trustEnvProxy":"bad"}}"#,
+            r#"{"ssrf":{}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":["198.18.0.0/15"],"allowRanges":[]}}"#,
             r#"{"version":2,"ssrf":{"allowRanges":["198.18.0.0/15","10.0.0.0/8"]}}"#,
             "{bad",
         ] {
             std::fs::write(cfg_dir.join("web-search.json"), invalid.as_bytes()).unwrap();
             assert!(!resolve_update_allow_tun(&layout).unwrap(), "{invalid}");
         }
+
+        // External data_dir outside kit root also walks every ancestor and rejects non-directory ancestors
+        let ext_base = temp_test_dir("allow-tun-ext");
+        let ext_missing = ext_base.join("nested").join("data");
+        let ext_layout = cst_os::KitLayout::with_data_dir(&dir, &ext_missing).unwrap();
+        assert!(resolve_update_allow_tun(&ext_layout).unwrap());
+
+        std::fs::write(ext_base.join("nested"), b"file-ancestor").unwrap();
+        assert!(resolve_update_allow_tun(&ext_layout).is_err());
+
+        let _ = std::fs::remove_dir_all(&ext_base);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

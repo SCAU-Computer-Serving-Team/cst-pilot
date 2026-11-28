@@ -3,7 +3,7 @@ import { Settings as SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
-import { SettingsFeedback, SettingsLink } from "../settings/settings-frame";
+import { querySettingsRouteStops, SettingsFeedback, SettingsLink } from "../settings/settings-frame";
 import { invalidateSetting, preloadSettings, settingsPaths } from "../settings/settings-resource-cache";
 import { usePointerMutex } from "../shell/kbd-focus";
 import { resolveToolbarNavKey } from "../shell/keyboard-navigation";
@@ -15,6 +15,8 @@ const tabs = [
 	{ to: "/settings/models", label: "模型偏好" },
 	{ to: "/settings/shortcuts", label: "快捷键" },
 ];
+const NON_TEXT_INPUT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"]);
+
 export default function Settings() {
 	const { pathname } = useLocation();
 	const navigate = useNavigate();
@@ -35,9 +37,31 @@ export default function Settings() {
 	const navRef = useRef<HTMLElement>(null);
 	const pagesRef = useRef<HTMLDivElement>(null);
 	const routeRef = useRef<HTMLDivElement>(null);
+	const pendingNavTargetRef = useRef<string | null>(null);
+	const pendingEnterContentRef = useRef(false);
 	const [navKbdActive, setNavKbdActive] = useState(false);
 	const clearNavKbd = useCallback(() => setNavKbdActive(false), []);
 	usePointerMutex(navKbdActive, clearNavKbd);
+
+	const focusFirstRouteStop = useCallback(() => {
+		const first =
+			querySettingsRouteStops(routeRef.current)[0] ??
+			routeRef.current?.querySelector<HTMLElement>(".settings-shortcuts-pane");
+		if (!first) return false;
+		setNavKbdActive(false);
+		first.focus();
+		return true;
+	}, []);
+
+	useEffect(() => {
+		if (pendingNavTargetRef.current === activePath) {
+			pendingNavTargetRef.current = null;
+			if (pendingEnterContentRef.current) {
+				pendingEnterContentRef.current = false;
+				focusFirstRouteStop();
+			}
+		}
+	}, [activePath, focusFirstRouteStop]);
 
 	function handleNavKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
 		if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -45,14 +69,14 @@ export default function Settings() {
 		if (!links.length) return;
 		const currentIdx = Math.max(0, links.indexOf(document.activeElement as HTMLElement));
 		if (event.key === "ArrowDown" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-			const first =
-				routeRef.current?.querySelector<HTMLElement>(
-					'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-				) ?? routeRef.current?.querySelector<HTMLElement>(".settings-shortcuts-pane");
-			if (first) {
+			if (pendingNavTargetRef.current && pendingNavTargetRef.current !== activePath) {
 				event.preventDefault();
+				pendingEnterContentRef.current = true;
 				setNavKbdActive(false);
-				first.focus();
+				return;
+			}
+			if (focusFirstRouteStop()) {
+				event.preventDefault();
 			}
 			return;
 		}
@@ -72,20 +96,22 @@ export default function Settings() {
 		);
 		if (nextIdx !== null) {
 			event.preventDefault();
+			pendingEnterContentRef.current = false;
 			setNavKbdActive(true);
 			const targetTab = tabs[nextIdx];
 			if (targetTab) {
 				links[nextIdx]?.focus();
 				if (targetTab.to !== activePath) {
+					pendingNavTargetRef.current = targetTab.to;
 					void navigate(targetTab.to, { viewTransition: true });
+				} else {
+					pendingNavTargetRef.current = null;
 				}
 			}
 		}
 	}
 
 	useEffect(() => {
-		const pagesEl = pagesRef.current;
-		if (!pagesEl) return;
 		function onRouteKeyDown(event: KeyboardEvent) {
 			const routeEl = routeRef.current;
 			if (
@@ -105,7 +131,7 @@ export default function Settings() {
 			if (!active || !routeEl.contains(active)) return;
 			if (active.closest('[role="dialog"], [data-slot="popover"]')) return;
 			if (active.tagName === "TEXTAREA" || active.tagName === "SELECT") return;
-			if (active instanceof HTMLInputElement) {
+			if (active instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(active.type)) {
 				if (event.key === "ArrowUp") {
 					if ((active.selectionStart ?? 0) !== 0 || (active.selectionEnd ?? 0) !== 0) return;
 				} else {
@@ -128,12 +154,9 @@ export default function Settings() {
 				}
 				return;
 			}
-			const focusables = [
-				...routeEl.querySelectorAll<HTMLElement>(
-					'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-				),
-			];
-			const idx = focusables.indexOf(active);
+			const stopEl = active.closest<HTMLElement>('[role="option"]') ?? active;
+			const focusables = querySettingsRouteStops(routeEl);
+			const idx = focusables.indexOf(stopEl);
 			if (idx < 0) return;
 			if (event.key === "ArrowUp") {
 				if (idx === 0) {
@@ -154,8 +177,8 @@ export default function Settings() {
 				focusables[idx + 1]?.focus();
 			}
 		}
-		pagesEl.addEventListener("keydown", onRouteKeyDown);
-		return () => pagesEl.removeEventListener("keydown", onRouteKeyDown);
+		window.addEventListener("keydown", onRouteKeyDown);
+		return () => window.removeEventListener("keydown", onRouteKeyDown);
 	}, []);
 
 	useEffect(() => {

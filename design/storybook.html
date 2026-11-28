@@ -3994,6 +3994,12 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .settings-hairline-row[data-force="active"] .settings-hairline-action {
     color: var(--text-primary);
   }
+  [data-kbd-active="true"] .settings-hairline-row:hover:not([data-force="hover"]) {
+    border-bottom-color: var(--border-subtle);
+  }
+  [data-kbd-active="true"] .settings-hairline-row:hover:not([data-force="hover"]) .settings-hairline-action {
+    color: var(--text-secondary);
+  }
   @media (prefers-reduced-motion: reduce) {
     .settings-hairline-row,
     .settings-hairline-action,
@@ -6791,7 +6797,7 @@ const STORIES = [
         </div>`
       ];
       stageEl.innerHTML = `
-        <div style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
+        <div id="vp-stage-wrap" style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
           <div class="settings-tabs-bar" id="vp-bar" data-pen-id="VPWAF" role="tablist">
             ${tabs.map((t, i) => `
               <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" tabindex="${i === activeIdx ? 0 : -1}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};outline:none;box-shadow:none;transition:color var(--fast) var(--ease-out);">
@@ -6804,9 +6810,20 @@ const STORIES = [
         </div>
       `;
 
+      const stageWrap = stageEl.querySelector("#vp-stage-wrap");
       const bar = stageEl.querySelector("#vp-bar");
       const line = stageEl.querySelector("#vp-line");
       const demoBody = stageEl.querySelector("#vp-hairline-demo");
+
+      function setStageKbdActive(on) {
+        if (on) {
+          stageWrap?.setAttribute("data-kbd-active", "true");
+          bar?.setAttribute("data-kbd-active", "true");
+        } else {
+          stageWrap?.removeAttribute("data-kbd-active");
+          bar?.removeAttribute("data-kbd-active");
+        }
+      }
 
       function syncTabs(focusActive = false) {
         const btns = bar.querySelectorAll(".vp-tab-btn");
@@ -6861,18 +6878,18 @@ const STORIES = [
 
       bar.querySelectorAll(".vp-tab-btn").forEach(btn => {
         btn.addEventListener("click", (e) => {
-          if (e.detail > 0) bar.removeAttribute("data-kbd-active");
+          if (e.detail > 0) setStageKbdActive(false);
           requestSwitchTab(Number(btn.dataset.idx), btn, false);
         });
       });
-      bar.addEventListener("mousemove", () => bar.removeAttribute("data-kbd-active"));
+      stageWrap?.addEventListener("mousemove", () => setStageKbdActive(false));
       bar.addEventListener("keydown", (e) => {
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
         if (e.key === "ArrowDown") {
           const firstRow = demoBody?.querySelector(".settings-hairline-row");
           if (firstRow) {
             e.preventDefault();
-            bar.removeAttribute("data-kbd-active");
+            setStageKbdActive(true);
             firstRow.setAttribute("tabindex", "0");
             firstRow.focus();
           }
@@ -6885,14 +6902,14 @@ const STORIES = [
         else if (e.key === "End") next = tabs.length - 1;
         if (next !== null) {
           e.preventDefault();
-          bar.setAttribute("data-kbd-active", "true");
+          setStageKbdActive(true);
           requestSwitchTab(next, bar.querySelectorAll(".vp-tab-btn")[activeIdx], true);
         }
       });
       demoBody?.addEventListener("keydown", (e) => {
         if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
           e.preventDefault();
-          bar.setAttribute("data-kbd-active", "true");
+          setStageKbdActive(true);
           bar.querySelectorAll(".vp-tab-btn")[activeIdx]?.focus();
         }
       });
