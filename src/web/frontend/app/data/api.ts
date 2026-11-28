@@ -1,12 +1,21 @@
+export type ProviderEndpointMode = "single" | "multi_endpoint" | "cloudflare_template" | "managed_oauth" | "custom";
+
 export type ProviderStatus = {
 	id: string;
 	name: string;
 	supportsApiKey: boolean;
 	supportsOAuth: boolean;
 	type: string | null;
+	credentialSource?: "stored" | "env" | "models_json" | null;
 	requiresLogin: boolean;
 	configured?: boolean;
 	custom?: boolean;
+	endpointMode?: ProviderEndpointMode;
+	defaultBaseUrl?: string | null;
+	configuredBaseUrl?: string | null;
+	endpointSummary?: string | null;
+	cloudflareAccountId?: string | null;
+	cloudflareGatewayId?: string | null;
 };
 
 export type OauthDeviceCode = {
@@ -104,16 +113,36 @@ export type CatalogRefreshResult = {
 export function refreshModelCatalog(): Promise<CatalogRefreshResult> {
 	return apiJson<CatalogRefreshResult>("/api/models/refresh", { method: "POST" });
 }
+export type ApiKeyStartBody = {
+	key?: string;
+	baseUrl?: string;
+	accountId?: string;
+	gatewayId?: string;
+};
+
 export function startOauthLogin(
 	providerId: string,
 	method: "oauth" | "api_key" = "oauth",
-	body: { key?: string; baseUrl?: string } = {},
+	body: ApiKeyStartBody = {},
 ): Promise<OauthStatus & { started: boolean }> {
 	return apiJson<OauthStatus & { started: boolean }>(
 		`/api/auth/${encodeURIComponent(providerId)}/${method === "oauth" ? "oauth" : "api-key"}/start`,
 		{
 			method: "POST",
 			body,
+		},
+	);
+}
+
+export function patchProviderEndpoint(
+	providerId: string,
+	baseUrl: string | null,
+): Promise<{ providerId: string; configuredBaseUrl: string | null }> {
+	return apiJson<{ providerId: string; configuredBaseUrl: string | null }>(
+		`/api/auth/${encodeURIComponent(providerId)}/endpoint`,
+		{
+			method: "PATCH",
+			body: { baseUrl },
 		},
 	);
 }

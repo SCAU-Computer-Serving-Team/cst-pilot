@@ -15,7 +15,7 @@ export function tabProviders(providers: ProviderStatus[], tab: LoginTab): Provid
 			? provider.id === CSTOA_PROVIDER && provider.supportsOAuth
 			: tab === "oauth"
 				? provider.id !== CSTOA_PROVIDER && provider.supportsOAuth
-				: provider.supportsApiKey,
+				: !provider.custom && provider.supportsApiKey,
 	);
 }
 

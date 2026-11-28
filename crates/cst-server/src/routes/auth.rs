@@ -42,6 +42,20 @@ pub async fn handle_auth_route(
             .map_err(ApiError::from_config_err)?
             .into_iter()
             .collect();
+        let configured_urls = auth.read_configured_base_urls().map_err(ApiError::from)?;
+        let mut cf_envs: std::collections::BTreeMap<String, pi_ai::ProviderEnv> =
+            std::collections::BTreeMap::new();
+        for cf_id in ["cloudflare-workers-ai", "cloudflare-ai-gateway"] {
+            if credentials
+                .iter()
+                .any(|c| c.provider_id == cf_id && c.auth_type == AuthType::ApiKey)
+                && let Ok(Some(pi_ai::Credential::ApiKey(api))) =
+                    runtime.credentials().read(cf_id).await
+                && let Some(env) = api.env
+            {
+                cf_envs.insert(cf_id.to_owned(), env);
+            }
+        }
         let invalid_auth = state
             .pool
             .invalid_auth
@@ -59,22 +73,45 @@ pub async fn handle_auth_route(
             })
             .map(|p| {
                 let pid = p.id();
+                let is_custom = custom_ids.contains(pid);
                 let configured = runtime.has_configured_auth(pid);
                 let cred_type = credentials
                     .iter()
                     .find(|c| c.provider_id == pid)
                     .map(|c| auth_type_str(c.auth_type));
+                let credential_source = match runtime.get_auth_source(pid).as_deref() {
+                    Some("stored" | "runtime") => Some("stored"),
+                    Some("environment") => Some("env"),
+                    Some("models_json_key" | "models_json_command" | "models_json_headers") => {
+                        Some("models_json")
+                    }
+                    _ if cred_type.is_some() => Some("stored"),
+                    _ => None,
+                };
+                let meta = auth.provider_endpoint_metadata(
+                    pid,
+                    is_custom,
+                    configured_urls.get(pid).cloned(),
+                    cf_envs.get(pid),
+                );
                 let supports_api_key = p.auth().api_key.as_ref().is_some_and(|a| !a.env_only);
                 let supports_oauth = p.auth().oauth.is_some();
                 json!({
                     "id": pid,
                     "name": p.name(),
-                    "custom": custom_ids.contains(pid),
+                    "custom": is_custom,
                     "configured": configured,
                     "supportsApiKey": supports_api_key,
                     "supportsOAuth": supports_oauth,
                     "type": cred_type,
+                    "credentialSource": credential_source,
                     "requiresLogin": invalid_auth.contains(pid),
+                    "endpointMode": meta.endpoint_mode,
+                    "defaultBaseUrl": meta.default_base_url,
+                    "configuredBaseUrl": meta.configured_base_url,
+                    "endpointSummary": meta.endpoint_summary,
+                    "cloudflareAccountId": meta.cloudflare_account_id,
+                    "cloudflareGatewayId": meta.cloudflare_gateway_id,
                 })
             })
             .collect();
@@ -118,6 +155,12 @@ pub async fn handle_auth_route(
                         .await
                         .map_err(ApiError::from)?;
                     let pid = saved.get("id").and_then(Value::as_str).unwrap_or("");
+                    state
+                        .pool
+                        .invalid_auth
+                        .lock()
+                        .expect("invalid_auth lock")
+                        .remove(pid);
                     state.pool.global_events.publish(
                         "state",
                         &json!({ "type": "auth_changed", "providerId": pid }),
@@ -203,6 +246,12 @@ pub async fn handle_auth_route(
                             .delete_custom_provider_checked(&pid_owned, &revision)
                             .await
                             .map_err(ApiError::from)?;
+                        state
+                            .pool
+                            .invalid_auth
+                            .lock()
+                            .expect("invalid_auth lock")
+                            .remove(&pid_owned);
                         state.pool.global_events.publish(
                             "state",
                             &json!({ "type": "auth_changed", "providerId": pid_owned }),
@@ -671,7 +720,9 @@ pub async fn handle_auth_route(
         } else if segments.len() == 2 {
             let provider_id = segments[0];
             let action = segments[1];
-            if is_valid_provider_id_key(provider_id) && matches!(action, "api-key" | "logout") {
+            if is_valid_provider_id_key(provider_id)
+                && matches!(action, "api-key" | "logout" | "endpoint")
+            {
                 let runtime = state.host.auth().runtime().clone();
                 let Some(provider_meta) = runtime.models().get_provider(provider_id) else {
                     return Err(ApiError::new(
@@ -680,6 +731,84 @@ pub async fn handle_auth_route(
                         "请求的模型服务不存在",
                     ));
                 };
+
+                if action == "endpoint" && *method == Method::PATCH {
+                    let body = read_json_body(raw_body, 128 * 1024)?;
+                    let Some(obj) = body.as_object() else {
+                        return Err(ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            "请求的服务地址格式无效",
+                        ));
+                    };
+                    if obj.keys().any(|k| k != "baseUrl") || !obj.contains_key("baseUrl") {
+                        return Err(ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            "请求的服务地址格式无效",
+                        ));
+                    }
+                    let requested_url = match obj.get("baseUrl") {
+                        Some(Value::Null) => None,
+                        Some(Value::String(s)) if s.len() <= 2048 => Some(s.clone()),
+                        _ => {
+                            return Err(ApiError::new(
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "请求的服务地址格式无效",
+                            ));
+                        }
+                    };
+                    let pid_owned = provider_id.to_owned();
+                    let st = state.clone();
+                    let result = state
+                        .write_once_keyed(
+                            caller,
+                            method.as_str(),
+                            pathname,
+                            &body,
+                            headers,
+                            format!("auth:{pid_owned}"),
+                            || async move {
+                                let _cfg_guard = st.locks.lock("auth-config:all").await;
+                                if st.pool.has_running_session_for_provider(&pid_owned).await {
+                                    return Err(ApiError::new(
+                                        StatusCode::CONFLICT,
+                                        "conflict",
+                                        "此模型服务的会话正在执行，请完成后再修改服务地址",
+                                    ));
+                                }
+                                let saved = st
+                                    .host
+                                    .auth()
+                                    .update_provider_endpoint_checked(
+                                        &pid_owned,
+                                        requested_url.as_deref(),
+                                    )
+                                    .await
+                                    .map_err(ApiError::from)?;
+                                st.pool
+                                    .invalid_auth
+                                    .lock()
+                                    .expect("invalid_auth lock")
+                                    .remove(&pid_owned);
+                                st.pool.global_events.publish(
+                                    "state",
+                                    &json!({ "type": "auth_changed", "providerId": pid_owned }),
+                                );
+                                st.pool.global_events.publish(
+                                    "state",
+                                    &json!({ "type": "models_changed", "providerId": pid_owned }),
+                                );
+                                Ok(json!({
+                                    "providerId": pid_owned,
+                                    "configuredBaseUrl": saved,
+                                }))
+                            },
+                        )
+                        .await?;
+                    return Ok(Some(json_response(StatusCode::OK, &result, method)));
+                }
 
                 if action == "api-key" && *method == Method::PUT {
                     if provider_meta
@@ -868,6 +997,7 @@ pub async fn handle_auth_route(
                                     }))
                                 };
 
+                                let had_base_url = base_url_opt.is_some();
                                 let resp_val = if let Some(ref base) = base_url_opt {
                                     let _cfg_guard = st.locks.lock("auth-config:all").await;
                                     if st.pool.has_running_session_for_provider(&pid_owned).await {
@@ -909,6 +1039,15 @@ pub async fn handle_auth_route(
                                         "providerId": pid_owned,
                                     }),
                                 );
+                                if had_base_url {
+                                    st.pool.global_events.publish(
+                                        "state",
+                                        &json!({
+                                            "type": "models_changed",
+                                            "providerId": pid_owned,
+                                        }),
+                                    );
+                                }
                                 Ok(resp_val)
                             },
                         )

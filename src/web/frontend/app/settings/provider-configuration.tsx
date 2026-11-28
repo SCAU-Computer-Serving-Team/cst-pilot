@@ -1,11 +1,11 @@
 import { Checkbox, Input, Label, TextField } from "@heroui/react";
-import { ChevronRight, Eye, EyeOff, KeyRound, RefreshCw, ScanLine, Search, Trash2 } from "lucide-react";
+import { Eye, EyeOff, KeyRound, RefreshCw, ScanLine, Search, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { OAuthPanel } from "../auth/oauth-panel";
 import { initialLogin, type LoginMethod, returnPath } from "../auth/providers";
-import type { ProviderStatus } from "../data/api";
-import { apiJson } from "../data/api";
+import type { ApiKeyStartBody, ProviderEndpointMode, ProviderStatus } from "../data/api";
+import { apiJson, patchProviderEndpoint } from "../data/api";
 import type { ModelSelectionPayload } from "../data/model-selection";
 import type { Model } from "../data/web-state";
 import { CredentialDialog } from "./credential-dialog";
@@ -20,6 +20,45 @@ const methods = [
 	{ id: "api_key", label: "API Key", icon: KeyRound },
 ];
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
+const trimSlash = (url: string) => url.trim().replace(/\/+$/, "");
+
+function inferEndpointMode(provider: ProviderStatus): ProviderEndpointMode {
+	if (provider.endpointMode) return provider.endpointMode;
+	if (provider.custom) return "custom";
+	if (
+		provider.id === "cstoa" ||
+		provider.id === "openai-codex" ||
+		provider.id === "github-copilot" ||
+		provider.id === "google-gemini-cli" ||
+		provider.id === "google-antigravity"
+	) {
+		return "managed_oauth";
+	}
+	if (provider.id === "cloudflare-workers-ai" || provider.id === "cloudflare-ai-gateway") {
+		return "cloudflare_template";
+	}
+	if (
+		provider.id === "opencode-go" ||
+		provider.id === "opencode" ||
+		provider.id === "openrouter" ||
+		provider.id === "fireworks"
+	) {
+		return "multi_endpoint";
+	}
+	return "single";
+}
+
+function validateCustomUrl(raw: string): boolean {
+	try {
+		const url = new URL(raw.trim());
+		return (
+			url.protocol === "https:" ||
+			(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
+		);
+	} catch {
+		return false;
+	}
+}
 
 export function ProviderConfigurationForm({
 	provider,
@@ -35,11 +74,15 @@ export function ProviderConfigurationForm({
 	const [method, setMethod] = useState<LoginMethod>(
 		() => initialLogin([provider], provider.id, requestedMethod)?.method ?? "api_key",
 	);
+	const endpointMode = inferEndpointMode(provider);
+	const effectiveBaseUrl = provider.configuredBaseUrl ?? provider.defaultBaseUrl ?? "";
 	const [apiKey, setApiKey] = useState("");
-	const [baseUrl, setBaseUrl] = useState("");
+	const [baseUrl, setBaseUrl] = useState(effectiveBaseUrl);
+	const [accountId, setAccountId] = useState(provider.cloudflareAccountId ?? "");
+	const [gatewayId, setGatewayId] = useState(provider.cloudflareGatewayId ?? "");
 	const [showKey, setShowKey] = useState(false);
-	const [advanced, setAdvanced] = useState(false);
 	const [editingKey, setEditingKey] = useState(false);
+	const [endpointBusy, setEndpointBusy] = useState(false);
 	const [modelSearchOpen, setModelSearchOpen] = useState(false);
 	const [modelQuery, setModelQuery] = useState("");
 	const [catalogBusy, setCatalogBusy] = useState(false);
@@ -50,7 +93,7 @@ export function ProviderConfigurationForm({
 			(!provider.type || provider.requiresLogin),
 	);
 	const navigate = useNavigate();
-	const [flow, setFlow] = useState<{ id: string; body: { key: string; baseUrl?: string } } | null>(null);
+	const [flow, setFlow] = useState<{ id: string; body: ApiKeyStartBody } | null>(null);
 	const [error, setError] = useState("");
 	const [confirming, setConfirming] = useState(false);
 	const [removing, setRemoving] = useState(false);
@@ -63,12 +106,27 @@ export function ProviderConfigurationForm({
 			mounted.current = false;
 		};
 	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 切换 provider.id 时同步重置草稿
+	useEffect(() => {
+		setBaseUrl(provider.configuredBaseUrl ?? provider.defaultBaseUrl ?? "");
+		setAccountId(provider.cloudflareAccountId ?? "");
+		setGatewayId(provider.cloudflareGatewayId ?? "");
+	}, [
+		provider.id,
+		provider.configuredBaseUrl,
+		provider.defaultBaseUrl,
+		provider.cloudflareAccountId,
+		provider.cloudflareGatewayId,
+	]);
 	const feedback = useSettingsFeedback();
 	const allowedMethods = methods.filter((item) =>
 		item.id === "oauth" ? provider.supportsOAuth : provider.supportsApiKey,
 	);
 	const pending = oauth || !!flow;
-	const isConnected = Boolean(provider.type) && !provider.requiresLogin;
+	const isConnected = Boolean(provider.type || provider.configured) && !provider.requiresLogin;
+	const hasApiKey =
+		(provider.type === "api_key" || (!provider.type && Boolean(provider.configured))) && !provider.requiresLogin;
+	const canRemove = Boolean(provider.type || provider.requiresLogin || provider.configuredBaseUrl);
 
 	const allModels = modelsResource.data?.models ?? [];
 	const selection = modelsResource.data?.enabled ?? null;
@@ -97,7 +155,7 @@ export function ProviderConfigurationForm({
 		try {
 			await apiJson("/api/models/refresh", { method: "POST" });
 			await modelsResource.refresh();
-			feedback(testLabel ? "连接正常，模型目录已同步" : "模型目录已更新");
+			feedback(testLabel ? "连接正常" : "目录已更新");
 		} catch (cause) {
 			setCatalogError(cause instanceof Error ? cause.message : "拉取模型目录失败，请检查网络连接与密钥");
 		} finally {
@@ -125,27 +183,59 @@ export function ProviderConfigurationForm({
 		if (ok) feedback();
 	}
 
+	async function updateEndpoint(nextUrl: string | null) {
+		if (endpointBusy || removing || pending) return;
+		if (nextUrl !== null && !validateCustomUrl(nextUrl)) {
+			setError("仅限 HTTPS");
+			return;
+		}
+		setEndpointBusy(true);
+		setError("");
+		try {
+			await patchProviderEndpoint(provider.id, nextUrl);
+			if (mounted.current) {
+				const defUrl = provider.defaultBaseUrl ?? "";
+				if (nextUrl === null || (defUrl && trimSlash(nextUrl) === trimSlash(defUrl))) {
+					setBaseUrl(defUrl);
+				}
+				feedback();
+				await onRefresh();
+				await modelsResource.refresh();
+			}
+		} catch (cause) {
+			if (mounted.current) {
+				setError(cause instanceof Error ? cause.message : "保存失败");
+			}
+		} finally {
+			if (mounted.current) setEndpointBusy(false);
+		}
+	}
+
 	function saveKey(event?: FormEvent) {
 		event?.preventDefault();
 		if (pending || lock.current || !apiKey.trim()) return;
-		if (baseUrl.trim()) {
-			try {
-				const url = new URL(baseUrl);
-				if (
-					url.protocol !== "https:" &&
-					!(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
-				)
-					throw new Error();
-			} catch {
-				setError("服务地址须使用 HTTPS 或本机 HTTP，请修改后重新输入密钥。");
-				return;
+		const body: ApiKeyStartBody = { key: apiKey };
+		if (endpointMode === "single") {
+			const trimmed = baseUrl.trim();
+			const defaultUrl = provider.defaultBaseUrl ?? "";
+			const changedFromDefault = trimmed !== "" && trimSlash(trimmed) !== trimSlash(defaultUrl);
+			if (changedFromDefault) {
+				if (!validateCustomUrl(trimmed)) {
+					setError("仅限 HTTPS");
+					return;
+				}
+				body.baseUrl = trimmed;
+			} else if (provider.configuredBaseUrl && defaultUrl) {
+				body.baseUrl = defaultUrl;
+			}
+		} else if (endpointMode === "cloudflare_template") {
+			if (accountId.trim()) body.accountId = accountId.trim();
+			if (provider.id === "cloudflare-ai-gateway" && gatewayId.trim()) {
+				body.gatewayId = gatewayId.trim();
 			}
 		}
 		setError("");
-		setFlow({
-			id: crypto.randomUUID(),
-			body: { key: apiKey, ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) },
-		});
+		setFlow({ id: crypto.randomUUID(), body });
 		setApiKey("");
 		setShowKey(false);
 	}
@@ -168,7 +258,12 @@ export function ProviderConfigurationForm({
 		setRemoving(true);
 		setError("");
 		try {
-			await apiJson(`/api/auth/${encodeURIComponent(provider.id)}/logout`, { method: "POST" });
+			if (provider.type || provider.requiresLogin) {
+				await apiJson(`/api/auth/${encodeURIComponent(provider.id)}/logout`, { method: "POST" });
+			}
+			if (provider.configuredBaseUrl) {
+				await patchProviderEndpoint(provider.id, null);
+			}
 			if (mounted.current) {
 				setConfirming(false);
 				setFlow(null);
@@ -187,7 +282,20 @@ export function ProviderConfigurationForm({
 			if (mounted.current) setRemoving(false);
 		}
 	}
-	const showKeyEditor = method === "api_key" && !flow && (!isConnected || editingKey);
+	const showKeyEditor = method === "api_key" && !flow && (!hasApiKey || editingKey);
+	const defaultUrl = provider.defaultBaseUrl ?? "";
+	const trimmedUrl = baseUrl.trim();
+	const urlDiffersFromDefault =
+		Boolean(provider.configuredBaseUrl) || (defaultUrl !== "" && trimSlash(trimmedUrl) !== trimSlash(defaultUrl));
+	const urlDiffersFromEffective = trimSlash(trimmedUrl) !== trimSlash(effectiveBaseUrl);
+	const cfPreview =
+		provider.id === "cloudflare-ai-gateway"
+			? `gateway.ai.cloudflare.com/v1/${accountId.trim() || "{accountId}"}/${gatewayId.trim() || "{gatewayId}"}/*`
+			: `api.cloudflare.com/client/v4/accounts/${accountId.trim() || "{accountId}"}/ai/v1`;
+	const readonlySummary =
+		provider.configuredBaseUrl ??
+		(endpointMode === "cloudflare_template" ? cfPreview : provider.endpointSummary) ??
+		"官方默认";
 
 	return (
 		<>
@@ -229,11 +337,150 @@ export function ProviderConfigurationForm({
 						/>
 					</div>
 				)}
-				{isConnected && method === "api_key" && !editingKey && !flow && (
+				{endpointMode === "cloudflare_template" && method === "api_key" && (
+					<>
+						<div className="settings-flat-row">
+							<span className="settings-custom-field-label">Account ID</span>
+							<TextField
+								className="settings-url-input"
+								aria-label="Account ID"
+								value={accountId}
+								onChange={(value) => {
+									setAccountId(value);
+									setError("");
+								}}
+								isDisabled={removing || pending}
+							>
+								<Label className="visually-hidden">Account ID</Label>
+								<Input placeholder="Account ID" autoComplete="off" spellCheck={false} />
+							</TextField>
+						</div>
+						{provider.id === "cloudflare-ai-gateway" && (
+							<div className="settings-flat-row">
+								<span className="settings-custom-field-label">Gateway ID</span>
+								<TextField
+									className="settings-url-input"
+									aria-label="Gateway ID"
+									value={gatewayId}
+									onChange={(value) => {
+										setGatewayId(value);
+										setError("");
+									}}
+									isDisabled={removing || pending}
+								>
+									<Label className="visually-hidden">Gateway ID</Label>
+									<Input placeholder="Gateway ID" autoComplete="off" spellCheck={false} />
+								</TextField>
+							</div>
+						)}
+						<div className="settings-flat-row">
+							<div className="settings-row-inline">
+								<span className="settings-custom-field-label">服务地址</span>
+								<span className="settings-description">{readonlySummary}</span>
+							</div>
+							{provider.configuredBaseUrl && (
+								<button
+									type="button"
+									className="settings-inline-action"
+									disabled={endpointBusy || removing || pending}
+									onClick={() => void updateEndpoint(null)}
+								>
+									恢复默认
+								</button>
+							)}
+						</div>
+					</>
+				)}
+				{(endpointMode === "multi_endpoint" || endpointMode === "managed_oauth") && (
+					<div className="settings-flat-row">
+						<div className="settings-row-inline">
+							<span className="settings-custom-field-label">服务地址</span>
+							<span className="settings-description">{readonlySummary}</span>
+						</div>
+						{provider.configuredBaseUrl && (
+							<button
+								type="button"
+								className="settings-inline-action"
+								disabled={endpointBusy || removing || pending}
+								onClick={() => void updateEndpoint(null)}
+							>
+								恢复默认
+							</button>
+						)}
+					</div>
+				)}
+				{endpointMode === "single" && method === "api_key" && (
+					<div className="settings-flat-row">
+						<span className="settings-custom-field-label">服务地址</span>
+						<TextField
+							className="settings-url-input"
+							aria-label="服务地址"
+							value={baseUrl}
+							onChange={(value) => {
+								setBaseUrl(value);
+								setError("");
+							}}
+							isDisabled={removing || pending || endpointBusy}
+						>
+							<Label className="visually-hidden">服务地址</Label>
+							<div className="settings-input-with-action">
+								<Input
+									type="url"
+									placeholder={defaultUrl || "https://"}
+									autoComplete="off"
+									spellCheck={false}
+									onKeyDown={(event) => {
+										if (
+											event.key === "Enter" &&
+											!event.nativeEvent.isComposing &&
+											event.nativeEvent.keyCode !== 229 &&
+											!apiKey.trim() &&
+											urlDiffersFromEffective
+										) {
+											event.preventDefault();
+											void updateEndpoint(trimmedUrl || null);
+										}
+									}}
+								/>
+								{urlDiffersFromDefault && (
+									<button
+										type="button"
+										className="settings-inline-action"
+										disabled={endpointBusy || removing || pending}
+										onClick={() => {
+											setBaseUrl(defaultUrl);
+											setError("");
+											if (provider.configuredBaseUrl) {
+												void updateEndpoint(null);
+											}
+										}}
+									>
+										恢复默认
+									</button>
+								)}
+								{urlDiffersFromEffective && !apiKey.trim() && (
+									<button
+										type="button"
+										className="settings-inline-action settings-inline-action--accent"
+										disabled={endpointBusy || removing || pending}
+										onClick={() => void updateEndpoint(trimmedUrl || null)}
+									>
+										{endpointBusy ? "保存中…" : "保存地址"}
+									</button>
+								)}
+							</div>
+						</TextField>
+					</div>
+				)}
+				{hasApiKey && method === "api_key" && !editingKey && !flow && (
 					<div className="settings-flat-row">
 						<div className="settings-row-inline">
 							<span className="settings-custom-field-label">API 密钥</span>
-							<span className="settings-description">已配置（••••••••••••••••）</span>
+							<span className="settings-description">
+								{provider.credentialSource === "env" && !provider.type
+									? "环境变量"
+									: "已配置（••••••••••••••••）"}
+							</span>
 						</div>
 						<div className="settings-section-actions">
 							<button
@@ -297,7 +544,7 @@ export function ProviderConfigurationForm({
 									>
 										{showKey ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
 									</button>
-									{isConnected && (
+									{hasApiKey && (
 										<button
 											type="button"
 											className="settings-inline-action"
@@ -341,7 +588,7 @@ export function ProviderConfigurationForm({
 								className="settings-inline-action settings-inline-action--primary"
 								onClick={() => setOauth(true)}
 							>
-								{provider.type ? "重新授权" : "开始授权"}
+								{provider.type === "oauth" ? "重新授权" : "开始授权"}
 							</button>
 						</div>
 					</div>
@@ -364,42 +611,6 @@ export function ProviderConfigurationForm({
 					</div>
 				)}
 			</div>
-			{method === "api_key" && (
-				<div className="settings-advanced t-acc" data-open={advanced}>
-					<button
-						className="settings-advanced-trigger"
-						type="button"
-						aria-expanded={advanced}
-						aria-controls="provider-advanced"
-						disabled={removing || pending}
-						onClick={() => setAdvanced(!advanced)}
-					>
-						<ChevronRight size={14} aria-hidden="true" />
-						高级设置
-					</button>
-					<div className="t-acc-panel" id="provider-advanced" inert={!advanced}>
-						<div className="t-acc-panel-inner">
-							<div className="settings-flat-row">
-								<span className="settings-custom-field-label">服务地址</span>
-								<TextField
-									className="settings-url-input"
-									aria-label="服务地址"
-									value={baseUrl}
-									onChange={setBaseUrl}
-									isDisabled={provider.id === "cstoa" || removing || pending}
-								>
-									<Label className="visually-hidden">服务地址</Label>
-									<Input
-										type="url"
-										placeholder={provider.id === "cstoa" ? "CSTOA 使用固定地址" : "保留现有服务地址"}
-										autoComplete="off"
-									/>
-								</TextField>
-							</div>
-						</div>
-					</div>
-				</div>
-			)}
 			{isConnected && (
 				<SettingsSection
 					title="可用模型"
@@ -520,7 +731,7 @@ export function ProviderConfigurationForm({
 					</div>
 				</SettingsSection>
 			)}
-			{(provider.type || provider.requiresLogin) && (
+			{canRemove && (
 				<section className="settings-danger-zone">
 					<p>移除后将隐藏该服务下的关联模型</p>
 					<button

@@ -58,6 +58,16 @@ pub struct LoginView {
     qr_poll_task: Option<gpui::Task<()>>,
     active_qr_flow_id: Option<String>,
     oauth_pending: bool,
+    oauth_active_provider: Option<String>,
+    oauth_flow_id: Option<String>,
+    oauth_auth_url: Option<String>,
+    oauth_user_code: Option<SharedString>,
+    oauth_prompt_id: Option<String>,
+    oauth_prompt_label: Option<SharedString>,
+    oauth_prompt_secret: bool,
+    oauth_prompt_input: Entity<InputState>,
+    oauth_submitting: bool,
+    oauth_error: Option<SharedString>,
     window: gpui::AnyWindowHandle,
     qr_expires_at_ms: u64,
     qr_loading: bool,
@@ -91,13 +101,12 @@ impl LoginView {
                 .masked(true)
         });
         let base_url_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
-        let account_id_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Account ID"));
-        let gateway_id_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("输入 Gateway ID"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://api.deepseek.com"));
+        let account_id_input = cx.new(|cx| InputState::new(window, cx).placeholder("Account ID"));
+        let gateway_id_input = cx.new(|cx| InputState::new(window, cx).placeholder("Gateway ID"));
+        let oauth_prompt_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入授权码"));
 
-        let subscriptions = [
+        let mut subscriptions: Vec<Subscription> = [
             &api_key_input,
             &base_url_input,
             &account_id_input,
@@ -118,6 +127,32 @@ impl LoginView {
             })
         })
         .collect();
+        subscriptions.push(cx.subscribe_in(
+            &oauth_prompt_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    let cleared_key = this.api_key_error.take().is_some();
+                    let cleared_oauth = this.oauth_error.take().is_some();
+                    if cleared_key || cleared_oauth {
+                        cx.notify();
+                    }
+                }
+                InputEvent::Focus => {
+                    this.dismiss_dropdowns_on_outside_click(cx);
+                }
+                InputEvent::PressEnter { .. }
+                    if !crate::sessions::input_is_composing(
+                        &this.oauth_prompt_input,
+                        window,
+                        cx,
+                    ) =>
+                {
+                    this.submit_oauth_prompt(window, cx);
+                }
+                _ => {}
+            },
+        ));
 
         Self {
             client,
@@ -131,6 +166,16 @@ impl LoginView {
             qr_poll_task: None,
             active_qr_flow_id: None,
             oauth_pending: false,
+            oauth_active_provider: None,
+            oauth_flow_id: None,
+            oauth_auth_url: None,
+            oauth_user_code: None,
+            oauth_prompt_id: None,
+            oauth_prompt_label: None,
+            oauth_prompt_secret: false,
+            oauth_prompt_input,
+            oauth_submitting: false,
+            oauth_error: None,
             window: window.window_handle(),
             qr_expires_at_ms: 0,
             qr_loading: false,
@@ -194,13 +239,54 @@ impl LoginView {
         }
         self.generation += 1;
         self.reset_qr(cx);
+        if self.oauth_pending
+            && let Some(pid) = self.oauth_active_provider.take()
+        {
+            let fid = self.oauth_flow_id.take();
+            let client = self.client.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = client.cancel_auth_flow(pid, "oauth".into(), fid).await;
+                })
+                .detach();
+        }
         self.tab = tab;
         self.provider_dropdown_open = false;
         self.api_key_error = None;
+        self.oauth_pending = false;
+        self.oauth_active_provider = None;
+        self.oauth_flow_id = None;
+        self.oauth_auth_url = None;
+        self.oauth_user_code = None;
+        self.oauth_prompt_id = None;
+        self.oauth_prompt_label = None;
+        self.oauth_prompt_secret = false;
+        self.oauth_submitting = false;
+        self.oauth_error = None;
+        let selected_pid = self.selected_provider_id.clone();
+        let snap = self.client.snapshot();
+        let sel_entry = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == selected_pid));
+        let initial_url = sel_entry
+            .and_then(|p| {
+                p.configured_base_url
+                    .clone()
+                    .or_else(|| p.default_base_url.clone())
+            })
+            .unwrap_or_default();
+        let initial_acc = sel_entry
+            .and_then(|p| p.cloudflare_account_id.clone())
+            .unwrap_or_default();
+        let initial_gw = sel_entry
+            .and_then(|p| p.cloudflare_gateway_id.clone())
+            .unwrap_or_default();
         let key = self.api_key_input.downgrade();
         let url = self.base_url_input.downgrade();
         let acc = self.account_id_input.downgrade();
         let gw = self.gateway_id_input.downgrade();
+        let oauth_inp = self.oauth_prompt_input.downgrade();
         let window = self.window;
         cx.spawn(async move |_, cx| {
             let _ = window.update(cx, |_, window, cx| {
@@ -208,9 +294,10 @@ impl LoginView {
                     input.set_value("", window, cx);
                     input.set_masked(true, window, cx);
                 });
-                let _ = url.update(cx, |input, cx| input.set_value("", window, cx));
-                let _ = acc.update(cx, |input, cx| input.set_value("", window, cx));
-                let _ = gw.update(cx, |input, cx| input.set_value("", window, cx));
+                let _ = url.update(cx, |input, cx| input.set_value(initial_url, window, cx));
+                let _ = acc.update(cx, |input, cx| input.set_value(initial_acc, window, cx));
+                let _ = gw.update(cx, |input, cx| input.set_value(initial_gw, window, cx));
+                let _ = oauth_inp.update(cx, |input, cx| input.set_value("", window, cx));
             });
         })
         .detach();
@@ -491,39 +578,285 @@ impl LoginView {
         }));
     }
 
-    fn start_provider_oauth(&mut self, provider_id: String, cx: &mut Context<Self>) {
+    fn start_provider_oauth(
+        &mut self,
+        provider_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.oauth_pending {
             return;
         }
         self.oauth_pending = true;
+        self.oauth_active_provider = Some(provider_id.clone());
+        self.oauth_flow_id = None;
+        self.oauth_auth_url = None;
+        self.oauth_user_code = None;
+        self.oauth_prompt_id = None;
+        self.oauth_prompt_label = None;
+        self.oauth_prompt_secret = false;
+        self.oauth_submitting = false;
+        self.oauth_error = None;
+        self.oauth_prompt_input.update(cx, |inp, cx| {
+            inp.set_value("", window, cx);
+            inp.set_masked(false, window, cx);
+        });
+        cx.notify();
+
         let generation = self.generation;
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
+        cx.spawn_in(window, async move |weak, cx| {
             let res = client
-                .start_auth_flow(provider_id, "oauth".into(), None)
+                .start_auth_flow(provider_id.clone(), "oauth".into(), None)
                 .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.oauth_pending = false;
+            let flow_id = match res {
+                Ok(val) => {
+                    let url_opt = val
+                        .get("authUrl")
+                        .and_then(|a| a.get("url"))
+                        .or_else(|| val.get("url"))
+                        .or_else(|| val.get("verificationUriComplete"))
+                        .or_else(|| val.get("deviceCode").and_then(|d| d.get("verificationUri")))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if let Some(ref url) = url_opt {
+                        open_url_in_trusted_browser(url);
+                    }
+                    let code_opt = val
+                        .get("deviceCode")
+                        .and_then(|d| d.get("userCode"))
+                        .or_else(|| val.get("userCode"))
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| SharedString::from(format!("授权码：{s}")));
+                    let fid = val.get("flowId").and_then(Value::as_str).map(str::to_owned);
+                    let _ = weak.update_in(cx, |this, window, cx| {
+                        if this.generation == generation {
+                            this.oauth_flow_id = fid.clone();
+                            this.oauth_auth_url = url_opt;
+                            this.oauth_user_code = code_opt;
+                            this.sync_oauth_prompt_from_status(&val, window, cx);
+                            cx.notify();
+                        }
+                    });
+                    fid
+                }
+                Err(err) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.oauth_pending = false;
+                            this.oauth_error = Some(err.to_string().into());
+                            cx.notify();
+                        }
+                    });
+                    return;
+                }
+            };
+
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
+                let still_alive = weak
+                    .update(cx, |this, _| {
+                        this.generation == generation
+                            && this.tab == LoginMethodTab::OAuth
+                            && this.oauth_active_provider.as_deref() == Some(provider_id.as_str())
+                    })
+                    .unwrap_or(false);
+                if !still_alive {
+                    return;
+                }
+                let Ok(st) = client
+                    .get_auth_flow_status(provider_id.clone(), "oauth".into())
+                    .await
+                else {
+                    continue;
+                };
+                if let Some(ref expected) = flow_id
+                    && st
+                        .get("flowId")
+                        .and_then(Value::as_str)
+                        .is_some_and(|actual| actual != expected)
+                {
+                    let _ = weak.update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.oauth_pending = false;
+                            cx.notify();
+                        }
+                    });
+                    break;
+                }
+                let state = st
+                    .get("state")
+                    .or_else(|| st.get("status"))
+                    .and_then(Value::as_str);
+                if matches!(state, Some("succeeded" | "completed" | "done")) {
+                    let _ = client.refresh_globals().await;
+                    let _ = client.refresh_models(None).await;
+                    let _ = weak.update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.oauth_pending = false;
+                            this.oauth_active_provider = None;
+                            this.oauth_flow_id = None;
+                            cx.emit(LoginViewEvent::CredentialsSavedReturn);
+                            cx.notify();
+                        }
+                    });
+                    break;
+                }
+                if matches!(state, Some("failed" | "cancelled" | "idle")) {
+                    let msg = st
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("授权未完成")
+                        .to_owned();
+                    let _ = weak.update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.oauth_pending = false;
+                            this.oauth_error = Some(msg.into());
+                            cx.notify();
+                        }
+                    });
+                    break;
+                }
+                let _ = weak.update_in(cx, |this, window, cx| {
+                    if this.generation == generation {
+                        if this.oauth_auth_url.is_none()
+                            && let Some(url) = st
+                                .get("authUrl")
+                                .and_then(|a| a.get("url"))
+                                .or_else(|| {
+                                    st.get("deviceCode").and_then(|d| d.get("verificationUri"))
+                                })
+                                .and_then(Value::as_str)
+                        {
+                            this.oauth_auth_url = Some(url.to_owned());
+                            open_url_in_trusted_browser(url);
+                        }
+                        if this.oauth_user_code.is_none()
+                            && let Some(code) = st
+                                .get("deviceCode")
+                                .and_then(|d| d.get("userCode"))
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                        {
+                            this.oauth_user_code =
+                                Some(SharedString::from(format!("授权码：{code}")));
+                        }
+                        this.sync_oauth_prompt_from_status(&st, window, cx);
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn sync_oauth_prompt_from_status(
+        &mut self,
+        status: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(prompt) = status.get("prompt").and_then(Value::as_object) else {
+            self.oauth_prompt_id = None;
+            self.oauth_prompt_label = None;
+            return;
+        };
+        let Some(pid) = prompt.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        if self.oauth_prompt_id.as_deref() == Some(pid) {
+            return;
+        }
+        let ptype = prompt.get("type").and_then(Value::as_str).unwrap_or("text");
+        let label = if ptype == "manual_code" {
+            "授权码".to_owned()
+        } else {
+            prompt
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("授权信息")
+                .to_owned()
+        };
+        let is_secret = ptype == "secret";
+        self.oauth_prompt_id = Some(pid.to_owned());
+        self.oauth_prompt_label = Some(label.into());
+        self.oauth_prompt_secret = is_secret;
+        self.oauth_prompt_input.update(cx, |inp, cx| {
+            inp.set_value("", window, cx);
+            inp.set_masked(is_secret, window, cx);
+            inp.focus(window, cx);
+        });
+    }
+
+    fn submit_oauth_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.oauth_submitting {
+            return;
+        }
+        let (Some(provider), Some(flow_id), Some(prompt_id)) = (
+            self.oauth_active_provider.clone(),
+            self.oauth_flow_id.clone(),
+            self.oauth_prompt_id.clone(),
+        ) else {
+            return;
+        };
+        let val = self.oauth_prompt_input.read(cx).value().trim().to_owned();
+        if val.is_empty() {
+            return;
+        }
+        self.oauth_submitting = true;
+        self.oauth_error = None;
+        cx.notify();
+        let generation = self.generation;
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client
+                .respond_auth_flow(provider, "oauth".into(), flow_id, prompt_id, val)
+                .await;
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.oauth_submitting = false;
                 if this.generation != generation {
                     return;
                 }
                 match res {
-                    Ok(val) => {
-                        if let Some(url) = val
-                            .get("authUrl")
-                            .and_then(|a| a.get("url"))
-                            .or_else(|| val.get("url"))
-                            .or_else(|| val.get("verificationUriComplete"))
-                            .and_then(Value::as_str)
-                        {
-                            open_url_in_trusted_browser(url);
-                        }
+                    Ok(_) => {
+                        this.oauth_prompt_id = None;
+                        this.oauth_prompt_label = None;
+                        this.oauth_prompt_input
+                            .update(cx, |inp, cx| inp.set_value("", window, cx));
                     }
-                    Err(err) => cx.emit(LoginViewEvent::ErrorMessage(err.to_string())),
+                    Err(err) => {
+                        this.oauth_error = Some(err.to_string().into());
+                    }
                 }
+                cx.notify();
             });
         })
         .detach();
+    }
+
+    fn cancel_provider_oauth(&mut self, cx: &mut Context<Self>) {
+        let provider = self.oauth_active_provider.take();
+        let flow_id = self.oauth_flow_id.take();
+        self.generation += 1;
+        self.oauth_pending = false;
+        self.oauth_auth_url = None;
+        self.oauth_user_code = None;
+        self.oauth_prompt_id = None;
+        self.oauth_prompt_label = None;
+        self.oauth_submitting = false;
+        self.oauth_error = None;
+        if let Some(pid) = provider {
+            let client = self.client.clone();
+            cx.spawn(async move |_, _| {
+                let _ = client.cancel_auth_flow(pid, "oauth".into(), flow_id).await;
+            })
+            .detach();
+        }
+        cx.notify();
     }
 
     fn toggle_provider_menu(
@@ -556,16 +889,34 @@ impl LoginView {
         }
         if self.selected_provider_id != provider {
             self.selected_provider_id = provider.to_owned();
+            let snap = self.client.snapshot();
+            let entry = snap
+                .auth_providers
+                .as_ref()
+                .and_then(|list| list.iter().find(|p| p.id == provider));
+            let initial_url = entry
+                .and_then(|p| {
+                    p.configured_base_url
+                        .clone()
+                        .or_else(|| p.default_base_url.clone())
+                })
+                .unwrap_or_default();
+            let initial_acc = entry
+                .and_then(|p| p.cloudflare_account_id.clone())
+                .unwrap_or_default();
+            let initial_gw = entry
+                .and_then(|p| p.cloudflare_gateway_id.clone())
+                .unwrap_or_default();
             self.api_key_input.update(cx, |input, cx| {
                 input.set_value("", window, cx);
                 input.set_masked(true, window, cx);
             });
             self.base_url_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
+                .update(cx, |input, cx| input.set_value(initial_url, window, cx));
             self.account_id_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
+                .update(cx, |input, cx| input.set_value(initial_acc, window, cx));
             self.gateway_id_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
+                .update(cx, |input, cx| input.set_value(initial_gw, window, cx));
             self.api_key_error = None;
         }
         self.dismiss_dropdown(window, cx);
@@ -609,11 +960,49 @@ impl LoginView {
         }
         self.dismiss_dropdown(window, cx);
         self.api_key_error = None;
-        let base_url = if is_cf_workers || is_cf_gateway {
-            None
-        } else {
+        let snap = self.client.snapshot();
+        let sel_entry = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider));
+        let endpoint_mode = sel_entry
+            .and_then(|p| p.endpoint_mode.as_deref())
+            .unwrap_or(if is_cf_workers || is_cf_gateway {
+                "cloudflare_template"
+            } else if matches!(
+                provider.as_str(),
+                "opencode-go" | "opencode" | "openrouter" | "fireworks"
+            ) {
+                "multi_endpoint"
+            } else if matches!(
+                provider.as_str(),
+                "cstoa"
+                    | "openai-codex"
+                    | "github-copilot"
+                    | "google-gemini-cli"
+                    | "google-antigravity"
+            ) {
+                "managed_oauth"
+            } else {
+                "single"
+            });
+        let base_url = if endpoint_mode == "single" {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
-            (!b.is_empty()).then_some(b)
+            let def = sel_entry
+                .and_then(|p| p.default_base_url.as_deref())
+                .unwrap_or("");
+            let has_override = sel_entry
+                .and_then(|p| p.configured_base_url.as_deref())
+                .is_some();
+            if !b.is_empty() && b.trim_end_matches('/') != def.trim_end_matches('/') {
+                Some(b)
+            } else if has_override && !def.is_empty() {
+                Some(def.to_owned())
+            } else {
+                None
+            }
+        } else {
+            None
         };
         self.saving_key = true;
         cx.notify();
@@ -932,29 +1321,33 @@ impl Render for LoginView {
                 .into_any_element(),
             LoginMethodTab::OAuth => {
                 let mut col = div().w_full().flex().flex_col().gap(space::SM);
-                let oauth_providers: Vec<_> = providers
-                    .iter()
-                    .filter(|p| p.supports_oauth && p.id != "cstoa")
-                    .collect();
-                if oauth_providers.is_empty() {
+                if let Some(ref active_pid) = self.oauth_active_provider.clone() {
+                    let active_name = providers
+                        .iter()
+                        .find(|p| &p.id == active_pid)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| active_pid.clone());
                     col = col.child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_muted)
-                            .child("当前暂无其他支持浏览器 OAuth 的提供商。"),
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(SharedString::from(active_name)),
                     );
-                } else {
-                    for p in oauth_providers {
-                        let pid = p.id.clone();
-                        let pname = p.name.clone();
-                        let btn_id = SharedString::from(format!("login-oauth-btn-{pid}"));
-                        let btn_label = SharedString::from(format!("使用 {pname} 授权登录"));
+                    if let Some(ref code_hint) = self.oauth_user_code {
                         col = col.child(
                             apply_scale(div(), scale::UI_MEDIUM)
-                                .id(btn_id.clone())
+                                .font_family(mono_family.clone())
+                                .text_color(palette.text_primary)
+                                .child(code_hint.clone()),
+                        );
+                    }
+                    if let Some(url) = self.oauth_auth_url.clone() {
+                        col = col.child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("login-oauth-open-url-btn")
                                 .test_support()
-                                .a11y_button(btn_id, btn_label.clone())
+                                .a11y_button("login-oauth-open-url-btn", "打开授权页")
                                 .w_full()
-                                .h(height::FIELD)
+                                .h(height::CONTROL)
                                 .px(space::MD)
                                 .rounded(radius::CONTROL)
                                 .border_1()
@@ -965,16 +1358,177 @@ impl Render for LoginView {
                                 .items_center()
                                 .justify_between()
                                 .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.start_provider_oauth(pid.clone(), cx);
-                                }))
-                                .child(btn_label)
+                                .on_click(move |_, _, _| {
+                                    open_url_in_trusted_browser(&url);
+                                })
+                                .child(cjk_inline_label("打开授权页"))
                                 .child(
                                     Icon::new(IconName::ExternalLink)
                                         .size(px(14.0))
                                         .text_color(palette.text_secondary),
                                 ),
                         );
+                    }
+                    if let Some(ref prompt_lbl) = self.oauth_prompt_label {
+                        col = col.child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .gap(space::TIGHT)
+                                .child(
+                                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                                        .text_color(palette.text_primary)
+                                        .child(prompt_lbl.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .h(px(36.0))
+                                        .px(space::XS)
+                                        .rounded(radius::CONTROL)
+                                        .border_1()
+                                        .border_color(palette.border_strong)
+                                        .bg(palette.bg_workspace)
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            Input::new(&self.oauth_prompt_input)
+                                                .accessibility_id("login-oauth-prompt-input")
+                                                .disabled(self.oauth_submitting)
+                                                .aria_label(prompt_lbl.clone())
+                                                .appearance(false)
+                                                .bordered(false)
+                                                .focus_bordered(false)
+                                                .w_full()
+                                                .h_full(),
+                                        ),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("login-oauth-prompt-submit-btn")
+                                        .test_support()
+                                        .a11y_button("login-oauth-prompt-submit-btn", "提交")
+                                        .w_full()
+                                        .h(px(36.0))
+                                        .rounded(radius::CONTROL)
+                                        .bg(palette.accent_solid)
+                                        .text_color(palette.text_on_accent)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .hover(|s| s.bg(palette.accent_hover))
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.submit_oauth_prompt(w, cx);
+                                        }))
+                                        .child(cjk_inline_label(if self.oauth_submitting {
+                                            "提交中…"
+                                        } else {
+                                            "提交"
+                                        })),
+                                ),
+                        );
+                    }
+                    if let Some(ref err_msg) = self.oauth_error {
+                        col = col.child(
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(palette.status_danger)
+                                .child(err_msg.clone()),
+                        );
+                    }
+                    let retry_pid = active_pid.clone();
+                    col = col.child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::SM)
+                            .children((!self.oauth_pending).then(|| {
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .id("login-oauth-retry-btn")
+                                    .test_support()
+                                    .a11y_button("login-oauth-retry-btn", "重新授权")
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .rounded(radius::CONTROL)
+                                    .bg(palette.accent_solid)
+                                    .text_color(palette.text_on_accent)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|s| s.bg(palette.accent_hover))
+                                    .on_click(cx.listener(move |this, _, w, cx| {
+                                        this.start_provider_oauth(retry_pid.clone(), w, cx);
+                                    }))
+                                    .child(cjk_inline_label("重新授权"))
+                            }))
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .id("login-oauth-cancel-btn")
+                                    .test_support()
+                                    .a11y_button("login-oauth-cancel-btn", "取消")
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_subtle)
+                                    .text_color(palette.text_secondary)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.cancel_provider_oauth(cx);
+                                    }))
+                                    .child(cjk_inline_label("取消")),
+                            ),
+                    );
+                } else {
+                    let oauth_providers: Vec<_> = providers
+                        .iter()
+                        .filter(|p| p.supports_oauth && p.id != "cstoa")
+                        .collect();
+                    if oauth_providers.is_empty() {
+                        col = col.child(
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(palette.text_muted)
+                                .child("暂无可用服务"),
+                        );
+                    } else {
+                        for p in oauth_providers {
+                            let pid = p.id.clone();
+                            let pname = p.name.clone();
+                            let btn_id = SharedString::from(format!("login-oauth-btn-{pid}"));
+                            let btn_label = SharedString::from(pname);
+                            col = col.child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .id(btn_id.clone())
+                                    .test_support()
+                                    .a11y_button(btn_id, btn_label.clone())
+                                    .w_full()
+                                    .h(height::FIELD)
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_workspace)
+                                    .text_color(palette.text_primary)
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(move |this, _, w, cx| {
+                                        this.start_provider_oauth(pid.clone(), w, cx);
+                                    }))
+                                    .child(btn_label)
+                                    .child(
+                                        Icon::new(IconName::ExternalLink)
+                                            .size(px(14.0))
+                                            .text_color(palette.text_secondary),
+                                    ),
+                            );
+                        }
                     }
                 }
                 col.into_any_element()
@@ -983,7 +1537,7 @@ impl Render for LoginView {
                 let key_providers: Vec<(String, String)> = {
                     let from_snap: Vec<(String, String)> = providers
                         .iter()
-                        .filter(|p| p.supports_api_key)
+                        .filter(|p| p.supports_api_key && !p.custom.unwrap_or(false))
                         .map(|p| (p.id.clone(), p.name.clone()))
                         .collect();
                     if from_snap.is_empty() {
@@ -1150,9 +1704,49 @@ impl Render for LoginView {
                     )
                 });
 
+                let sel_prov = providers.iter().find(|p| p.id == self.selected_provider_id);
                 let is_cf_workers = self.selected_provider_id == "cloudflare-workers-ai";
                 let is_cf_gateway = self.selected_provider_id == "cloudflare-ai-gateway";
                 let is_cloudflare = is_cf_workers || is_cf_gateway;
+                let endpoint_mode =
+                    sel_prov
+                        .and_then(|p| p.endpoint_mode.as_deref())
+                        .unwrap_or(if is_cloudflare {
+                            "cloudflare_template"
+                        } else if matches!(
+                            self.selected_provider_id.as_str(),
+                            "opencode-go" | "opencode" | "openrouter" | "fireworks"
+                        ) {
+                            "multi_endpoint"
+                        } else if matches!(
+                            self.selected_provider_id.as_str(),
+                            "cstoa"
+                                | "openai-codex"
+                                | "github-copilot"
+                                | "google-gemini-cli"
+                                | "google-antigravity"
+                        ) {
+                            "managed_oauth"
+                        } else {
+                            "single"
+                        });
+                let default_base_url = sel_prov
+                    .and_then(|p| p.default_base_url.clone())
+                    .unwrap_or_default();
+                let current_url_val = self.base_url_input.read(cx).value().trim().to_owned();
+                let show_reset_url = !default_base_url.is_empty()
+                    && current_url_val.trim_end_matches('/')
+                        != default_base_url.trim_end_matches('/');
+                let readonly_summary: Option<SharedString> = if endpoint_mode == "multi_endpoint" {
+                    Some(
+                        sel_prov
+                            .and_then(|p| p.endpoint_summary.clone())
+                            .unwrap_or_else(|| "官方默认".to_owned())
+                            .into(),
+                    )
+                } else {
+                    None
+                };
 
                 div()
                     .w_full()
@@ -1352,16 +1946,63 @@ impl Render for LoginView {
                                     .child(err_msg)
                             })),
                     )
-                    .children((!is_cloudflare).then(|| {
+                    .children(readonly_summary.map(|summary| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("服务地址")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .font_family(mono_family.clone())
+                                    .truncate()
+                                    .text_color(palette.text_muted)
+                                    .child(summary),
+                            )
+                    }))
+                    .children((endpoint_mode == "single").then(|| {
+                        let def_reset = default_base_url.clone();
                         div()
                             .w_full()
                             .flex()
                             .flex_col()
                             .gap(space::TIGHT)
                             .child(
-                                apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("服务地址（可选）")),
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            .text_color(palette.text_primary)
+                                            .child(cjk_inline_label("服务地址")),
+                                    )
+                                    .children(show_reset_url.then(|| {
+                                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            .id("login-baseurl-reset-btn")
+                                            .test_support()
+                                            .a11y_button("login-baseurl-reset-btn", "恢复默认")
+                                            .px(space::XS)
+                                            .rounded(radius::CONTROL)
+                                            .text_color(palette.accent_ink)
+                                            .hover(|s| s.bg(palette.bg_item_hover))
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                let d = def_reset.clone();
+                                                this.base_url_input.update(cx, |inp, cx| {
+                                                    inp.set_value(d, window, cx);
+                                                });
+                                                this.api_key_error = None;
+                                                cx.notify();
+                                            }))
+                                            .child(cjk_inline_label("恢复默认"))
+                                    })),
                             )
                             .child(
                                 div()
@@ -1378,7 +2019,7 @@ impl Render for LoginView {
                                         Input::new(&self.base_url_input)
                                             .accessibility_id("login-baseurl-input")
                                             .disabled(self.saving_key)
-                                            .aria_label("自定义 Base URL")
+                                            .aria_label("服务地址")
                                             .appearance(false)
                                             .bordered(false)
                                             .focus_bordered(false)

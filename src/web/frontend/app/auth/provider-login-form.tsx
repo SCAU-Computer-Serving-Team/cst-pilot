@@ -1,8 +1,8 @@
-import { Checkbox, Input, Label, TextField } from "@heroui/react";
-import { ArrowRight, Check, Eye, EyeOff, KeyRound, QrCode, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Input, Label, TextField } from "@heroui/react";
+import { ArrowRight, Eye, EyeOff, KeyRound, QrCode, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { type FormEvent, type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { apiJson, type ProviderStatus } from "../data/api";
+import { type ApiKeyStartBody, apiJson, type ProviderEndpointMode, type ProviderStatus } from "../data/api";
 import { OAuthPanel } from "./oauth-panel";
 import { ProviderPicker } from "./provider-picker";
 import {
@@ -18,6 +18,27 @@ import {
 } from "./providers";
 
 type LoginStep = "choice" | "cstoa" | "cstoa_key" | "api_key" | "oauth";
+const trimSlash = (url: string) => url.trim().replace(/\/+$/, "");
+
+function inferEndpointMode(item: ProviderStatus | undefined): ProviderEndpointMode {
+	if (!item) return "single";
+	if (item.endpointMode) return item.endpointMode;
+	if (item.custom) return "custom";
+	if (
+		item.id === "cstoa" ||
+		item.id === "openai-codex" ||
+		item.id === "github-copilot" ||
+		item.id === "google-gemini-cli" ||
+		item.id === "google-antigravity"
+	) {
+		return "managed_oauth";
+	}
+	if (item.id === "cloudflare-workers-ai" || item.id === "cloudflare-ai-gateway") return "cloudflare_template";
+	if (item.id === "opencode-go" || item.id === "opencode" || item.id === "openrouter" || item.id === "fireworks") {
+		return "multi_endpoint";
+	}
+	return "single";
+}
 
 function inferInitialStep(requestedProvider: string | null, requestedMethod: string | null): LoginStep {
 	if (!requestedProvider && !requestedMethod) return "choice";
@@ -50,14 +71,15 @@ export function ProviderLoginForm({
 	const [mode, setMode] = useState<LoginTab>("cstoa");
 	const [provider, setProvider] = useState("");
 	const [oauthProvider, setOauthProvider] = useState("");
-	const [customProvider, setCustomProvider] = useState(false);
 	const [baseUrl, setBaseUrl] = useState("");
+	const [accountId, setAccountId] = useState("");
+	const [gatewayId, setGatewayId] = useState("");
 	const [apiKey, setApiKey] = useState("");
 	const [showKey, setShowKey] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [loadFailed, setLoadFailed] = useState(false);
 	const [reloadNonce, setReloadNonce] = useState(0);
-	const [apiFlow, setApiFlow] = useState<{ id: string; body: { key?: string; baseUrl?: string } } | null>(null);
+	const [apiFlow, setApiFlow] = useState<{ id: string; body: ApiKeyStartBody } | null>(null);
 	const [error, setError] = useState("");
 	const stackRef = useRef<HTMLDivElement>(null);
 	const prevStepRef = useRef<LoginStep>(step);
@@ -95,7 +117,8 @@ export function ProviderLoginForm({
 			setStep("choice");
 			setApiKey("");
 			setBaseUrl("");
-			setCustomProvider(false);
+			setAccountId("");
+			setGatewayId("");
 			setShowKey(false);
 			setError("");
 			return true;
@@ -135,7 +158,7 @@ export function ProviderLoginForm({
 		apiJson<{ providers: ProviderStatus[] }>("/api/auth", { signal: controller.signal })
 			.then((data) => {
 				const all = orderedProviders(data.providers);
-				const keys = all.filter((item) => item.supportsApiKey);
+				const keys = all.filter((item) => !item.custom && item.supportsApiKey);
 				const oauth = all.filter((item) => item.supportsOAuth);
 				setProviders(all);
 				setOauthProviders(oauth);
@@ -144,7 +167,11 @@ export function ProviderLoginForm({
 					setMode("api_key");
 					setStep("api_key");
 					setCameFromChoice(false);
-					setProvider(keys[0]?.id ?? "");
+					const fallback = keys[0];
+					setProvider(fallback?.id ?? "");
+					setBaseUrl(fallback?.configuredBaseUrl ?? fallback?.defaultBaseUrl ?? "");
+					setAccountId(fallback?.cloudflareAccountId ?? "");
+					setGatewayId(fallback?.cloudflareGatewayId ?? "");
 					setOauthProvider("");
 					return;
 				}
@@ -153,9 +180,13 @@ export function ProviderLoginForm({
 					initial?.method === "oauth" && initial.providerId === CSTOA_PROVIDER
 						? "cstoa"
 						: (initial?.method ?? "api_key");
+				const chosen = all.find((item) => item.id === initial?.providerId);
 				setMode(nextMode);
 				setProvider(initial?.providerId ?? "");
 				setOauthProvider(initial?.providerId ?? "");
+				setBaseUrl(chosen?.configuredBaseUrl ?? chosen?.defaultBaseUrl ?? "");
+				setAccountId(chosen?.cloudflareAccountId ?? "");
+				setGatewayId(chosen?.cloudflareGatewayId ?? "");
 				if (!standalone) {
 					if (!hasDirectRequest) {
 						setStep("choice");
@@ -185,46 +216,72 @@ export function ProviderLoginForm({
 			});
 		return () => controller.abort();
 	}, [requestedProvider, requestedMethod, standalone, hasDirectRequest, reloadNonce]);
-	function submit(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault();
-		if (loading || !provider || (customProvider && !baseUrl.trim())) return;
-		if (step === "cstoa_key" && !apiKey.trim()) return;
-		setError("");
-		setApiFlow({
-			id: crypto.randomUUID(),
-			body: { ...(apiKey.trim() ? { key: apiKey } : {}), ...(customProvider ? { baseUrl: baseUrl.trim() } : {}) },
-		});
-		setApiKey("");
-	}
 	const selectedOAuth = oauthProviders.find((item) => item.id === oauthProvider);
 	const selected = providers.find((item) => item.id === (mode !== "api_key" ? oauthProvider : provider));
+	const selectedMode = inferEndpointMode(selected);
+	const selectedDefaultUrl = selected?.defaultBaseUrl ?? "";
+	const selectedUrlDiffers =
+		Boolean(selected?.configuredBaseUrl) ||
+		(selectedDefaultUrl !== "" && trimSlash(baseUrl) !== trimSlash(selectedDefaultUrl));
 	const cstoaProvider = providers.find((item) => item.id === CSTOA_PROVIDER);
 	const hasCstoaOAuth = !!cstoaProvider?.supportsOAuth;
 	const hasCstoaApiKey = !!cstoaProvider?.supportsApiKey;
 	const hasOtherOAuth = tabProviders(providers, "oauth").length > 0;
 	const hasApiKey = tabProviders(providers, "api_key").length > 0;
 
+	function syncFieldsForProvider(target: ProviderStatus | undefined) {
+		setBaseUrl(target?.configuredBaseUrl ?? target?.defaultBaseUrl ?? "");
+		setAccountId(target?.cloudflareAccountId ?? "");
+		setGatewayId(target?.cloudflareGatewayId ?? "");
+	}
+
+	function submit(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (loading || !provider) return;
+		if (step === "cstoa_key" && !apiKey.trim()) return;
+		const body: ApiKeyStartBody = { ...(apiKey.trim() ? { key: apiKey } : {}) };
+		if (step !== "cstoa_key") {
+			if (selectedMode === "cloudflare_template") {
+				if (accountId.trim()) body.accountId = accountId.trim();
+				if (provider === "cloudflare-ai-gateway" && gatewayId.trim()) {
+					body.gatewayId = gatewayId.trim();
+				}
+			} else if (selectedMode === "single") {
+				const trimmed = baseUrl.trim();
+				if (trimmed && trimSlash(trimmed) !== trimSlash(selectedDefaultUrl)) {
+					body.baseUrl = trimmed;
+				} else if (selected?.configuredBaseUrl && selectedDefaultUrl) {
+					body.baseUrl = selectedDefaultUrl;
+				}
+			}
+		}
+		setError("");
+		setApiFlow({ id: crypto.randomUUID(), body });
+		setApiKey("");
+	}
+
 	function enterStep(target: LoginStep) {
 		setApiFlow(null);
 		setApiKey("");
-		setBaseUrl("");
 		setShowKey(false);
-		setCustomProvider(false);
 		setError("");
 		if (target === "cstoa") {
 			setMode("cstoa");
 			setProvider(CSTOA_PROVIDER);
 			setOauthProvider(CSTOA_PROVIDER);
+			syncFieldsForProvider(cstoaProvider);
 		} else if (target === "cstoa_key") {
 			setMode("api_key");
 			setProvider(CSTOA_PROVIDER);
 			setOauthProvider(CSTOA_PROVIDER);
+			syncFieldsForProvider(cstoaProvider);
 		} else if (target === "oauth") {
 			const choice = chooseLoginTab(providers, "oauth", selected?.id ?? "");
 			setMode("oauth");
 			if (choice) {
 				setProvider(choice.id);
 				setOauthProvider(choice.id);
+				syncFieldsForProvider(choice);
 			}
 		} else if (target === "api_key") {
 			const candidates = tabProviders(providers, "api_key");
@@ -233,6 +290,7 @@ export function ProviderLoginForm({
 			if (preferred) {
 				setProvider(preferred.id);
 				setOauthProvider(preferred.id);
+				syncFieldsForProvider(preferred);
 			}
 		}
 		setStep(target);
@@ -246,25 +304,24 @@ export function ProviderLoginForm({
 		setProvider(choice.id);
 		setOauthProvider(choice.id);
 		setApiKey("");
-		setBaseUrl("");
-		setCustomProvider(false);
+		syncFieldsForProvider(choice);
 		setError("");
 	}
 	function chooseProvider(id: string) {
 		const choice = initialLogin(providers, id, mode === "cstoa" ? "oauth" : mode);
 		if (!choice) return;
+		const chosen = providers.find((item) => item.id === choice.providerId);
 		setProvider(choice.providerId);
 		setApiFlow(null);
 		setOauthProvider(choice.providerId);
 		setMode(choice.method === "oauth" && choice.providerId === CSTOA_PROVIDER ? "cstoa" : choice.method);
 		setApiKey("");
-		setBaseUrl("");
-		setCustomProvider(false);
+		syncFieldsForProvider(chosen);
 		setError("");
 	}
 	const picker = (
 		<ProviderPicker
-			providers={standalone ? providers : tabProviders(providers, mode)}
+			providers={standalone ? providers.filter((item) => !item.custom) : tabProviders(providers, mode)}
 			selected={selected?.id ?? ""}
 			standalone={standalone}
 			disabled={loading}
@@ -280,6 +337,65 @@ export function ProviderLoginForm({
 			重试读取服务
 		</button>
 	) : null;
+
+	const endpointFields =
+		selectedMode === "cloudflare_template" ? (
+			<>
+				<TextField className="login-field" value={accountId} onChange={setAccountId}>
+					<Label>Account ID</Label>
+					<Input
+						className="login-input"
+						placeholder="Account ID"
+						autoComplete="off"
+						spellCheck={false}
+						disabled={loading}
+					/>
+				</TextField>
+				{provider === "cloudflare-ai-gateway" && (
+					<TextField className="login-field" value={gatewayId} onChange={setGatewayId}>
+						<Label>Gateway ID</Label>
+						<Input
+							className="login-input"
+							placeholder="Gateway ID"
+							autoComplete="off"
+							spellCheck={false}
+							disabled={loading}
+						/>
+					</TextField>
+				)}
+			</>
+		) : selectedMode === "multi_endpoint" ? (
+			<div className="login-field">
+				<span className="provider-field-label">服务地址</span>
+				<span className="settings-description">{selected?.endpointSummary ?? "官方默认"}</span>
+			</div>
+		) : selectedMode === "single" ? (
+			<TextField className="login-field" value={baseUrl} onChange={setBaseUrl}>
+				<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+					<Label>服务地址</Label>
+					{selectedUrlDiffers && selectedDefaultUrl && (
+						<button
+							type="button"
+							className="settings-inline-action"
+							onClick={() => {
+								setBaseUrl(selectedDefaultUrl);
+								setError("");
+							}}
+						>
+							恢复默认
+						</button>
+					)}
+				</div>
+				<Input
+					className="login-input"
+					type="url"
+					placeholder={selectedDefaultUrl || "https://"}
+					autoComplete="url"
+					spellCheck={false}
+					disabled={loading}
+				/>
+			</TextField>
+		) : null;
 
 	if (standalone) {
 		return (
@@ -340,40 +456,7 @@ export function ProviderLoginForm({
 				) : (
 					<form className="login-api-form" onSubmit={submit}>
 						<div className="login-fields">
-							<div className="provider-custom-row">
-								<span className="provider-field-label">自定义地址</span>
-								<Checkbox
-									isSelected={customProvider}
-									isDisabled={loading || selected?.id === CSTOA_PROVIDER}
-									onChange={(checked) => {
-										setCustomProvider(checked);
-										setError("");
-									}}
-									className="login-custom-checkbox"
-								>
-									<Checkbox.Content>
-										<Checkbox.Control>
-											<Checkbox.Indicator>
-												<Check size={12} aria-hidden="true" />
-											</Checkbox.Indicator>
-										</Checkbox.Control>
-										<Label>自定义服务地址</Label>
-									</Checkbox.Content>
-								</Checkbox>
-							</div>
-							{customProvider && (
-								<TextField className="login-field" value={baseUrl} onChange={setBaseUrl}>
-									<Label>服务地址</Label>
-									<Input
-										className="login-input"
-										type="url"
-										placeholder="https://api.example.com/v1"
-										autoComplete="url"
-										required
-										disabled={loading}
-									/>
-								</TextField>
-							)}
+							{endpointFields}
 							<TextField className="login-field" value={apiKey} onChange={setApiKey}>
 								<Label>API KEY</Label>
 								<div className="login-key-field">
@@ -400,11 +483,7 @@ export function ProviderLoginForm({
 							<button type="button" className="btn-ghost provider-cancel" onClick={close}>
 								取消
 							</button>
-							<button
-								type="submit"
-								disabled={loading || !provider || (customProvider && !baseUrl.trim())}
-								className="tier-1-btn-primary login-submit"
-							>
+							<button type="submit" disabled={loading || !provider} className="tier-1-btn-primary login-submit">
 								保存
 							</button>
 						</div>
@@ -684,37 +763,7 @@ export function ProviderLoginForm({
 			) : (
 				<form className="login-api-form" onSubmit={submit}>
 					<div className="login-form-fields">
-						<Checkbox
-							isSelected={customProvider}
-							isDisabled={loading || selected?.id === CSTOA_PROVIDER}
-							onChange={(checked) => {
-								setCustomProvider(checked);
-								setError("");
-							}}
-							className="login-custom-checkbox"
-						>
-							<Checkbox.Content>
-								<Checkbox.Control>
-									<Checkbox.Indicator>
-										<Check size={12} aria-hidden="true" />
-									</Checkbox.Indicator>
-								</Checkbox.Control>
-								<Label>自定义服务地址</Label>
-							</Checkbox.Content>
-						</Checkbox>
-						{customProvider && (
-							<TextField className="login-field" value={baseUrl} onChange={setBaseUrl}>
-								<Label>Base URL</Label>
-								<Input
-									className="login-input"
-									type="url"
-									placeholder="https://api.example.com/v1"
-									autoComplete="url"
-									required
-									disabled={loading}
-								/>
-							</TextField>
-						)}
+						{endpointFields}
 						<TextField className="login-field" value={apiKey} onChange={setApiKey}>
 							<Label>APIKEY</Label>
 							<div className="login-key-field">
@@ -738,11 +787,7 @@ export function ProviderLoginForm({
 						</TextField>
 					</div>
 					<div className="login-stack-group">
-						<button
-							type="submit"
-							disabled={loading || !provider || (customProvider && !baseUrl.trim())}
-							className="tier-1-btn-primary login-action-btn"
-						>
+						<button type="submit" disabled={loading || !provider} className="tier-1-btn-primary login-action-btn">
 							登录
 						</button>
 					</div>

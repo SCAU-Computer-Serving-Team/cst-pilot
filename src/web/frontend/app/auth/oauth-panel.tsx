@@ -135,7 +135,7 @@ export function OAuthPanel({
 	providerName: string;
 	standalone?: boolean;
 	method?: "oauth" | "api_key";
-	initialBody?: { key?: string; baseUrl?: string };
+	initialBody?: { key?: string; baseUrl?: string; accountId?: string; gatewayId?: string };
 	onCancel?: () => void;
 	onSuccess: () => void;
 }) {
