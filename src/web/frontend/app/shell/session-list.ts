@@ -1,5 +1,10 @@
 export const RECENT_SESSION_LIMIT = 20;
 
+/** 归一化会话展示标题，兼容缺省或纯空白标题并回退为「新对话」。 */
+export function displaySessionTitle(title?: string | null): string {
+	return (title ?? "").trim() || "新对话";
+}
+
 export function orderedSessions<T extends { updatedAt?: string }>(sessions: readonly T[]): T[] {
 	const timestamp = (value?: string) => {
 		const time = Date.parse(value ?? "");

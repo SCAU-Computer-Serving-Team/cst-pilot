@@ -54,9 +54,92 @@ export type RustWebServerHandle = {
 	port: number;
 	kitRoot: string;
 	home: string;
+	configDir: string;
+	sessionsDir: string;
 	child: ChildProcess;
 	close: () => Promise<void>;
 };
+
+/** 解析已构建的 Web 前端静态目录（供 `--static-dir` 使用，兼容默认构建与 `embed-web`）。 */
+export function resolveWebStaticDir(): string {
+	const published = join(repoRoot, "agent/home/extensions/web/static");
+	if (existsSync(join(published, "index.html"))) {
+		return published;
+	}
+	const viteClient = join(repoRoot, "src/web/frontend/build/client");
+	if (existsSync(join(viteClient, "index.html"))) {
+		return viteClient;
+	}
+	throw new Error(
+		`未找到已构建的前端静态目录（已检查 ${published} 与 ${viteClient}）。请先运行 npm run build --prefix src/web/frontend`,
+	);
+}
+
+/** 解析 Rust `cst-server` 可执行文件路径（优先使用 `CARGO_TARGET_DIR`，再回退至仓库 `target/debug`）。 */
+export function resolveRustServerBin(): string {
+	const exeName = process.platform === "win32" ? "cst-server.exe" : "cst-server";
+	const candidates: string[] = [];
+	if (process.env.CARGO_TARGET_DIR) {
+		candidates.push(join(resolve(process.env.CARGO_TARGET_DIR), "debug", exeName));
+	}
+	candidates.push(join(repoRoot, "target", "debug", exeName));
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) {
+			return candidate;
+		}
+	}
+	throw new Error(
+		`未找到 cst-server 可执行文件（已检查：${candidates.join("、")}）。请先运行 cargo build -p cst-server --bin cst-server`,
+	);
+}
+
+/** 按阶段 9.2 发行/隔离目录契约初始化临时 `kitRoot`（`data/config`、`data/sessions`、`app/*`）。 */
+export async function prepareRustKitRoot(
+	kitRootInput: string,
+	modelBaseUrl?: string,
+): Promise<{
+	kitRoot: string;
+	configDir: string;
+	sessionsDir: string;
+}> {
+	const kitRoot = resolve(kitRootInput);
+	const configDir = join(kitRoot, "data", "config");
+	const sessionsDir = join(kitRoot, "data", "sessions");
+	const promptsDir = join(kitRoot, "app", "prompts");
+	const skillsDir = join(kitRoot, "app", "skills");
+	const defaultsDir = join(kitRoot, "app", "defaults");
+	const fontsDir = join(kitRoot, "app", "fonts");
+
+	await mkdir(configDir, { recursive: true });
+	await mkdir(sessionsDir, { recursive: true });
+	await mkdir(promptsDir, { recursive: true });
+
+	const appendTarget = join(promptsDir, "APPEND_SYSTEM.md");
+	if (!existsSync(appendTarget)) {
+		const appPrompt = join(repoRoot, "app/prompts/APPEND_SYSTEM.md");
+		const fallbackPrompt = join(repoRoot, "agent/home/APPEND_SYSTEM.md");
+		await cp(existsSync(appPrompt) ? appPrompt : fallbackPrompt, appendTarget);
+	}
+	if (!existsSync(skillsDir)) {
+		const appSkills = join(repoRoot, "app/skills");
+		const fallbackSkills = join(repoRoot, "agent/home/skills");
+		await cp(existsSync(appSkills) ? appSkills : fallbackSkills, skillsDir, { recursive: true });
+	}
+	const appDefaults = join(repoRoot, "app/defaults");
+	if (existsSync(appDefaults) && !existsSync(defaultsDir)) {
+		await cp(appDefaults, defaultsDir, { recursive: true });
+	}
+	const sharedFontsSource = join(repoRoot, "assets/fonts");
+	if (existsSync(sharedFontsSource) && !existsSync(fontsDir)) {
+		await mkdir(dirname(fontsDir), { recursive: true });
+		await symlink(sharedFontsSource, fontsDir, "junction");
+	}
+	if (!existsSync(join(configDir, "settings.json")) && !existsSync(join(configDir, "models.json"))) {
+		await configureTestModel(configDir, modelBaseUrl);
+	}
+
+	return { kitRoot, configDir, sessionsDir };
+}
 
 /** 启动独立模式 Rust cst-server 子进程，供过渡期双入口浏览器 E2E 验收使用。 */
 export async function startRustWebServer(options: {
@@ -64,49 +147,23 @@ export async function startRustWebServer(options: {
 	cwd?: string;
 	port?: number;
 	modelBaseUrl?: string;
+	standaloneWeb?: boolean;
 }): Promise<RustWebServerHandle> {
-	const kitRoot = resolve(options.kitRoot);
-	const home = join(kitRoot, "agent", "home");
-	await mkdir(join(home, "sessions"), { recursive: true });
-
-	const appendTarget = join(home, "APPEND_SYSTEM.md");
-	if (!existsSync(appendTarget)) {
-		await cp(join(repoRoot, "agent/home/APPEND_SYSTEM.md"), appendTarget);
-	}
-	const skillsTarget = join(home, "skills");
-	if (!existsSync(skillsTarget)) {
-		await cp(join(repoRoot, "agent/home/skills"), skillsTarget, { recursive: true });
-	}
-	const staticTarget = join(home, "extensions/web/static");
-	if (!existsSync(staticTarget)) {
-		await mkdir(dirname(staticTarget), { recursive: true });
-		await symlink(join(repoRoot, "agent/home/extensions/web/static"), staticTarget, "junction");
-	}
-	const sharedFontsSource = join(repoRoot, "assets/fonts");
-	const sharedFontsTarget = join(kitRoot, "assets/fonts");
-	if (existsSync(sharedFontsSource) && !existsSync(sharedFontsTarget)) {
-		await mkdir(dirname(sharedFontsTarget), { recursive: true });
-		await symlink(sharedFontsSource, sharedFontsTarget, "junction");
-	}
-	if (!existsSync(join(home, "settings.json")) && !existsSync(join(home, "models.json"))) {
-		await configureTestModel(home, options.modelBaseUrl);
-	}
-
+	const { kitRoot, configDir, sessionsDir } = await prepareRustKitRoot(options.kitRoot, options.modelBaseUrl);
+	const staticDir = resolveWebStaticDir();
 	const port = options.port ?? (await freePort());
-	const bin = join(repoRoot, "target", "debug", process.platform === "win32" ? "cst-server.exe" : "cst-server");
-	if (!existsSync(bin)) {
-		throw new Error(`未找到 cst-server 可执行文件：${bin}。请先运行 cargo build -p cst-server --bin cst-server`);
+	const bin = resolveRustServerBin();
+	const args: string[] = [];
+	if (options.standaloneWeb !== false) {
+		args.push("--standalone-web");
 	}
+	args.push("--port", String(port), "--kit-root", kitRoot, "--cwd", options.cwd ?? kitRoot, "--static-dir", staticDir);
 
-	const child = spawn(
-		bin,
-		["--standalone-web", "--port", String(port), "--kit-root", kitRoot, "--cwd", options.cwd ?? kitRoot],
-		{
-			cwd: options.cwd ?? kitRoot,
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: true,
-		},
-	);
+	const child = spawn(bin, args, {
+		cwd: options.cwd ?? kitRoot,
+		stdio: ["ignore", "pipe", "pipe"],
+		windowsHide: true,
+	});
 
 	let logs = "";
 	child.stdout?.on("data", (chunk: Buffer) => {
@@ -172,5 +229,5 @@ export async function startRustWebServer(options: {
 		}
 	};
 
-	return { url, port, kitRoot, home, child, close };
+	return { url, port, kitRoot, home: configDir, configDir, sessionsDir, child, close };
 }

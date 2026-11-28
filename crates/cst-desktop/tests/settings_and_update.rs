@@ -181,6 +181,7 @@ struct Step6MockState {
     enabled_models: Option<Vec<String>>,
     rich_catalog: bool,
     settings_patches: Vec<Value>,
+    extra_sessions: Vec<Value>,
 }
 
 impl Default for Step6MockState {
@@ -208,6 +209,7 @@ impl Default for Step6MockState {
             enabled_models: None,
             rich_catalog: false,
             settings_patches: Vec::new(),
+            extra_sessions: Vec::new(),
         }
     }
 }
@@ -346,6 +348,7 @@ impl Step6MockBackend {
                                     "running": false
                                 }));
                             }
+                            sessions.extend(guard.extra_sessions.iter().cloned());
 
                             let update_status = json!({
                                 "phase": guard.update_phase,
@@ -2444,4 +2447,112 @@ async fn cold_start_available_update_stays_silent_without_auto_modal(
             "manual trigger via Settings must render the update dialog"
         );
     });
+}
+
+#[gpui_kit::test]
+async fn headless_palette_long_session_list_preserves_row_height_and_spacing(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = Step6MockBackend::start();
+    {
+        let mut guard = backend.state.lock().unwrap();
+        for idx in 1..=14 {
+            guard.extra_sessions.push(json!({
+                "id": format!("sess-extra-{idx:02}"),
+                "title": format!("历史会话诊断记录 {idx:02}"),
+                "updatedAt": format!("2026-11-{:02}T10:00:00+08:00", 17usize.saturating_sub(idx).max(1)),
+                "running": false
+            }));
+        }
+    }
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+
+    let (win_handle, _shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+
+        // Open Ctrl+O QuickOpen with 16 sessions: list must cap height & scroll without shrinking rows.
+        window.press("ctrl-o", cx);
+        let modal = window.find("command-palette-modal-i70mz");
+        assert!(modal.visible());
+        assert!(f32::from(modal.bounds().size.height) <= 480.5);
+
+        let list = window.find("command-palette-list");
+        assert!(
+            f32::from(list.bounds().size.height) <= 432.5,
+            "palette scroll container must stay capped at max_h(432px), got {:?}",
+            list.bounds().size.height
+        );
+
+        let mut prev_top: Option<f32> = None;
+        for (idx, row_id) in [
+            "command-palette-item-0",
+            "command-palette-item-1",
+            "command-palette-item-2",
+            "command-palette-item-3",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let row = window.find(row_id);
+            let bounds = row.bounds();
+            let h = f32::from(bounds.size.height);
+            let top = f32::from(bounds.origin.y);
+            assert!(
+                (h - 40.0).abs() <= 0.5,
+                "QuickOpen row {idx} must preserve 40px height under overflow, got {h}"
+            );
+            if let Some(prev) = prev_top {
+                let pitch = top - prev;
+                assert!(
+                    (pitch - 44.0).abs() <= 0.5,
+                    "QuickOpen row {idx} pitch must be 44px (40px row + 4px gap), got {pitch}"
+                );
+            }
+            prev_top = Some(top);
+        }
+
+        // Navigate down past the initial viewport to verify keyboard scrolling still works cleanly.
+        for _ in 0..10 {
+            window.press("down", cx);
+        }
+        let item10 = window.find("command-palette-item-10");
+        assert!(
+            (f32::from(item10.bounds().size.height) - 40.0).abs() <= 0.5,
+            "Scrolled QuickOpen row 10 must keep 40px height"
+        );
+
+        // Switch in-place to Ctrl+P Commands and confirm matching 40px height / 44px pitch.
+        window.press("ctrl-p", cx);
+        let cmd0 = window.find("command-palette-item-0").bounds();
+        let cmd1 = window.find("command-palette-item-1").bounds();
+        assert!((f32::from(cmd0.size.height) - 40.0).abs() <= 0.5);
+        assert!((f32::from(cmd1.size.height) - 40.0).abs() <= 0.5);
+        assert!(
+            ((f32::from(cmd1.origin.y) - f32::from(cmd0.origin.y)) - 44.0).abs() <= 0.5,
+            "Commands row pitch must be 44px (40px row + 4px gap)"
+        );
+
+        window.press("escape", cx);
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+    })
+    .unwrap();
 }

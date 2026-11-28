@@ -199,3 +199,34 @@ test("filterPaletteEntries supports Chinese Pinyin, bounded fuzzy matching, and 
 	assert.equal(fuzzyHits.length, 1);
 	assert.equal(fuzzyHits[0]?.id, "sess-s-gpu");
 });
+
+test("buildQuickOpenEntries tolerates missing session and export titles without throwing", () => {
+	const entries = buildQuickOpenEntries(
+		[{ id: "s-missing", title: undefined as unknown as string, updatedAt: "2026-11-26T10:00:00.000Z" }],
+		undefined,
+		[
+			{
+				id: "exp-1",
+				sessionId: "s-missing",
+				title: undefined as unknown as string,
+				status: "completed",
+				capturedAt: "2026-11-26T10:05:00.000Z",
+				options: { format: "png", theme: "light", includeThinking: false, includeTools: true },
+				files: [{ name: "export-01.png", bytes: 2048, url: "/api/exports/exp-1/files/export-01.png" }],
+			},
+			{
+				id: "exp-2",
+				sessionId: "s-missing",
+				title: undefined as unknown as string,
+				status: "completed",
+				capturedAt: "2026-11-26T10:04:00.000Z",
+				options: { format: "html", theme: "light", includeThinking: false, includeTools: true },
+				files: [],
+			},
+		],
+	);
+
+	assert.equal(entries.find((item) => item.id === "sess-s-missing")?.title, "新对话");
+	assert.equal(entries.find((item) => item.id === "exp-exp-1")?.title, "export-01.png");
+	assert.equal(entries.find((item) => item.id === "exp-exp-2")?.title, "会话导出");
+});

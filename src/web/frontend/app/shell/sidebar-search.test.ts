@@ -195,3 +195,46 @@ test("searchLocalPreloadedSessions pins active session, includes tool results, a
 		0,
 	);
 });
+
+test("searchLocalPreloadedSessions 兼容缺省 title 而不崩溃并回退为新对话", () => {
+	const sessions = [
+		{
+			id: "s-untitled",
+			title: undefined as unknown as string,
+			updatedAt: "2026-11-26T10:00:00.000Z",
+			running: false,
+		},
+		{ id: "s-named", title: "网络异常排查", updatedAt: "2026-11-26T09:00:00.000Z", running: false },
+	];
+	const cached = new Map([
+		[
+			"s-untitled",
+			{
+				id: "s-untitled",
+				running: false,
+				messages: [],
+				queue: { version: 0, paused: false, items: [] },
+				ui: [],
+				entries: [
+					{
+						id: "e-u1",
+						message: {
+							role: "user" as const,
+							timestamp: 1000,
+							content: "蓝屏代码 0x116 排查",
+						},
+					},
+				],
+			},
+		],
+	]);
+
+	const byContent = searchLocalPreloadedSessions("0x116", undefined, sessions, cached);
+	assert.equal(byContent.contentMatches.length, 1);
+	assert.equal(byContent.contentMatches[0]?.sessionId, "s-untitled");
+	assert.equal(byContent.contentMatches[0]?.title, "新对话");
+
+	const byPlaceholder = searchLocalPreloadedSessions("新对话", undefined, sessions, cached);
+	assert.equal(byPlaceholder.titleMatches.length, 1);
+	assert.equal(byPlaceholder.titleMatches[0]?.sessionId, "s-untitled");
+});

@@ -376,8 +376,9 @@ export function searchLocalPreloadedSessions(
 	}[] = [];
 
 	for (const session of sessions) {
-		const title = session.title.trim() || "新对话";
-		const isPlaceholder = !session.title.trim() || title === "新对话";
+		const rawTitle = (session.title ?? "").trim();
+		const title = rawTitle || "新对话";
+		const isPlaceholder = !rawTitle || title === "新对话";
 		const isActive = activeSessionId === session.id;
 		const sortTs = session.updatedAt ?? "";
 
