@@ -17,7 +17,7 @@ pub use fs_safe::{
     atomic_write_json_sync, commit_open_temp_file_no_overwrite, is_reparse_or_symlink,
     is_same_existing_file, is_storage_full_io, is_transient_replace_error, link_count,
     open_exclusive_temp_file_in_pinned_dir, open_read_in_pinned_dir, pin_child_directory_handle,
-    pin_directory_handle,
+    pin_directory_handle, try_open_read_in_pinned_dir, try_pin_child_directory_handle,
 };
 pub use json::{parse_local_json, parse_strict_json, strip_json_comments};
 pub use layout::{

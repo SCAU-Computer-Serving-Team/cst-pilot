@@ -6815,13 +6815,18 @@ const STORIES = [
       const line = stageEl.querySelector("#vp-line");
       const demoBody = stageEl.querySelector("#vp-hairline-demo");
 
-      function setStageKbdActive(on) {
+      let lastStagePointer = null;
+      function setStageKbdActive(on, seedEvent = null) {
         if (on) {
           stageWrap?.setAttribute("data-kbd-active", "true");
           bar?.setAttribute("data-kbd-active", "true");
+          if (seedEvent && typeof seedEvent.clientX === "number") {
+            lastStagePointer = { x: seedEvent.clientX, y: seedEvent.clientY };
+          }
         } else {
           stageWrap?.removeAttribute("data-kbd-active");
           bar?.removeAttribute("data-kbd-active");
+          lastStagePointer = null;
         }
       }
 
@@ -6882,7 +6887,16 @@ const STORIES = [
           requestSwitchTab(Number(btn.dataset.idx), btn, false);
         });
       });
-      stageWrap?.addEventListener("mousemove", () => setStageKbdActive(false));
+      stageWrap?.addEventListener("mousemove", (e) => {
+        if (!stageWrap.hasAttribute("data-kbd-active")) return;
+        if (!lastStagePointer) {
+          lastStagePointer = { x: e.clientX, y: e.clientY };
+          return;
+        }
+        if (Math.abs(e.clientX - lastStagePointer.x) + Math.abs(e.clientY - lastStagePointer.y) >= 4) {
+          setStageKbdActive(false);
+        }
+      });
       demoBody?.addEventListener("click", (e) => {
         if (e.detail > 0) setStageKbdActive(false);
       });

@@ -909,29 +909,23 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
     use std::io::Read as _;
     use std::path::Component;
 
-    let clean_root = cst_os::strip_windows_verbatim_prefix(kit_layout.root());
     let clean_data = cst_os::strip_windows_verbatim_prefix(kit_layout.data_dir());
-    let (anchor, rel_target) = if let Ok(rel) = clean_data.strip_prefix(&clean_root) {
-        (clean_root, rel.join("config"))
-    } else {
-        let full = clean_data.join("config");
-        let mut anchor = PathBuf::new();
-        let mut rel = PathBuf::new();
-        for comp in full.components() {
-            match comp {
-                Component::Prefix(p) => anchor.push(p.as_os_str()),
-                Component::RootDir => anchor.push(comp.as_os_str()),
-                Component::Normal(part) => rel.push(part),
-                Component::CurDir | Component::ParentDir => {
-                    return Err("配置目录路径无效。".into());
-                }
+    let full = clean_data.join("config");
+    let mut anchor = PathBuf::new();
+    let mut rel_target = PathBuf::new();
+    for comp in full.components() {
+        match comp {
+            Component::Prefix(p) => anchor.push(p.as_os_str()),
+            Component::RootDir => anchor.push(comp.as_os_str()),
+            Component::Normal(part) => rel_target.push(part),
+            Component::CurDir | Component::ParentDir => {
+                return Err("配置目录路径无效。".into());
             }
         }
-        if anchor.as_os_str().is_empty() {
-            return Err("数据目录必须是绝对路径。".into());
-        }
-        (anchor, rel)
-    };
+    }
+    if anchor.as_os_str().is_empty() {
+        return Err("数据目录必须是绝对路径。".into());
+    }
 
     let mut dir_handles = Vec::new();
     let (root_handle, _) = cst_os::pin_directory_handle(&anchor)?;
@@ -943,55 +937,24 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
             return Err("配置目录路径无效。".into());
         };
         cur_path.push(part);
-        #[cfg(target_os = "linux")]
-        let probe_path = {
-            use std::os::unix::io::AsRawFd;
-            let parent_h = dir_handles.last().expect("anchor handle present");
-            PathBuf::from(format!("/proc/self/fd/{}", parent_h.as_raw_fd())).join(part)
+        let parent_h = dir_handles.last().expect("anchor handle present");
+        let Some((child_h, _)) = cst_os::try_pin_child_directory_handle(parent_h, &cur_path, part)?
+        else {
+            return Ok(true);
         };
-        #[cfg(not(target_os = "linux"))]
-        let probe_path = cur_path.clone();
-
-        match std::fs::symlink_metadata(&probe_path) {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-            Err(_) => return Err("配置目录状态无法读取。".into()),
-            Ok(meta) if cst_os::is_reparse_or_symlink(&meta) || !meta.is_dir() => {
-                return Err("配置目录不能为符号链接或文件。".into());
-            }
-            Ok(_) => {
-                let parent_h = dir_handles.last().expect("anchor handle present");
-                let (child_h, _) =
-                    cst_os::pin_child_directory_handle(parent_h, &cur_path, part, false)?;
-                dir_handles.push(child_h);
-            }
-        }
+        dir_handles.push(child_h);
     }
 
     let cfg_file_path = cur_path.join("web-search.json");
-    #[cfg(target_os = "linux")]
-    let cfg_probe_path = {
-        use std::os::unix::io::AsRawFd;
-        let cfg_dir_h = dir_handles.last().expect("config dir handle present");
-        PathBuf::from(format!("/proc/self/fd/{}", cfg_dir_h.as_raw_fd())).join("web-search.json")
-    };
-    #[cfg(not(target_os = "linux"))]
-    let cfg_probe_path = cfg_file_path.clone();
-
-    match std::fs::symlink_metadata(&cfg_probe_path) {
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(_) => return Err("联网检索配置状态无法读取。".into()),
-        Ok(meta) if cst_os::is_reparse_or_symlink(&meta) || !meta.is_file() => {
-            return Err("联网检索配置不能为符号链接或非普通文件。".into());
-        }
-        Ok(_) => {}
-    }
-
     let cfg_dir_h = dir_handles.last().expect("config dir handle present");
-    let (opened, _, len) = cst_os::open_read_in_pinned_dir(
+    let Some((opened, _, len)) = cst_os::try_open_read_in_pinned_dir(
         cfg_dir_h,
         &cfg_file_path,
         std::ffi::OsStr::new("web-search.json"),
-    )?;
+    )?
+    else {
+        return Ok(true);
+    };
     if cst_os::link_count(&opened)? != 1 {
         return Err("联网检索配置不能是硬链接文件。".into());
     }
@@ -1169,6 +1132,49 @@ mod tests {
 
         std::fs::write(ext_base.join("nested"), b"file-ancestor").unwrap();
         assert!(resolve_update_allow_tun(&ext_layout).is_err());
+        std::fs::remove_file(ext_base.join("nested")).unwrap();
+
+        #[cfg(windows)]
+        {
+            // Unprivileged NTFS directory junction on ancestor or config file path is rejected
+            let j_target = ext_base.join("real-target");
+            std::fs::create_dir_all(j_target.join("config")).unwrap();
+            std::fs::write(
+                j_target.join("config").join("web-search.json"),
+                br#"{"version":2,"ssrf":{"allowRanges":[]}}"#,
+            )
+            .unwrap();
+            let j_link = ext_base.join("junction-data");
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&j_link)
+                .arg(&j_target)
+                .output()
+                .unwrap();
+            assert!(status.status.success(), "mklink /J must succeed");
+            let j_layout = cst_os::KitLayout::with_data_dir(&dir, &j_link).unwrap();
+            assert!(
+                resolve_update_allow_tun(&j_layout).is_err(),
+                "directory junction on data_dir must be rejected"
+            );
+
+            // Junction occupying `web-search.json` itself must also be rejected
+            let cfg_j_path = cfg_dir.join("web-search.json");
+            let _ = std::fs::remove_file(&cfg_j_path);
+            let status_cfg = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&cfg_j_path)
+                .arg(&j_target)
+                .output()
+                .unwrap();
+            assert!(status_cfg.status.success());
+            assert!(
+                resolve_update_allow_tun(&layout).is_err(),
+                "reparse point at web-search.json must be rejected"
+            );
+            let _ = std::fs::remove_dir(&cfg_j_path);
+            let _ = std::fs::remove_dir(&j_link);
+        }
 
         let _ = std::fs::remove_dir_all(&ext_base);
         let _ = std::fs::remove_dir_all(&dir);

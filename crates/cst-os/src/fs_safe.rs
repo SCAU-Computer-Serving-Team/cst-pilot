@@ -512,12 +512,193 @@ pub fn pin_directory_handle(path: &Path) -> Result<(File, FileIdentity), String>
     Ok((f, id))
 }
 
+#[cfg(windows)]
+fn nt_open_relative_no_reparse(
+    parent_dir: &File,
+    child_name: &std::ffi::OsStr,
+    is_dir: bool,
+) -> io::Result<File> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+
+    #[repr(C)]
+    struct UnicodeString {
+        length: u16,
+        maximum_length: u16,
+        buffer: *mut u16,
+    }
+
+    #[repr(C)]
+    struct ObjectAttributes {
+        length: u32,
+        root_directory: *mut core::ffi::c_void,
+        object_name: *mut UnicodeString,
+        attributes: u32,
+        security_descriptor: *mut core::ffi::c_void,
+        security_quality_of_service: *mut core::ffi::c_void,
+    }
+
+    #[repr(C)]
+    struct IoStatusBlock {
+        status_or_pointer: *mut core::ffi::c_void,
+        information: usize,
+    }
+
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn NtCreateFile(
+            file_handle: *mut *mut core::ffi::c_void,
+            desired_access: u32,
+            object_attributes: *mut ObjectAttributes,
+            io_status_block: *mut IoStatusBlock,
+            allocation_size: *mut i64,
+            file_attributes: u32,
+            share_access: u32,
+            create_disposition: u32,
+            create_options: u32,
+            ea_buffer: *mut core::ffi::c_void,
+            ea_length: u32,
+        ) -> i32;
+        fn RtlNtStatusToDosError(status: i32) -> u32;
+    }
+
+    let mut wide: Vec<u16> = child_name.encode_wide().collect();
+    if wide.is_empty()
+        || wide == [u16::from(b'.')]
+        || wide == [u16::from(b'.'), u16::from(b'.')]
+        || wide.iter().any(|&ch| {
+            ch == 0 || ch == u16::from(b'\\') || ch == u16::from(b'/') || ch == u16::from(b':')
+        })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid relative child component",
+        ));
+    }
+    let byte_len = u16::try_from(wide.len().saturating_mul(2))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "component name too long"))?;
+
+    let mut ustr = UnicodeString {
+        length: byte_len,
+        maximum_length: byte_len,
+        buffer: wide.as_mut_ptr(),
+    };
+    let mut oa = ObjectAttributes {
+        length: core::mem::size_of::<ObjectAttributes>() as u32,
+        root_directory: parent_dir.as_raw_handle(),
+        object_name: &mut ustr,
+        attributes: 0x0000_0040, // OBJ_CASE_INSENSITIVE
+        security_descriptor: core::ptr::null_mut(),
+        security_quality_of_service: core::ptr::null_mut(),
+    };
+    let mut iosb = IoStatusBlock {
+        status_or_pointer: core::ptr::null_mut(),
+        information: 0,
+    };
+    let mut handle: *mut core::ffi::c_void = core::ptr::null_mut();
+
+    // SYNCHRONIZE = 0x0010_0000, FILE_OPEN = 1, FILE_OPEN_REPARSE_POINT = 0x0020_0000,
+    // FILE_SYNCHRONOUS_IO_NONALERT = 0x0000_0020
+    let (desired_access, share_access, create_options) = if is_dir {
+        (
+            0x0001 | 0x0080 | 0x0010_0000,
+            0x0001 | 0x0002,
+            0x0000_0001 | 0x0020_0000 | 0x0000_0020,
+        )
+    } else {
+        (
+            0x8000_0000 | 0x0010_0000,
+            0x0001,
+            0x0000_0040 | 0x0020_0000 | 0x0000_0020,
+        )
+    };
+
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            desired_access,
+            &mut oa,
+            &mut iosb,
+            core::ptr::null_mut(),
+            0,
+            share_access,
+            1,
+            create_options,
+            core::ptr::null_mut(),
+            0,
+        )
+    };
+    if status < 0 {
+        // STATUS_NOT_A_DIRECTORY (0xC0000103) / STATUS_FILE_IS_A_DIRECTORY (0xC00000BA)
+        if status == -1_073_741_565_i32 || status == -1_073_741_638_i32 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "entry kind mismatch or reparse point",
+            ));
+        }
+        let dos = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(dos as i32));
+    }
+    Ok(unsafe { File::from_raw_handle(handle) })
+}
+
+pub fn try_pin_child_directory_handle(
+    parent_dir: &File,
+    fallback_child_path: &Path,
+    child_name: &std::ffi::OsStr,
+) -> Result<Option<(File, FileIdentity)>, String> {
+    #[cfg(windows)]
+    {
+        let _ = fallback_child_path;
+        let file = match nt_open_relative_no_reparse(parent_dir, child_name, true) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("交付目录包含链接、重解析点或非目录路径。".into()),
+        };
+        let meta = file
+            .metadata()
+            .map_err(|e| io_error("读取交付目录身份", e))?;
+        if is_reparse_or_symlink(&meta) || !meta.is_dir() {
+            return Err("交付目录包含链接、重解析点或非目录路径。".into());
+        }
+        let id = FileIdentity::from_file(&file)?;
+        Ok(Some((file, id)))
+    }
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "linux")]
+        let step_path = {
+            use std::os::unix::io::AsRawFd;
+            let _ = fallback_child_path;
+            PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(child_name)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let step_path = {
+            let _ = (parent_dir, child_name);
+            fallback_child_path.to_path_buf()
+        };
+        match fs::symlink_metadata(&step_path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io_error("检查子目录链接状态", e)),
+            Ok(meta) if is_reparse_or_symlink(&meta) || !meta.is_dir() => {
+                return Err("交付目录包含链接、重解析点或非目录路径。".into());
+            }
+            Ok(_) => {}
+        }
+        pin_directory_handle(&step_path).map(Some)
+    }
+}
+
 pub fn pin_child_directory_handle(
     parent_dir: &File,
     fallback_child_path: &Path,
     child_name: &std::ffi::OsStr,
     create_missing: bool,
 ) -> Result<(File, FileIdentity), String> {
+    if !create_missing {
+        return try_pin_child_directory_handle(parent_dir, fallback_child_path, child_name)?
+            .ok_or_else(|| "目标子目录不存在。".to_owned());
+    }
     #[cfg(target_os = "linux")]
     let step_path = {
         use std::os::unix::io::AsRawFd;
@@ -530,14 +711,100 @@ pub fn pin_child_directory_handle(
         fallback_child_path.to_path_buf()
     };
 
-    if create_missing {
-        match fs::create_dir(&step_path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(io_error("在锁定父目录创建子目录", e)),
-        }
+    match fs::create_dir(&step_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(io_error("在锁定父目录创建子目录", e)),
     }
-    pin_directory_handle(&step_path)
+    try_pin_child_directory_handle(parent_dir, fallback_child_path, child_name)?
+        .ok_or_else(|| "创建后目标子目录不存在。".to_owned())
+}
+
+pub fn try_open_read_in_pinned_dir(
+    parent_dir: &File,
+    fallback_path: &Path,
+    file_name: &std::ffi::OsStr,
+) -> Result<Option<(File, FileIdentity, u64)>, String> {
+    #[cfg(windows)]
+    {
+        let _ = fallback_path;
+        let file = match nt_open_relative_no_reparse(parent_dir, file_name, false) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err("目标路径包含链接、重解析点或非普通文件。".into()),
+        };
+        let fmeta = file
+            .metadata()
+            .map_err(|e| io_error("读取已打开文件元数据", e))?;
+        if is_reparse_or_symlink(&fmeta) || !fmeta.is_file() {
+            return Err("已打开句柄不是普通文件。".into());
+        }
+        let opened_id = FileIdentity::from_file(&file)?;
+        Ok(Some((file, opened_id, fmeta.len())))
+    }
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "linux")]
+        let step_path = {
+            use std::os::unix::io::AsRawFd;
+            let _ = fallback_path;
+            PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(file_name)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let step_path = {
+            let _ = (parent_dir, file_name);
+            fallback_path.to_path_buf()
+        };
+
+        let lmeta = match fs::symlink_metadata(&step_path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io_error("读取文件链接状态", e)),
+        };
+        if is_reparse_or_symlink(&lmeta) || !lmeta.is_file() {
+            return Err("目标路径包含链接、重解析点或非普通文件。".into());
+        }
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // O_NOFOLLOW (0o400_000) | O_NONBLOCK (0o004_000) prevents symlink-follow & FIFO hang!
+            opts.custom_flags(0o400_000 | 0o004_000);
+        }
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(0o100_000 | 0o004_000);
+        }
+        let file = opts
+            .open(&step_path)
+            .map_err(|e| io_error("打开受固定目录保护的文件", e))?;
+        let fmeta = file
+            .metadata()
+            .map_err(|e| io_error("读取已打开文件元数据", e))?;
+        if is_reparse_or_symlink(&fmeta) || !fmeta.is_file() {
+            return Err("已打开句柄不是普通文件。".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (lmeta.dev(), lmeta.ino()) != (fmeta.dev(), fmeta.ino()) {
+                return Err("打开期间文件真实身份发生变化。".into());
+            }
+        }
+        let lmeta_after =
+            fs::symlink_metadata(&step_path).map_err(|e| io_error("复核文件链接状态", e))?;
+        if is_reparse_or_symlink(&lmeta_after) || !lmeta_after.is_file() {
+            return Err("打开期间目标路径变为链接、重解析点或非普通文件。".into());
+        }
+        let opened_id = FileIdentity::from_file(&file)?;
+        let path_id = FileIdentity::from_path(&step_path)?;
+        if opened_id != path_id {
+            return Err("打开期间文件真实身份发生变化。".into());
+        }
+        Ok(Some((file, opened_id, fmeta.len())))
+    }
 }
 
 pub fn open_read_in_pinned_dir(
@@ -545,69 +812,8 @@ pub fn open_read_in_pinned_dir(
     fallback_path: &Path,
     file_name: &std::ffi::OsStr,
 ) -> Result<(File, FileIdentity, u64), String> {
-    #[cfg(target_os = "linux")]
-    let step_path = {
-        use std::os::unix::io::AsRawFd;
-        let _ = fallback_path;
-        PathBuf::from(format!("/proc/self/fd/{}", parent_dir.as_raw_fd())).join(file_name)
-    };
-    #[cfg(not(target_os = "linux"))]
-    let step_path = {
-        let _ = (parent_dir, file_name);
-        fallback_path.to_path_buf()
-    };
-
-    let lmeta = fs::symlink_metadata(&step_path).map_err(|e| io_error("读取文件链接状态", e))?;
-    if is_reparse_or_symlink(&lmeta) || !lmeta.is_file() {
-        return Err("目标路径包含链接、重解析点或非普通文件。".into());
-    }
-    let mut opts = OpenOptions::new();
-    opts.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // `FILE_FLAG_OPEN_REPARSE_POINT` (`0x0020_0000`) ensures `open` never follows a symlink
-        // or junction swapped in after `symlink_metadata`; `fmeta` below then rejects it.
-        opts.share_mode(1).custom_flags(0x0020_0000);
-    }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // O_NOFOLLOW (0o400_000) | O_NONBLOCK (0o004_000) prevents symlink-follow & FIFO hang!
-        opts.custom_flags(0o400_000 | 0o004_000);
-    }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.custom_flags(0o100_000 | 0o004_000);
-    }
-    let file = opts
-        .open(&step_path)
-        .map_err(|e| io_error("打开受固定目录保护的文件", e))?;
-    let fmeta = file
-        .metadata()
-        .map_err(|e| io_error("读取已打开文件元数据", e))?;
-    if is_reparse_or_symlink(&fmeta) || !fmeta.is_file() {
-        return Err("已打开句柄不是普通文件。".into());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if (lmeta.dev(), lmeta.ino()) != (fmeta.dev(), fmeta.ino()) {
-            return Err("打开期间文件真实身份发生变化。".into());
-        }
-    }
-    let lmeta_after =
-        fs::symlink_metadata(&step_path).map_err(|e| io_error("复核文件链接状态", e))?;
-    if is_reparse_or_symlink(&lmeta_after) || !lmeta_after.is_file() {
-        return Err("打开期间目标路径变为链接、重解析点或非普通文件。".into());
-    }
-    let opened_id = FileIdentity::from_file(&file)?;
-    let path_id = FileIdentity::from_path(&step_path)?;
-    if opened_id != path_id {
-        return Err("打开期间文件真实身份发生变化。".into());
-    }
-    Ok((file, opened_id, fmeta.len()))
+    try_open_read_in_pinned_dir(parent_dir, fallback_path, file_name)?
+        .ok_or_else(|| "目标文件不存在。".to_owned())
 }
 
 pub fn open_exclusive_temp_file_in_pinned_dir(
