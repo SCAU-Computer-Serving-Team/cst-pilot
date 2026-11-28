@@ -215,11 +215,25 @@ pub struct ProviderStatusDto {
     #[serde(rename = "type", default)]
     pub auth_type: Option<String>,
     #[serde(default)]
+    pub credential_source: Option<String>,
+    #[serde(default)]
     pub requires_login: bool,
     #[serde(default)]
     pub configured: Option<bool>,
     #[serde(default)]
     pub custom: Option<bool>,
+    #[serde(default)]
+    pub endpoint_mode: Option<String>,
+    #[serde(default)]
+    pub default_base_url: Option<String>,
+    #[serde(default)]
+    pub configured_base_url: Option<String>,
+    #[serde(default)]
+    pub endpoint_summary: Option<String>,
+    #[serde(default)]
+    pub cloudflare_account_id: Option<String>,
+    #[serde(default)]
+    pub cloudflare_gateway_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

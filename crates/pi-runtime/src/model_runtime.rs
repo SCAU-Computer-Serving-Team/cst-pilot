@@ -609,6 +609,16 @@ impl ModelRuntime {
             .is_some_and(|a| a.auth_type == AuthType::OAuth)
     }
 
+    pub fn get_auth_source(&self, provider: &str) -> Option<String> {
+        self.ensure_credential_snapshot();
+        self.snapshot
+            .read()
+            .expect("snapshot lock")
+            .auth
+            .get(provider)
+            .and_then(|a| a.source.clone())
+    }
+
     fn lock_for_provider(&self, provider_id: &str) -> Arc<tokio::sync::Mutex<()>> {
         let mut map = self.provider_locks.lock().expect("provider locks");
         map.entry(provider_id.to_owned())

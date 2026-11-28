@@ -1245,6 +1245,19 @@ impl ClientHandle {
         .await
     }
 
+    pub async fn patch_provider_endpoint(
+        &self,
+        provider_id: String,
+        base_url: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.patch_provider_endpoint(&provider_id, base_url.as_deref())
+                .await
+        })
+        .await
+    }
+
     pub async fn save_provider_api_key(
         &self,
         provider_id: String,

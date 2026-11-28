@@ -232,7 +232,10 @@ pub struct ProvidersTabView {
     back_btn_focus: FocusHandle,
     add_refresh_focus: FocusHandle,
     save_key_btn_focus: FocusHandle,
+    save_url_btn_focus: FocusHandle,
+    reset_url_btn_focus: FocusHandle,
     oauth_btn_focus: FocusHandle,
+    oauth_prompt_submit_focus: FocusHandle,
     hdr_search_btn_focus: FocusHandle,
     hdr_refresh_btn_focus: FocusHandle,
     hdr_add_model_btn_focus: FocusHandle,
@@ -265,8 +268,13 @@ pub struct ProvidersTabView {
     revision: Option<String>,
     editable_rows: Vec<EditableModelRow>,
     saving: bool,
+    endpoint_saving: bool,
+    auth_method_oauth: bool,
     oauth_pending: bool,
+    oauth_flow_id: Option<String>,
     oauth_code_hint: Option<SharedString>,
+    oauth_prompt_id: Option<String>,
+    oauth_prompt_input: Entity<InputState>,
     loading: bool,
     generation: u64,
     window: gpui::AnyWindowHandle,
@@ -310,6 +318,7 @@ impl ProvidersTabView {
                 .masked(true)
         });
         let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("128K"));
+        let oauth_prompt_input = cx.new(|cx| InputState::new(window, cx).placeholder("输入授权码"));
 
         let mut subs = vec![
             cx.subscribe(
@@ -382,7 +391,11 @@ impl ProvidersTabView {
                             cx,
                         ) =>
                 {
-                    this.save_builtin_api_key(window, cx);
+                    if this.read_key(cx).is_empty() {
+                        this.save_builtin_endpoint(false, window, cx);
+                    } else {
+                        this.save_builtin_api_key(window, cx);
+                    }
                 }
                 _ => {}
             },
@@ -443,7 +456,10 @@ impl ProvidersTabView {
         let back_btn_focus = cx.focus_handle().tab_stop(true);
         let add_refresh_focus = cx.focus_handle().tab_stop(true);
         let save_key_btn_focus = cx.focus_handle().tab_stop(true);
+        let save_url_btn_focus = cx.focus_handle().tab_stop(true);
+        let reset_url_btn_focus = cx.focus_handle().tab_stop(true);
         let oauth_btn_focus = cx.focus_handle().tab_stop(true);
+        let oauth_prompt_submit_focus = cx.focus_handle().tab_stop(true);
         let hdr_search_btn_focus = cx.focus_handle().tab_stop(true);
         let hdr_refresh_btn_focus = cx.focus_handle().tab_stop(true);
         let hdr_add_model_btn_focus = cx.focus_handle().tab_stop(true);
@@ -456,7 +472,10 @@ impl ProvidersTabView {
             &back_btn_focus,
             &add_refresh_focus,
             &save_key_btn_focus,
+            &save_url_btn_focus,
+            &reset_url_btn_focus,
             &oauth_btn_focus,
+            &oauth_prompt_submit_focus,
             &hdr_search_btn_focus,
             &hdr_refresh_btn_focus,
             &hdr_add_model_btn_focus,
@@ -514,7 +533,10 @@ impl ProvidersTabView {
             back_btn_focus,
             add_refresh_focus,
             save_key_btn_focus,
+            save_url_btn_focus,
+            reset_url_btn_focus,
             oauth_btn_focus,
+            oauth_prompt_submit_focus,
             hdr_search_btn_focus,
             hdr_refresh_btn_focus,
             hdr_add_model_btn_focus,
@@ -547,8 +569,13 @@ impl ProvidersTabView {
             revision: None,
             editable_rows: Vec::new(),
             saving: false,
+            endpoint_saving: false,
+            auth_method_oauth: false,
             oauth_pending: false,
+            oauth_flow_id: None,
             oauth_code_hint: None,
+            oauth_prompt_id: None,
+            oauth_prompt_input,
             loading: false,
             generation: 0,
             window: window.window_handle(),
@@ -1294,13 +1321,35 @@ impl ProvidersTabView {
             .and_then(|list| list.iter().find(|p| p.id == provider_id));
         let is_custom = prov_entry.and_then(|p| p.custom).unwrap_or(false);
         let is_configured = prov_entry.and_then(|p| p.configured) == Some(true);
-        let is_oauth_only = prov_entry.is_some_and(|p| !p.supports_api_key && p.supports_oauth);
+        let supports_api_key = prov_entry.map(|p| p.supports_api_key).unwrap_or(true);
+        let supports_oauth = prov_entry.map(|p| p.supports_oauth).unwrap_or(false);
+        let use_oauth = !supports_api_key
+            || (supports_oauth && prov_entry.and_then(|p| p.auth_type.as_deref()) == Some("oauth"));
+        let initial_url = prov_entry
+            .and_then(|p| {
+                p.configured_base_url
+                    .clone()
+                    .or_else(|| p.default_base_url.clone())
+            })
+            .unwrap_or_default();
+        let initial_acc = prov_entry
+            .and_then(|p| p.cloudflare_account_id.clone())
+            .unwrap_or_default();
+        let initial_gw = prov_entry
+            .and_then(|p| p.cloudflare_gateway_id.clone())
+            .unwrap_or_default();
 
         self.page_slide.start(1.0, cx);
         self.body_scroll.set_offset(point(px(0.0), px(0.0)));
         self.reset_form();
+        self.endpoint_saving = false;
+        self.auth_method_oauth = use_oauth;
         self.oauth_pending = false;
+        self.oauth_flow_id = None;
         self.oauth_code_hint = None;
+        self.oauth_prompt_id = None;
+        self.oauth_prompt_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
         self.clear_key(window, cx);
         self.search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
@@ -1312,11 +1361,11 @@ impl ProvidersTabView {
         self.provider_name_input
             .update(cx, |i, cx| i.set_value(pname, window, cx));
         self.base_url_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+            .update(cx, |i, cx| i.set_value(initial_url, window, cx));
         self.account_id_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+            .update(cx, |i, cx| i.set_value(initial_acc, window, cx));
         self.gateway_id_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+            .update(cx, |i, cx| i.set_value(initial_gw, window, cx));
 
         if is_custom {
             self.loading = true;
@@ -1350,7 +1399,7 @@ impl ProvidersTabView {
             self.detail_kbd_active = from_keyboard;
             self.detail_last_pointer = from_keyboard.then(|| window.mouse_position());
             self.detail_list_focus.focus(window, cx);
-        } else if is_oauth_only {
+        } else if use_oauth {
             self.oauth_btn_focus.focus(window, cx);
         } else if matches!(
             provider_id.as_str(),
@@ -1636,13 +1685,27 @@ impl ProvidersTabView {
                         .and_then(Value::as_str)
                         .filter(|s| !s.is_empty())
                         .map(|s| SharedString::from(format!("授权码：{s}")));
-                    let _ = weak.update(cx, |this, cx| {
+                    let fid = val.get("flowId").and_then(Value::as_str).map(str::to_owned);
+                    let prompt_id = val
+                        .get("prompt")
+                        .and_then(|p| p.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let _ = weak.update_in(cx, |this, window, cx| {
                         if this.generation == generation {
+                            this.oauth_flow_id = fid.clone();
                             this.oauth_code_hint = code_hint;
+                            if prompt_id.is_some() && this.oauth_prompt_id != prompt_id {
+                                this.oauth_prompt_id = prompt_id;
+                                this.oauth_prompt_input.update(cx, |i, cx| {
+                                    i.set_value("", window, cx);
+                                    i.focus(window, cx);
+                                });
+                            }
                             cx.notify();
                         }
                     });
-                    val.get("flowId").and_then(Value::as_str).map(str::to_owned)
+                    fid
                 }
                 Err(err) => {
                     let _ = weak.update(cx, |this, cx| {
@@ -1700,7 +1763,9 @@ impl ProvidersTabView {
                     let _ = weak.update(cx, |this, cx| {
                         if this.generation == generation {
                             this.oauth_pending = false;
+                            this.oauth_flow_id = None;
                             this.oauth_code_hint = None;
+                            this.oauth_prompt_id = None;
                             cx.emit(ProvidersTabEvent::CredentialsSaved);
                             cx.emit(ProvidersTabEvent::Notice("账号已授权。".into()));
                             cx.notify();
@@ -1718,14 +1783,147 @@ impl ProvidersTabView {
                     let _ = weak.update(cx, |this, cx| {
                         if this.generation == generation {
                             this.oauth_pending = false;
+                            this.oauth_flow_id = None;
                             this.oauth_code_hint = None;
+                            this.oauth_prompt_id = None;
                             this.key_error = Some(msg.into());
                             cx.notify();
                         }
                     });
                     break;
                 }
+                let next_prompt_id = st
+                    .get("prompt")
+                    .and_then(|p| p.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let _ = weak.update_in(cx, |this, window, cx| {
+                    if this.generation == generation && this.oauth_prompt_id != next_prompt_id {
+                        this.oauth_prompt_id = next_prompt_id.clone();
+                        if next_prompt_id.is_some() {
+                            this.oauth_prompt_input.update(cx, |i, cx| {
+                                i.set_value("", window, cx);
+                                i.focus(window, cx);
+                            });
+                        }
+                        cx.notify();
+                    }
+                });
             }
+        })
+        .detach();
+    }
+
+    fn submit_builtin_oauth_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(provider), Some(flow_id), Some(prompt_id)) = (
+            self.active_provider_id.clone(),
+            self.oauth_flow_id.clone(),
+            self.oauth_prompt_id.clone(),
+        ) else {
+            return;
+        };
+        let val = self.oauth_prompt_input.read(cx).value().trim().to_owned();
+        if val.is_empty() {
+            return;
+        }
+        let generation = self.generation;
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client
+                .respond_auth_flow(provider, "oauth".into(), flow_id, prompt_id, val)
+                .await;
+            let _ = weak.update_in(cx, |this, window, cx| {
+                if this.generation == generation {
+                    match res {
+                        Ok(_) => {
+                            this.oauth_prompt_id = None;
+                            this.oauth_prompt_input
+                                .update(cx, |i, cx| i.set_value("", window, cx));
+                        }
+                        Err(err) => {
+                            this.key_error = Some(err.to_string().into());
+                        }
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn save_builtin_endpoint(
+        &mut self,
+        reset_to_default: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.saving || self.endpoint_saving || self.inline_edit_mode {
+            return;
+        }
+        let Some(provider) = self.active_provider_id.clone() else {
+            return;
+        };
+        let snap = self.client.snapshot();
+        let entry = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider));
+        let default_url = entry
+            .and_then(|p| p.default_base_url.clone())
+            .unwrap_or_default();
+        let payload_url = if reset_to_default {
+            self.base_url_input
+                .update(cx, |i, cx| i.set_value(default_url.clone(), window, cx));
+            if entry.and_then(|p| p.configured_base_url.as_ref()).is_none() {
+                self.key_error = None;
+                cx.notify();
+                return;
+            }
+            None
+        } else {
+            let raw = self.base_url_input.read(cx).value().trim().to_owned();
+            if raw.is_empty()
+                || (!default_url.is_empty()
+                    && raw.trim_end_matches('/') == default_url.trim_end_matches('/'))
+            {
+                None
+            } else {
+                Some(raw)
+            }
+        };
+        self.endpoint_saving = true;
+        self.key_error = None;
+        cx.notify();
+        let generation = self.generation;
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client.patch_provider_endpoint(provider, payload_url).await;
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, _window, cx| {
+                this.endpoint_saving = false;
+                if this.generation != generation {
+                    return;
+                }
+                match res {
+                    Ok(_) => {
+                        cx.emit(ProvidersTabEvent::Notice("服务地址已保存。".into()));
+                    }
+                    Err(ClientError::BadRequest { message, .. }) => {
+                        this.key_error = Some(if message.is_empty() {
+                            "服务地址无效。".into()
+                        } else {
+                            message.into()
+                        });
+                    }
+                    Err(err) => {
+                        this.key_error = Some(err.to_string().into());
+                    }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
@@ -1776,11 +1974,45 @@ impl ProvidersTabView {
             return;
         }
         self.key_error = None;
-        let base_url = if is_cf_workers || is_cf_gateway {
-            None
-        } else {
+        let snap = self.client.snapshot();
+        let entry = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider));
+        let endpoint_mode = entry.and_then(|p| p.endpoint_mode.as_deref()).unwrap_or(
+            if is_cf_workers || is_cf_gateway {
+                "cloudflare_template"
+            } else if matches!(
+                provider.as_str(),
+                "opencode-go" | "opencode" | "openrouter" | "fireworks"
+            ) {
+                "multi_endpoint"
+            } else if matches!(
+                provider.as_str(),
+                "cstoa" | "openai-codex" | "github-copilot"
+            ) {
+                "managed_oauth"
+            } else {
+                "single"
+            },
+        );
+        let base_url = if endpoint_mode == "single" {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
-            (!b.is_empty()).then_some(b)
+            let def = entry
+                .and_then(|p| p.default_base_url.as_deref())
+                .unwrap_or("");
+            let has_override = entry
+                .and_then(|p| p.configured_base_url.as_deref())
+                .is_some();
+            if !b.is_empty() && b.trim_end_matches('/') != def.trim_end_matches('/') {
+                Some(b)
+            } else if has_override && !def.is_empty() {
+                Some(def.to_owned())
+            } else {
+                None
+            }
+        } else {
+            None
         };
         self.saving = true;
         cx.notify();
@@ -1806,10 +2038,6 @@ impl ProvidersTabView {
                 match res {
                     Ok(_) => {
                         this.clear_key(window, cx);
-                        this.account_id_input
-                            .update(cx, |i, cx| i.set_value("", window, cx));
-                        this.gateway_id_input
-                            .update(cx, |i, cx| i.set_value("", window, cx));
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
                     }
@@ -2752,7 +2980,46 @@ impl Render for ProvidersTabView {
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| pid_owned.clone());
             let is_configured = prov_entry.and_then(|p| p.configured) == Some(true);
-            let is_oauth_only = prov_entry.is_some_and(|p| !p.supports_api_key && p.supports_oauth);
+            let supports_api_key = prov_entry.map(|p| p.supports_api_key).unwrap_or(true);
+            let supports_oauth = prov_entry.map(|p| p.supports_oauth).unwrap_or(false);
+            let is_dual_auth = supports_api_key && supports_oauth;
+            let use_oauth = !supports_api_key || (supports_oauth && self.auth_method_oauth);
+            let can_remove = prov_entry.is_some_and(|p| {
+                p.auth_type.is_some() || p.requires_login || p.configured_base_url.is_some()
+            });
+            let is_env_only_cred = prov_entry.is_some_and(|p| {
+                p.credential_source.as_deref() == Some("env") && p.auth_type.is_none()
+            });
+            let endpoint_mode = prov_entry
+                .and_then(|p| p.endpoint_mode.as_deref())
+                .unwrap_or(
+                    if matches!(
+                        pid_owned.as_str(),
+                        "cloudflare-workers-ai" | "cloudflare-ai-gateway"
+                    ) {
+                        "cloudflare_template"
+                    } else if matches!(
+                        pid_owned.as_str(),
+                        "opencode-go" | "opencode" | "openrouter" | "fireworks"
+                    ) {
+                        "multi_endpoint"
+                    } else if matches!(
+                        pid_owned.as_str(),
+                        "cstoa" | "openai-codex" | "github-copilot"
+                    ) {
+                        "managed_oauth"
+                    } else {
+                        "single"
+                    },
+                );
+            let default_base_url = prov_entry
+                .and_then(|p| p.default_base_url.clone())
+                .unwrap_or_default();
+            let configured_base_url = prov_entry.and_then(|p| p.configured_base_url.clone());
+            let effective_base_url = configured_base_url
+                .clone()
+                .unwrap_or_else(|| default_base_url.clone());
+            let endpoint_summary = prov_entry.and_then(|p| p.endpoint_summary.clone());
             let filter_q = self.search_input.read(cx).value().trim().to_lowercase();
             let all_provider_models: Vec<_> = snap
                 .models
@@ -2797,7 +3064,7 @@ impl Render for ProvidersTabView {
                 .iter()
                 .map(|m| DetailTarget::Model(format!("{}/{}", m.provider, m.id)))
                 .collect();
-            if is_configured {
+            if can_remove {
                 detail_targets.push(DetailTarget::RemoveCredentials);
             }
             let detail_clamped_idx = self
@@ -2817,6 +3084,16 @@ impl Render for ProvidersTabView {
                     KbdDynamicSpec::control("detail-save-key", KbdRailPlacement::LeftOutside)
                         .with_tone(KbdTone::Accent),
                 )
+            } else if self.save_url_btn_focus.is_focused(window) {
+                Some(
+                    KbdDynamicSpec::control("detail-save-url", KbdRailPlacement::LeftOutside)
+                        .with_tone(KbdTone::Accent),
+                )
+            } else if self.reset_url_btn_focus.is_focused(window) {
+                Some(KbdDynamicSpec::control(
+                    "detail-reset-url",
+                    KbdRailPlacement::LeftOutside,
+                ))
             } else if self.oauth_btn_focus.is_focused(window) {
                 Some(
                     KbdDynamicSpec::control("detail-oauth-btn", KbdRailPlacement::LeftOutside)
@@ -3209,16 +3486,241 @@ impl Render for ProvidersTabView {
                 // 24px gap -> frameless 52px hairline rows (no `连接与凭据` heading)
                 .child({
                     let tr_oauth = self.detail_tracker.clone();
+                    let tr_save_url = self.detail_tracker.clone();
+                    let tr_reset_url = self.detail_tracker.clone();
                     let oauth_focused = self.oauth_btn_focus.is_focused(window);
+                    let cur_url_val = self.base_url_input.read(cx).value().trim().to_owned();
+                    let cur_key_empty = self.read_key(cx).is_empty();
+                    let url_differs_from_default = configured_base_url.is_some()
+                        || (!default_base_url.is_empty()
+                            && cur_url_val.trim_end_matches('/')
+                                != default_base_url.trim_end_matches('/'));
+                    let url_differs_from_effective = cur_url_val.trim_end_matches('/')
+                        != effective_base_url.trim_end_matches('/');
+                    let cur_acc = self.account_id_input.read(cx).value().trim().to_owned();
+                    let cur_gw = self.gateway_id_input.read(cx).value().trim().to_owned();
+                    let cf_preview = if is_cf_gateway {
+                        let a = if cur_acc.is_empty() {
+                            "{accountId}"
+                        } else {
+                            cur_acc.as_str()
+                        };
+                        let g = if cur_gw.is_empty() {
+                            "{gatewayId}"
+                        } else {
+                            cur_gw.as_str()
+                        };
+                        format!("gateway.ai.cloudflare.com/v1/{a}/{g}/*")
+                    } else {
+                        let a = if cur_acc.is_empty() {
+                            "{accountId}"
+                        } else {
+                            cur_acc.as_str()
+                        };
+                        format!("api.cloudflare.com/client/v4/accounts/{a}/ai/v1")
+                    };
+                    let readonly_url_text: SharedString = configured_base_url
+                        .clone()
+                        .or_else(|| {
+                            if is_cloudflare {
+                                Some(cf_preview)
+                            } else {
+                                endpoint_summary.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| "官方默认".to_owned())
+                        .into();
+                    let has_stale_override = configured_base_url.is_some();
+
                     div()
                         .mt(px(24.0))
                         .w_full()
                         .flex()
                         .flex_col()
-                        .children(is_oauth_only.then(|| {
+                        .children(is_dual_auth.then(|| {
+                            let oauth_sel = self.auth_method_oauth;
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(palette.border_subtle)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("登录方式")),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::XS)
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .id("providers-method-oauth-chip")
+                                                .test_support()
+                                                .a11y_toggle_button(
+                                                    "providers-method-oauth-chip",
+                                                    "账号授权",
+                                                    oauth_sel,
+                                                )
+                                                .h(height::COMPACT)
+                                                .px(px(10.0))
+                                                .rounded(radius::CONTROL)
+                                                .border_1()
+                                                .border_color(if oauth_sel {
+                                                    palette.border_subtle
+                                                } else {
+                                                    gpui_kit::transparent_black()
+                                                })
+                                                .bg(if oauth_sel {
+                                                    palette.bg_surface
+                                                } else {
+                                                    gpui_kit::transparent_black()
+                                                })
+                                                .text_color(if oauth_sel {
+                                                    palette.text_primary
+                                                } else {
+                                                    palette.text_secondary
+                                                })
+                                                .flex()
+                                                .items_center()
+                                                .hover(move |s| {
+                                                    if oauth_sel {
+                                                        s
+                                                    } else {
+                                                        s.bg(palette.bg_item_hover)
+                                                            .text_color(palette.text_primary)
+                                                    }
+                                                })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.auth_method_oauth = true;
+                                                    this.key_error = None;
+                                                    cx.notify();
+                                                }))
+                                                .child(cjk_inline_label("账号授权")),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .id("providers-method-apikey-chip")
+                                                .test_support()
+                                                .a11y_toggle_button(
+                                                    "providers-method-apikey-chip",
+                                                    "API Key",
+                                                    !oauth_sel,
+                                                )
+                                                .h(height::COMPACT)
+                                                .px(px(10.0))
+                                                .rounded(radius::CONTROL)
+                                                .border_1()
+                                                .border_color(if !oauth_sel {
+                                                    palette.border_subtle
+                                                } else {
+                                                    gpui_kit::transparent_black()
+                                                })
+                                                .bg(if !oauth_sel {
+                                                    palette.bg_surface
+                                                } else {
+                                                    gpui_kit::transparent_black()
+                                                })
+                                                .text_color(if !oauth_sel {
+                                                    palette.text_primary
+                                                } else {
+                                                    palette.text_secondary
+                                                })
+                                                .flex()
+                                                .items_center()
+                                                .hover(move |s| {
+                                                    if !oauth_sel {
+                                                        s
+                                                    } else {
+                                                        s.bg(palette.bg_item_hover)
+                                                            .text_color(palette.text_primary)
+                                                    }
+                                                })
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.auth_method_oauth = false;
+                                                    this.key_error = None;
+                                                    cx.notify();
+                                                }))
+                                                .child("API Key"),
+                                        ),
+                                )
+                        }))
+                        .children(
+                            (matches!(
+                                endpoint_mode,
+                                "multi_endpoint" | "managed_oauth" | "cloudflare_template"
+                            ) && !(is_cloudflare && !use_oauth))
+                                .then(|| {
+                                    let tr_rst_ro = tr_reset_url.clone();
+                                    div()
+                                        .w_full()
+                                        .h(px(52.0))
+                                        .border_b_1()
+                                        .border_color(palette.border_subtle)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::LG)
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .w(px(184.0))
+                                                .flex_shrink_0()
+                                                .text_color(palette.text_secondary)
+                                                .child(cjk_inline_label("服务地址")),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .font_family(mono_family.clone())
+                                                .flex_1()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_color(palette.text_secondary)
+                                                .child(readonly_url_text.clone()),
+                                        )
+                                        .children(has_stale_override.then(|| {
+                                            apply_scale(div(), scale::UI_MEDIUM)
+                                                .id("providers-builtin-reset-url-btn")
+                                                .test_support()
+                                                .a11y_button(
+                                                    "providers-builtin-reset-url-btn",
+                                                    "恢复默认",
+                                                )
+                                                .track_focus(&self.reset_url_btn_focus)
+                                                .mr(px(-8.0))
+                                                .h(height::COMPACT)
+                                                .px(space::SM)
+                                                .rounded(radius::CONTROL)
+                                                .text_color(palette.text_secondary)
+                                                .flex()
+                                                .items_center()
+                                                .flex_shrink_0()
+                                                .hover(|s| {
+                                                    s.bg(palette.bg_item_hover)
+                                                        .text_color(palette.text_primary)
+                                                })
+                                                .on_click(cx.listener(|this, _, w, cx| {
+                                                    this.save_builtin_endpoint(true, w, cx);
+                                                }))
+                                                .on_prepaint(move |bounds, _, _| {
+                                                    tr_rst_ro.set("detail-reset-url", bounds)
+                                                })
+                                                .child(cjk_inline_label("恢复默认"))
+                                        }))
+                                }),
+                        )
+                        .children(use_oauth.then(|| {
                             let status_label: SharedString =
                                 self.oauth_code_hint.clone().unwrap_or_else(|| {
-                                    if is_configured {
+                                    if prov_entry
+                                        .and_then(|p| p.auth_type.as_deref())
+                                        .is_some_and(|t| t == "oauth")
+                                    {
                                         "已授权".into()
                                     } else {
                                         "未授权".into()
@@ -3226,7 +3728,10 @@ impl Render for ProvidersTabView {
                                 });
                             let action_label = if self.oauth_pending {
                                 "授权中…"
-                            } else if is_configured {
+                            } else if prov_entry
+                                .and_then(|p| p.auth_type.as_deref())
+                                .is_some_and(|t| t == "oauth")
+                            {
                                 "重新授权"
                             } else {
                                 "开始授权"
@@ -3328,7 +3833,54 @@ impl Render for ProvidersTabView {
                                         .child(cjk_inline_label(action_label)),
                                 )
                         }))
-                        .children((!is_oauth_only && is_cloudflare).then(|| {
+                        .children((use_oauth && self.oauth_prompt_id.is_some()).then(|| {
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(palette.border_subtle)
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("授权码")),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.oauth_prompt_input)
+                                            .accessibility_id("providers-oauth-prompt-input")
+                                            .aria_label("授权码")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .p_0(),
+                                    ),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("providers-oauth-prompt-submit-btn")
+                                        .test_support()
+                                        .a11y_button("providers-oauth-prompt-submit-btn", "提交")
+                                        .track_focus(&self.oauth_prompt_submit_focus)
+                                        .mr(px(-8.0))
+                                        .h(height::COMPACT)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.accent_ink)
+                                        .flex()
+                                        .items_center()
+                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.submit_builtin_oauth_prompt(w, cx);
+                                        }))
+                                        .child(cjk_inline_label("提交")),
+                                )
+                        }))
+                        .children((!use_oauth && is_cloudflare).then(|| {
                             div()
                                 .w_full()
                                 .h(px(52.0))
@@ -3364,7 +3916,7 @@ impl Render for ProvidersTabView {
                                     ),
                                 )
                         }))
-                        .children((!is_oauth_only && is_cf_gateway).then(|| {
+                        .children((!use_oauth && is_cf_gateway).then(|| {
                             div()
                                 .w_full()
                                 .h(px(52.0))
@@ -3400,7 +3952,60 @@ impl Render for ProvidersTabView {
                                     ),
                                 )
                         }))
-                        .children((!is_oauth_only && !is_cloudflare).then(|| {
+                        .children((!use_oauth && is_cloudflare).then(|| {
+                            let tr_rst_cf = tr_reset_url.clone();
+                            div()
+                                .w_full()
+                                .h(px(52.0))
+                                .border_b_1()
+                                .border_color(palette.border_subtle)
+                                .flex()
+                                .items_center()
+                                .gap(space::LG)
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .w(px(184.0))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("服务地址")),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .font_family(mono_family.clone())
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(palette.text_secondary)
+                                        .child(readonly_url_text.clone()),
+                                )
+                                .children(has_stale_override.then(|| {
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("providers-builtin-reset-url-btn")
+                                        .test_support()
+                                        .a11y_button("providers-builtin-reset-url-btn", "恢复默认")
+                                        .track_focus(&self.reset_url_btn_focus)
+                                        .mr(px(-8.0))
+                                        .h(height::COMPACT)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_secondary)
+                                        .flex()
+                                        .items_center()
+                                        .flex_shrink_0()
+                                        .hover(|s| {
+                                            s.bg(palette.bg_item_hover)
+                                                .text_color(palette.text_primary)
+                                        })
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.save_builtin_endpoint(true, w, cx);
+                                        }))
+                                        .on_prepaint(move |bounds, _, _| {
+                                            tr_rst_cf.set("detail-reset-url", bounds)
+                                        })
+                                        .child(cjk_inline_label("恢复默认"))
+                                }))
+                        }))
+                        .children((!use_oauth && endpoint_mode == "single").then(|| {
                             div()
                                 .w_full()
                                 .h(px(52.0))
@@ -3435,8 +4040,65 @@ impl Render for ProvidersTabView {
                                             .p_0(),
                                     ),
                                 )
+                                .children(url_differs_from_default.then(|| {
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("providers-builtin-reset-url-btn")
+                                        .test_support()
+                                        .a11y_button("providers-builtin-reset-url-btn", "恢复默认")
+                                        .track_focus(&self.reset_url_btn_focus)
+                                        .h(height::COMPACT)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_secondary)
+                                        .flex()
+                                        .items_center()
+                                        .flex_shrink_0()
+                                        .hover(|s| {
+                                            s.bg(palette.bg_item_hover)
+                                                .text_color(palette.text_primary)
+                                        })
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.save_builtin_endpoint(true, w, cx);
+                                        }))
+                                        .on_prepaint(move |bounds, _, _| {
+                                            tr_reset_url.set("detail-reset-url", bounds)
+                                        })
+                                        .child(cjk_inline_label("恢复默认"))
+                                }))
+                                .children((url_differs_from_effective && cur_key_empty).then(
+                                    || {
+                                        apply_scale(div(), scale::UI_MEDIUM)
+                                            .id("providers-builtin-save-url-btn")
+                                            .test_support()
+                                            .a11y_button(
+                                                "providers-builtin-save-url-btn",
+                                                "保存地址",
+                                            )
+                                            .track_focus(&self.save_url_btn_focus)
+                                            .mr(px(-8.0))
+                                            .h(height::COMPACT)
+                                            .px(space::SM)
+                                            .rounded(radius::CONTROL)
+                                            .text_color(palette.accent_ink)
+                                            .flex()
+                                            .items_center()
+                                            .flex_shrink_0()
+                                            .hover(|s| s.bg(palette.bg_item_hover))
+                                            .on_click(cx.listener(|this, _, w, cx| {
+                                                this.save_builtin_endpoint(false, w, cx);
+                                            }))
+                                            .on_prepaint(move |bounds, _, _| {
+                                                tr_save_url.set("detail-save-url", bounds)
+                                            })
+                                            .child(cjk_inline_label(if self.endpoint_saving {
+                                                "保存中…"
+                                            } else {
+                                                "保存地址"
+                                            }))
+                                    },
+                                ))
                         }))
-                        .children((!is_oauth_only).then(|| {
+                        .children((!use_oauth).then(|| {
                             div()
                                 .w_full()
                                 .h(px(52.0))
@@ -3493,6 +4155,12 @@ impl Render for ProvidersTabView {
                                         })
                                         .child(cjk_inline_label("API 密钥")),
                                 )
+                                .children(is_env_only_cred.then(|| {
+                                    apply_scale(div(), scale::CAPTION)
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_muted)
+                                        .child(cjk_inline_label("环境变量"))
+                                }))
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Input::new(&self.api_key_input)
@@ -3804,7 +4472,7 @@ impl Render for ProvidersTabView {
                         }))
                         .child(model_rows),
                 )
-                .children(is_configured.then(|| {
+                .children(can_remove.then(|| {
                     div()
                         .mt(px(40.0))
                         .w_full()
@@ -3981,7 +4649,9 @@ impl Render for ProvidersTabView {
             let track_key = SharedString::from(format!("cfg-row-{row_slot}"));
             let row_kbd_selected = list_focused && kbd_active && clamped_idx == row_slot;
             let (status_label, status_color, action_label) = if prov.requires_login {
-                ("凭据已失效，请重新配置", palette.status_warning, "重新登录")
+                ("凭据已失效", palette.status_warning, "重新登录")
+            } else if prov.credential_source.as_deref() == Some("env") && prov.auth_type.is_none() {
+                ("环境变量", palette.text_secondary, "管理")
             } else {
                 ("已连接", palette.text_secondary, "管理")
             };

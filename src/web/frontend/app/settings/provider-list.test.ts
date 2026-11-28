@@ -35,6 +35,7 @@ test("已配置与可添加互斥，CSTOA置顶，失效凭据留在已配置列
 test("服务说明区分配置、授权、失效和能力，不把有密钥表述为已验证可调用", () => {
 	assert.equal(providerDescription(provider("key", { type: "api_key" })), "API key · 已配置");
 	assert.equal(providerDescription(provider("oauth", { type: "oauth" })), "账号授权 · 已登录");
+	assert.equal(providerDescription(provider("env-only", { configured: true, credentialSource: "env" })), "环境变量");
 	assert.equal(providerDescription(provider("expired", { requiresLogin: true })), "凭据已失效 · 需要重新登录");
 	assert.equal(providerDescription(provider("both", { supportsOAuth: true })), "OAuth · API key");
 });

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 
 use pi_ai::ModelsRefreshOptions;
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,27 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{AuthRuntime, oa::validate_base};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderEndpointMode {
+    Single,
+    MultiEndpoint,
+    CloudflareTemplate,
+    ManagedOauth,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEndpointMetadata {
+    pub endpoint_mode: ProviderEndpointMode,
+    pub default_base_url: Option<String>,
+    pub configured_base_url: Option<String>,
+    pub endpoint_summary: Option<String>,
+    pub cloudflare_account_id: Option<String>,
+    pub cloudflare_gateway_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -129,6 +151,55 @@ fn config(value: Option<Value>) -> Result<Value, CustomProviderError> {
 }
 fn reserved(id: &str) -> bool {
     id == "cstoa" || pi_ai::builtin_providers().iter().any(|p| p.id() == id)
+}
+
+pub fn classify_builtin_endpoint_mode(provider_id: &str) -> ProviderEndpointMode {
+    match provider_id {
+        "cstoa" | "openai-codex" | "github-copilot" => ProviderEndpointMode::ManagedOauth,
+        "cloudflare-workers-ai" | "cloudflare-ai-gateway" => {
+            ProviderEndpointMode::CloudflareTemplate
+        }
+        "opencode-go" | "opencode" | "openrouter" | "fireworks" => {
+            ProviderEndpointMode::MultiEndpoint
+        }
+        _ => ProviderEndpointMode::Single,
+    }
+}
+
+fn default_builtin_base_urls() -> &'static BTreeMap<String, String> {
+    static DEFAULTS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    DEFAULTS.get_or_init(|| {
+        let mut map = BTreeMap::new();
+        for p in pi_ai::builtin_providers() {
+            let pid = p.id().to_owned();
+            if classify_builtin_endpoint_mode(&pid) == ProviderEndpointMode::Single
+                && let Some(first) = p.get_models().into_iter().next()
+                && !first.base_url.is_empty()
+            {
+                map.insert(pid, first.base_url);
+            }
+        }
+        map
+    })
+}
+
+pub fn default_builtin_base_url(provider_id: &str) -> Option<&'static str> {
+    default_builtin_base_urls()
+        .get(provider_id)
+        .map(String::as_str)
+}
+
+fn normalize_endpoint_compare(url: &str) -> &str {
+    url.trim().trim_end_matches('/')
+}
+
+fn strip_url_scheme_and_slash(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed)
+        .to_owned()
 }
 impl AuthRuntime {
     /// Defaults for a new editor row; no local table of model capabilities is maintained.
@@ -375,6 +446,102 @@ impl AuthRuntime {
         self.invalidate_account();
         Ok(json!({"id":id}))
     }
+    pub fn read_configured_base_urls(
+        &self,
+    ) -> Result<BTreeMap<String, String>, CustomProviderError> {
+        let value = config(
+            self.files
+                .read("models.json")
+                .map_err(CustomProviderError::config_unavailable)?,
+        )?;
+        let mut out = BTreeMap::new();
+        for (id, entry) in value["providers"].as_object().expect("validated") {
+            if !is_custom(entry)
+                && let Some(url) = entry
+                    .get("baseUrl")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            {
+                out.insert(id.clone(), url.to_owned());
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn provider_endpoint_metadata(
+        &self,
+        provider_id: &str,
+        custom: bool,
+        configured_base_url: Option<String>,
+        stored_env: Option<&pi_ai::ProviderEnv>,
+    ) -> ProviderEndpointMetadata {
+        if custom {
+            return ProviderEndpointMetadata {
+                endpoint_mode: ProviderEndpointMode::Custom,
+                default_base_url: None,
+                configured_base_url: None,
+                endpoint_summary: None,
+                cloudflare_account_id: None,
+                cloudflare_gateway_id: None,
+            };
+        }
+        let mode = classify_builtin_endpoint_mode(provider_id);
+        let default_base_url = (mode == ProviderEndpointMode::Single)
+            .then(|| default_builtin_base_url(provider_id).map(str::to_owned))
+            .flatten();
+        let cf_acc = stored_env
+            .and_then(|e| e.get("CLOUDFLARE_ACCOUNT_ID"))
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let cf_gw = stored_env
+            .and_then(|e| e.get("CLOUDFLARE_GATEWAY_ID"))
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let endpoint_summary = match mode {
+            ProviderEndpointMode::MultiEndpoint => match provider_id {
+                "opencode-go" => Some("opencode.ai/inference/go/*".to_owned()),
+                "opencode" => Some("opencode.ai/inference/*".to_owned()),
+                "openrouter" => Some("openrouter.ai/api/*".to_owned()),
+                "fireworks" => Some("api.fireworks.ai/inference/*".to_owned()),
+                _ => None,
+            },
+            ProviderEndpointMode::CloudflareTemplate => match provider_id {
+                "cloudflare-workers-ai" => {
+                    let acc = cf_acc.as_deref().unwrap_or("{accountId}");
+                    Some(format!("api.cloudflare.com/client/v4/accounts/{acc}/ai/v1"))
+                }
+                "cloudflare-ai-gateway" => {
+                    let acc = cf_acc.as_deref().unwrap_or("{accountId}");
+                    let gw = cf_gw.as_deref().unwrap_or("{gatewayId}");
+                    Some(format!("gateway.ai.cloudflare.com/v1/{acc}/{gw}/*"))
+                }
+                _ => None,
+            },
+            ProviderEndpointMode::ManagedOauth => match provider_id {
+                "cstoa" => Some(
+                    self.runtime
+                        .models()
+                        .get_provider("cstoa")
+                        .and_then(|p| p.base_url().map(strip_url_scheme_and_slash))
+                        .unwrap_or_else(|| "www.cstoa.top".to_owned()),
+                ),
+                "openai-codex" => Some("chatgpt.com/backend-api".to_owned()),
+                "github-copilot" => Some("api.individual.githubcopilot.com".to_owned()),
+                _ => None,
+            },
+            ProviderEndpointMode::Single | ProviderEndpointMode::Custom => None,
+        };
+        ProviderEndpointMetadata {
+            endpoint_mode: mode,
+            default_base_url,
+            configured_base_url,
+            endpoint_summary,
+            cloudflare_account_id: cf_acc,
+            cloudflare_gateway_id: cf_gw,
+        }
+    }
+
     pub async fn with_provider_endpoint<T, Fut>(
         &self,
         provider_id: &str,
@@ -393,10 +560,27 @@ impl AuthRuntime {
         provider_id: &str,
         base_url: &str,
     ) -> Result<String, CustomProviderError> {
-        if provider_id == "cstoa" {
-            return Err(CustomProviderError::invalid(
-                "CSTOA 使用固定服务地址，无需自定义 Provider。",
-            ));
+        if reserved(provider_id) {
+            match classify_builtin_endpoint_mode(provider_id) {
+                ProviderEndpointMode::ManagedOauth => {
+                    return Err(CustomProviderError::invalid(if provider_id == "cstoa" {
+                        "CSTOA 使用固定服务地址，无需自定义 Provider。"
+                    } else {
+                        "该服务使用托管授权地址，不支持修改服务地址。"
+                    }));
+                }
+                ProviderEndpointMode::MultiEndpoint => {
+                    return Err(CustomProviderError::invalid(
+                        "该服务按模型分流多协议地址，不支持单地址覆写。",
+                    ));
+                }
+                ProviderEndpointMode::CloudflareTemplate => {
+                    return Err(CustomProviderError::invalid(
+                        "Cloudflare 服务地址由 Account ID 与 Gateway ID 自动生成。",
+                    ));
+                }
+                ProviderEndpointMode::Single | ProviderEndpointMode::Custom => {}
+            }
         }
         let trimmed = base_url.trim();
         if trimmed.is_empty() || base_url.len() > 2048 {
@@ -431,6 +615,10 @@ impl AuthRuntime {
         Fut: std::future::Future<Output = Result<T, String>>,
     {
         let endpoint = self.validate_provider_endpoint(provider_id, base_url)?;
+        let matches_default = reserved(provider_id)
+            && default_builtin_base_url(provider_id).is_some_and(|def| {
+                normalize_endpoint_compare(def) == normalize_endpoint_compare(&endpoint)
+            });
         // Hold one outer ActivityLease across initial write, local refresh, login, and rollback
         // so an update handoff cannot close the gate mid-sequence and strand a half-committed BaseURL.
         let _activity = self
@@ -451,19 +639,46 @@ impl AuthRuntime {
         if previous.as_ref().is_some_and(|v| !v.is_object()) {
             return Err(CustomProviderError::invalid("请求的 Provider 配置无效"));
         }
-        let mut updated = previous.clone().unwrap_or_else(|| json!({}));
-        updated["baseUrl"] = json!(endpoint);
-        if let Some(models) = updated.get_mut("models").and_then(Value::as_array_mut) {
-            for item in models {
-                if item
-                    .as_object()
-                    .is_some_and(|obj| obj.contains_key("baseUrl"))
-                {
-                    item["baseUrl"] = json!(endpoint);
+        if matches_default && previous.as_ref().and_then(|v| v.get("baseUrl")).is_none() {
+            drop(tx);
+            let output = login().await.map_err(CustomProviderError::invalid)?;
+            self.invalidate_account();
+            return Ok(output);
+        }
+        let committed_opt = if matches_default {
+            let mut next_obj = previous
+                .as_ref()
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            next_obj.remove("baseUrl");
+            if next_obj.is_empty() {
+                value["providers"]
+                    .as_object_mut()
+                    .expect("validated")
+                    .remove(provider_id);
+                None
+            } else {
+                let next_val = Value::Object(next_obj);
+                value["providers"][provider_id] = next_val.clone();
+                Some(next_val)
+            }
+        } else {
+            let mut updated = previous.clone().unwrap_or_else(|| json!({}));
+            updated["baseUrl"] = json!(endpoint);
+            if let Some(models) = updated.get_mut("models").and_then(Value::as_array_mut) {
+                for item in models {
+                    if item
+                        .as_object()
+                        .is_some_and(|obj| obj.contains_key("baseUrl"))
+                    {
+                        item["baseUrl"] = json!(endpoint);
+                    }
                 }
             }
-        }
-        value["providers"][provider_id] = updated.clone();
+            value["providers"][provider_id] = updated.clone();
+            Some(updated)
+        };
         tx.write("models.json", &value)
             .map_err(CustomProviderError::config_unavailable)?;
         drop(tx);
@@ -484,9 +699,9 @@ impl AuthRuntime {
         let endpoint_ok = self.runtime.get_error().is_none()
             && !refreshed.errors.contains_key(provider_id)
             && !provider_models.is_empty()
-            && provider_models.iter().all(|m| m.base_url == endpoint);
+            && (matches_default || provider_models.iter().all(|m| m.base_url == endpoint));
         if !endpoint_ok {
-            self.rollback_custom(provider_id, Some(&updated), previous.as_ref())
+            self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
                 .await
                 .map_err(CustomProviderError::config_unavailable)?;
             return Err(CustomProviderError::invalid(
@@ -499,12 +714,128 @@ impl AuthRuntime {
                 Ok(output)
             }
             Err(err) => {
-                self.rollback_custom(provider_id, Some(&updated), previous.as_ref())
+                self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
                     .await
                     .map_err(CustomProviderError::config_unavailable)?;
                 Err(CustomProviderError::invalid(err))
             }
         }
+    }
+
+    pub async fn update_provider_endpoint_checked(
+        &self,
+        provider_id: &str,
+        base_url: Option<&str>,
+    ) -> Result<Option<String>, CustomProviderError> {
+        if self.runtime.models().get_provider(provider_id).is_none() {
+            return Err(CustomProviderError::invalid("请求的模型服务不存在"));
+        }
+        let cleaned = base_url.map(str::trim).filter(|s| !s.is_empty());
+        let normalized_set = match cleaned {
+            None => None,
+            Some(raw) => {
+                let endpoint = self.validate_provider_endpoint(provider_id, raw)?;
+                let matches_default = reserved(provider_id)
+                    && default_builtin_base_url(provider_id).is_some_and(|def| {
+                        normalize_endpoint_compare(def) == normalize_endpoint_compare(&endpoint)
+                    });
+                (!matches_default).then_some(endpoint)
+            }
+        };
+
+        let _activity = self
+            .files
+            .enter_activity()
+            .map_err(CustomProviderError::config_unavailable)?;
+        let _serial = self.config_writes.lock().await;
+        let tx = self
+            .files
+            .transaction()
+            .await
+            .map_err(CustomProviderError::config_unavailable)?;
+        let mut value = config(Some(
+            tx.read("models.json")
+                .map_err(CustomProviderError::config_unavailable)?,
+        ))?;
+        let previous = value["providers"].get(provider_id).cloned();
+        if previous.as_ref().is_some_and(|v| !v.is_object()) {
+            return Err(CustomProviderError::invalid("请求的 Provider 配置无效"));
+        }
+        if !reserved(provider_id) && previous.as_ref().is_some_and(is_custom) {
+            return Err(CustomProviderError::invalid(
+                "自定义服务请通过自定义配置接口修改地址。",
+            ));
+        }
+        let committed_opt = match normalized_set {
+            None => {
+                let mut next_obj = previous
+                    .as_ref()
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                next_obj.remove("baseUrl");
+                if next_obj.is_empty() {
+                    value["providers"]
+                        .as_object_mut()
+                        .expect("validated")
+                        .remove(provider_id);
+                    None
+                } else {
+                    let next_val = Value::Object(next_obj);
+                    value["providers"][provider_id] = next_val.clone();
+                    Some(next_val)
+                }
+            }
+            Some(ref endpoint) => {
+                let mut updated = previous.clone().unwrap_or_else(|| json!({}));
+                updated["baseUrl"] = json!(endpoint);
+                if let Some(models) = updated.get_mut("models").and_then(Value::as_array_mut) {
+                    for item in models {
+                        if item
+                            .as_object()
+                            .is_some_and(|obj| obj.contains_key("baseUrl"))
+                        {
+                            item["baseUrl"] = json!(endpoint);
+                        }
+                    }
+                }
+                value["providers"][provider_id] = updated.clone();
+                Some(updated)
+            }
+        };
+        tx.write("models.json", &value)
+            .map_err(CustomProviderError::config_unavailable)?;
+        drop(tx);
+        let refreshed = self
+            .runtime
+            .refresh(Some(ModelsRefreshOptions {
+                providers: Some(vec![provider_id.into()]),
+                allow_network: Some(false),
+                force: Some(false),
+            }))
+            .await;
+        let provider_models: Vec<_> = self
+            .runtime
+            .get_all_models()
+            .into_iter()
+            .filter(|m| m.provider == provider_id)
+            .collect();
+        let endpoint_ok = self.runtime.get_error().is_none()
+            && !refreshed.errors.contains_key(provider_id)
+            && (provider_id == "cstoa" || !provider_models.is_empty())
+            && normalized_set
+                .as_ref()
+                .is_none_or(|ep| provider_models.iter().all(|m| &m.base_url == ep));
+        if !endpoint_ok {
+            self.rollback_custom(provider_id, committed_opt.as_ref(), previous.as_ref())
+                .await
+                .map_err(CustomProviderError::config_unavailable)?;
+            return Err(CustomProviderError::invalid(
+                "请求的 Provider 无法使用此 BaseURL，请检查模型配置",
+            ));
+        }
+        self.invalidate_account();
+        Ok(normalized_set)
     }
     async fn reload_custom(&self, id: &str, require_models: bool) -> bool {
         let result = self

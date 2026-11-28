@@ -1457,6 +1457,26 @@ impl AppHttpClient {
         .await
     }
 
+    pub async fn patch_provider_endpoint(
+        &self,
+        provider_id: &str,
+        base_url: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let body = match base_url.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(u) => json!({ "baseUrl": u }),
+            None => json!({ "baseUrl": Value::Null }),
+        };
+        self.request_value(
+            Method::PATCH,
+            &format!("/api/auth/{pid}/endpoint"),
+            Some(&body),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
     pub async fn logout_provider(&self, provider_id: &str) -> Result<Value, ClientError> {
         let pid = encode_segment(provider_id);
         self.request_value(

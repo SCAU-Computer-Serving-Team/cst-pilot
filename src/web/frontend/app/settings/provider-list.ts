@@ -27,6 +27,7 @@ export function providerDescription(provider: ProviderStatus) {
 	if (provider.type === "oauth") return "账号授权 · 已登录";
 	if (provider.custom) return provider.configured ? "自定义服务 · 已配置" : "自定义服务 · 尚未连接";
 	if (provider.type === "api_key") return "API key · 已配置";
+	if (provider.credentialSource === "env") return "环境变量";
 	if (provider.configured) return "配置文件 · 已连接";
 	return loginMethods(provider)
 		.map((method) => (method === "oauth" ? "OAuth" : "API key"))
