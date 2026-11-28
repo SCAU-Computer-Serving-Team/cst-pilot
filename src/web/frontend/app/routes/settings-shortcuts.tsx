@@ -33,7 +33,13 @@ const shortcutGroups = [
 
 export default function ShortcutSettings() {
 	return (
-		<>
+		<section
+			className="settings-shortcuts-pane"
+			aria-label="快捷键列表"
+			ref={(node) => {
+				if (node) node.tabIndex = -1;
+			}}
+		>
 			{shortcutGroups.map((group) => (
 				<SettingsSection title={group.title} key={group.title}>
 					<div className="settings-flat-list settings-shortcuts">
@@ -46,6 +52,6 @@ export default function ShortcutSettings() {
 					</div>
 				</SettingsSection>
 			))}
-		</>
+		</section>
 	);
 }

@@ -144,14 +144,24 @@ impl UpdateService {
             UpdateOptions::Trusted { client, launcher } => {
                 (Some(client), launcher, "尚未检查更新。")
             }
-            UpdateOptions::Compiled => match compiled_client(&root) {
-                Ok(client) => (
-                    Some(Arc::new(client)),
-                    Arc::new(NativeLauncher),
-                    "尚未检查更新。",
-                ),
-                Err(_) => (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。"),
-            },
+            UpdateOptions::Compiled => {
+                if cst_updater::manifest::compiled_manifest_url().is_err()
+                    || super::manifest::ReleaseKey::compiled().is_err()
+                {
+                    (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。")
+                } else if cst_os::KitLayout::new(&root).is_ok_and(|k| k.is_dev_workspace()) {
+                    (None, Arc::new(NativeLauncher), "仅发行版支持")
+                } else {
+                    match compiled_client(&root) {
+                        Ok(client) => (
+                            Some(Arc::new(client)),
+                            Arc::new(NativeLauncher),
+                            "尚未检查更新。",
+                        ),
+                        Err(_) => (None, Arc::new(NativeLauncher), "本地配置异常"),
+                    }
+                }
+            }
         };
         let service = Arc::new(Self {
             gate,
@@ -314,7 +324,15 @@ impl UpdateService {
                 "升级下载或交接正在进行中。".into(),
             ));
         }
-        if self.state.lock().expect("update state").package.is_some() {
+        if self.state.lock().expect("update state").package.is_some()
+            && self.revalidate_local_version_for_staged().is_ok()
+        {
+            return Ok(self.status());
+        }
+        if self.status().phase == Phase::Failed
+            && self.status().error_kind.as_deref() == Some("manual_upgrade_required")
+            && layout::read_version(&self.root).is_err()
+        {
             return Ok(self.status());
         }
         let _ = self.run_check_locked(cancel).await;
@@ -339,9 +357,30 @@ impl UpdateService {
             return Err(self.status().message);
         }
         if self.state.lock().expect("update state").package.is_some() {
+            self.revalidate_local_version_for_staged()?;
             return Ok(self.status());
         }
         self.run_check_locked(cancel).await
+    }
+
+    fn revalidate_local_version_for_staged(&self) -> Result<(), String> {
+        if layout::read_version(&self.root).is_ok() {
+            return Ok(());
+        }
+        {
+            let mut state = self.state.lock().expect("update state");
+            state.package = None;
+            state.release = None;
+            state.status.version = None;
+            state.status.archive_bytes = None;
+            state.status.downloaded_bytes = None;
+            state.status.release_notes = None;
+            state.status.operation_id = None;
+            state.status.error_kind = Some("manual_upgrade_required".into());
+        }
+        let message = UpdateError::InvalidLocalVersion.ui_message(false);
+        self.publish(Phase::Failed, &message);
+        Err(message)
     }
 
     async fn run_check_locked(&self, cancel: CancellationToken) -> Result<UpdateStatus, String> {
@@ -353,7 +392,8 @@ impl UpdateService {
         }
         self.publish(Phase::Checking, "正在检查更新。");
         let result = async {
-            let current = layout::read_version(&self.root).map_err(|_| UpdateError::Other)?;
+            let current =
+                layout::read_version(&self.root).map_err(|_| UpdateError::InvalidLocalVersion)?;
             client.check_detailed(&current, cancel).await
         }
         .await;
@@ -400,7 +440,8 @@ impl UpdateService {
                 Ok(self.status())
             }
             Err(err) => {
-                let kind = if err.is_manual_upgrade_required() {
+                let manual = err.is_manual_upgrade_required();
+                let kind = if manual {
                     "manual_upgrade_required"
                 } else {
                     "check_failed"
@@ -410,6 +451,13 @@ impl UpdateService {
                     state.status.downloaded_bytes = None;
                     state.status.operation_id = None;
                     state.status.error_kind = Some(kind.to_owned());
+                    if manual {
+                        state.release = None;
+                        state.package = None;
+                        state.status.version = None;
+                        state.status.archive_bytes = None;
+                        state.status.release_notes = None;
+                    }
                 }
                 let message = err.ui_message(false);
                 self.publish(Phase::Failed, &message);
@@ -446,23 +494,29 @@ impl UpdateService {
         if self.client.is_none() {
             return Err(UpdateControlError::NotAvailable(self.status().message));
         }
-        {
+        let staged = {
             let state = self.state.lock().expect("update state");
-            if state.package.is_some()
-                || matches!(
-                    state.status.phase,
-                    Phase::Preparing | Phase::Launching | Phase::ExitRequired
-                )
-            {
+            if matches!(
+                state.status.phase,
+                Phase::Preparing | Phase::Launching | Phase::ExitRequired
+            ) {
                 return Err(UpdateControlError::Busy(
                     "升级包已就绪或正在准备中。".into(),
                 ));
             }
-            if state.release.is_none() {
-                return Err(UpdateControlError::NotAvailable(
-                    "请先检查并确认存在新版本。".into(),
-                ));
-            }
+            state.package.is_some()
+        };
+        if staged {
+            self.revalidate_local_version_for_staged()
+                .map_err(UpdateControlError::Failed)?;
+            return Err(UpdateControlError::Busy(
+                "升级包已就绪或正在准备中。".into(),
+            ));
+        }
+        if self.state.lock().expect("update state").release.is_none() {
+            return Err(UpdateControlError::NotAvailable(
+                "请先检查并确认存在新版本。".into(),
+            ));
         }
         let op_id = uuid::Uuid::new_v4().to_string();
         let op_cancel = CancellationToken::new();
@@ -492,6 +546,7 @@ impl UpdateService {
         let _activity = self.gate.enter()?;
         let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
         if self.state.lock().expect("update state").package.is_some() {
+            self.revalidate_local_version_for_staged()?;
             return Ok(self.status());
         }
         let release = self
@@ -547,13 +602,14 @@ impl UpdateService {
                     state.status.error_kind = None;
                     state.release.is_some()
                 };
-                if has_release {
+                if has_release && self.revalidate_local_version_for_staged().is_ok() {
                     self.publish(Phase::Available, "已取消下载，可重新升级。");
                 }
                 Err("升级准备已取消。".into())
             }
             Err(err) => {
-                let kind = if err.is_manual_upgrade_required() {
+                let manual = err.is_manual_upgrade_required();
+                let kind = if manual {
                     "manual_upgrade_required"
                 } else {
                     "download_failed"
@@ -564,6 +620,13 @@ impl UpdateService {
                     state.status.operation_id = None;
                     state.status.downloaded_bytes = None;
                     state.status.error_kind = Some(kind.to_owned());
+                    if manual {
+                        state.release = None;
+                        state.package = None;
+                        state.status.version = None;
+                        state.status.archive_bytes = None;
+                        state.status.release_notes = None;
+                    }
                 }
                 let message = err.ui_message(true);
                 self.publish(Phase::Failed, &message);
@@ -615,13 +678,18 @@ impl UpdateService {
             let had_active = state.active_prepare.take().is_some();
             state.status.operation_id = None;
             state.status.downloaded_bytes = None;
-            state.status.error_kind = None;
+            if state.status.phase != Phase::Failed {
+                state.status.error_kind = None;
+            }
             (
                 state.release.is_some(),
                 had_stage || had_active || state.status.phase == Phase::Available,
             )
         };
-        if has_release && was_preparing_or_staged {
+        if has_release
+            && was_preparing_or_staged
+            && self.revalidate_local_version_for_staged().is_ok()
+        {
             self.publish(Phase::Available, "已取消下载，可重新升级。");
         }
         Ok(self.status())
@@ -837,34 +905,109 @@ pub fn compiled_update_key_fingerprint() -> Result<String, String> {
     Ok(key.fingerprint())
 }
 
+fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, String> {
+    use std::io::Read as _;
+    use std::path::Component;
+
+    let clean_data = cst_os::strip_windows_verbatim_prefix(kit_layout.data_dir());
+    let full = clean_data.join("config");
+    if !full.is_absolute() || !full.has_root() {
+        return Err("数据目录必须是绝对路径。".into());
+    }
+    let mut anchor = PathBuf::new();
+    let mut saw_root_dir = false;
+    let mut rel_target = PathBuf::new();
+    for comp in full.components() {
+        match comp {
+            Component::Prefix(p) => anchor.push(p.as_os_str()),
+            Component::RootDir => {
+                saw_root_dir = true;
+                anchor.push(comp.as_os_str());
+            }
+            Component::Normal(part) => rel_target.push(part),
+            Component::CurDir | Component::ParentDir => {
+                return Err("配置目录路径无效。".into());
+            }
+        }
+    }
+    if !saw_root_dir || anchor.as_os_str().is_empty() {
+        return Err("数据目录必须是绝对路径。".into());
+    }
+
+    let mut dir_handles = Vec::new();
+    let (root_handle, _) = cst_os::pin_directory_handle(&anchor)?;
+    dir_handles.push(root_handle);
+
+    let mut cur_path = anchor;
+    for comp in rel_target.components() {
+        let Component::Normal(part) = comp else {
+            return Err("配置目录路径无效。".into());
+        };
+        cur_path.push(part);
+        let parent_h = dir_handles.last().expect("anchor handle present");
+        let Some((child_h, _)) = cst_os::try_pin_child_directory_handle(parent_h, &cur_path, part)?
+        else {
+            return Ok(true);
+        };
+        dir_handles.push(child_h);
+    }
+
+    let cfg_file_path = cur_path.join("web-search.json");
+    let cfg_dir_h = dir_handles.last().expect("config dir handle present");
+    let Some((opened, _, len)) = cst_os::try_open_read_in_pinned_dir(
+        cfg_dir_h,
+        &cfg_file_path,
+        std::ffi::OsStr::new("web-search.json"),
+    )?
+    else {
+        return Ok(true);
+    };
+    if cst_os::link_count(&opened)? != 1 {
+        return Err("联网检索配置不能是硬链接文件。".into());
+    }
+    let max_bytes = crate::tools::web_access::MAX_CONFIG_BYTES;
+    if len > max_bytes as u64 {
+        return Ok(false);
+    }
+    let mut bytes = Vec::new();
+    if opened
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > max_bytes
+    {
+        return Ok(false);
+    }
+    drop(dir_handles);
+
+    let trimmed = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    let Ok(value) = parse_strict_json(trimmed) else {
+        return Ok(false);
+    };
+    let Some(obj) = value.as_object() else {
+        return Ok(false);
+    };
+    if let Some(ver) = obj.get("version")
+        && !matches!(ver.as_u64(), Some(1 | 2))
+    {
+        return Ok(false);
+    }
+    for section in ["ssrf", "defaults", "providers"] {
+        if obj.get(section).is_some_and(|v| !v.is_object()) {
+            return Ok(false);
+        }
+    }
+    let Ok(cfg) = crate::tools::web_access::WebSearchConfig::from_json_value(value) else {
+        return Ok(false);
+    };
+    Ok(cfg.ssrf.allow_ranges.iter().any(|r| r == "198.18.0.0/15"))
+}
+
 fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
     let source = cst_updater::manifest::compiled_manifest_url()?;
     let key = super::manifest::ReleaseKey::compiled()?;
     let kit_layout = cst_os::KitLayout::new(root)?;
-    let allow_tun = if kit_layout.config_dir().exists() {
-        let (storage, rel) = if let Ok(r) = kit_layout.data_dir().strip_prefix(kit_layout.root()) {
-            (Storage::new(kit_layout.root())?, r.join("config"))
-        } else {
-            (
-                Storage::new(kit_layout.data_dir())?,
-                PathBuf::from("config"),
-            )
-        };
-        let _cfg = storage.pin_directory(&rel, false)?;
-        storage
-            .read_limited(&storage.root.join(&rel).join("web-search.json"), 64 * 1024)?
-            .and_then(|bytes| parse_strict_json(&bytes).ok())
-            .and_then(|value| {
-                value
-                    .get("ssrf")?
-                    .get("allowRanges")?
-                    .as_array()
-                    .map(|ranges| ranges.iter().any(|v| v == "198.18.0.0/15"))
-            })
-            .unwrap_or(false)
-    } else {
-        false
-    };
+    let allow_tun = resolve_update_allow_tun(&kit_layout)?;
     UpdateClient::with_fetcher(
         source.as_str(),
         key,
@@ -904,5 +1047,150 @@ mod tests {
             let fp = compiled_update_key_fingerprint().expect("compiled update root must be valid");
             assert_eq!(fp.len(), 16);
         }
+    }
+
+    fn temp_test_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "cst-update-svc-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn compiled_mode_marks_dev_workspace_unavailable_without_startup_check() {
+        let dir = temp_test_dir("dev-ws");
+        std::fs::write(dir.join("Cargo.toml"), "[package]\nname = \"dev\"\n").unwrap();
+        let gate = ActivityGate::new();
+        let svc = UpdateService::new(&dir, "https://www.cstoa.top", gate, UpdateOptions::Compiled)
+            .unwrap();
+        let st = svc.status();
+        assert_eq!(st.phase, Phase::Unavailable);
+        if option_env!("CST_UPDATE_MANIFEST_URL")
+            .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+            || option_env!("CST_UPDATE_PUBLIC_KEY")
+                .is_some_and(cst_updater::manifest::is_disabled_update_sentinel)
+        {
+            assert_eq!(st.message, "当前构建未启用在线更新。");
+        } else {
+            assert_eq!(st.message, "仅发行版支持");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_update_allow_tun_defaults_true_and_respects_explicit_override() {
+        let dir = temp_test_dir("allow-tun");
+        let data_dir = dir.join("data");
+        let layout = cst_os::KitLayout::with_data_dir(&dir, &data_dir).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // Non-directory `data` path must reject instead of silently defaulting to true
+        std::fs::write(&data_dir, b"not-a-dir").unwrap();
+        assert!(resolve_update_allow_tun(&layout).is_err());
+        std::fs::remove_file(&data_dir).unwrap();
+
+        let cfg_dir = layout.config_dir();
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // UTF-8 BOM + omitted ssrf defaults to true
+        let mut bom_json = vec![0xEF, 0xBB, 0xBF];
+        bom_json.extend_from_slice(br#"{"version":2}"#);
+        std::fs::write(cfg_dir.join("web-search.json"), bom_json).unwrap();
+        assert!(resolve_update_allow_tun(&layout).unwrap());
+
+        // Explicit empty allowRanges disables TUN
+        std::fs::write(
+            cfg_dir.join("web-search.json"),
+            br#"{"version":2,"ssrf":{"allowRanges":[]}}"#,
+        )
+        .unwrap();
+        assert!(!resolve_update_allow_tun(&layout).unwrap());
+
+        // Non-object ssrf, invalid sibling fields, legacy empty ssrf, or extra CIDRs all fail closed
+        for invalid in [
+            r#"{"version":"2"}"#,
+            r#"{"version":3}"#,
+            r#"{"version":2,"ssrf":null}"#,
+            r#"{"version":2,"ssrf":[]}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":null}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":[123]}}"#,
+            r#"{"version":2,"ssrf":{"trustEnvProxy":"bad"}}"#,
+            r#"{"ssrf":{}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":["198.18.0.0/15"],"allowRanges":[]}}"#,
+            r#"{"version":2,"ssrf":{"allowRanges":["198.18.0.0/15","10.0.0.0/8"]}}"#,
+            "{bad",
+        ] {
+            std::fs::write(cfg_dir.join("web-search.json"), invalid.as_bytes()).unwrap();
+            assert!(!resolve_update_allow_tun(&layout).unwrap(), "{invalid}");
+        }
+
+        // External data_dir outside kit root also walks every ancestor and rejects non-directory ancestors
+        let ext_base = temp_test_dir("allow-tun-ext");
+        let ext_missing = ext_base.join("nested").join("data");
+        let ext_layout = cst_os::KitLayout::with_data_dir(&dir, &ext_missing).unwrap();
+        assert!(resolve_update_allow_tun(&ext_layout).unwrap());
+
+        std::fs::write(ext_base.join("nested"), b"file-ancestor").unwrap();
+        assert!(resolve_update_allow_tun(&ext_layout).is_err());
+        std::fs::remove_file(ext_base.join("nested")).unwrap();
+
+        #[cfg(windows)]
+        {
+            // Drive-relative path (`C:rel`) must be rejected instead of resolving against CWD
+            let drive_rel = cst_os::KitLayout::with_data_dir(&dir, "C:rel-cst-data").unwrap();
+            assert!(
+                resolve_update_allow_tun(&drive_rel).is_err(),
+                "drive-relative data_dir must be rejected"
+            );
+
+            // Unprivileged NTFS directory junction on ancestor or config file path is rejected
+            let j_target = ext_base.join("real-target");
+            std::fs::create_dir_all(j_target.join("config")).unwrap();
+            std::fs::write(
+                j_target.join("config").join("web-search.json"),
+                br#"{"version":2,"ssrf":{"allowRanges":[]}}"#,
+            )
+            .unwrap();
+            let j_link = ext_base.join("junction-data");
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&j_link)
+                .arg(&j_target)
+                .output()
+                .unwrap();
+            assert!(status.status.success(), "mklink /J must succeed");
+            let j_layout = cst_os::KitLayout::with_data_dir(&dir, &j_link).unwrap();
+            assert!(
+                resolve_update_allow_tun(&j_layout).is_err(),
+                "directory junction on data_dir must be rejected"
+            );
+
+            // Junction occupying `web-search.json` itself must also be rejected
+            let cfg_j_path = cfg_dir.join("web-search.json");
+            let _ = std::fs::remove_file(&cfg_j_path);
+            let status_cfg = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&cfg_j_path)
+                .arg(&j_target)
+                .output()
+                .unwrap();
+            assert!(status_cfg.status.success());
+            assert!(
+                resolve_update_allow_tun(&layout).is_err(),
+                "reparse point at web-search.json must be rejected"
+            );
+            let _ = std::fs::remove_dir(&cfg_j_path);
+            let _ = std::fs::remove_dir(&j_link);
+        }
+
+        let _ = std::fs::remove_dir_all(&ext_base);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -4,7 +4,7 @@ import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import type { ProviderStatus } from "../data/api";
 import { providerDescription } from "../settings/provider-list";
-import { SettingsLink } from "../settings/settings-frame";
+import { querySettingsRouteStops, SettingsLink } from "../settings/settings-frame";
 import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { resolveListNavKey } from "../shell/keyboard-navigation";
 import { configurationPath, initialLogin } from "./providers";
@@ -32,6 +32,62 @@ export function ProviderServices({
 		const links = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>(".settings-service-row a") ?? [])];
 		if (!links.length) return;
 		const cur = Math.max(0, links.indexOf(document.activeElement as HTMLAnchorElement));
+		if (
+			cur === 0 &&
+			event.key === "ArrowUp" &&
+			!event.defaultPrevented &&
+			!event.nativeEvent.isComposing &&
+			event.keyCode !== 229 &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRef.current?.closest<HTMLElement>(".settings-route");
+			if (route) {
+				const focusables = querySettingsRouteStops(route);
+				const pos = focusables.indexOf(links[0]);
+				const prev =
+					pos > 0
+						? focusables[pos - 1]
+						: document.querySelector<HTMLElement>(
+								'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+							);
+				if (prev) {
+					event.preventDefault();
+					setActiveId(null);
+					setKbdActive(false);
+					prev.focus();
+					return;
+				}
+			}
+		}
+		if (
+			cur + 1 >= links.length &&
+			event.key === "ArrowDown" &&
+			!event.defaultPrevented &&
+			!event.nativeEvent.isComposing &&
+			event.keyCode !== 229 &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRef.current?.closest<HTMLElement>(".settings-route");
+			const lastLink = links[links.length - 1];
+			if (route && lastLink) {
+				const focusables = querySettingsRouteStops(route);
+				const pos = focusables.indexOf(lastLink);
+				const nextStop = pos >= 0 ? focusables[pos + 1] : undefined;
+				if (nextStop) {
+					event.preventDefault();
+					setActiveId(null);
+					setKbdActive(false);
+					nextStop.focus();
+					return;
+				}
+			}
+		}
 		const nextIdx = resolveListNavKey(
 			{
 				key: event.key,

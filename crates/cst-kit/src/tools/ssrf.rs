@@ -59,11 +59,20 @@ impl NetworkPolicy {
     }
 }
 
+fn tun_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, _, _] = ip.octets();
+    a == 198 && (b == 18 || b == 19)
+}
+
+fn ula_v6(ip: Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
 fn public_v4(ip: Ipv4Addr, allow_tun: bool) -> bool {
-    let [a, b, c, _] = ip.octets();
-    if a == 198 && (b == 18 || b == 19) {
+    if tun_v4(ip) {
         return allow_tun;
     }
+    let [a, b, c, _] = ip.octets();
     !(a == 0
         || a == 10
         || a == 127
@@ -159,6 +168,27 @@ impl SafeHttpClient {
             Host::Ipv4(ip) => vec![SocketAddr::new(ip.into(), port)],
             Host::Ipv6(ip) => vec![SocketAddr::new(ip.into(), port)],
             Host::Domain(host) => self.resolver.resolve(host.into(), port).await?,
+        };
+        if addresses.is_empty() {
+            return Err("域名没有可用地址。".into());
+        }
+        // Dual-stack TUN DNS often pairs `198.18.0.0/15` with a Fake-IPv6 ULA (`fc00::/7`).
+        // Strip companion ULA AAAA records so outbound sockets connect strictly to `198.18.0.0/15`
+        // (never to any `fc00::/7` ULA address), while still rejecting mixed public/private answers.
+        let addresses = if self.policy.allow_tun
+            && addresses.iter().any(|a| match a.ip() {
+                IpAddr::V4(v4) => tun_v4(v4),
+                IpAddr::V6(v6) => v6.to_ipv4_mapped().is_some_and(tun_v4),
+            }) && addresses.iter().all(|a| {
+            self.policy.validate_ip(a.ip()).is_ok()
+                || matches!(a.ip(), IpAddr::V6(v6) if v6.to_ipv4_mapped().is_none() && ula_v6(v6))
+        }) {
+            addresses
+                .into_iter()
+                .filter(|a| self.policy.validate_ip(a.ip()).is_ok())
+                .collect::<Vec<_>>()
+        } else {
+            addresses
         };
         if addresses.is_empty() {
             return Err("域名没有可用地址。".into());

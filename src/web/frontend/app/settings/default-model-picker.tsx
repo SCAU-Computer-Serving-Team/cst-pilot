@@ -6,6 +6,7 @@ import type { ModelChoice } from "../data/model-selection";
 import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
+import { querySettingsRouteStops } from "./settings-frame";
 import { SettingsSearch } from "./settings-search";
 
 const fullId = (model: ModelChoice) => `${model.provider}/${model.id}`;
@@ -44,6 +45,41 @@ export function DefaultModelPicker({
 		closePopover();
 		setMissingKey(null);
 	}, [shell?.appActive, closePopover]);
+	useEffect(() => {
+		const el = triggerRef.current;
+		if (!el) return;
+		function onTriggerKeyDown(event: KeyboardEvent) {
+			if (open || event.isComposing || event.keyCode === 229) return;
+			if (event.altKey && event.key === "ArrowDown") {
+				event.preventDefault();
+				event.stopPropagation();
+				setOpen(true);
+				return;
+			}
+			if (
+				!event.altKey &&
+				!event.ctrlKey &&
+				!event.metaKey &&
+				!event.shiftKey &&
+				(event.key === "ArrowUp" || event.key === "ArrowDown")
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				if (event.key === "ArrowUp") {
+					document
+						.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]')
+						?.focus();
+				} else {
+					const route = el?.closest<HTMLElement>(".settings-route");
+					const focusables = querySettingsRouteStops(route);
+					const idx = el ? focusables.indexOf(el) : -1;
+					if (idx >= 0) focusables[idx + 1]?.focus();
+				}
+			}
+		}
+		el.addEventListener("keydown", onTriggerKeyDown, true);
+		return () => el.removeEventListener("keydown", onTriggerKeyDown, true);
+	}, [open]);
 	const needle = query.trim().toLocaleLowerCase();
 	const ordered = [
 		model,

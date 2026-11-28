@@ -1963,8 +1963,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .chk-box[data-kbd-focus="true"],
   .chk-row[data-kbd-focus="true"],
   .choice-seg-btn[data-kbd-focus="true"],
-  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"],
-  .vp-tab-kbd-pill {
+  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"] {
     position: relative;
   }
   .tier-1-btn-primary[data-kbd-focus="true"]::after,
@@ -1975,8 +1974,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .chk-box[data-kbd-focus="true"]::after,
   .chk-row[data-kbd-focus="true"]::after,
   .choice-seg-btn[data-kbd-focus="true"]::after,
-  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"]::after,
-  .vp-tab-kbd-pill::after {
+  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"]::after {
     content: "";
     position: absolute;
     inset: -3px;
@@ -3637,15 +3635,6 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     border-color: var(--border-strong);
     color: var(--text-primary);
   }
-  .vp-tab-kbd-pill {
-    height: 40px;
-    padding: 0 8px;
-    border-radius: var(--radius-control);
-    display: inline-flex;
-    align-items: center;
-    font-size: 16px;
-    color: var(--text-primary);
-  }
 
   /* 浮层玻璃 (对齐 timdesignize glass-popover: 顶光在发丝内边之上 + 叠栈投影) */
   .tier-2-glass {
@@ -4004,6 +3993,12 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .settings-hairline-row:active .settings-hairline-action,
   .settings-hairline-row[data-force="active"] .settings-hairline-action {
     color: var(--text-primary);
+  }
+  [data-kbd-active="true"] .settings-hairline-row:hover:not([data-force="hover"]) {
+    border-bottom-color: var(--border-subtle);
+  }
+  [data-kbd-active="true"] .settings-hairline-row:hover:not([data-force="hover"]) .settings-hairline-action {
+    color: var(--text-secondary);
   }
   @media (prefers-reduced-motion: reduce) {
     .settings-hairline-row,
@@ -5065,7 +5060,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "caption-buttons":      ["hover", "modal"],
     "chat-header":          ["popover", "hover"],
     "subpage-header":       ["hover"],
-    "settings-tabs":        ["tabIndicator", "hover", "kbdNav"],
+    "settings-tabs":        ["tabIndicator", "hover"],
     "toast":                ["toast"],
     "error-banner":         ["toast"],
     "alert-dialog":         ["modal"],
@@ -6802,10 +6797,10 @@ const STORIES = [
         </div>`
       ];
       stageEl.innerHTML = `
-        <div style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
+        <div id="vp-stage-wrap" style="width:100%;max-width:816px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
           <div class="settings-tabs-bar" id="vp-bar" data-pen-id="VPWAF" role="tablist">
             ${tabs.map((t, i) => `
-              <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};transition:color var(--fast) var(--ease-out);">
+              <button type="button" role="tab" class="vp-tab-btn" data-idx="${i}" tabindex="${i === activeIdx ? 0 : -1}" aria-selected="${i === activeIdx}" style="height:40px;font-size:16px;font-weight:${i === activeIdx ? 600 : 400};color:${i === activeIdx ? "var(--text-primary)" : "var(--text-secondary)"};outline:none;box-shadow:none;transition:color var(--fast) var(--ease-out);">
                 ${t}
               </button>
             `).join("")}
@@ -6815,15 +6810,31 @@ const STORIES = [
         </div>
       `;
 
+      const stageWrap = stageEl.querySelector("#vp-stage-wrap");
       const bar = stageEl.querySelector("#vp-bar");
       const line = stageEl.querySelector("#vp-line");
       const demoBody = stageEl.querySelector("#vp-hairline-demo");
 
-      function syncTabs() {
+      let recentStagePointer = null;
+      let lastStagePointer = null;
+      function setStageKbdActive(on) {
+        if (on) {
+          stageWrap?.setAttribute("data-kbd-active", "true");
+          bar?.setAttribute("data-kbd-active", "true");
+          lastStagePointer = recentStagePointer ? { ...recentStagePointer } : null;
+        } else {
+          stageWrap?.removeAttribute("data-kbd-active");
+          bar?.removeAttribute("data-kbd-active");
+          lastStagePointer = null;
+        }
+      }
+
+      function syncTabs(focusActive = false) {
         const btns = bar.querySelectorAll(".vp-tab-btn");
         btns.forEach((b, i) => {
           const on = i === activeIdx;
           b.setAttribute("aria-selected", String(on));
+          b.setAttribute("tabindex", on ? "0" : "-1");
           b.style.fontWeight = on ? "600" : "400";
           b.style.color = on ? "var(--text-primary)" : "var(--text-secondary)";
         });
@@ -6831,8 +6842,37 @@ const STORIES = [
         if (curBtn) {
           line.style.width = `${curBtn.offsetWidth}px`;
           line.style.transform = `translateX(${curBtn.offsetLeft}px)`;
+          if (focusActive === true) curBtn.focus();
         }
         if (demoBody) demoBody.innerHTML = tabRowsHtml[activeIdx];
+      }
+
+      function requestSwitchTab(next, triggerEl, viaKbd = false) {
+        if (next === activeIdx || next < 0 || next >= tabs.length) return;
+        const go = (focusNow) => {
+          activeIdx = next;
+          syncTabs(focusNow);
+          logAction("设置导航 VPWAF", `${viaKbd ? "方向键" : "点击"}滑至「${tabs[next]}」`);
+        };
+        if (dirty) {
+          openAlertDialog({
+            title: "放弃未保存的模型修改？",
+            desc: "切换分类将丢失当前正在编辑的新增模型行。",
+            confirmText: "放弃并切换",
+            cancelText: "继续编辑",
+            danger: true,
+            defaultSafeFocus: true,
+            triggerEl,
+            onConfirm: () => {
+              dirty = false;
+              controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false";
+              go(false);
+              if (viaKbd) requestAnimationFrame(() => bar.querySelectorAll(".vp-tab-btn")[activeIdx]?.focus());
+            }
+          });
+        } else {
+          go(viaKbd);
+        }
       }
 
       controlsEl.querySelector("#vp-dirty-chk").addEventListener("click", (e) => {
@@ -6841,34 +6881,67 @@ const STORIES = [
       });
 
       bar.querySelectorAll(".vp-tab-btn").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const next = Number(btn.dataset.idx);
-          if (next === activeIdx) return;
-          const go = () => { activeIdx = next; syncTabs(); logAction("设置导航 VPWAF", `滑至「${tabs[next]}」`); };
-          if (dirty) {
-            openAlertDialog({
-              title: "放弃未保存的模型修改？",
-              desc: "切换分类将丢失当前正在编辑的新增模型行。",
-              confirmText: "放弃并切换",
-              cancelText: "继续编辑",
-              danger: true,
-              defaultSafeFocus: true,
-              triggerEl: btn,
-              onConfirm: () => { dirty = false; controlsEl.querySelector("#vp-dirty-chk").dataset.checked = "false"; go(); }
-            });
-          } else {
-            go();
-          }
+        btn.addEventListener("click", (e) => {
+          if (e.detail > 0) setStageKbdActive(false);
+          requestSwitchTab(Number(btn.dataset.idx), btn, false);
         });
       });
+      stageWrap?.addEventListener("mousemove", (e) => {
+        recentStagePointer = { x: e.clientX, y: e.clientY };
+        if (!stageWrap.hasAttribute("data-kbd-active")) return;
+        if (!lastStagePointer) {
+          lastStagePointer = { x: e.clientX, y: e.clientY };
+          return;
+        }
+        if (Math.abs(e.clientX - lastStagePointer.x) + Math.abs(e.clientY - lastStagePointer.y) >= 4) {
+          setStageKbdActive(false);
+        }
+      });
+      demoBody?.addEventListener("click", (e) => {
+        if (e.detail > 0) setStageKbdActive(false);
+      });
+      stageWrap?.addEventListener("focusin", (e) => {
+        if (e.target instanceof HTMLElement && e.target.matches(":focus-visible")) {
+          setStageKbdActive(true);
+        }
+      });
+      bar.addEventListener("keydown", (e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        if (e.key === "ArrowDown") {
+          const firstRow = demoBody?.querySelector(".settings-hairline-row");
+          if (firstRow) {
+            e.preventDefault();
+            setStageKbdActive(true);
+            firstRow.setAttribute("tabindex", "0");
+            firstRow.focus();
+          }
+          return;
+        }
+        let next = null;
+        if (e.key === "ArrowLeft") next = Math.max(0, activeIdx - 1);
+        else if (e.key === "ArrowRight") next = Math.min(tabs.length - 1, activeIdx + 1);
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = tabs.length - 1;
+        if (next !== null) {
+          e.preventDefault();
+          setStageKbdActive(true);
+          requestSwitchTab(next, bar.querySelectorAll(".vp-tab-btn")[activeIdx], true);
+        }
+      });
+      demoBody?.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowUp" && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          setStageKbdActive(true);
+          bar.querySelectorAll(".vp-tab-btn")[activeIdx]?.focus();
+        }
+      });
 
-      requestAnimationFrame(syncTabs);
+      requestAnimationFrame(() => syncTabs(false));
     },
     states: [
       { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },
       { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` },
-      { name: "直线行悬停", sub: "无灰底 · 底线主色 + 动作高亮", html: `<div class="settings-hairline-row settings-hairline-row--compact" data-force="hover" style="width:240px;"><span style="font-size:14px;color:var(--text-primary);">DeepSeek</span><span class="settings-hairline-action" style="font-size:12px;">管理 ›</span></div>` },
-      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<div class="vp-tab-kbd-pill">模型偏好</div>` }
+      { name: "直线行悬停", sub: "无灰底 · 底线主色 + 动作高亮", html: `<div class="settings-hairline-row settings-hairline-row--compact" data-force="hover" style="width:240px;"><span style="font-size:14px;color:var(--text-primary);">DeepSeek</span><span class="settings-hairline-action" style="font-size:12px;">管理 ›</span></div>` }
     ],
     hosts: {
       gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动；下方直线列表行悬停时底线平滑过渡至 $accent-solid，跳转动作字样与箭头同步由 $text-secondary 高亮至 $text-primary。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
@@ -11074,7 +11147,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
             </div>
 
             <div class="kbd-matrix-card">
-              <div class="kbd-matrix-title"><span>6. 列表行、菜单项与设置导航</span><span class="kbd-matrix-sub">列表边轨游标 · 导航四角取景</span></div>
+              <div class="kbd-matrix-title"><span>6. 列表行、菜单项与行内按钮</span><span class="kbd-matrix-sub">列表边轨游标 · 按钮四角取景</span></div>
               <div style="display:flex;flex-direction:column;gap:8px;">
                 <button type="button" class="session-row-master" data-mat-idx="8" data-selected="${mat.sessionSelected}" data-kbd-focus="${f(8)}" style="height:36px;font-size:14px;">
                   <span>C 盘空间与硬盘信息</span>
@@ -11084,7 +11157,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
                   <button type="button" class="menu-row" data-mat-idx="9" data-mat-col="0" data-kbd-focus="${f(9) && mat.pairCol === 0}" style="width:140px;">
                     <span class="menu-row-left"><span style="color:var(--text-secondary);display:inline-flex;">${icon("pencil", 15)}</span><span>重命名</span></span>
                   </button>
-                  <button type="button" class="${f(9) && mat.pairCol === 1 ? "vp-tab-kbd-pill" : ""}" data-mat-idx="9" data-mat-col="1" style="height:32px;border-radius:var(--radius-control);font-size:14px;color:var(--text-primary);padding:0 8px;">模型偏好</button>
+                  <button type="button" class="btn-ghost" data-mat-idx="9" data-mat-col="1" data-kbd-focus="${f(9) && mat.pairCol === 1}" style="height:32px;padding:0 10px;">收起列表</button>
                 </div>
               </div>
             </div>
@@ -11336,7 +11409,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
             else if (mat.focusIdx === 7) mat.selectIdx = (mat.selectIdx + 1) % mat.selectOpts.length;
             else if (mat.focusIdx === 8) mat.sessionSelected = !mat.sessionSelected;
             else {
-              const names = ["主按钮 · 确认操作", "实心危险按钮 · 删除", "描边按钮 · 打开保存目录", "描边危险按钮 · 删除", mat.pairCol === 0 ? "文字按钮 · 管理" : "图标按钮 · 更多", "", "", "", "", mat.pairCol === 0 ? "菜单项 · 重命名" : "设置导航 · 模型偏好"];
+              const names = ["主按钮 · 确认操作", "实心危险按钮 · 删除", "描边按钮 · 打开保存目录", "描边危险按钮 · 删除", mat.pairCol === 0 ? "文字按钮 · 管理" : "图标按钮 · 更多", "", "", "", "", mat.pairCol === 0 ? "菜单项 · 重命名" : "行内按钮 · 收起列表"];
               if (names[mat.focusIdx]) showToast({ text: `键盘 Enter 触发：${names[mat.focusIdx]}`, ignoreSlow: true });
             }
           }

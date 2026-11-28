@@ -15,7 +15,12 @@ import type { Model } from "../data/web-state";
 import { DefaultModelPicker } from "../settings/default-model-picker";
 import { modelListRows } from "../settings/model-list";
 import { moveModel, normalizeScope, toggleModel } from "../settings/model-scope";
-import { SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
+import {
+	querySettingsRouteStops,
+	SettingsLoadState,
+	SettingsSection,
+	useSettingsFeedback,
+} from "../settings/settings-frame";
 import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
@@ -50,6 +55,39 @@ export default function ModelPreferences() {
 	useEffect(() => {
 		if (shell?.appActive) closeProviderPopover();
 	}, [shell?.appActive, closeProviderPopover]);
+	const hasModelsData = Boolean(state.data);
+	useEffect(() => {
+		if (!hasModelsData) return;
+		const el = providerTriggerRef.current;
+		if (!el) return;
+		function onProviderTriggerKeyDown(event: KeyboardEvent) {
+			if (providerOpen || event.isComposing || event.keyCode === 229) return;
+			if (event.altKey && event.key === "ArrowDown") {
+				event.preventDefault();
+				event.stopPropagation();
+				setProviderOpen(true);
+				return;
+			}
+			if (
+				!event.altKey &&
+				!event.ctrlKey &&
+				!event.metaKey &&
+				!event.shiftKey &&
+				(event.key === "ArrowUp" || event.key === "ArrowDown")
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				const route = el?.closest<HTMLElement>(".settings-route");
+				const focusables = querySettingsRouteStops(route);
+				const idx = el ? focusables.indexOf(el) : -1;
+				if (idx < 0) return;
+				const next = event.key === "ArrowUp" ? focusables[idx - 1] : focusables[idx + 1];
+				next?.focus();
+			}
+		}
+		el.addEventListener("keydown", onProviderTriggerKeyDown, true);
+		return () => el.removeEventListener("keydown", onProviderTriggerKeyDown, true);
+	}, [providerOpen, hasModelsData]);
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);
@@ -251,6 +289,55 @@ export default function ModelPreferences() {
 			event.preventDefault();
 			setKbdActive(true);
 			void save((current) => toggleModel(current.enabled, current.models.map(fullId), id));
+			return;
+		}
+		if (
+			idx === 0 &&
+			event.key === "ArrowUp" &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRoot.current?.closest<HTMLElement>(".settings-route");
+			const rowEl = listRoot.current?.querySelector<HTMLElement>(
+				`.settings-model[data-model-id="${CSS.escape(id)}"]`,
+			);
+			const focusables = querySettingsRouteStops(route);
+			const pos = rowEl ? focusables.indexOf(rowEl) : -1;
+			const prev =
+				pos > 0
+					? focusables[pos - 1]
+					: document.querySelector<HTMLElement>('.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]');
+			if (prev) {
+				event.preventDefault();
+				setFocusedRowId(null);
+				setKbdActive(false);
+				prev.focus();
+				return;
+			}
+		}
+		if (
+			idx + 1 >= listed.ids.length &&
+			event.key === "ArrowDown" &&
+			!event.altKey &&
+			!event.ctrlKey &&
+			!event.metaKey &&
+			!event.shiftKey
+		) {
+			const route = listRoot.current?.closest<HTMLElement>(".settings-route");
+			const rowEl = listRoot.current?.querySelector<HTMLElement>(
+				`.settings-model[data-model-id="${CSS.escape(id)}"]`,
+			);
+			const focusables = querySettingsRouteStops(route);
+			const pos = rowEl ? focusables.indexOf(rowEl) : -1;
+			const nextStop = pos >= 0 ? focusables[pos + 1] : undefined;
+			if (nextStop) {
+				event.preventDefault();
+				setFocusedRowId(null);
+				setKbdActive(false);
+				nextStop.focus();
+			}
 			return;
 		}
 		const nextIdx = resolveListNavKey(

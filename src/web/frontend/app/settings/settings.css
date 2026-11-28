@@ -9,9 +9,11 @@
 ::view-transition-group(settings-tab-indicator) { animation-duration: var(--normal); animation-timing-function: var(--ease-in-out); }
 ::view-transition-old(settings-tab-indicator), ::view-transition-new(settings-tab-indicator) { animation: none; }
 .settings-nav-link:hover, .settings-back:hover { color: var(--text-primary); }
+.settings-nav[data-kbd-active="true"] .settings-nav-link:not(.is-current):hover { color: var(--text-secondary); }
 .settings-back { transition: color var(--fast) var(--ease-out); }
-.settings-nav-link:focus-visible, .settings-back:focus-visible, .settings-advanced-trigger:focus-visible { outline: none; border-radius: var(--radius-control); box-shadow: var(--focus-shadow); }
-.settings-nav[data-kbd-active="true"] .settings-nav-link:focus-visible { box-shadow: none; }
+.settings-nav-link:focus, .settings-nav-link:focus-visible, .settings-shortcuts-pane:focus, .settings-shortcuts-pane:focus-visible { outline: none; box-shadow: none; }
+.settings-shortcuts-pane { display: flex; flex-direction: column; gap: 8px; }
+.settings-back:focus-visible, .settings-advanced-trigger:focus-visible { outline: none; border-radius: var(--radius-control); box-shadow: var(--focus-shadow); }
 
 .settings-subpage-head { display: flex; flex-direction: column; gap: var(--space-component); }
 .settings-page-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-group); }

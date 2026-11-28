@@ -2061,7 +2061,44 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         );
         assert!(
             sv.is_tab_kbd_active(),
-            "Ctrl+, must activate VPWAF keyboard indicator"
+            "Ctrl+, must focus VPWAF tabbar for keyboard navigation"
+        );
+    });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("kbd-dyn-ind-settings-tabbar").is_none()
+                && window.try_find("kbd-dyn-active-settings-tabbar").is_none()
+                && window.try_find("kbd-ctrl-ind-settings-tabbar").is_none()
+                && window.try_find("kbd-ctrl-active-settings-tabbar").is_none(),
+            "VPWAF top tabbar must never render a 4-corner or rail keyboard indicator"
+        );
+    })
+    .unwrap();
+
+    // Park pointer on `settings-tab-General`, re-activate VPWAF keyboard mode via Right/Left
+    // without moving the pointer, then click `settings-tab-General` in-place to prove `on_click`
+    // itself clears `is_tab_kbd_active` (independent of pointer-move delta).
+    click(cx, "settings-tab-General");
+    press(cx, "right");
+    press(cx, "left");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert_eq!(
+            sv.category(),
+            cst_desktop::settings::SettingsCategory::General
+        );
+        assert!(
+            sv.is_tab_kbd_active(),
+            "Right -> Left must restore keyboard-active state at the parked pointer position"
+        );
+    });
+    click(cx, "settings-tab-General");
+    cx.update(|cx| {
+        let sv = shell.read(cx).settings_view().read(cx);
+        assert!(
+            !sv.is_tab_kbd_active(),
+            "In-place pointer click on active VPWAF tab must clear keyboard-active hover suppression"
         );
     });
 
@@ -2083,6 +2120,14 @@ async fn headless_settings_keyboard_navigation_complete(cx: &mut gpui_kit::TestA
         assert!(sv.is_general_kbd_active());
         assert_eq!(sv.general_row_index(), 0);
     });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("kbd-dyn-active-settings-general").is_some(),
+            "Subpage content must still render its gliding keyboard focus indicator"
+        );
+    })
+    .unwrap();
     press(cx, "end");
     cx.update(|cx| {
         assert_eq!(

@@ -3,9 +3,9 @@ import { Settings as SettingsIcon } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
-import { SettingsFeedback, SettingsLink } from "../settings/settings-frame";
+import { querySettingsRouteStops, SettingsFeedback, SettingsLink } from "../settings/settings-frame";
 import { invalidateSetting, preloadSettings, settingsPaths } from "../settings/settings-resource-cache";
-import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { usePointerMutex } from "../shell/kbd-focus";
 import { resolveToolbarNavKey } from "../shell/keyboard-navigation";
 import { SidebarHeaderToggle } from "../shell/workspace-shell-context";
 
@@ -15,13 +15,17 @@ const tabs = [
 	{ to: "/settings/models", label: "模型偏好" },
 	{ to: "/settings/shortcuts", label: "快捷键" },
 ];
+const NON_TEXT_INPUT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"]);
+
 export default function Settings() {
 	const { pathname } = useLocation();
 	const navigate = useNavigate();
-	const activePath = ["/settings/add", "/settings/provider", "/settings/custom"].includes(pathname)
+	const cleanPath = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+	const activePath = ["/settings/add", "/settings/provider", "/settings/custom"].includes(cleanPath)
 		? "/settings"
-		: pathname;
+		: cleanPath;
 	const index = tabs.findIndex((tab) => tab.to === activePath);
+	const tabStopIdx = index >= 0 ? index : 1;
 	const [navigation, setNavigation] = useState({ pathname, index, direction: 0 });
 	if (navigation.pathname !== pathname) {
 		setNavigation({
@@ -30,14 +34,34 @@ export default function Settings() {
 			direction: index < 0 || navigation.index < 0 ? 0 : Math.sign(index - navigation.index),
 		});
 	}
-	const kbdStyle = useKeyboardFocusStyle();
 	const navRef = useRef<HTMLElement>(null);
-	const navItemRefs = useRef<Map<string, HTMLElement>>(new Map());
+	const pagesRef = useRef<HTMLDivElement>(null);
 	const routeRef = useRef<HTMLDivElement>(null);
-	const [focusedTabId, setFocusedTabId] = useState<string | null>(null);
+	const pendingNavTargetRef = useRef<string | null>(null);
+	const pendingEnterContentRef = useRef(false);
 	const [navKbdActive, setNavKbdActive] = useState(false);
 	const clearNavKbd = useCallback(() => setNavKbdActive(false), []);
 	usePointerMutex(navKbdActive, clearNavKbd);
+
+	const focusFirstRouteStop = useCallback(() => {
+		const first =
+			querySettingsRouteStops(routeRef.current)[0] ??
+			routeRef.current?.querySelector<HTMLElement>(".settings-shortcuts-pane");
+		if (!first) return false;
+		setNavKbdActive(false);
+		first.focus();
+		return true;
+	}, []);
+
+	useEffect(() => {
+		if (pendingNavTargetRef.current === activePath) {
+			pendingNavTargetRef.current = null;
+			if (pendingEnterContentRef.current) {
+				pendingEnterContentRef.current = false;
+				focusFirstRouteStop();
+			}
+		}
+	}, [activePath, focusFirstRouteStop]);
 
 	function handleNavKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
 		if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -45,13 +69,14 @@ export default function Settings() {
 		if (!links.length) return;
 		const currentIdx = Math.max(0, links.indexOf(document.activeElement as HTMLElement));
 		if (event.key === "ArrowDown" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-			const first = routeRef.current?.querySelector<HTMLElement>(
-				'[tabindex="0"]:not(:disabled), button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), input:not(:disabled):not([tabindex="-1"])',
-			);
-			if (first) {
+			if (pendingNavTargetRef.current && pendingNavTargetRef.current !== activePath) {
 				event.preventDefault();
+				pendingEnterContentRef.current = true;
 				setNavKbdActive(false);
-				first.focus();
+				return;
+			}
+			if (focusFirstRouteStop()) {
+				event.preventDefault();
 			}
 			return;
 		}
@@ -71,17 +96,90 @@ export default function Settings() {
 		);
 		if (nextIdx !== null) {
 			event.preventDefault();
+			pendingEnterContentRef.current = false;
 			setNavKbdActive(true);
 			const targetTab = tabs[nextIdx];
 			if (targetTab) {
-				setFocusedTabId(targetTab.to);
 				links[nextIdx]?.focus();
 				if (targetTab.to !== activePath) {
+					pendingNavTargetRef.current = targetTab.to;
 					void navigate(targetTab.to, { viewTransition: true });
+				} else {
+					pendingNavTargetRef.current = null;
 				}
 			}
 		}
 	}
+
+	useEffect(() => {
+		function onRouteKeyDown(event: KeyboardEvent) {
+			const routeEl = routeRef.current;
+			if (
+				!routeEl ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				(event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+				event.altKey ||
+				event.ctrlKey ||
+				event.metaKey ||
+				event.shiftKey
+			) {
+				return;
+			}
+			const active = document.activeElement as HTMLElement | null;
+			if (!active || !routeEl.contains(active)) return;
+			if (active.closest('[role="dialog"], [data-slot="popover"]')) return;
+			if (active.tagName === "TEXTAREA" || active.tagName === "SELECT") return;
+			if (active instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(active.type)) {
+				if (event.key === "ArrowUp") {
+					if ((active.selectionStart ?? 0) !== 0 || (active.selectionEnd ?? 0) !== 0) return;
+				} else {
+					const end = active.value.length;
+					if ((active.selectionStart ?? 0) !== end || (active.selectionEnd ?? 0) !== end) return;
+				}
+			}
+			const isShortcutsPane = active.classList.contains("settings-shortcuts-pane");
+			if (isShortcutsPane) {
+				if (event.key === "ArrowDown") return;
+				const scroller = active.closest<HTMLElement>(".settings-scroll");
+				if (scroller && scroller.scrollTop > 0) return;
+				const currentTab = navRef.current?.querySelector<HTMLElement>(
+					'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+				);
+				if (currentTab) {
+					event.preventDefault();
+					setNavKbdActive(true);
+					currentTab.focus();
+				}
+				return;
+			}
+			const stopEl = active.closest<HTMLElement>('[role="option"]') ?? active;
+			const focusables = querySettingsRouteStops(routeEl);
+			const idx = focusables.indexOf(stopEl);
+			if (idx < 0) return;
+			if (event.key === "ArrowUp") {
+				if (idx === 0) {
+					const currentTab = navRef.current?.querySelector<HTMLElement>(
+						'.settings-nav-link.is-current, .settings-nav-link[tabindex="0"]',
+					);
+					if (currentTab) {
+						event.preventDefault();
+						setNavKbdActive(true);
+						currentTab.focus();
+					}
+				} else {
+					event.preventDefault();
+					focusables[idx - 1]?.focus();
+				}
+			} else if (idx + 1 < focusables.length) {
+				event.preventDefault();
+				focusables[idx + 1]?.focus();
+			}
+		}
+		window.addEventListener("keydown", onRouteKeyDown);
+		return () => window.removeEventListener("keydown", onRouteKeyDown);
+	}, []);
 
 	useEffect(() => {
 		void preloadSettings();
@@ -118,49 +216,41 @@ export default function Settings() {
 			</header>
 			<SettingsFeedback>
 				<div className="settings-scroll">
-					<div className="settings-content settings-pages">
+					<div className="settings-content settings-pages" ref={pagesRef}>
 						<nav
 							ref={navRef}
 							className="settings-nav"
 							aria-label="设置分类"
-							data-kbd-active={navKbdActive && focusedTabId !== null ? "true" : undefined}
+							data-kbd-active={navKbdActive ? "true" : undefined}
 							onKeyDown={handleNavKeyDown}
 							onBlur={(event) => {
 								if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-									setFocusedTabId(null);
 									setNavKbdActive(false);
 								}
 							}}
 						>
-							{tabs.map((tab) => (
-								<SettingsLink
-									key={tab.to}
-									to={tab.to}
-									ref={(node) => {
-										if (node) navItemRefs.current.set(tab.to, node);
-										else navItemRefs.current.delete(tab.to);
-									}}
-									aria-current={activePath === tab.to ? "page" : undefined}
-									className={`settings-nav-link${activePath === tab.to ? " is-current" : ""}`}
-									prefetch="render"
-									onFocus={(event) => {
-										setFocusedTabId(tab.to);
-										if (event.currentTarget.matches(":focus-visible")) setNavKbdActive(true);
-									}}
-									onClick={() => setNavKbdActive(false)}
-								>
-									{tab.label}
-									{activePath === tab.to && <span className="settings-nav-indicator" aria-hidden="true" />}
-								</SettingsLink>
-							))}
-							<KbdFocusOverlay
-								containerRef={navRef}
-								itemRefs={navItemRefs}
-								targetId={navKbdActive ? focusedTabId : null}
-								style={kbdStyle}
-								railPlacement="bottom"
-								bracketOutset={3}
-							/>
+							{tabs.map((tab, tabIdx) => {
+								const isCurrent = activePath === tab.to;
+								return (
+									<SettingsLink
+										key={tab.to}
+										to={tab.to}
+										tabIndex={tabIdx === tabStopIdx ? 0 : -1}
+										aria-current={isCurrent ? "page" : undefined}
+										className={`settings-nav-link${isCurrent ? " is-current" : ""}`}
+										prefetch="render"
+										onFocus={(event) => {
+											if (event.currentTarget.matches(":focus-visible")) setNavKbdActive(true);
+										}}
+										onClick={(event) => {
+											if (event.detail > 0) setNavKbdActive(false);
+										}}
+									>
+										{tab.label}
+										{isCurrent && <span className="settings-nav-indicator" aria-hidden="true" />}
+									</SettingsLink>
+								);
+							})}
 						</nav>
 						<div className="settings-route" key={pathname} ref={routeRef}>
 							<Outlet />

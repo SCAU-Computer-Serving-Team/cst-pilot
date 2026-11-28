@@ -12,7 +12,6 @@ use cst_client::{
 };
 use gpui::{FocusHandle, KeyDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle, point};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::input::Escape;
 use gpui_kit::{
@@ -27,8 +26,7 @@ use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
 use crate::theme::kbd_focus::{
-    DialogNavStep, KbdDynamicBoundsTracker, KbdDynamicSpec, KbdRailPlacement,
-    pointer_moved_past_threshold, render_gliding_dynamic_indicator, resolve_dialog_nav_key,
+    DialogNavStep, KbdDynamicBoundsTracker, pointer_moved_past_threshold, resolve_dialog_nav_key,
     scroll_dynamic_target_into_view, scroll_step_y,
 };
 use crate::theme::{
@@ -132,7 +130,6 @@ pub struct SettingsView {
     tab_kbd_active: bool,
     suppress_focus_kbd_for: Option<FocusHandle>,
     tab_last_pointer: Option<Point<Pixels>>,
-    tab_kbd_tracker: KbdDynamicBoundsTracker,
     general_focus: FocusHandle,
     general_row_idx: usize,
     general_kbd_active: bool,
@@ -261,7 +258,6 @@ impl SettingsView {
             tab_kbd_active: false,
             suppress_focus_kbd_for: None,
             tab_last_pointer: None,
-            tab_kbd_tracker: KbdDynamicBoundsTracker::new(),
             general_focus,
             general_row_idx: 0,
             general_kbd_active: false,
@@ -466,7 +462,6 @@ impl SettingsView {
         self.page_slide = motion::PageSlide::default();
         self.suppress_focus_kbd_for = None;
         self.general_tracker.cancel_pending_scroll();
-        self.tab_kbd_tracker.cancel_pending_scroll();
         self.close_tab_surfaces(cx);
     }
 
@@ -928,8 +923,6 @@ impl Render for SettingsView {
         }
         let kbd_style = effective_desktop_settings.keyboard_focus_style;
 
-        self.tab_kbd_tracker.clear();
-
         let rects = [
             self.tab_rects[0].get(),
             self.tab_rects[1].get(),
@@ -983,10 +976,8 @@ impl Render for SettingsView {
             }));
 
         let tab_kbd_active = self.tab_kbd_active && self.tab_bar_focus.is_focused(window);
-        for (idx, cat) in SettingsCategory::ALL.iter().copied().enumerate() {
+        for cat in SettingsCategory::ALL {
             let active = self.category == cat;
-            let tr = self.tab_kbd_tracker.clone();
-            let key = SharedString::from(format!("tab-{idx}"));
             let text_el = if active {
                 apply_scale(div(), scale::BODY_SEMIBOLD)
                     .text_color(palette.text_primary)
@@ -1014,10 +1005,15 @@ impl Render for SettingsView {
                     .flex()
                     .items_center()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.tab_kbd_active = false;
-                        this.set_category(cat, cx);
+                        let was_kbd = std::mem::replace(&mut this.tab_kbd_active, false);
+                        if this.category == cat {
+                            if was_kbd {
+                                cx.notify();
+                            }
+                        } else {
+                            this.set_category(cat, cx);
+                        }
                     }))
-                    .on_prepaint(move |bounds, _, _| tr.set(key.clone(), bounds))
                     .child(text_el)
                     .children((active && !tabs_measured).then(|| {
                         div()
@@ -1056,22 +1052,6 @@ impl Render for SettingsView {
                     .bg(palette.accent_solid),
             );
         }
-
-        let focused_tab = tab_kbd_active.then(|| {
-            KbdDynamicSpec::control(
-                format!("tab-{}", self.category.index()),
-                KbdRailPlacement::BottomCenter,
-            )
-        });
-        tab_bar = tab_bar.child(render_gliding_dynamic_indicator(
-            "settings-tabbar",
-            kbd_style,
-            focused_tab,
-            self.tab_kbd_tracker.clone(),
-            &palette,
-            window,
-            cx,
-        ));
 
         let entity = cx.entity();
         let e_theme = entity.clone();

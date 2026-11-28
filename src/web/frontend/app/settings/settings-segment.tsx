@@ -18,7 +18,7 @@ export function SettingsSegment({
 	disabled?: boolean;
 	busy?: boolean;
 	onChange: (value: string) => void;
-	onVerticalNav?: (direction: -1 | 1) => void;
+	onVerticalNav?: (direction: -1 | 1) => boolean | undefined;
 }) {
 	const groupRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -39,8 +39,8 @@ export function SettingsSegment({
 			(event.key === "ArrowUp" || event.key === "ArrowDown")
 		) {
 			event.preventDefault();
-			setKbdActive(false);
-			onVerticalNav(event.key === "ArrowUp" ? -1 : 1);
+			const moved = onVerticalNav(event.key === "ArrowUp" ? -1 : 1);
+			if (moved !== false) setKbdActive(false);
 			return;
 		}
 		if (disabled || busy) return;

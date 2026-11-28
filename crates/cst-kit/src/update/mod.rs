@@ -123,7 +123,7 @@ impl UpdateClient {
                     stage: "manifest_reverify",
                 })?;
         self.ensure_same_origin(&checked.info().archive.url)?;
-        let current = layout::read_version(root).map_err(|_| UpdateError::Other)?;
+        let current = layout::read_version(root).map_err(|_| UpdateError::InvalidLocalVersion)?;
         let available = checked.available_from(&current).map_err(|err| {
             if err.contains("最低版本") {
                 UpdateError::BelowMinUpgradable
