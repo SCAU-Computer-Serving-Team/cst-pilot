@@ -566,7 +566,9 @@ pub fn open_read_in_pinned_dir(
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        opts.share_mode(1);
+        // `FILE_FLAG_OPEN_REPARSE_POINT` (`0x0020_0000`) ensures `open` never follows a symlink
+        // or junction swapped in after `symlink_metadata`; `fmeta` below then rejects it.
+        opts.share_mode(1).custom_flags(0x0020_0000);
     }
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
@@ -594,6 +596,11 @@ pub fn open_read_in_pinned_dir(
         if (lmeta.dev(), lmeta.ino()) != (fmeta.dev(), fmeta.ino()) {
             return Err("打开期间文件真实身份发生变化。".into());
         }
+    }
+    let lmeta_after =
+        fs::symlink_metadata(&step_path).map_err(|e| io_error("复核文件链接状态", e))?;
+    if is_reparse_or_symlink(&lmeta_after) || !lmeta_after.is_file() {
+        return Err("打开期间目标路径变为链接、重解析点或非普通文件。".into());
     }
     let opened_id = FileIdentity::from_file(&file)?;
     let path_id = FileIdentity::from_path(&step_path)?;

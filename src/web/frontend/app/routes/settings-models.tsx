@@ -55,7 +55,9 @@ export default function ModelPreferences() {
 	useEffect(() => {
 		if (shell?.appActive) closeProviderPopover();
 	}, [shell?.appActive, closeProviderPopover]);
+	const hasModelsData = Boolean(state.data);
 	useEffect(() => {
+		if (!hasModelsData) return;
 		const el = providerTriggerRef.current;
 		if (!el) return;
 		function onProviderTriggerKeyDown(event: KeyboardEvent) {
@@ -85,7 +87,7 @@ export default function ModelPreferences() {
 		}
 		el.addEventListener("keydown", onProviderTriggerKeyDown, true);
 		return () => el.removeEventListener("keydown", onProviderTriggerKeyDown, true);
-	}, [providerOpen]);
+	}, [providerOpen, hasModelsData]);
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const keyboardFocusId = useRef<string | null>(null);

@@ -152,16 +152,12 @@ pub fn render_general_tab(
             ("正在重启".into(), "即将自动重启".into())
         }
         UpdatePhaseDto::Failed => {
-            let title = match error_kind {
-                Some("manual_upgrade_required") => "需重新下载",
-                Some("download_failed") => "下载更新失败",
-                _ => "更新检查失败",
+            let (title, detail) = match error_kind {
+                Some("manual_upgrade_required") => ("需重新下载", "需手动更新"),
+                Some("download_failed") => ("下载更新失败", "请稍后重试"),
+                _ => ("更新检查失败", "请稍后重试"),
             };
-            let msg = update_state
-                .map(|u| u.status.message.as_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("检查更新失败");
-            (title.into(), msg.to_owned().into())
+            (title.into(), detail.into())
         }
         UpdatePhaseDto::Idle => ("在线更新".into(), "手动检查更新".into()),
     };

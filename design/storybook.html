@@ -6883,6 +6883,9 @@ const STORIES = [
         });
       });
       stageWrap?.addEventListener("mousemove", () => setStageKbdActive(false));
+      demoBody?.addEventListener("click", (e) => {
+        if (e.detail > 0) setStageKbdActive(false);
+      });
       bar.addEventListener("keydown", (e) => {
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
         if (e.key === "ArrowDown") {

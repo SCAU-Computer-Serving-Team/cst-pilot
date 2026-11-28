@@ -1017,6 +1017,11 @@ fn resolve_update_allow_tun(kit_layout: &cst_os::KitLayout) -> Result<bool, Stri
     let Some(obj) = value.as_object() else {
         return Ok(false);
     };
+    if let Some(ver) = obj.get("version")
+        && !matches!(ver.as_u64(), Some(1 | 2))
+    {
+        return Ok(false);
+    }
     for section in ["ssrf", "defaults", "providers"] {
         if obj.get(section).is_some_and(|v| !v.is_object()) {
             return Ok(false);
@@ -1140,6 +1145,8 @@ mod tests {
 
         // Non-object ssrf, invalid sibling fields, legacy empty ssrf, or extra CIDRs all fail closed
         for invalid in [
+            r#"{"version":"2"}"#,
+            r#"{"version":3}"#,
             r#"{"version":2,"ssrf":null}"#,
             r#"{"version":2,"ssrf":[]}"#,
             r#"{"version":2,"ssrf":{"allowRanges":null}}"#,
